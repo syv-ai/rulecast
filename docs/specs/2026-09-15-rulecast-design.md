@@ -1,12 +1,12 @@
 # rulecast — design
 
-**Status:** draft for review
+**Status:** draft for review (revised after architecture review A–F)
 **Date:** 2026-09-15
 **Package:** `@syv-ai/rulecast` (npm), public OSS under the syv-ai GitHub org
 
 ## 1. Summary
 
-rulecast delivers project conventions to coding agents at the moment they matter: when the agent first touches a file a convention applies to, and when it writes code that violates one. Rules are YAML files that pair a detector with a short message and optional references to convention documents (`@conventions/api-access.md`). Agent hooks run the rules, render the context, dedupe it against what the agent has already seen this session, and inject it. The same rules run from a CLI for humans, CI and agents without hooks.
+rulecast delivers project conventions to coding agents at the moment they matter: when the agent first touches a file a convention applies to, and when it writes code that violates one. Rules are YAML files that pair a detector with a short message and optional references to convention documents or sections of them (`@conventions/api-access.md#frontend-data-flow`). Agent hooks run the rules, deliver the context, dedupe it against what the agent has already seen, and gate the agent's Stop on new violations. The same rules run from a CLI for humans, CI and agents without hooks.
 
 ### Why
 
@@ -17,98 +17,168 @@ rulecast delivers project conventions to coding agents at the moment they matter
 - **Any convention**, not just styling: API layering, state management, backend service boundaries, generated code.
 - **Any detector**: structural patterns, regexes, paths, existing linters, custom commands, LLM judgement.
 - **Just-in-time delivery through agent hooks**, instead of front-loading every rule into `CLAUDE.md` for every session.
-- **Author-controlled context**: rules point at the team's own convention documents, which are injected verbatim and deduped.
+- **Author-controlled context**: rules point at the team's own convention documents — whole files or single sections, injected or referenced — and rulecast dedupes them.
 
-rulecast composes with a project's existing general-purpose linters (ruff, ESLint, Oxlint) through the `linter` detector. Design-system rules are not delegated to `@shadcn/lint`: rulecast will own them as a first-party `design-system` detector, specified separately (§15).
+rulecast composes with a project's existing general-purpose linters (ruff, ESLint, Oxlint) through the `linter` detector. Design-system rules are not delegated to `@shadcn/lint`: rulecast will own them as a first-party `design-system` detector, specified separately (§18).
 
 ### Goals
 
 - One rule format for TypeScript and Python projects.
 - Claude Code integration covering first touch, violations, a Stop gate, and context-reset handling.
-- An adapter boundary that makes Codex, Cursor, OpenCode and others a single-file addition.
-- A stateless CLI usable by humans, CI and any agent.
-- Legacy-friendly: never block an agent on violations that existed before it started.
+- An adapter seam that makes Codex, Cursor, OpenCode and others a single-file addition.
+- A CLI usable by humans, CI and any agent.
+- Legacy-friendly: never block an agent on violations that existed before it touched the file.
+- Edit hook p95 under 500 ms, LLM rules excluded (§13).
 
 ### Non-goals
 
 - Replacing ESLint, Oxlint, ruff or Biome.
 - Autofixing code. rulecast informs; the agent fixes.
 - Editor/LSP integration.
+- A long-running daemon (0.1).
 - A rule marketplace or shared rule presets (0.1).
 
 ## 2. Concepts
 
 | Concept | Responsibility | Location |
 |---|---|---|
-| **Rule** | Scope (`files`), one detector, message template, `@` context references, triggers, severity | `.rulecast/rules/**/*.yml` |
+| **Rule** | Scope (`files`), one detector, message template, context references, triggers, severity | `.rulecast/rules/**/*.yml` |
 | **Convention** | Plain text (usually markdown) for humans and agents. Knows nothing about rules | Anywhere in the repo; `conventions/` by convention |
-| **Detector** | Plugin: files + config in, `Match[]` out | `src/detectors/*` |
-| **Adapter** | Plugin: agent hook payload → `Event`; `Response` → agent's native output | `src/adapters/*` |
-| **Ledger** | Per-session record of what has been injected, touched and edited | `.rulecast/.state/` |
+| **Detector** | Plugin: all selected rules of its kind + files in, findings per rule out | `src/detectors/*` |
+| **Adapter** | Plugin: agent input → `Event`; `Delivery` → agent's native output | `src/adapters/*` |
+| **Baseline** | Snapshots of files before the agent touched them; decides whether a finding is new | `src/core/baseline` |
+| **Session** | What the agent has in context and what it has worked on; decides what to deliver and whether to block | `src/core/session` |
+| **Delivery** | Structured result of one event: findings, references, stop decision, warnings | `src/core/delivery` |
 
 ## 3. Architecture
 
+Every hook invocation is a fresh process. No module-level mutable state: everything a module needs is passed in, and everything that must outlive the process is on disk under `.rulecast/.state/`.
+
 ```
-agent hook ──stdin──▶ adapter.parse ──▶ Event
-                                          │
-                   select rules (files glob × event kind × rule.on)
-                                          │
-                   detectors.run ──▶ Match[]
-                                          │
-                   baseline filter (drop pre-existing, git HEAD)
-                                          │
-                   render: message per match + resolve @ references
-                                          │
-                   ledger: group, dedupe, record injections
-                                          │
-adapter.format ◀── Response
+input ──▶ adapter.parse ──▶ Event
+                              │
+                  compile (config + rules → ready rules + diagnostics)        §5
+                              │
+                  session.open   (read state, no lock)                         §9
+                              │
+                  select rules × files for the event                           §10
+                              │
+                  baseline.changes (snapshots → change sets, ms)               §8
+                              │
+                  detection: one run per detector kind, kinds in parallel,     §6
+                  under the edit deadline or verify timeout
+                              │
+                  baseline.classify (new | preexisting)                        §8
+                              │
+                  session.commit  (lock: dedupe, budget, stop decision, append) §9
+                              │
+                           Delivery                                            §11
+                              │
+                  adapter.format ──▶ stdout + exit code
 ```
 
 ### Core types
 
 ```ts
-type EventKind = "touch" | "edit" | "stop" | "reset"
+type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset"
 
 interface Event {
   kind: EventKind
-  files: string[]            // repo-relative
+  files: string[]                    // repo-relative; empty for prompt/reset
+  completeRead?: boolean             // touch from a read: the whole file was read
+  baseRef?: string                   // verify from the CLI: --base
   session?: { id: string; agentId?: string }
   cwd: string
 }
 
-interface Response {
-  context?: string           // text to inject into the agent's context
-  block?: { reason: string } // stop gate: refuse to finish
-}
+type DetectorEvent = "edit" | "verify"
 
 interface Match {
   file: string
-  line: number
+  line: number                       // 1-based
+  endLine: number
   column: number
-  text: string                        // matched snippet
-  captures: Record<string, string>    // detector-specific template variables
+  text: string                       // matched snippet
+  captures: Record<string, string>   // exactly the names the detector declared for this rule
+}
+
+interface ChangeSet {
+  changedLines: [start: number, end: number][]   // 1-based inclusive ranges in the current file
+}
+
+interface Cache {                    // disk-backed, content-addressed, namespaced per detector kind
+  get<T>(key: string): Promise<T | undefined>
+  set(key: string, value: unknown): Promise<void>
+}
+
+interface ResolvedReference {
+  ref: string                        // "conventions/api-access.md#frontend-data-flow"
+  content: string
+}
+
+interface DetectorRun<Config> {
+  event: DetectorEvent
+  rules: { id: string; config: Config; files: string[]; context: ResolvedReference[] }[]
+  changes: ReadonlyMap<string, ChangeSet>   // file absent = no baseline, whole file is new
+  cache: Cache
+  cwd: string
+  signal: AbortSignal                        // edit deadline or verify timeout
+}
+
+interface DetectorResult {
+  findings: { rule: string; match: Match }[]
+  errors: { rule: string | null; message: string }[]   // rule null = the whole run failed
 }
 
 interface Detector<Config> {
-  kind: string                        // key under `detect:` in a rule
-  schema: ZodType<Config>
-  defaultEvents: EventKind[]          // events the detector runs on unless the rule overrides
-  run(input: { files: string[]; config: Config; cwd: string; signal: AbortSignal }): Promise<Match[]>
+  kind: string                                    // key under `detect:` in a rule
+  schema: ZodType<Config>                         // includes synchronous deep checks
+  captures(config: Config): string[]              // template variables every match carries
+  events(config: Config): DetectorEvent[]         // default events; a rule's `events` overrides
+  run(input: DetectorRun<Config>): Promise<DetectorResult>
+}
+
+interface Finding {
+  rule: string
+  severity: "error" | "warning"
+  status: "new" | "preexisting"
+  file: string
+  line: number
+  column: number
+  message: string                    // template rendered by the core
+  count: number                      // identical rendered findings merged
+}
+
+interface DeliveredReference {
+  ref: string
+  state: "full" | "pointer" | "read" | "missing"
+  content?: string                   // state "full" only
+  reason?: "mode" | "budget" | "tooLarge"   // state "read" only
+}
+
+interface Delivery {
+  findings: Finding[]
+  preexistingSummary: { rule: string; file: string; count: number }[]
+  references: DeliveredReference[]
+  touches: string[]                  // rule ids whose context was delivered through touch
+  stop: "block" | "allow" | "capReached" | null   // verify from a stop only
+  warnings: string[]                 // rulecast's own problems
 }
 
 interface Adapter {
   name: string
   supports: EventKind[]
-  parse(payload: unknown): Event | null     // null = event rulecast ignores
-  format(response: Response, event: Event): { stdout: string; exitCode: number }
+  maxContextChars: number | null     // null = unlimited
+  parse(input: unknown): Event | null
+  format(delivery: Delivery, event: Event): { stdout: string; exitCode: number }
 }
 ```
 
-The core only sees `Event` and `Response`. An adapter for an agent without a `touch` or `stop` event omits it from `supports`; nothing else changes. The CLI is an adapter too.
+`perRule(detect)` is an exported helper that turns a per-rule function `(rule, input) => Promise<Match[]>` into a `run`, catching errors per rule. Simple and third-party detectors use it; detectors that share work across rules implement `run` directly.
 
 ## 4. Rule format
 
-One rule per file, exactly one detector per rule. Two detection methods for the same convention are two rules sharing a `context` reference.
+One rule per file, exactly one detector per rule. Two detection methods for the same convention are two rules sharing a context reference.
 
 ```yaml
 # .rulecast/rules/api/no-client-in-components.yml
@@ -125,8 +195,9 @@ message: >
   {{file}}:{{line}} imports {{NAMES}} from the generated client.
   Components never talk to the API. Use the feature's query hook.
 context:
-  - "@conventions/api-access.md"
-  - "@frontend/src/features/documents/queries.ts"
+  - "@conventions/api-access.md#frontend-data-flow"
+  - path: "@conventions/state.md"
+    mode: read
 ```
 
 ### Fields
@@ -134,56 +205,91 @@ context:
 - **`id`** — required, unique, `[a-z0-9-]+(/[a-z0-9-]+)*`.
 - **`files`** — required, glob or list of globs, repo-relative.
 - **`ignore`** — optional globs excluded from `files`.
-- **`severity`** — `error` (blocks Stop; CLI exit 1) or `warning` (injected, never blocks). Default `error`.
+- **`severity`** — `error` (blocks Stop; CLI exit 1) or `warning` (delivered, never blocks). Default `error`.
 - **`on`** — list of `touch` and/or `violation`. Default `[violation]`.
-  - `touch`: the first time in a session the agent reads or edits a file matching `files`, the rule's `context` is injected with no message. A rule with `on: [touch]` only needs no `detect`.
-  - `violation`: the detector runs; matches produce messages plus `context`.
+  - `touch`: the first time in a session the agent reads or edits a file matching `files`, the rule's context is delivered with no message. A rule with `on: [touch]` needs no `detect`.
+  - `violation`: the detector runs; findings produce messages plus context.
 - **`detect`** — required unless `on` is `[touch]`. A single key naming the detector, whose value is that detector's config.
-- **`events`** — optional override of which events the detector runs on (`edit`, `stop`). Default: the detector's `defaultEvents`.
+- **`events`** — optional override of the detector events the rule runs on (`edit`, `verify`). Default: the detector's `events(config)`.
 - **`message`** — required when `detect` is present. Logic-free template; `{{name}}` placeholders only.
-- **`context`** — optional ordered list of `@path` references, repo-relative. Any text file. Whole files are injected verbatim.
+- **`context`** — optional ordered list of references.
+
+### Context references
+
+A reference is a string or an object:
+
+```yaml
+context:
+  - "@conventions/api-access.md"                     # whole file, project default mode
+  - "@conventions/api-access.md#frontend-data-flow"  # one section
+  - path: "@conventions/design-system.md#spacing"
+    mode: read                                       # override: inject | read
+```
+
+- **Path** — repo-relative, prefixed with `@`. Any text file.
+- **Anchor** — `.md`/`.mdx` only. A GitHub-style heading slug (`## Frontend data flow` → `#frontend-data-flow`; repeated headings get `-1`, `-2`, …). The section is the heading line and everything after it up to the next heading of the same or a higher level; subsections are included. Headings are recognised by a line scanner (ATX and setext) that skips fenced code blocks.
+- **Mode** — `inject` delivers the content into the agent's context. `read` delivers an instruction to read the reference. Default from `context.mode` in the project config.
 
 ### Template variables
 
-Always available: `file`, `line`, `column`, `text`, `rule` (the rule id). Detectors add captures:
-
-| Detector | Captures |
-|---|---|
-| `ast-grep` | metavariables (`$NAME` → `NAME`, `$$$NAMES` → `NAMES`, comma-joined) |
-| `regex` | named groups |
-| `path` | none beyond the defaults |
-| `command` | fields from the command's output (see §5) |
-| `linter` | `message`, `ruleId` |
-| `llm` | `reason` |
-
-An unknown variable is a validation error.
+Always available: `file`, `line`, `column`, `text`, `rule`. Each detector declares the rest through `captures(config)` (§6). An unknown variable is a compile diagnostic.
 
 ### Project config
 
 ```yaml
 # .rulecast/config.yml
 rules: .rulecast/rules/**/*.yml       # default
-maxContextBytes: 32768                # per referenced file
-maxMatchesPerRule: 10                 # further matches summarised as "and N more in M files"
+context:
+  mode: inject                        # default mode for references: inject | read
+  maxBytes: 32768                     # per resolved reference; larger → delivered as read
+maxMatchesPerRule: 10                 # agent and terminal rendering only
 timeouts:
-  detectorMs: 10000
-  llmMs: 60000
-  hookMs: 90000                       # total budget per hook invocation
+  editDeadlineMs: 350                 # detection deadline for edit events
+  verifyMs: 60000                     # detection timeout for verify events
 stopGate:
-  maxBlocks: 3
+  maxBlocks: 3                        # per user prompt
 llm:
   provider: anthropic                 # anthropic | openai-compatible
   model: claude-haiku-4-5-20251001
   baseUrl: null                       # openai-compatible only
   apiKeyEnv: ANTHROPIC_API_KEY
-  maxFilesPerStop: 10
+  maxFilesPerVerify: 10
 ```
 
-Rules and config are validated with zod at load. `rulecast validate` reports schema errors, globs matching nothing, missing `@` files, `@` files over `maxContextBytes`, duplicate ids, and unknown template variables.
+## 5. Compilation
 
-## 5. Detectors (0.1)
+One compilation step turns config and rule files into ready rules plus diagnostics. `hook`, `check`, `validate` and `doctor` all use it, so a hook skips exactly the rules `validate` rejects.
 
-All detectors receive only the files selected for the event (see §7) and return `Match[]`.
+Checks:
+
+- config and rule files parse and match their zod schemas, including each detector's `schema` (which carries synchronous deep checks, e.g. that an ast-grep rule object compiles);
+- rule ids are unique;
+- `on: [touch]` rules have `context`; other rules have `detect` and `message`;
+- globs compile;
+- referenced files exist; markdown files with anchors are read and every anchor resolves to a section;
+- every template variable is a core variable or in the detector's `captures(config)`.
+
+Referenced content is not read beyond anchor resolution; delivery reads it. Compilation runs in every hook process and must stay within ~20 ms for 30 rules; no compilation cache in 0.1.
+
+Consumers:
+
+- **hook** — rules with diagnostics are skipped; a warning naming them is delivered once per agent context (§9).
+- **validate** — prints diagnostics; exit 2 if any.
+- **doctor** — compilation, then environment checks (linter binaries, `@ast-grep/napi`, LLM credentials, hook installation), then a dry run of every rule on one matching file.
+
+## 6. Detectors
+
+### Contract
+
+- **Batching.** For each event, the core calls `run` once per detector kind with every selected rule of that kind. Detectors of different kinds run in parallel.
+- **Attribution.** Every finding names the rule it belongs to. A finding may be reported for several rules when several rules select it.
+- **Errors.** An error with a rule id disables that rule for the session. An error with `rule: null` disables every rule in that run for the session. Either delivers one warning naming the rules.
+- **Captures.** Every match carries exactly the names in `captures(config)` for its rule, as strings (possibly empty).
+- **Events.** `events(config)` gives the default events, so one detector kind can place slow tools on `verify` only.
+- **Cancellation.** Detectors observe `signal`. Work still running when it fires is discarded (§13).
+- **Cache.** Detectors that persist work use `cache`, keyed by content hashes. No module-level state.
+
+The contract is exported as a test suite (§15) that third-party detectors run.
 
 ### `regex`
 
@@ -192,16 +298,16 @@ detect:
   regex: { pattern: 'raise HTTPException\((?<args>.*)\)', flags: "m" }
 ```
 
-Runs a JavaScript regex over file contents. Default events: `edit`, `stop`.
+A JavaScript regex over file contents, via `perRule`. Captures: named groups in the pattern. Events: `edit`, `verify`.
 
 ### `path`
 
 ```yaml
 detect:
-  path: {}            # every file matching `files` is a match
+  path: {}
 ```
 
-Matches the file itself (line 1). Used for "do not edit generated code" (`files: frontend/src/client/**`). Default events: `edit`, `stop`.
+Every selected file is a match at line 1. Used for "do not edit generated code". Captures: none. Events: `edit`, `verify`.
 
 ### `ast-grep`
 
@@ -212,7 +318,7 @@ detect:
     rule: { pattern: "raise HTTPException($$$ARGS)", inside: { kind: function_definition } }
 ```
 
-Uses `@ast-grep/napi`. The `rule` value is an ast-grep rule object (pattern, kind, relational and composite rules). Languages: those built into `@ast-grep/napi` plus Python. Default events: `edit`, `stop`.
+Uses `@ast-grep/napi`. Parses each file once per language and runs every rule for that language against the parsed tree. Captures: metavariable names found anywhere in the rule object (`$NAME` → `NAME`, `$$$NAMES` → `NAMES`, multi-node captures comma-joined). Events: `edit`, `verify`.
 
 ### `command`
 
@@ -220,10 +326,11 @@ Uses `@ast-grep/napi`. The `rule` value is an ast-grep rule object (pattern, kin
 detect:
   command:
     run: ["uv", "run", "python", "scripts/check_layers.py", "{{files}}"]
-    output: json      # json | sarif
+    output: json            # json | sarif
+    captures: [layer, target]
 ```
 
-Runs a command with the selected files appended (or substituted for `{{files}}`). `json` output is an array of `{ file, line, column?, text?, ...captures }`; extra string fields become captures. `sarif` output is read as SARIF 2.1.0 results. Exit code is ignored; stdout parsing failure is a detector error. Default events: `edit`, `stop`.
+Runs the command once per rule via `perRule`, with the rule's files substituted for `{{files}}` (or appended). `json` output is an array of `{ file, line, endLine?, column?, text?, ...captures }`; `sarif` output is read as SARIF 2.1.0 results. Every declared capture must be a string field of every result; a missing one is a rule error. Exit code is ignored; unparseable stdout is a rule error. Captures: as declared. Events: `edit`, `verify`.
 
 ### `linter`
 
@@ -232,7 +339,7 @@ detect:
   linter: { tool: ruff, rules: [T201] }
 ```
 
-Runs a known linter in JSON mode on the selected files and keeps findings whose rule id is in `rules` (all findings if `rules` is omitted). Tools in 0.1: `eslint`, `oxlint`, `ruff`. The linter is resolved from the project (`node_modules/.bin`, `uv run`, then `PATH`). Default events: `edit`, `stop`.
+Runs each tool once per event in JSON mode over the union of files selected by its rules, then attributes findings to rules by linter rule id (all findings when a rule omits `rules`). Tools in 0.1: `ruff`, `oxlint`, `eslint`, resolved from the project (`node_modules/.bin`, `uv run`, then `PATH`). Captures: `message`, `ruleId`. Events: `edit`, `verify` for `ruff` and `oxlint`; `verify` only for `eslint`.
 
 ### `llm`
 
@@ -242,196 +349,280 @@ detect:
     question: >
       Does this route do more than parse input, call a service,
       and return the result? Report each offending line.
-    grounding: true   # default: send the rule's `context` files with the question
+    grounding: true         # default: send the rule's context references
 ```
 
-For each selected file the detector sends: the question, the full file, the file's diff against the baseline ref (§8), and — when `grounding` is true — the rule's `context` files. The model is instructed to report violations only on changed lines and to answer with structured output `{ violations: [{ line, text, reason }] }`, which maps to `Match[]` with a `reason` capture. Files with no diff against the baseline are skipped. When there is no baseline ref (CLI without `--base`, or a file outside git), no diff is sent and the model judges the whole file.
+- **Call shape.** One call per file, covering every llm rule selected for that file. The prompt contains each rule's id and question, the current file with changed lines marked (from `changes`; no marks and a whole-file judgement when the file has no change set), and, for rules with `grounding: true`, the rule's resolved references regardless of their delivery mode. The model is told to report only on changed lines when marks are present, and answers with structured output `{ findings: [{ rule, line, text, reason }] }`.
+- **Skip.** Files whose change set is empty are not sent.
+- **Events.** `verify` only by default; `events: [edit, verify]` opts in.
+- **Providers.** `anthropic` and `openai-compatible` (OpenAI, Azure OpenAI, Ollama and others via `baseUrl`), behind a provider interface.
+- **Cache.** Key: hash of file content, change set, model, and the ids, configs and grounding content of the rules in the call. Unchanged files make no calls on repeated verifies.
+- **Budget.** At most `llm.maxFilesPerVerify` files per verify, most recently edited first; skipped files are named in a warning.
+- **Captures.** `reason`.
+- **Consent.** `rulecast init` never creates llm rules. Documentation states that file contents are sent to the configured provider.
 
-- **Default events:** `stop` only. `events: [edit, stop]` opts in to per-edit judging.
-- **Providers:** `anthropic` (Anthropic API) and `openai-compatible` (OpenAI, Azure OpenAI, Ollama and others via `baseUrl`). Model from rule or project config.
-- **Cache:** results are cached in `.rulecast/.state/llm-cache/` under `sha256(rule id + detector config + model + file content + diff + grounding content)`. Shared across sessions. Re-running Stop on unchanged files makes no calls.
-- **Budget:** at most `llm.maxFilesPerStop` files judged per Stop, most recently edited first; skipped files are listed in a warning.
-- **Consent:** `rulecast init` never creates `llm` rules. Documentation states that file contents are sent to the configured provider.
+## 7. Events
 
-## 6. Rendering the injected context
+| Event | Claude Code source | Rules selected | Files |
+|---|---|---|---|
+| `touch` | `PostToolUse` on `Read`; implicit on every `edit` | `touch` rules matching the file, not yet touched in this agent context | the file (no detection) |
+| `edit` | `PostToolUse` on `Edit`, `MultiEdit`, `Write` | `violation` rules matching the file whose events include `edit` | the edited file |
+| `verify` | `Stop`, `SubagentStop`; `rulecast check` | `violation` rules whose events include `verify` | Stop: work memory's edited files whose content differs from their snapshot; CLI: §12 |
+| `prompt` | `UserPromptSubmit` | none | none; resets the agent's stop-block counter |
+| `reset` | `SessionStart` with source `compact` or `clear` | none | none; clears the agent's context memory |
 
-For one response:
+## 8. Baseline
 
-1. Group matches by rule, in rule id order.
-2. Render `message` for each match. Identical rendered lines merge with a count. More than `maxMatchesPerRule` lines are cut to that many plus `…and N more in M files`.
-3. Collect every `@` reference from every triggered rule (violations and touches). Each distinct file appears once, in order of first appearance.
-4. For each reference, consult the ledger (§7): inject the full content, or a pointer line if already injected with the same content hash.
+A finding is **new** when it touches a line the agent changed. Findings on unchanged lines are **pre-existing** and never block.
 
-Output shape (Claude Code `additionalContext`, CLI `--format agent`):
+### Snapshots
+
+- On the first read `touch` of a file in a session, the baseline stores a snapshot: `{ fileHash: u32, lines: Uint32Array }`. The implicit touch of an edit never takes a snapshot, because the file already contains the agent's change.
+- Each line is normalised by stripping leading and trailing whitespace, then hashed with 32-bit FNV-1a. `fileHash` is FNV-1a over the line-hash array. No file content is stored.
+- Snapshots are first-writer-wins: a later touch never replaces one.
+- Claude Code's `Edit` requires a prior `Read`, so the snapshot of an edited existing file is taken before the edit. A `Write` or `Edit` arriving with no snapshot (the file was changed through another tool, or the adapter has no read event) falls back to the session-start commit: the file's content at that commit, hashed the same way.
+- The session-start commit is `HEAD` recorded at the session's first event. A file absent there, or a session outside git, has no baseline: every finding in it is new.
+
+### Change sets
+
+- For each file, Myers diff between the snapshot's line hashes and the current file's line hashes gives changed line ranges. Equal `fileHash` means no changes; the diff is skipped.
+- A pure deletion marks the line after it as changed.
+- Whitespace-only edits (reindentation, formatting) produce no changes.
+- Change sets are computed once per event and passed to detectors as `changes`.
+
+### Classification
+
+A finding is new if its `line`–`endLine` range intersects a changed range of its file, or its file has no baseline. The CLI's `--base <ref>` uses the merge base with `<ref>` as the baseline commit (§12).
+
+**Known miss:** a change that causes a finding on an untouched line (e.g. an unused import after deleting its last use) is classified pre-existing. Accepted for 0.1; a detector-declared `nonLocal` opt-in with cached fingerprints can be added later without breaking detectors.
+
+### Storage
+
+`.rulecast/.state/sessions/<session-id>/baseline.jsonl`: one `start` record with the session-start commit, one record per snapshot (line hashes base64-encoded). Never cleared by `reset`.
+
+## 9. Session
+
+Session owns everything rulecast remembers about a session and every decision about what to deliver.
+
+### Stores
+
+| Store | Contents | Scope | Cleared by |
+|---|---|---|---|
+| **Context memory** | references delivered (ref → covered range + content hash), touch rules fired, pre-existing summaries shown, rule warnings shown | session + agent | `reset` |
+| **Work memory** | edited files; stop-block counter per agent | session | `prompt` resets that agent's counter; nothing clears edited files |
+
+Files: `.rulecast/.state/sessions/<session-id>/work.jsonl` and `context.<agent-id|main>.jsonl`. `.rulecast/.state/` gets its own `.gitignore` containing `*`. Agent id comes from the adapter (Claude Code: `agent_id`, present only inside subagents).
+
+Consequences:
+
+- A subagent has its own context memory, because it has not seen the main agent's context.
+- Edited files are shared, so the main agent's Stop re-verifies files its subagents edited.
+- Compaction clears context memory but not stop-block counters, so a reset cannot restart a Stop loop.
+
+### Flow
+
+1. **open** — read and fold both stores without a lock.
+2. Detection and change sets run outside any lock.
+3. **commit** — take the lock, re-read, decide, append, release, return the `Delivery`.
+
+The lock is a lock file per session directory, considered stale after 5 s; it is held only for step 3. Stores are append-only JSONL. A `reset` appends a reset record; folding ignores context records before the last one. An unparseable final line (crash mid-append) is ignored; any other unparseable line is a store error (§14).
+
+### Decisions in commit
+
+**Findings**
+
+- New findings are delivered in full.
+- Pre-existing findings are delivered as one summary line per rule per file (`preexistingSummary`), once per agent context; details are available through `rulecast check`.
+- Messages of new findings are never deduped across events: a violation that still exists is reported again.
+- Within one delivery, identical rendered findings merge with a count.
+
+**References**
+
+1. Collect references from every rule with findings or touches, in order of first appearance; each ref once.
+2. Resolve each to a covered range (whole file or section line range) and a content hash.
+3. A ref is **covered** when context memory holds a delivery of the same path whose range contains it with the same content hash. Covered refs get state `pointer`. A whole file covers its sections; a section covers its subsections; a section never covers the whole file.
+4. Refs with mode `read` get state `read` with reason `mode` and are not recorded as delivered.
+5. Refs with mode `inject` larger than `context.maxBytes` get state `read` with reason `tooLarge`.
+6. Missing files get state `missing` (compilation normally prevents this).
+7. Remaining `inject` refs are recorded as delivered with state `full`, subject to the budget below.
+
+**Budget**
+
+When the adapter declares `maxContextChars`, commit fills the delivery in priority order: new error findings, new warning findings, pre-existing summaries, references in order. Findings and summaries are never dropped; a reference that does not fit gets state `read` with reason `budget` and is not recorded. Renderers never drop content, so what is recorded is what was delivered.
+
+**Agent reads**
+
+A `touch` from a complete read (`completeRead: true`) of a file records that file as delivered in context memory (whole-file range, current content hash). A later reference to that file or any of its sections is a `pointer`. Partial reads record nothing.
+
+**Stop decision** (verify from a stop)
+
+- No new error findings: `allow`.
+- New error findings and the agent's stop-block counter is below `stopGate.maxBlocks`: `block`, counter incremented.
+- Otherwise: `capReached` (the agent may stop; the delivery lists what remains).
+
+## 10. Rule and file selection
+
+For each event, the core selects `(rule, files)` pairs before detection:
+
+- a rule applies to a file when the file matches `files` and not `ignore`;
+- `touch` pairs come from `on: [touch]` rules not yet fired in context memory;
+- `edit` and `verify` pairs come from `violation` rules whose effective events include the event;
+- rules disabled for the session (compile diagnostics, detector errors) are excluded.
+
+## 11. Delivery rendering
+
+Renderers arrange a `Delivery`; they never filter or truncate references.
+
+- **`renderAgentText`** (shared by agent adapters and `check --format agent`) groups findings by rule, caps each group at `maxMatchesPerRule` lines plus `…and N more in M files`, then lists references.
+- **CLI terminal** — human layout with the same cap.
+- **JSON** — the `Delivery` as is.
+- **SARIF 2.1.0** — findings as results; references omitted.
+
+Agent text example:
 
 ```text
-rulecast: 2 rules violated in frontend/src/components/DocumentCard.tsx
+rulecast: 1 rule violated in frontend/src/components/DocumentCard.tsx
 
 error api/no-client-in-components
   frontend/src/components/DocumentCard.tsx:3 imports DocumentsService from the generated client.
   Components never talk to the API. Use the feature's query hook.
 
-warning design/no-restyle
-  frontend/src/components/DocumentCard.tsx:41 "p-4" is not allowed on <Button>: <Button> owns its spacing. (×2)
+pre-existing (not blocking): backend/no-logic-in-routes ×4 in frontend/src/components/DocumentCard.tsx
 
---- conventions/api-access.md ---
-<file contents>
+--- conventions/api-access.md#frontend-data-flow ---
+<section content>
 
---- conventions/design-system.md (provided earlier in this session) ---
+--- conventions/state.md: read this file before fixing these findings ---
+--- conventions/design-system.md#spacing (provided earlier in this session) ---
 ```
 
-A missing `@` file or one over `maxContextBytes` renders as `--- <path> (missing) ---` or `--- <path> (too large to inject: N bytes) ---` and never suppresses the messages.
+## 12. Adapters and CLI
 
-## 7. Events, ledger and dedupe
+### Claude Code adapter
 
-### Event semantics
+Installed by `rulecast init` into `.claude/settings.json`, merged with existing hooks (existing entries are never modified or removed). Every hook runs `rulecast hook claude-code`.
 
-| Event | Rules selected | Files given to detectors |
-|---|---|---|
-| `touch` | Rules with `touch` in `on` whose `files` match, not yet in the ledger's `touched` set | none (no detection) |
-| `edit` | Rules with `violation` in `on` whose `files` match the edited file and whose detector events include `edit` | the edited file |
-| `stop` | Rules with `violation` in `on` whose detector events include `stop` | files in the ledger's `edited` set matching `files` |
-| `reset` | none | none; clears ledger state (below) |
+| Hook | Matcher | Event | Output | Hook timeout |
+|---|---|---|---|---|
+| `PostToolUse` | `Read` | `touch` (`completeRead` when no offset/limit was given and the tool response was not truncated) | `hookSpecificOutput.additionalContext` | 5 s |
+| `PostToolUse` | `Edit\|MultiEdit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
+| `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; otherwise nothing, or `systemMessage` on `capReached` | `timeouts.verifyMs` + 10 s |
+| `UserPromptSubmit` | — | `prompt` | none | 5 s |
+| `SessionStart` | `startup\|resume` | none; starts cache warm-up (§13) | none | 5 s |
+| `SessionStart` | `compact\|clear` | `reset` | none | 5 s |
 
-An `edit` event also counts as a `touch` for that file, so the first edit of a file the agent never read still delivers touch context.
+- `maxContextChars`: 20,000 until measured (below).
+- Session id from `session_id`; agent id from `agent_id`.
+- `SessionStart` with source `fork` starts a new session with an empty context memory; duplicate injections in a forked session are accepted in 0.1.
 
-### Ledger
+**Before implementation:** record real payloads for every row from the current Claude Code release into `test/payloads/claude-code/`; confirm the Stop and SubagentStop block output shape; send an oversized `additionalContext` to find where Claude Code truncates and set `maxContextChars` from it. The adapter is written against those recordings.
 
-Stored as an append-only JSONL log at `.rulecast/.state/sessions/<session-id>[.<agent-id>].jsonl`. `.rulecast/.state/` gets its own `.gitignore` containing `*`. Folded on read into:
-
-```json
-{
-  "injected": { "conventions/api-access.md": "sha256:9f2…" },
-  "touched": ["api/no-client-in-components"],
-  "edited": ["frontend/src/components/DocumentCard.tsx"],
-  "reportedPreexisting": ["sha256:41c…"],
-  "stopBlocks": 1
-}
-```
-
-Each hook invocation holds a lock file (`<log>.lock`, stale after `timeouts.hookMs`) across its read–decide–append step, so concurrent hooks from parallel tool calls cannot inject the same reference twice.
-
-The ledger is keyed by session id plus agent id when the adapter provides one, because a subagent has its own context window and has not seen the main agent's injections.
-
-### Dedupe levels
-
-1. **Per response, per rule** — grouping and merging as in §6.
-2. **Per response, per reference** — each `@` file at most once.
-3. **Per session, per reference** — a reference whose path and content hash are in `injected` renders as a pointer. A changed file is injected again.
-
-Messages are never deduped across the session. A violation that still exists is reported on every relevant event.
-
-### Reset
-
-A `reset` event clears `injected`, `touched` and `reportedPreexisting`. `edited` and `stopBlocks` are kept. Adapters emit `reset` whenever the agent's context may have lost earlier injections (Claude Code: compaction and `/clear`).
-
-### Stop gate
-
-On `stop`, if any `error`-severity match remains after the baseline filter and `stopBlocks < stopGate.maxBlocks`, the response blocks with the rendered report and `stopBlocks` increments. At the cap, the response does not block and injects a warning listing the remaining violations.
-
-## 8. Baseline
-
-Violations that existed before the session must not block the agent.
-
-- **Baseline ref:** `HEAD` in hooks; `--base <ref>` in the CLI (default: none, all findings reported).
-- **Fingerprint:** `sha256(rule id + file path + normalised match text + occurrence index of that text in the file)`. Line numbers are excluded so unrelated edits above a violation do not change it. Normalisation collapses whitespace.
-- **Filter:** for non-LLM detectors, the detector also runs on the baseline version of the file (`git show <ref>:<path>`, written to a temp file with the same extension); matches whose fingerprint appears in the baseline are pre-existing. Baseline results are cached per blob hash in `.rulecast/.state/baseline-cache/`.
-- Pre-existing `error` matches are reported as warnings the first time their fingerprint is seen in a session (tracked in the ledger's `reportedPreexisting`), are omitted afterwards, and never block.
-- New files and files outside git have an empty baseline.
-- LLM rules use the diff-scoped prompt (§5) instead of a baseline run.
-
-## 9. Claude Code adapter
-
-Installed by `rulecast init` into `.claude/settings.json`, merged with existing hooks (existing entries are never modified or removed). Every hook runs `rulecast hook claude-code`, with the hook's `timeout` set to `timeouts.hookMs` rounded up to seconds.
-
-| Claude Code hook | Matcher | rulecast event | Output |
-|---|---|---|---|
-| `PostToolUse` | `Read` | `touch` (file from `tool_input.file_path`) | `hookSpecificOutput.additionalContext` |
-| `PostToolUse` | `Edit\|MultiEdit\|Write` | `edit` (+ implicit `touch`) | `hookSpecificOutput.additionalContext` |
-| `Stop`, `SubagentStop` | — | `stop` | `{ "decision": "block", "reason": … }` when blocking; `systemMessage` with remaining warnings when not blocking |
-| `SessionStart` | `compact\|clear` | `reset` | none |
-
-Session id comes from `session_id`; agent id from the subagent identifier field in the payload when present.
-
-**Before implementation:** record real payloads for every row above from the current Claude Code release into `test/payloads/claude-code/`, confirm the subagent identifier field name, and confirm how `SubagentStop` blocking and `SessionStart` sources are reported. The adapter is written against those recordings, not against documentation alone.
-
-## 10. CLI
+### CLI
 
 ```
-rulecast init                 scaffold config, example rule, conventions/, install Claude Code hooks
-rulecast check [files...]     run violation rules (all matching files if none given)
+rulecast init                   scaffold config, example rule, conventions/, install Claude Code hooks
+rulecast check [files...]       verify event
+    --base <ref>                files changed since the merge base with <ref>; that merge base is the baseline
     --format terminal|agent|json|sarif   (default: terminal)
-    --base <ref>              drop findings present at <ref>
-    --session <id>            enable the ledger (for agents calling the CLI themselves)
-    --no-llm                  skip llm rules
-rulecast hook <adapter>       read a hook payload on stdin, write the adapter's response
-rulecast validate             validate config and rules
-rulecast doctor               check linter/ast-grep availability, hook installation, LLM credentials; dry-run every rule
+    --session <id>              use session stores (agents calling the CLI themselves)
+    --no-llm                    skip llm rules
+rulecast hook <adapter>         read a hook payload on stdin, write the adapter's output
+rulecast validate               print compile diagnostics
+rulecast doctor                 compile, check environment, dry-run every rule
+rulecast warm                   build detector caches (started detached by hooks; §13)
 ```
 
-Without `--session`, `check` is stateless and prints full context for every reference.
+`check` file selection: explicit arguments (what pre-commit passes); otherwise with `--base`, files changed since the merge base; otherwise every file matching any rule's `files`. Without `--base` and `--session` there is no baseline and every finding is new. The CLI adapter maps error findings to exit code 1; it has no stop decision. CI documentation recommends `--base` so llm rules judge only changed files.
 
-A `SETUP.md` in the repo root is written for agents ("Read <url>/SETUP.md and set up rulecast in this project"), in the style of `@shadcn/lint`.
+A `SETUP.md` in the repo root is written for agents ("Read <url>/SETUP.md and set up rulecast in this project").
 
-## 11. Error handling
+## 13. Performance
 
-Hooks fail open; CLI fails closed.
+**Requirement:** the `edit` hook completes in under 500 ms at p95, measured from process start to exit, with a 30-rule project and warm caches, excluding llm rules.
+
+Budget: process start with `@ast-grep/napi` ~80–120 ms; compile and session open ~20 ms; detection and change sets within `timeouts.editDeadlineMs` (350 ms); commit and rendering the remainder.
+
+Mechanisms:
+
+- one detector run per kind per event, kinds in parallel (§6);
+- slow tools default to `verify` (`eslint`, `llm`);
+- persistent, content-addressed caches for detectors with expensive setup;
+- no daemon, no in-process caches.
+
+**Edit deadline.** When `editDeadlineMs` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for all detectors that declare warm-up work.
+
+**Perf test.** CI runs a fixture project with 30 rules across ast-grep, regex, path, ruff and command, replays 50 edit events, and fails if p95 exceeds 500 ms.
+
+## 14. Error handling
+
+Hooks fail open; the CLI fails closed.
 
 | Failure | Hook behaviour | CLI |
 |---|---|---|
-| Invalid config or rule | Rule skipped; one warning per session naming the rule and `rulecast validate` | exit 2 |
-| Detector error or missing binary | Rule disabled for the session; one warning | exit 2 |
-| Detector or hook timeout | Result dropped; warning with rule id | exit 2 |
-| LLM credentials missing | LLM rules skipped; one warning | exit 2 unless `--no-llm` |
-| Malformed LLM output | Treated as no matches; logged | exit 2 |
-| Missing or oversized `@` file | Placeholder line (§6); messages still delivered | exit 2 from `validate` |
-| Ledger unreadable or lock timeout | Run stateless for this invocation; start a new log | n/a |
+| Compile diagnostic | Rule skipped; warning once per agent context | exit 2 |
+| Detector error for a rule | Rule disabled for the session; one warning | exit 2 |
+| Detector error for a whole run | All rules in the run disabled for the session; one warning naming them | exit 2 |
+| Declared capture missing from a match | Rule error | exit 2 |
+| Edit deadline passed | Results dropped; debug log; background warm-up | n/a |
+| Verify timeout | Results dropped; warning naming the rules | exit 2 |
+| LLM credentials missing | llm rules disabled for the session; one warning | exit 2 unless `--no-llm` |
+| Malformed LLM output | Error for the rules in that call | exit 2 |
+| Store unreadable or lock not acquired within 2 s | Run without session state for this invocation (every reference `full`, no stop block); warning | n/a |
 
-Exit codes: `0` clean, `1` violations of `error` severity, `2` rulecast itself failed. Hook adapters never exit non-zero on internal failure. All errors are logged to `.rulecast/.state/debug.log`.
+Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itself failed. Hook adapters never exit non-zero on internal failure. All errors are logged to `.rulecast/.state/debug.log`.
 
-## 12. Testing
+## 15. Testing
 
-- **Unit:** rule selection, template rendering, grouping, reference dedupe, fingerprinting, ledger folding, reset semantics.
-- **Detector contract suite:** a shared suite every detector passes (abort handling, empty input, repo-relative paths, capture naming), plus fixture directories per case with snapshot `Match[]`. Exported for third-party detectors.
-- **Adapter contract suite:** recorded real payloads → `parse` → `Event` snapshots; `Response` → `format` → output snapshots. Exported for third-party adapters.
-- **Scenario tests:** a fixture repo (TSX + Python) and scripted event sequences — e.g. `touch → edit → edit → reset → edit → stop → stop → stop → stop` — asserted against golden files of every injected context and block decision. These cover dedupe, reset, baseline and the stop cap.
-- **LLM detector:** provider calls behind the provider interface; tests use a recorded-response fake. One opt-in live test per provider, skipped without credentials.
+- **Compile:** schema diagnostics, anchor resolution (slugs, duplicates, setext, fenced code), capture checks.
+- **Baseline:** line normalisation, FNV-1a hashing, Myers change sets (insertions, deletions, reindentation), first-writer-wins, fallbacks, classification.
+- **Session:** scenario tests driven directly with synthetic findings and events — `touch → edit → edit → reset → edit → verify ×4 → prompt → verify`, sections covered by whole files, agent reads, budget fallbacks, subagent isolation — asserted against golden `Delivery` values. No detectors, no fixture repo.
+- **Detector contract suite** (exported): batching attribution, per-rule and whole-run errors, declared captures present on every match, abort handling, empty input. Plus fixture cases per built-in detector.
+- **Adapter contract suite** (exported): recorded payloads → `Event` snapshots; `Delivery` → output snapshots.
+- **End to end:** a few scenarios through `rulecast hook claude-code` on a fixture repo (TSX + Python).
+- **Perf test:** §13.
+- **LLM:** recorded-response fake behind the provider interface; one opt-in live test per provider.
 - **Dogfooding:** aka-agents2, with rules derived from its `CLAUDE.md` (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`, `useUnsavedWork` on close paths).
 
-## 13. Package layout and distribution
+## 16. Package layout and distribution
 
 Single package with a stable, exported plugin API. Split into multiple packages only when third-party detectors or adapters exist.
 
 ```
 src/
-  core/         pipeline, rule loading + schema, render, ledger, baseline
-  detectors/    regex/ path/ ast-grep/ command/ linter/ llm/
-  adapters/     claude-code/ cli/
-  commands/     init check hook validate doctor
-  index.ts      exports Detector, Adapter, Event, Response, Match, contract suites
+  core/
+    compile/     config + rule loading, schemas, anchors, diagnostics
+    detection/   selection, batching, deadline, cache
+    baseline/    snapshots, change sets, classification
+    session/     stores, lock, commit decisions
+    delivery/    Delivery type, renderAgentText
+    pipeline.ts
+  detectors/     regex/ path/ ast-grep/ command/ linter/ llm/
+  adapters/      claude-code/ cli/
+  commands/      init check hook validate doctor warm
+  index.ts       exports types, perRule, contract suites
 test/
-  unit/ contracts/ payloads/ scenarios/
+  compile/ baseline/ session/ contracts/ payloads/ e2e/ perf/
 ```
 
 - TypeScript, Node ≥ 20, published to npm as `@syv-ai/rulecast` with a `rulecast` bin.
 - Releases via changesets and GitHub Actions.
-- Standalone binary via `bun build --compile` for projects without Node, published to GitHub Releases in 0.1.
+- Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1.
 
-**Early risk:** the standalone binary must embed `@ast-grep/napi`'s native module. This is verified in the first implementation milestone; if it fails, the binary ships without the `ast-grep` detector and reports it as unavailable in `doctor`.
+**Early risk:** the standalone binary must embed `@ast-grep/napi`'s native module. Verified in the first implementation milestone; if it fails, the binary ships without the `ast-grep` detector and `doctor` reports it unavailable.
 
-## 14. Releases
+## 17. Releases
 
 | Release | Scope |
 |---|---|
-| **0.1** | Everything in this document: pipeline, rule format, `validate`, ledger/dedupe/reset, baseline, Stop gate; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (eslint, oxlint, ruff), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `check`, `hook`, `validate`, `doctor`; npm package and GitHub Releases binary; dogfooded on aka-agents2 |
-| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome linter support; rule tests (inline good/bad examples run by `rulecast test`) |
+| **0.1** | Everything in this document: compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `check`, `hook`, `validate`, `doctor`, `warm`; perf test; npm package and GitHub Releases binary; dogfooded on aka-agents2 |
+| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`) |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
 
-## 15. Follow-up sub-project: `design-system` detector
+## 18. Follow-up sub-project: `design-system` detector
 
 A first-party detector for Tailwind design systems (restyling components, raw colors, arbitrary values, inline styles, unknown classes, dynamic classes), with its own spec after 0.1. Decided approach, after a design review of `@shadcn/lint` 0.1.0 (MIT):
 
-- **Not wrapped or forked.** Its load-bearing choices — synchronous ESLint visitors and ~30 module-level in-process caches — are what rulecast's async, per-invocation detector model replaces. The review also found failures that degrade to "no findings" (component index build errors), an untyped AST core (`any` ×145, 79 in the class-site collector) and a duplicated color-function definition that has already diverged.
-- **Rewritten:** project model (on oxc-resolver/oxc-parser), class-site collection, rules, messages, contracts.
+- **Not wrapped or forked.** Its load-bearing choices — synchronous ESLint visitors and ~30 module-level in-process caches — are what rulecast's batched, per-invocation detector model replaces. The review also found failures that degrade to "no findings" (component index build errors), an untyped AST core (`any` ×145, 79 in the class-site collector) and a duplicated color-function definition that has already diverged.
+- **Rewritten:** project model (on oxc-resolver/oxc-parser), class-site collection, rules, messages, contracts. One project model per detector run, persisted through the detector `cache` and built in the background by `rulecast warm`.
 - **Ported as isolated pure functions, with MIT attribution:** class-group classifier trie, color and length math, group→category table, stylesheet `@import` resolution.
 - **Acceptance spec:** its 327 RuleTester cases converted into rulecast detector fixtures.
