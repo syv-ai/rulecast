@@ -19,7 +19,7 @@ rulecast delivers project conventions to coding agents at the moment they matter
 - **Just-in-time delivery through agent hooks**, instead of front-loading every rule into `CLAUDE.md` for every session.
 - **Author-controlled context**: rules point at the team's own convention documents, which are injected verbatim and deduped.
 
-rulecast composes with existing linters rather than replacing them. In a shadcn project, `@shadcn/lint` stays the styling engine; a rulecast rule can attach the team's design conventions to its findings.
+rulecast composes with a project's existing general-purpose linters (ruff, ESLint, Oxlint) through the `linter` detector. Design-system rules are not delegated to `@shadcn/lint`: rulecast will own them as a first-party `design-system` detector, specified separately (§15).
 
 ### Goals
 
@@ -31,7 +31,7 @@ rulecast composes with existing linters rather than replacing them. In a shadcn 
 
 ### Non-goals
 
-- Replacing ESLint, Oxlint, ruff, Biome or `@shadcn/lint`.
+- Replacing ESLint, Oxlint, ruff or Biome.
 - Autofixing code. rulecast informs; the agent fixes.
 - Editor/LSP integration.
 - A rule marketplace or shared rule presets (0.1).
@@ -229,7 +229,7 @@ Runs a command with the selected files appended (or substituted for `{{files}}`)
 
 ```yaml
 detect:
-  linter: { tool: oxlint, rules: [shadcn/no-restyle] }
+  linter: { tool: ruff, rules: [T201] }
 ```
 
 Runs a known linter in JSON mode on the selected files and keeps findings whose rule id is in `rules` (all findings if `rules` is omitted). Tools in 0.1: `eslint`, `oxlint`, `ruff`. The linter is resolved from the project (`node_modules/.bin`, `uv run`, then `PATH`). Default events: `edit`, `stop`.
@@ -396,7 +396,7 @@ Exit codes: `0` clean, `1` violations of `error` severity, `2` rulecast itself f
 - **Adapter contract suite:** recorded real payloads → `parse` → `Event` snapshots; `Response` → `format` → output snapshots. Exported for third-party adapters.
 - **Scenario tests:** a fixture repo (TSX + Python) and scripted event sequences — e.g. `touch → edit → edit → reset → edit → stop → stop → stop → stop` — asserted against golden files of every injected context and block decision. These cover dedupe, reset, baseline and the stop cap.
 - **LLM detector:** provider calls behind the provider interface; tests use a recorded-response fake. One opt-in live test per provider, skipped without credentials.
-- **Dogfooding:** aka-agents2, with rules derived from its `CLAUDE.md` (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`, `useUnsavedWork` on close paths) and `@shadcn/lint` wrapped through the `linter` detector once its shadcn migration lands.
+- **Dogfooding:** aka-agents2, with rules derived from its `CLAUDE.md` (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`, `useUnsavedWork` on close paths).
 
 ## 13. Package layout and distribution
 
@@ -426,3 +426,12 @@ test/
 | **0.1** | Everything in this document: pipeline, rule format, `validate`, ledger/dedupe/reset, baseline, Stop gate; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (eslint, oxlint, ruff), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `check`, `hook`, `validate`, `doctor`; npm package and GitHub Releases binary; dogfooded on aka-agents2 |
 | **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome linter support; rule tests (inline good/bad examples run by `rulecast test`) |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
+
+## 15. Follow-up sub-project: `design-system` detector
+
+A first-party detector for Tailwind design systems (restyling components, raw colors, arbitrary values, inline styles, unknown classes, dynamic classes), with its own spec after 0.1. Decided approach, after a design review of `@shadcn/lint` 0.1.0 (MIT):
+
+- **Not wrapped or forked.** Its load-bearing choices — synchronous ESLint visitors and ~30 module-level in-process caches — are what rulecast's async, per-invocation detector model replaces. The review also found failures that degrade to "no findings" (component index build errors), an untyped AST core (`any` ×145, 79 in the class-site collector) and a duplicated color-function definition that has already diverged.
+- **Rewritten:** project model (on oxc-resolver/oxc-parser), class-site collection, rules, messages, contracts.
+- **Ported as isolated pure functions, with MIT attribution:** class-group classifier trie, color and length math, group→category table, stylesheet `@import` resolution.
+- **Acceptance spec:** its 327 RuleTester cases converted into rulecast detector fixtures.
