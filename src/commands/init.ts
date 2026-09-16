@@ -22,7 +22,7 @@ const SCAFFOLD: Readonly<Record<string, string>> = {
     "  editDeadlineMs: 350",
     "  verifyMs: 60000",
     "stopGate:",
-    "  maxBlocks: 3",
+    "  maxBlocks: 1",
     "",
   ].join("\n"),
   ".rulecast/rules/example.yml": [

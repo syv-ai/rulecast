@@ -69,8 +69,8 @@ describe("pipeline with a session", () => {
     await send({ kind: "edit", files: [USERS] })
 
     const stops = []
-    for (let i = 0; i < 4; i++) stops.push((await send({ kind: "verify", files: [] })).stop)
-    expect(stops).toEqual(["block", "block", "block", "capReached"])
+    for (let i = 0; i < 3; i++) stops.push((await send({ kind: "verify", files: [] })).stop)
+    expect(stops).toEqual(["block", "capReached", "capReached"])
 
     await send({ kind: "prompt", files: [] })
     expect((await send({ kind: "verify", files: [] })).stop).toBe("block")

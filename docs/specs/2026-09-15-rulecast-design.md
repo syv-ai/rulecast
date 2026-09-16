@@ -260,7 +260,7 @@ timeouts:
   editDeadlineMs: 350                 # detection deadline for edit events
   verifyMs: 60000                     # detection timeout for verify events
 stopGate:
-  maxBlocks: 3                        # per user prompt
+  maxBlocks: 1                        # per user prompt
 llm:
   provider: anthropic                 # anthropic | openai-compatible
   model: claude-haiku-4-5-20251001

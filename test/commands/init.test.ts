@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
+import { defaultConfig, loadConfig } from "../../src/core/compile/config"
 import { runCli } from "../helpers/cli"
 import { createProject } from "../helpers/project"
 
@@ -31,6 +32,12 @@ describe("rulecast init", () => {
       timeout: 70,
     })
     expect(await read(root, ".rulecast/.state/.gitignore")).toBe("*\n")
+  })
+
+  test("the scaffolded config spells out the defaults", async () => {
+    const root = await createProject({})
+    await runCli(root, ["init"])
+    expect(await loadConfig(root)).toEqual({ ok: true, config: defaultConfig() })
   })
 
   test("keeps existing files and settings, and a second run changes nothing", async () => {

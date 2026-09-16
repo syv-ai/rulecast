@@ -14,7 +14,7 @@ describe("loadConfig", () => {
         context: { mode: "inject", maxBytes: 32768 },
         maxMatchesPerRule: 10,
         timeouts: { editDeadlineMs: 350, verifyMs: 60000 },
-        stopGate: { maxBlocks: 3 },
+        stopGate: { maxBlocks: 1 },
         llm: {
           provider: "anthropic",
           model: "claude-haiku-4-5-20251001",

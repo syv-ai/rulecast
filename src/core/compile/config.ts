@@ -26,7 +26,7 @@ export const configSchema = z
       .strict()
       .default({}),
     stopGate: z
-      .object({ maxBlocks: z.number().int().nonnegative().default(3) })
+      .object({ maxBlocks: z.number().int().nonnegative().default(1) })
       .strict()
       .default({}),
     llm: z
