@@ -138,4 +138,19 @@ describe("decide: stop gate", () => {
     expect(decision.delivery.stop).toBe("capReached")
     expect(decision.work).toEqual([])
   })
+
+  test("only a blocking stop records context", async () => {
+    const warnings = [{ key: "w", text: "problem" }]
+    const allow = await decide(input({ stopGate: true, findings: [newWarning], warnings }))
+    expect(allow.delivery.warnings).toEqual(["problem"])
+    expect(allow.context).toEqual([])
+
+    const work = emptyWork()
+    work.stopBlocks.set("main", 3)
+    const capped = await decide(input({ stopGate: true, work, findings: [newError], warnings }))
+    expect(capped.context).toEqual([])
+
+    const block = await decide(input({ stopGate: true, findings: [newError], warnings }))
+    expect(block.context).toEqual([{ t: "warned", key: "w" }])
+  })
 })

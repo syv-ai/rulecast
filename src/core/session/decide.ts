@@ -190,6 +190,8 @@ export async function decide(input: DecideInput): Promise<Decision> {
       delivery.stop = "block"
       work.push({ t: "stopBlock", agent: input.agent })
     } else delivery.stop = "capReached"
+    // Only a block reaches the agent; anything else must not count as delivered.
+    if (delivery.stop !== "block") return { delivery, work, context: [] }
   }
 
   return { delivery, work, context }
