@@ -1,0 +1,46 @@
+{
+  "session_id": "0276ff4f-8577-47a9-b446-d92ddf4b3b9c",
+  "transcript_path": "/home/user/.claude/projects/-project/0276ff4f-8577-47a9-b446-d92ddf4b3b9c.jsonl",
+  "cwd": "/project",
+  "prompt_id": "2e1203fa-52e2-4818-bc73-7b45689d3e10",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "abd44ac3f82a2c652",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/project/src/math.ts",
+    "old_string": "  return a - b",
+    "new_string": "  return b - a",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "/project/src/math.ts",
+    "oldString": "  return a - b",
+    "newString": "  return b - a",
+    "originalFile": "export function add(a: number, b: number) {\n  return a + b\n}\n\nexport function subtract(a: number, b: number) {\n  return a - b\n}\n",
+    "structuredPatch": [
+      {
+        "oldStart": 3,
+        "oldLines": 5,
+        "newStart": 3,
+        "newLines": 5,
+        "lines": [
+          " }",
+          " ",
+          " export function subtract(a: number, b: number) {",
+          "-  return a - b",
+          "+  return b - a",
+          " }"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01RTWwm4KR3ApkKSzNaqGWYb",
+  "duration_ms": 7
+}

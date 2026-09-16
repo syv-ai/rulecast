@@ -1,0 +1,9 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "c0ee902d-0f7b-434a-9f28-d9b720e1e64c",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Do these steps in order, one tool call each, no parallel calls: 1) Read src/math.ts fully. 2) Read src/math.ts again with offset 5 and limit 2. 3) Use the Edit tool to rename 'sub' to 'subtract'. 4) If you have a MultiEdit tool, use it to make two edits to src/math.ts: rename 'add' to 'plus' and 'a + b' to 'b + a'; otherwise say MultiEdit is unavailable. 5) Use Write to create src/new.ts containing 'export const x = 1'. 6) Use Edit on src/new.ts with replace_all true to replace 'x' with 'y'. Then reply 'done' and list your tool names."
+}

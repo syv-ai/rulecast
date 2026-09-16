@@ -1,0 +1,18 @@
+{
+  "session_id": "bfec3f87-11eb-4dae-9be4-391ff825a274",
+  "transcript_path": "/home/user/.claude/projects/-project/bfec3f87-11eb-4dae-9be4-391ff825a274.jsonl",
+  "cwd": "/project",
+  "prompt_id": "4215b36d-2840-43b0-b346-32a70310ac53",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "a0caf2c8c7a3b97bc",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": true,
+  "agent_transcript_path": "/home/user/.claude/projects/-project/bfec3f87-11eb-4dae-9be4-391ff825a274/subagents/agent-a0caf2c8c7a3b97bc.jsonl",
+  "last_assistant_message": "Done — created `src/sub-stopped.txt` containing `ok` as requested by the SubagentStop hook feedback.",
+  "background_tasks": [],
+  "session_crons": []
+}

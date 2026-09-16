@@ -1,0 +1,11 @@
+{
+  "session_id": "94e06e21-27d5-411b-8e8b-33b9204e8122",
+  "transcript_path": "/home/user/.claude/projects/-project/94e06e21-27d5-411b-8e8b-33b9204e8122.jsonl",
+  "cwd": "/project",
+  "hook_event_name": "SessionStart",
+  "source": "fork",
+  "seconds_since_last_response": 3,
+  "context_tokens": 50211,
+  "prompt_cache_likely_expired": false,
+  "estimated_cache_write_usd": 0.2008
+}

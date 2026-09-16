@@ -1,0 +1,34 @@
+{
+  "session_id": "37005f04-7a5a-4bde-a1b0-ddf9050b5eac",
+  "transcript_path": "/home/user/.claude/projects/-project/37005f04-7a5a-4bde-a1b0-ddf9050b5eac.jsonl",
+  "cwd": "/project",
+  "prompt_id": "53ee5ff2-9d83-48a6-a1fa-ea580c441149",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/project/src/wide.txt",
+    "content": "replaced"
+  },
+  "tool_response": {
+    "type": "update",
+    "filePath": "/project/src/wide.txt",
+    "content": "replaced",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 3,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": ["-short", "-wwwwwwwwwwwwwwwwwwww", "-end", "+replaced", "\\ No newline at end of file"]
+      }
+    ],
+    "originalFile": "short\nwwwwwwwwwwwwwwwwwwww\nend\n",
+    "userModified": false
+  },
+  "tool_use_id": "toolu_01Nj4F8c71JYMmb7Hm6txegM",
+  "duration_ms": 9
+}

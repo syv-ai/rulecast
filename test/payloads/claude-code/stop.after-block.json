@@ -1,0 +1,15 @@
+{
+  "session_id": "bfec3f87-11eb-4dae-9be4-391ff825a274",
+  "transcript_path": "/home/user/.claude/projects/-project/bfec3f87-11eb-4dae-9be4-391ff825a274.jsonl",
+  "cwd": "/project",
+  "prompt_id": "4215b36d-2840-43b0-b346-32a70310ac53",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": true,
+  "last_assistant_message": "Created `src/stopped.txt` with \"ok\" as the Stop hook require…",
+  "background_tasks": [],
+  "session_crons": []
+}

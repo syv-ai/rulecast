@@ -1,0 +1,8 @@
+{
+  "session_id": "d9c15132-3624-4a14-84a7-47352f24feb0",
+  "transcript_path": "/home/user/.claude/projects/-project/d9c15132-3624-4a14-84a7-47352f24feb0.jsonl",
+  "cwd": "/project",
+  "scratchpad_dir": "/tmp/claude/-project/d9c15132-3624-4a14-84a7-47352f24feb0/scratchpad",
+  "hook_event_name": "SessionStart",
+  "source": "clear"
+}

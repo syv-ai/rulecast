@@ -1,0 +1,15 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "c0ee902d-0f7b-434a-9f28-d9b720e1e64c",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "done\n\nTool names used: Read, Read, Edit, Write, Edit. MultiEdit is unavailable — no such tool was in my toolset, so step 4 was skipped.",
+  "background_tasks": [],
+  "session_crons": []
+}

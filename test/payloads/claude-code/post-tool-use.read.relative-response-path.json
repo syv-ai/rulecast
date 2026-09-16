@@ -1,0 +1,27 @@
+{
+  "session_id": "723a1924-a62e-4d1e-a51e-926ff6fcbfa8",
+  "transcript_path": "/home/user/.claude/projects/-project/723a1924-a62e-4d1e-a51e-926ff6fcbfa8.jsonl",
+  "cwd": "/project",
+  "prompt_id": "e90b4153-fccc-4bcc-914c-a097dcb41522",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/project/src/wide.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "src/wide.txt",
+      "content": "short\nwwwwwwwwwwwwwwwwwwww\nend\n",
+      "numLines": 4,
+      "startLine": 1,
+      "totalLines": 4
+    }
+  },
+  "tool_use_id": "toolu_01YCamJBSCcn5Fe2NuBecec4",
+  "duration_ms": 6
+}

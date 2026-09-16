@@ -1,0 +1,27 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "c0ee902d-0f7b-434a-9f28-d9b720e1e64c",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/project/src/math.ts"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "/project/src/math.ts",
+      "content": "export function add(a: number, b: number) {\n  return a + b\n}\n\nexport function sub(a: number, b: number) {\n  return a - b\n}\n",
+      "numLines": 8,
+      "startLine": 1,
+      "totalLines": 8
+    }
+  },
+  "tool_use_id": "toolu_01Q2YSpGjXHaA5VLuVAigKSK",
+  "duration_ms": 5
+}

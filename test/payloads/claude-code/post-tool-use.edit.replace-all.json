@@ -1,0 +1,42 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "c0ee902d-0f7b-434a-9f28-d9b720e1e64c",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/project/src/new.ts",
+    "old_string": "x",
+    "new_string": "y",
+    "replace_all": true
+  },
+  "tool_response": {
+    "filePath": "/project/src/new.ts",
+    "oldString": "x",
+    "newString": "y",
+    "originalFile": "export const x = 1",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 1,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": [
+          "-export const x = 1",
+          "\\ No newline at end of file",
+          "+eyport const y = 1",
+          "\\ No newline at end of file"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": true
+  },
+  "tool_use_id": "toolu_01WXH9tACpEDGBGLkiXk1RxF",
+  "duration_ms": 21
+}

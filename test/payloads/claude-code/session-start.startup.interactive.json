@@ -1,0 +1,9 @@
+{
+  "session_id": "da1c4f88-6bc5-4f0f-aac7-7b853e697fa4",
+  "transcript_path": "/home/user/.claude/projects/-project/da1c4f88-6bc5-4f0f-aac7-7b853e697fa4.jsonl",
+  "cwd": "/project",
+  "scratchpad_dir": "/tmp/claude/-project/da1c4f88-6bc5-4f0f-aac7-7b853e697fa4/scratchpad",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "claude-sonnet-5"
+}

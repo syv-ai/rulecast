@@ -1,0 +1,81 @@
+{
+  "session_id": "0276ff4f-8577-47a9-b446-d92ddf4b3b9c",
+  "transcript_path": "/home/user/.claude/projects/-project/0276ff4f-8577-47a9-b446-d92ddf4b3b9c.jsonl",
+  "cwd": "/project",
+  "prompt_id": "2e1203fa-52e2-4818-bc73-7b45689d3e10",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Edit src/math.ts subtraction order",
+    "prompt": "Read src/math.ts, then use Edit to change the text \"a - b\" to \"b - a\" in src/math.ts, then reply ok.",
+    "subagent_type": "general-purpose",
+    "run_in_background": false
+  },
+  "tool_response": {
+    "status": "completed",
+    "prompt": "Read src/math.ts, then use Edit to change the text \"a - b\" to \"b - a\" in src/math.ts, then reply ok.",
+    "agentId": "abd44ac3f82a2c652",
+    "agentType": "general-purpose",
+    "harnessNoteCount": 0,
+    "harnessTailCount": 0,
+    "harnessSectionHash": "5b76de768ca662b0",
+    "content": [
+      {
+        "type": "text",
+        "text": "ok"
+      }
+    ],
+    "resolvedModel": "claude-sonnet-5",
+    "totalDurationMs": 5537,
+    "totalTokens": 20276,
+    "totalToolUseCount": 2,
+    "usage": {
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 328,
+      "cache_read_input_tokens": 19942,
+      "output_tokens": 4,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 328
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4,
+          "cache_read_input_tokens": 19942,
+          "cache_creation_input_tokens": 328,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 328,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "toolStats": {
+      "readCount": 1,
+      "searchCount": 0,
+      "bashCount": 0,
+      "editFileCount": 1,
+      "linesAdded": 1,
+      "linesRemoved": 1,
+      "otherToolCount": 0
+    }
+  },
+  "tool_use_id": "toolu_01JYAvkr19RmKFYJLrTPwrKY",
+  "duration_ms": 5537
+}

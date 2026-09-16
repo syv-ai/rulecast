@@ -1,0 +1,19 @@
+{
+  "session_id": "723a1924-a62e-4d1e-a51e-926ff6fcbfa8",
+  "transcript_path": "/home/user/.claude/projects/-project/723a1924-a62e-4d1e-a51e-926ff6fcbfa8.jsonl",
+  "cwd": "/project",
+  "prompt_id": "e90b4153-fccc-4bcc-914c-a097dcb41522",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/project/src/huge.txt"
+  },
+  "tool_use_id": "toolu_01Y6NXiFatj3gtGTKcc8c8yY",
+  "error": "File content (4.3MB) exceeds maximum allowed size (256KB). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+  "is_interrupt": false,
+  "duration_ms": 4
+}

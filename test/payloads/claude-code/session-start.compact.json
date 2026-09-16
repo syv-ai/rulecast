@@ -1,0 +1,9 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "b744deed-edb4-48a7-9b24-c86e09e0da7f",
+  "hook_event_name": "SessionStart",
+  "source": "compact",
+  "model": "claude-sonnet-5"
+}

@@ -1,0 +1,18 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "b744deed-edb4-48a7-9b24-c86e09e0da7f",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "ac116476f4272f8ce",
+  "agent_type": "",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653/subagents/agent-ac116476f4272f8ce.jsonl",
+  "last_assistant_message": "<analysis>\nThe user gave a precise sequence of six tool-based steps to perform on files in the project, one tool call at a time, no parallel calls. I executed each in order:\n\n…",
+  "background_tasks": [],
+  "session_crons": []
+}
