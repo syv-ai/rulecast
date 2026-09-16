@@ -12,7 +12,9 @@ export interface SessionView {
 }
 
 function safeSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]/g, "_")
+  const segment = value.replace(/[^A-Za-z0-9._-]/g, "_")
+  // "", "." and ".." would resolve to the parent directory or the directory itself.
+  return /^\.*$/.test(segment) ? `_${segment}` : segment
 }
 
 export function sessionDir(root: string, sessionId: string): string {

@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { describe, expect, test } from "vitest"
 
 import { appendContext, appendWork, commitSession, openSession, sessionDir } from "../../../src/core/session/session"
@@ -8,6 +10,11 @@ describe("session", () => {
   test("session directories sanitise ids", async () => {
     expect(sessionDir("/repo", "abc-123_x.y")).toBe("/repo/.rulecast/.state/sessions/abc-123_x.y")
     expect(sessionDir("/repo", "../evil/id")).toBe("/repo/.rulecast/.state/sessions/.._evil_id")
+  })
+
+  test.each([".", "..", ""])("session id %j stays inside the sessions directory", (id) => {
+    const sessions = "/repo/.rulecast/.state/sessions"
+    expect(path.dirname(sessionDir("/repo", id))).toBe(sessions)
   })
 
   test("work is shared across agents, context is per agent", async () => {
