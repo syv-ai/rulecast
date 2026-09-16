@@ -3,6 +3,7 @@ import { errorMessage } from "../core/errors"
 import { builtinDetectors } from "../detectors"
 import { checkCommand, UsageError } from "./check"
 import { hookCommand } from "./hook"
+import { initCommand } from "./init"
 import { findRoot } from "./project"
 import { validateCommand } from "./validate"
 import { warmCommand } from "./warm"
@@ -18,6 +19,7 @@ export interface CliIo {
 }
 
 const USAGE = `usage:
+  rulecast init
   rulecast check [files...] [--base <ref>] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast validate
   rulecast hook <adapter>
@@ -30,6 +32,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   const root = findRoot(io.cwd)
   try {
     switch (command) {
+      case "init":
+        return await initCommand(root, io)
       case "check":
         return await checkCommand(root, args, registry, io)
       case "validate":
