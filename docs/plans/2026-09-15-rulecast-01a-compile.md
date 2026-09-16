@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ≥ 20, TypeScript 5, pnpm, vitest, zod 3, yaml 2, picomatch 4, tinyglobby.
 
-Part of plan 1 (see `docs/plans/2026-09-15-rulecast-00-index.md`). Continue with `2026-09-15-rulecast-01b-detection-baseline.md` afterwards.
+Part of plan 1 (see `docs/plans/2026-09-15-rulecast-00-index.md`). Continue with `2026-09-15-rulecast-01b-detection.md` afterwards.
 
 ---
 
