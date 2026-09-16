@@ -2,14 +2,12 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { main } from "../../src/commands/main"
+import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
 import { git } from "../helpers/git"
 
 async function run(cwd: string, ...argv: string[]) {
-  let stdout = ""
-  let stderr = ""
-  const code = await main(argv, { cwd, stdout: (text) => (stdout += text), stderr: (text) => (stderr += text) })
+  const { code, stdout, stderr } = await runCli(cwd, argv)
   return { code, stdout, stderr }
 }
 

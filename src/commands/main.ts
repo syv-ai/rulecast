@@ -9,6 +9,10 @@ export interface CliIo {
   cwd: string
   stdout(text: string): void
   stderr(text: string): void
+  /** All of stdin. */
+  readStdin(): Promise<string>
+  /** Starts `rulecast warm --detector <kind>...` in root, detached. */
+  startWarm(root: string, kinds: string[]): void
 }
 
 const USAGE = `usage:
