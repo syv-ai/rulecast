@@ -1,1 +1,4 @@
-export {}
+export type * from "./core/types"
+export { emptyDelivery } from "./core/types"
+export { compile, type CompiledProject, type CompiledRule, type Diagnostic } from "./core/compile/compile"
+export { createRegistry, type DetectorRegistry } from "./core/detection/registry"
