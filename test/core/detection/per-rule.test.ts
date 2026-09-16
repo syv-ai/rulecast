@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest"
-
-import { perRule } from "../../../src/core/detection/per-rule"
 import { memoryCache } from "../../../src/core/detection/cache"
+import { perRule } from "../../../src/core/detection/per-rule"
 import type { DetectorRun, Match } from "../../../src/core/types"
 
 function run(rules: string[]): DetectorRun<null> {

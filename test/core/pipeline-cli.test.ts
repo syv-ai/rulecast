@@ -56,7 +56,10 @@ describe("pipeline without a session", () => {
 
   test("compile diagnostics are warnings and mark the run failed", async () => {
     const root = await createFixture()
-    await writeFile(path.join(root, ".rulecast/rules/broken.yml"), "id: broken\nfiles: '**'\ndetect: { nope: {} }\nmessage: m\n")
+    await writeFile(
+      path.join(root, ".rulecast/rules/broken.yml"),
+      "id: broken\nfiles: '**'\ndetect: { nope: {} }\nmessage: m\n",
+    )
     const { delivery, failed } = await runPipeline({
       root,
       event: { kind: "verify", files: [USERS], cwd: root },

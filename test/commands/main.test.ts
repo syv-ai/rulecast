@@ -17,7 +17,10 @@ describe("rulecast CLI", () => {
   test("validate reports rule count, or diagnostics with exit 2", async () => {
     const root = await createFixture()
     expect(await run(root, "validate")).toEqual({ code: 0, stdout: "rulecast: 3 rules valid\n", stderr: "" })
-    await writeFile(path.join(root, ".rulecast/rules/broken.yml"), "id: broken\nfiles: '**'\ndetect: { nope: {} }\nmessage: m\n")
+    await writeFile(
+      path.join(root, ".rulecast/rules/broken.yml"),
+      "id: broken\nfiles: '**'\ndetect: { nope: {} }\nmessage: m\n",
+    )
     expect(await run(root, "validate")).toEqual({
       code: 2,
       stdout: '.rulecast/rules/broken.yml (broken): unknown detector "nope"\n',

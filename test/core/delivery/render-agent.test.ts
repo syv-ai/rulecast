@@ -24,7 +24,10 @@ describe("renderAgentText", () => {
     const text = renderAgentText(
       {
         ...emptyDelivery(),
-        findings: [finding({ count: 2 }), finding({ rule: "style/x", severity: "warning", message: "consider x", line: 9 })],
+        findings: [
+          finding({ count: 2 }),
+          finding({ rule: "style/x", severity: "warning", message: "consider x", line: 9 }),
+        ],
         preexistingSummary: [{ rule: "backend/y", file: "src/Card.tsx", count: 4 }],
         references: [
           { ref: "conventions/api.md#errors", state: "full", content: "## Errors\nMap them." },
@@ -66,16 +69,26 @@ describe("renderAgentText", () => {
   })
 
   test("caps findings per rule and names the files of the rest", () => {
-    const findings = [1, 2, 3, 4].map((line) => finding({ line, file: line > 2 ? "b.ts" : "a.ts", message: `m${line}` }))
+    const findings = [1, 2, 3, 4].map((line) =>
+      finding({ line, file: line > 2 ? "b.ts" : "a.ts", message: `m${line}` }),
+    )
     const text = renderAgentText({ ...emptyDelivery(), findings }, { maxMatchesPerRule: 2 })
-    expect(text).toBe(["rulecast: 1 rule violated", "", "error api/no-client", "  m1", "  m2", "  …and 2 more in 1 file"].join("\n"))
+    expect(text).toBe(
+      ["rulecast: 1 rule violated", "", "error api/no-client", "  m1", "  m2", "  …and 2 more in 1 file"].join("\n"),
+    )
   })
 
   test("touch-only deliveries get a conventions header", () => {
     const text = renderAgentText(
-      { ...emptyDelivery(), touches: ["api/touch"], references: [{ ref: "conventions/api.md", state: "full", content: "# API" }] },
+      {
+        ...emptyDelivery(),
+        touches: ["api/touch"],
+        references: [{ ref: "conventions/api.md", state: "full", content: "# API" }],
+      },
       { maxMatchesPerRule: 10 },
     )
-    expect(text).toBe(["rulecast: conventions for the files you are working on", "", "--- conventions/api.md ---", "# API"].join("\n"))
+    expect(text).toBe(
+      ["rulecast: conventions for the files you are working on", "", "--- conventions/api.md ---", "# API"].join("\n"),
+    )
   })
 })

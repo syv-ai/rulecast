@@ -1,12 +1,21 @@
 import { describe, expect, test } from "vitest"
 
 import { exitCodeFor, formatDelivery } from "../../../src/adapters/cli/format"
-import { emptyDelivery, type Delivery } from "../../../src/core/types"
+import { type Delivery, emptyDelivery } from "../../../src/core/types"
 
 const delivery: Delivery = {
   ...emptyDelivery(),
   findings: [
-    { rule: "backend/x", severity: "error", status: "new", file: "a.py", line: 2, column: 5, message: "bad\nfix it", count: 1 },
+    {
+      rule: "backend/x",
+      severity: "error",
+      status: "new",
+      file: "a.py",
+      line: 2,
+      column: 5,
+      message: "bad\nfix it",
+      count: 1,
+    },
     { rule: "front/y", severity: "warning", status: "new", file: "b.ts", line: 1, column: 1, message: "hmm", count: 3 },
   ],
   preexistingSummary: [{ rule: "backend/x", file: "a.py", count: 4 }],
@@ -37,7 +46,9 @@ describe("formatDelivery", () => {
   })
 
   test("agent uses the shared agent renderer", () => {
-    expect(formatDelivery(delivery, "agent", { maxMatchesPerRule: 10 })).toContain("--- conventions/backend.md#errors ---")
+    expect(formatDelivery(delivery, "agent", { maxMatchesPerRule: 10 })).toContain(
+      "--- conventions/backend.md#errors ---",
+    )
   })
 
   test("json is the delivery", () => {
@@ -53,7 +64,9 @@ describe("formatDelivery", () => {
       ruleId: "backend/x",
       level: "error",
       message: { text: "bad\nfix it" },
-      locations: [{ physicalLocation: { artifactLocation: { uri: "a.py" }, region: { startLine: 2, startColumn: 5 } } }],
+      locations: [
+        { physicalLocation: { artifactLocation: { uri: "a.py" }, region: { startLine: 2, startColumn: 5 } } },
+      ],
     })
   })
 })

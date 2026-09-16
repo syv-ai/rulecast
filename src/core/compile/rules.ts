@@ -13,12 +13,18 @@ export const ruleSchema = z
     files: z.union([z.string(), z.array(z.string()).nonempty()]),
     ignore: z.array(z.string()).default([]),
     severity: z.enum(["error", "warning"]).default("error"),
-    on: z.array(z.enum(["touch", "violation"])).nonempty().default(["violation"]),
+    on: z
+      .array(z.enum(["touch", "violation"]))
+      .nonempty()
+      .default(["violation"]),
     detect: z
       .record(z.unknown())
       .refine((value) => Object.keys(value).length === 1, "must name exactly one detector")
       .optional(),
-    events: z.array(z.enum(["edit", "verify"])).nonempty().optional(),
+    events: z
+      .array(z.enum(["edit", "verify"]))
+      .nonempty()
+      .optional(),
     message: z.string().optional(),
     context: z.array(referenceInputSchema).default([]),
   })

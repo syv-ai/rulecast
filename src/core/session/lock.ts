@@ -39,7 +39,8 @@ export async function withLock<T>(dir: string, fn: () => Promise<T>, options: Lo
       if (!isNotFound(error)) throw error
       continue
     }
-    if (Date.now() - started > options.waitMs) throw new LockTimeoutError(`could not lock ${dir} within ${options.waitMs} ms`)
+    if (Date.now() - started > options.waitMs)
+      throw new LockTimeoutError(`could not lock ${dir} within ${options.waitMs} ms`)
     await new Promise((resolve) => setTimeout(resolve, options.retryMs))
   }
   try {

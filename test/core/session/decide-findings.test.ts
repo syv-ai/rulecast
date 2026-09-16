@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { decide, type DecideInput } from "../../../src/core/session/decide"
+import { type DecideInput, decide } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork, preexistingKey } from "../../../src/core/session/state"
 import type { Match } from "../../../src/core/types"
 import { fakeResolver } from "../../helpers/resolver"
@@ -48,8 +48,26 @@ describe("decide: findings", () => {
       }),
     )
     expect(delivery.findings).toEqual([
-      { rule: "api/no-client", severity: "error", status: "new", file: "a.ts", line: 3, column: 3, message: "a.ts:3 imports Docs", count: 2 },
-      { rule: "style/warn", severity: "warning", status: "new", file: "b.ts", line: 9, column: 3, message: "consider style/warn", count: 1 },
+      {
+        rule: "api/no-client",
+        severity: "error",
+        status: "new",
+        file: "a.ts",
+        line: 3,
+        column: 3,
+        message: "a.ts:3 imports Docs",
+        count: 2,
+      },
+      {
+        rule: "style/warn",
+        severity: "warning",
+        status: "new",
+        file: "b.ts",
+        line: 9,
+        column: 3,
+        message: "consider style/warn",
+        count: 1,
+      },
     ])
   })
 

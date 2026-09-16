@@ -6,12 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "**",
-      "!!**/dist",
-      "!.dash",
-      "!.claude"
-    ]
+    "includes": ["**", "!!**/dist", "!.dash", "!.claude"]
   },
   "formatter": {
     "enabled": true,

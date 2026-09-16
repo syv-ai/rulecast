@@ -1,8 +1,8 @@
 import { expect, test } from "vitest"
 
 import { memoryCache } from "../../src/core/detection/cache"
-import { pathDetector } from "../../src/detectors/path"
 import { builtinDetectors } from "../../src/detectors"
+import { pathDetector } from "../../src/detectors/path"
 import { createProject } from "../helpers/project"
 
 test("path detector matches each existing file across all its lines", async () => {

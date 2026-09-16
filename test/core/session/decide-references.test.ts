@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest"
 
 import { fnv1a } from "../../../src/core/baseline/hash"
-import { decide, type DecideInput } from "../../../src/core/session/decide"
 import { parseReference } from "../../../src/core/references"
+import { type DecideInput, decide } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork } from "../../../src/core/session/state"
 import { fakeResolver } from "../../helpers/resolver"
 import { rule } from "../../helpers/rules"
@@ -65,11 +65,21 @@ describe("decide: references", () => {
 
   test("delivered content covers itself and its subsections while unchanged", async () => {
     const context = emptyContext()
-    context.delivered.push({ path: "conventions/api.md", anchor: "errors", hash: fnv1a(files["conventions/api.md#errors"]) })
+    context.delivered.push({
+      path: "conventions/api.md",
+      anchor: "errors",
+      hash: fnv1a(files["conventions/api.md#errors"]),
+    })
     const decision = await decide(
       input({
         context,
-        findings: [violated("r", [ref("@conventions/api.md#retries"), ref("@conventions/api.md#errors"), ref("@conventions/api.md")])],
+        findings: [
+          violated("r", [
+            ref("@conventions/api.md#retries"),
+            ref("@conventions/api.md#errors"),
+            ref("@conventions/api.md"),
+          ]),
+        ],
       }),
     )
     expect(decision.delivery.references.map((r) => [r.ref, r.state])).toEqual([
@@ -90,7 +100,15 @@ describe("decide: references", () => {
     const decision = await decide(
       input({
         agentRead: "conventions/api.md",
-        touches: [rule({ id: "t", on: ["touch"], detector: null, message: null, context: [ref("@conventions/api.md#retries")] })],
+        touches: [
+          rule({
+            id: "t",
+            on: ["touch"],
+            detector: null,
+            message: null,
+            context: [ref("@conventions/api.md#retries")],
+          }),
+        ],
       }),
     )
     expect(decision.delivery.touches).toEqual(["t"])

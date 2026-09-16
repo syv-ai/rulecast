@@ -4,7 +4,7 @@ import { appendRecords, readRecords } from "../jsonl"
 import type { Delivery } from "../types"
 import type { Decision } from "./decide"
 import { withLock } from "./lock"
-import { foldContext, foldWork, type ContextRecord, type ContextState, type WorkRecord, type WorkState } from "./state"
+import { type ContextRecord, type ContextState, foldContext, foldWork, type WorkRecord, type WorkState } from "./state"
 
 export interface SessionView {
   work: WorkState

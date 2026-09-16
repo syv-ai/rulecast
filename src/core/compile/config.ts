@@ -25,7 +25,10 @@ export const configSchema = z
       })
       .strict()
       .default({}),
-    stopGate: z.object({ maxBlocks: z.number().int().nonnegative().default(3) }).strict().default({}),
+    stopGate: z
+      .object({ maxBlocks: z.number().int().nonnegative().default(3) })
+      .strict()
+      .default({}),
     llm: z
       .object({
         provider: z.enum(["anthropic", "openai-compatible"]).default("anthropic"),

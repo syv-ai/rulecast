@@ -2,8 +2,8 @@ import type { CompiledRule } from "../compile/compile"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate } from "../template"
-import { emptyDelivery, type DeliveredReference, type Delivery, type Finding, type Match } from "../types"
-import { preexistingKey, type ContextRecord, type ContextState, type WorkRecord, type WorkState } from "./state"
+import { type DeliveredReference, type Delivery, emptyDelivery, type Finding, type Match } from "../types"
+import { type ContextRecord, type ContextState, preexistingKey, type WorkRecord, type WorkState } from "./state"
 
 export interface ClassifiedFinding {
   rule: CompiledRule
@@ -143,10 +143,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
   }
 
   // References.
-  const ruleOrder = [
-    ...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(),
-    ...input.touches,
-  ]
+  const ruleOrder = [...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(), ...input.touches]
   const candidates: { index: number; resolved: Extract<ResolvedRef, { found: true }> }[] = []
   for (const spec of referencesInOrder(ruleOrder)) {
     const resolved = await input.resolver.resolve(spec)
@@ -173,7 +170,11 @@ export async function decide(input: DecideInput): Promise<Decision> {
   for (const { index, resolved } of candidates) {
     const size = resolved.content.length + resolved.spec.ref.length + ITEM_OVERHEAD
     if (input.maxContextChars !== null && used + size > input.maxContextChars) {
-      delivery.references[index] = { ref: resolved.spec.ref, state: "read", reason: "budget" } satisfies DeliveredReference
+      delivery.references[index] = {
+        ref: resolved.spec.ref,
+        state: "read",
+        reason: "budget",
+      } satisfies DeliveredReference
       continue
     }
     used += size

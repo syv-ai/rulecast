@@ -33,7 +33,11 @@ describe("pipeline with a session", () => {
     const first = await send({ kind: "touch", files: [USERS], completeRead: true })
     expect(first.touches).toEqual(["backend/services"])
     expect(first.references).toEqual([
-      { ref: "conventions/backend.md#services", state: "full", content: "## Services\nBusiness logic lives in services." },
+      {
+        ref: "conventions/backend.md#services",
+        state: "full",
+        content: "## Services\nBusiness logic lives in services.",
+      },
     ])
     const second = await send({ kind: "touch", files: [USERS], completeRead: true })
     expect(second.touches).toEqual([])

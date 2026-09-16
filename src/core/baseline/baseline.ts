@@ -2,7 +2,7 @@ import { readSourceFile } from "../detection/per-rule"
 import type { ChangeSet, Match } from "../types"
 import { changedLines } from "./changes"
 import { fileAtCommit } from "./git"
-import { snapshotOf, type Snapshot } from "./hash"
+import { type Snapshot, snapshotOf } from "./hash"
 
 export interface BaselineSources {
   snapshots: ReadonlyMap<string, Snapshot>

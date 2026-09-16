@@ -8,7 +8,10 @@ import type { Detector, Match } from "../core/types"
 const schema = z
   .object({
     pattern: z.string().min(1),
-    flags: z.string().regex(/^[dimsuvy]*$/, "allowed flags: d i m s u v y").default(""),
+    flags: z
+      .string()
+      .regex(/^[dimsuvy]*$/, "allowed flags: d i m s u v y")
+      .default(""),
   })
   .strict()
   .superRefine((config, ctx) => {

@@ -1,19 +1,19 @@
 import { computeChanges, isNew } from "./baseline/baseline"
 import { headCommit, mergeBase } from "./baseline/git"
-import { snapshotOf, type Snapshot } from "./baseline/hash"
-import { appendBaseline, readBaseline, snapshotRecord, startRecord, type BaselineState } from "./baseline/store"
-import { compile, type CompiledProject, type CompiledRule } from "./compile/compile"
+import { type Snapshot, snapshotOf } from "./baseline/hash"
+import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, startRecord } from "./baseline/store"
+import { type CompiledProject, type CompiledRule, compile } from "./compile/compile"
+import { createReferenceResolver } from "./delivery/resolve"
 import { detectorCacheDir, diskCache } from "./detection/cache"
 import { readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectTouchRules, selectViolationRules } from "./detection/select"
-import { createReferenceResolver } from "./delivery/resolve"
-import { decide, type ClassifiedFinding, type DecideInput } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
-import { appendContext, appendWork, commitSession, openSession, sessionDir, type SessionView } from "./session/session"
+import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
-import { emptyDelivery, type Delivery, type Event, type ResolvedReference } from "./types"
+import { type Delivery, type Event, emptyDelivery, type ResolvedReference } from "./types"
 
 export interface PipelineOptions {
   root: string
@@ -72,7 +72,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   const workRecords: WorkRecord[] = []
-  const relevant = (files: readonly string[]) => files.filter((file) => project.rules.some((rule) => rule.matches(file)))
+  const relevant = (files: readonly string[]) =>
+    files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
@@ -101,7 +102,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     let fallbackCommit = session ? baseline.startCommit : null
 
     if (event.kind === "edit" && session) {
-      await appendWork(session.dir, files.map((file) => ({ t: "edited" as const, file })))
+      await appendWork(
+        session.dir,
+        files.map((file) => ({ t: "edited" as const, file })),
+      )
     }
     if (event.kind === "verify") {
       if (event.baseRef) {

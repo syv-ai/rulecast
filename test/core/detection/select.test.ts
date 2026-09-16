@@ -32,7 +32,9 @@ describe("selectViolationRules", () => {
 describe("selectTouchRules", () => {
   test("keeps touch rules matching a file that have not fired and are not disabled", () => {
     expect(selectTouchRules([tsx, touchOnly, both], ["src/a.tsx"], new Set(), new Set())).toEqual([touchOnly])
-    expect(selectTouchRules([touchOnly, both], ["src/a.tsx", "backend/x.py"], new Set(["touch-only"]), new Set())).toEqual([both])
+    expect(
+      selectTouchRules([touchOnly, both], ["src/a.tsx", "backend/x.py"], new Set(["touch-only"]), new Set()),
+    ).toEqual([both])
     expect(selectTouchRules([touchOnly], ["src/a.tsx"], new Set(), new Set(["touch-only"]))).toEqual([])
   })
 })

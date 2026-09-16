@@ -43,7 +43,9 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
 
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
   const warningsCount = delivery.findings.length - errors
-  out.push(delivery.findings.length === 0 ? "no findings" : `${plural(errors, "error")}, ${plural(warningsCount, "warning")}`)
+  out.push(
+    delivery.findings.length === 0 ? "no findings" : `${plural(errors, "error")}, ${plural(warningsCount, "warning")}`,
+  )
   return out.join("\n")
 }
 

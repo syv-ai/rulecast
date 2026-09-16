@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
-
-import { errorMessage } from "../core/errors"
 import { createRegistry } from "../core/detection/registry"
+import { errorMessage } from "../core/errors"
 import { builtinDetectors } from "../detectors"
 import { checkCommand, UsageError } from "./check"
 import { validateCommand } from "./validate"

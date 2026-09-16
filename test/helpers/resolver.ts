@@ -5,7 +5,10 @@ import type { ReferenceResolver } from "../../src/core/delivery/resolve"
  * In-memory resolver. `files` maps "path" or "path#anchor" to content.
  * `children` maps "path#anchor" to the anchors it contains (besides itself).
  */
-export function fakeResolver(files: Record<string, string>, children: Record<string, string[]> = {}): ReferenceResolver {
+export function fakeResolver(
+  files: Record<string, string>,
+  children: Record<string, string[]> = {},
+): ReferenceResolver {
   const key = (path: string, anchor: string | null) => (anchor === null ? path : `${path}#${anchor}`)
   return {
     async resolve(spec) {

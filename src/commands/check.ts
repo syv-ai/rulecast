@@ -2,7 +2,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 import { glob } from "tinyglobby"
 
-import { CLI_FORMATS, exitCodeFor, formatDelivery, type CliFormat } from "../adapters/cli/format"
+import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
 import { changedFilesSince, mergeBase } from "../core/baseline/git"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runPipeline } from "../core/pipeline"
@@ -14,7 +14,12 @@ function toProjectPath(root: string, cwd: string, file: string): string {
   return path.relative(root, path.resolve(cwd, file)).split(path.sep).join("/")
 }
 
-export async function checkCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
+export async function checkCommand(
+  root: string,
+  args: string[],
+  registry: DetectorRegistry,
+  io: CliIo,
+): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -26,7 +31,8 @@ export async function checkCommand(root: string, args: string[], registry: Detec
     },
   })
   const format = values.format as CliFormat
-  if (!CLI_FORMATS.includes(format)) throw new UsageError(`unknown format "${values.format}" (use ${CLI_FORMATS.join(", ")})`)
+  if (!CLI_FORMATS.includes(format))
+    throw new UsageError(`unknown format "${values.format}" (use ${CLI_FORMATS.join(", ")})`)
 
   let files: string[]
   if (positionals.length > 0) {
@@ -35,7 +41,11 @@ export async function checkCommand(root: string, args: string[], registry: Detec
     files = await changedFilesSince(root, await mergeBase(root, values.base))
   } else {
     files = (
-      await glob(["**/*"], { cwd: root, dot: true, ignore: ["**/node_modules/**", "**/.git/**", ".rulecast/.state/**"] })
+      await glob(["**/*"], {
+        cwd: root,
+        dot: true,
+        ignore: ["**/node_modules/**", "**/.git/**", ".rulecast/.state/**"],
+      })
     ).sort()
   }
 

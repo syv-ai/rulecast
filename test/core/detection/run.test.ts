@@ -23,7 +23,11 @@ function detector(kind: string, run: Detector<unknown>["run"]): Detector<unknown
 const detectorRule = (id: string, kind: string, captures: string[] = []) =>
   rule({ id, detector: { kind, config: { id }, captures, events: ["edit", "verify"] } })
 
-function input(selections: { rule: ReturnType<typeof rule>; files: string[] }[], detectors: Detector<unknown>[], timeoutMs = 1000) {
+function input(
+  selections: { rule: ReturnType<typeof rule>; files: string[] }[],
+  detectors: Detector<unknown>[],
+  timeoutMs = 1000,
+) {
   return {
     root: "/project",
     event: "edit" as const,
@@ -45,7 +49,15 @@ describe("runDetection", () => {
     })
     const r1 = detectorRule("r1", "a")
     const r2 = detectorRule("r2", "a")
-    const output = await runDetection(input([{ rule: r1, files: ["x.ts"] }, { rule: r2, files: ["y.ts"] }], [a]))
+    const output = await runDetection(
+      input(
+        [
+          { rule: r1, files: ["x.ts"] },
+          { rule: r2, files: ["y.ts"] },
+        ],
+        [a],
+      ),
+    )
     expect(calls).toHaveLength(1)
     expect(calls[0]!.rules.map((r) => [r.id, r.config, r.files])).toEqual([
       ["r1", { id: "r1" }, ["x.ts"]],
@@ -72,7 +84,13 @@ describe("runDetection", () => {
       return { findings: [], errors: [] }
     })
     await runDetection(
-      input([{ rule: detectorRule("s", "slow"), files: ["a"] }, { rule: detectorRule("f", "fast"), files: ["a"] }], [slow, fast]),
+      input(
+        [
+          { rule: detectorRule("s", "slow"), files: ["a"] },
+          { rule: detectorRule("f", "fast"), files: ["a"] },
+        ],
+        [slow, fast],
+      ),
     )
     expect(order).toEqual(["slow:start", "fast", "slow:end"])
   })
@@ -107,16 +125,23 @@ describe("runDetection", () => {
   })
 
   test("a match missing a declared capture is a rule error", async () => {
-    const d = detector("caps", async () => ({ findings: [{ rule: "r", match: match("a", { other: "1" }) }], errors: [] }))
+    const d = detector("caps", async () => ({
+      findings: [{ rule: "r", match: match("a", { other: "1" }) }],
+      errors: [],
+    }))
     const output = await runDetection(input([{ rule: detectorRule("r", "caps", ["NAMES"]), files: ["a"] }], [d]))
     expect(output.findings).toEqual([])
-    expect(output.errors).toEqual([{ kind: "caps", rules: ["r"], message: 'match is missing declared capture "NAMES"' }])
+    expect(output.errors).toEqual([
+      { kind: "caps", rules: ["r"], message: 'match is missing declared capture "NAMES"' },
+    ])
   })
 
   test("findings for unselected rules are a whole-run error", async () => {
     const d = detector("stray", async () => ({ findings: [{ rule: "someone-else", match: match("a") }], errors: [] }))
     const output = await runDetection(input([{ rule: detectorRule("r", "stray"), files: ["a"] }], [d]))
-    expect(output.errors).toEqual([{ kind: "stray", rules: ["r"], message: 'detector reported unknown rule "someone-else"' }])
+    expect(output.errors).toEqual([
+      { kind: "stray", rules: ["r"], message: 'detector reported unknown rule "someone-else"' },
+    ])
   })
 
   test("runs past the deadline are aborted and reported as timed out", async () => {
@@ -128,7 +153,14 @@ describe("runDetection", () => {
     })
     const quick = detector("quick", async () => ({ findings: [{ rule: "q", match: match("a") }], errors: [] }))
     const output = await runDetection(
-      input([{ rule: detectorRule("h", "hanging"), files: ["a"] }, { rule: detectorRule("q", "quick"), files: ["a"] }], [hanging, quick], 20),
+      input(
+        [
+          { rule: detectorRule("h", "hanging"), files: ["a"] },
+          { rule: detectorRule("q", "quick"), files: ["a"] },
+        ],
+        [hanging, quick],
+        20,
+      ),
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(aborted).toBe(true)

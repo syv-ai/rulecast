@@ -9,7 +9,14 @@ import type { Match } from "../../../src/core/types"
 import { createRepo } from "../../helpers/git"
 import { createProject } from "../../helpers/project"
 
-const at = (file: string, line: number, endLine = line): Match => ({ file, line, endLine, column: 1, text: "", captures: {} })
+const at = (file: string, line: number, endLine = line): Match => ({
+  file,
+  line,
+  endLine,
+  column: 1,
+  text: "",
+  captures: {},
+})
 
 describe("computeChanges", () => {
   test("uses snapshots first", async () => {

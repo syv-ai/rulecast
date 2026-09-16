@@ -5,11 +5,11 @@ import picomatch from "picomatch"
 import { sectionRange } from "../anchors"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError, isNotFound } from "../errors"
-import { parseReference, ReferenceSyntaxError, type ReferenceSpec } from "../references"
+import { parseReference, type ReferenceSpec, ReferenceSyntaxError } from "../references"
 import { CORE_VARIABLES, templateVariables } from "../template"
 import type { DetectorEvent, Severity, Trigger } from "../types"
-import { CONFIG_PATH, defaultConfig, loadConfig, type Config } from "./config"
-import { loadRuleFiles, ruleSchema, type RuleData } from "./rules"
+import { CONFIG_PATH, type Config, defaultConfig, loadConfig } from "./config"
+import { loadRuleFiles, type RuleData, ruleSchema } from "./rules"
 
 export interface CompiledDetector {
   kind: string
@@ -166,7 +166,11 @@ export async function compile(root: string, registry: DetectorRegistry): Promise
     const sources = sourcesById.get(rule.id)!
     if (sources.length === 1) return true
     const others = sources.filter((source) => source !== rule.source).join(", ")
-    diagnostics.push({ source: rule.source, rule: rule.id, message: `duplicate rule id "${rule.id}" (also in ${others})` })
+    diagnostics.push({
+      source: rule.source,
+      rule: rule.id,
+      message: `duplicate rule id "${rule.id}" (also in ${others})`,
+    })
     return false
   })
 
