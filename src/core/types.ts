@@ -8,7 +8,7 @@ export type ReferenceMode = "inject" | "read"
 
 export interface Event {
   kind: EventKind
-  /** Repo-relative paths. Empty for prompt and reset. */
+  /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt and reset. */
   files: string[]
   /** touch from a read: the whole file was read. */
   completeRead?: boolean
@@ -104,12 +104,22 @@ export interface Delivery {
   warnings: string[]
 }
 
+export interface AdapterInput {
+  /** The agent's directory; the project root is found from it. */
+  cwd: string
+  /** null: nothing to run for this input. */
+  event: Event | null
+  /** Start detector warm-up (§13). */
+  warmup: boolean
+}
+
 export interface Adapter {
   name: string
-  supports: EventKind[]
+  /** Budget handed to commit (§9); null = unlimited. */
   maxContextChars: number | null
-  parse(input: unknown): Event | null
-  format(delivery: Delivery, event: Event): { stdout: string; exitCode: number }
+  /** null: not an input this adapter handles. */
+  parse(input: unknown): AdapterInput | null
+  format(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): { stdout: string; exitCode: number }
 }
 
 export function emptyDelivery(): Delivery {
