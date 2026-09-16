@@ -1,6 +1,6 @@
 import type { Detector } from "../types"
 
-// Detector<any>: each detector has its own config type; the registry erases it.
+// biome-ignore lint/suspicious/noExplicitAny: each detector has its own config type; the registry erases it.
 export type AnyDetector = Detector<any>
 
 export interface DetectorRegistry {
