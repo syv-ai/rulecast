@@ -1,3 +1,4 @@
+export { claudeCodeAdapter } from "./adapters/claude-code/adapter"
 export { type CompiledProject, type CompiledRule, compile, type Diagnostic } from "./core/compile/compile"
 export { renderAgentText } from "./core/delivery/render-agent"
 export { perRule } from "./core/detection/per-rule"
