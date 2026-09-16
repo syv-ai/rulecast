@@ -366,7 +366,7 @@ detect:
 | Event | Claude Code source | Rules selected | Files |
 |---|---|---|---|
 | `touch` | `PostToolUse` on `Read`; implicit on every `edit` | `touch` rules matching the file, not yet touched in this agent context | the file (no detection) |
-| `edit` | `PostToolUse` on `Edit`, `MultiEdit`, `Write` | `violation` rules matching the file whose events include `edit` | the edited file |
+| `edit` | `PostToolUse` on `Edit`, `Write` | `violation` rules matching the file whose events include `edit` | the edited file |
 | `verify` | `Stop`, `SubagentStop`; `rulecast check` | `violation` rules whose events include `verify` | Stop: work memory's edited files whose content differs from their snapshot; CLI: §12 |
 | `prompt` | `UserPromptSubmit` | none | none; resets the agent's stop-block counter |
 | `reset` | `SessionStart` with source `compact` or `clear` | none | none; clears the agent's context memory |
@@ -504,18 +504,20 @@ Installed by `rulecast init` into `.claude/settings.json`, merged with existing 
 
 | Hook | Matcher | Event | Output | Hook timeout |
 |---|---|---|---|---|
-| `PostToolUse` | `Read` | `touch` (`completeRead` when no offset/limit was given and the tool response was not truncated) | `hookSpecificOutput.additionalContext` | 5 s |
-| `PostToolUse` | `Edit\|MultiEdit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
+| `PostToolUse` | `Read` | `touch` (`completeRead` when `tool_response.file` has `startLine` 1 and `numLines` equal to `totalLines`) | `hookSpecificOutput.additionalContext` | 5 s |
+| `PostToolUse` | `Edit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
 | `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; otherwise nothing, or `systemMessage` on `capReached` | `timeouts.verifyMs` + 10 s |
 | `UserPromptSubmit` | — | `prompt` | none | 5 s |
 | `SessionStart` | `startup\|resume` | none; starts cache warm-up (§13) | none | 5 s |
 | `SessionStart` | `compact\|clear` | `reset` | none | 5 s |
 
-- `maxContextChars`: 20,000 until measured (below).
-- Session id from `session_id`; agent id from `agent_id`.
+- `maxContextChars`: 10,000. Claude Code injects `additionalContext` of up to 10,000 chars whole; above that it replaces all of it with a pointer to a saved file and a 2 KB preview.
+- Session id from `session_id`; agent id from `agent_id`. File paths from `tool_input.file_path` (absolute); `tool_response` paths can be relative.
+- `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.
+- `/clear` and `fork` start a new `session_id`; `resume` and `compact` keep it.
 - `SessionStart` with source `fork` starts a new session with an empty context memory; duplicate injections in a forked session are accepted in 0.1.
 
-**Before implementation:** record real payloads for every row from the current Claude Code release into `test/payloads/claude-code/`; confirm the Stop and SubagentStop block output shape; send an oversized `additionalContext` to find where Claude Code truncates and set `maxContextChars` from it. The adapter is written against those recordings.
+Payloads for every row are recorded from Claude Code 2.1.273 in `test/payloads/claude-code/` (findings in its `README.md`), and the adapter is written against them. The Stop and SubagentStop block shape above is confirmed. Claude Code 2.1.273 has no `MultiEdit` tool.
 
 ### CLI
 
