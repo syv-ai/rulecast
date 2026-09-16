@@ -1,0 +1,117 @@
+import type { ZodType, ZodTypeDef } from "zod"
+
+export type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset"
+export type DetectorEvent = "edit" | "verify"
+export type Severity = "error" | "warning"
+export type Trigger = "touch" | "violation"
+export type ReferenceMode = "inject" | "read"
+
+export interface Event {
+  kind: EventKind
+  /** Repo-relative paths. Empty for prompt and reset. */
+  files: string[]
+  /** touch from a read: the whole file was read. */
+  completeRead?: boolean
+  /** verify from the CLI: --base. */
+  baseRef?: string
+  session?: { id: string; agentId?: string }
+  cwd: string
+}
+
+export interface Match {
+  file: string
+  /** 1-based. */
+  line: number
+  endLine: number
+  column: number
+  text: string
+  /** Exactly the names the detector declared for the rule. */
+  captures: Record<string, string>
+}
+
+export interface ChangeSet {
+  /** 1-based inclusive ranges in the current file. */
+  changedLines: [start: number, end: number][]
+}
+
+export interface Cache {
+  get<T>(key: string): Promise<T | undefined>
+  set(key: string, value: unknown): Promise<void>
+}
+
+export interface ResolvedReference {
+  /** "conventions/api-access.md#frontend-data-flow" */
+  ref: string
+  content: string
+}
+
+export interface DetectorRuleInput<Config> {
+  id: string
+  config: Config
+  files: string[]
+  context: ResolvedReference[]
+}
+
+export interface DetectorRun<Config> {
+  event: DetectorEvent
+  rules: DetectorRuleInput<Config>[]
+  /** File absent = no baseline, the whole file is new. */
+  changes: ReadonlyMap<string, ChangeSet>
+  cache: Cache
+  cwd: string
+  signal: AbortSignal
+}
+
+export interface DetectorResult {
+  findings: { rule: string; match: Match }[]
+  /** rule null = the whole run failed. */
+  errors: { rule: string | null; message: string }[]
+}
+
+export interface Detector<Config> {
+  kind: string
+  /** Input is unknown: schemas may apply defaults and refinements. */
+  schema: ZodType<Config, ZodTypeDef, unknown>
+  captures(config: Config): string[]
+  events(config: Config): DetectorEvent[]
+  run(input: DetectorRun<Config>): Promise<DetectorResult>
+}
+
+export interface Finding {
+  rule: string
+  severity: Severity
+  status: "new" | "preexisting"
+  file: string
+  line: number
+  column: number
+  message: string
+  count: number
+}
+
+export interface DeliveredReference {
+  ref: string
+  state: "full" | "pointer" | "read" | "missing"
+  content?: string
+  reason?: "mode" | "budget" | "tooLarge"
+}
+
+export interface Delivery {
+  findings: Finding[]
+  preexistingSummary: { rule: string; file: string; count: number }[]
+  references: DeliveredReference[]
+  touches: string[]
+  stop: "block" | "allow" | "capReached" | null
+  warnings: string[]
+}
+
+export interface Adapter {
+  name: string
+  supports: EventKind[]
+  maxContextChars: number | null
+  parse(input: unknown): Event | null
+  format(delivery: Delivery, event: Event): { stdout: string; exitCode: number }
+}
+
+export function emptyDelivery(): Delivery {
+  return { findings: [], preexistingSummary: [], references: [], touches: [], stop: null, warnings: [] }
+}
