@@ -4,6 +4,7 @@ import { builtinDetectors } from "../detectors"
 import { checkCommand, UsageError } from "./check"
 import { findRoot } from "./project"
 import { validateCommand } from "./validate"
+import { warmCommand } from "./warm"
 
 export interface CliIo {
   cwd: string
@@ -18,6 +19,7 @@ export interface CliIo {
 const USAGE = `usage:
   rulecast check [files...] [--base <ref>] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast validate
+  rulecast warm [--detector <kind>]...
 `
 
 export async function main(argv: string[], io: CliIo): Promise<number> {
@@ -30,6 +32,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await checkCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, registry, io)
+      case "warm":
+        return await warmCommand(root, args, registry, io)
       case undefined:
       case "help":
       case "--help":

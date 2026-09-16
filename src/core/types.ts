@@ -68,6 +68,14 @@ export interface DetectorResult {
   errors: { rule: string | null; message: string }[]
 }
 
+export interface DetectorWarm<Config> {
+  /** Every rule of this detector kind in the project. */
+  rules: { id: string; config: Config }[]
+  cache: Cache
+  cwd: string
+  signal: AbortSignal
+}
+
 export interface Detector<Config> {
   kind: string
   /** Input is unknown: schemas may apply defaults and refinements. */
@@ -75,6 +83,8 @@ export interface Detector<Config> {
   captures(config: Config): string[]
   events(config: Config): DetectorEvent[]
   run(input: DetectorRun<Config>): Promise<DetectorResult>
+  /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
+  warm?(input: DetectorWarm<Config>): Promise<void>
 }
 
 export interface Finding {
