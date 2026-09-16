@@ -32,6 +32,8 @@ export interface PipelineResult {
   project: CompiledProject
   /** rulecast itself failed: compile diagnostics, detector errors or verify timeouts. */
   failed: boolean
+  /** Detector kinds whose results were dropped at the edit deadline (§13). */
+  deadlineMissed: string[]
 }
 
 type Warning = { key: string; text: string }
@@ -46,6 +48,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     text: `${diagnostic.source}: ${diagnostic.message} (run rulecast validate)`,
   }))
   let failed = project.diagnostics.length > 0
+  const deadlineMissed: string[] = []
   const session = event.session
     ? { dir: sessionDir(root, event.session.id), agent: event.session.agentId ?? "main" }
     : null
@@ -53,7 +56,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "prompt" || event.kind === "reset") {
     if (session && event.kind === "prompt") await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     if (session && event.kind === "reset") await appendContext(session.dir, session.agent, [{ t: "reset" }])
-    return { delivery: emptyDelivery(), project, failed }
+    return { delivery: emptyDelivery(), project, failed, deadlineMissed }
   }
 
   let baseline: BaselineState = { started: false, startCommit: null, snapshots: new Map() }
@@ -159,6 +162,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     for (const timeout of output.timedOut) {
       if (event.kind === "edit") {
         log(`edit deadline passed for ${timeout.kind}: ${timeout.rules.join(", ")}`)
+        deadlineMissed.push(timeout.kind)
       } else {
         failed = true
         warnings.push({
@@ -184,17 +188,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     stopGate: event.kind === "verify" && session !== null,
   })
 
-  if (!session) return { delivery: (await decide(inputFor(view))).delivery, project, failed }
+  if (!session) return { delivery: (await decide(inputFor(view))).delivery, project, failed, deadlineMissed }
 
   await appendWork(session.dir, workRecords)
   try {
     const delivery = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery, project, failed }
+    return { delivery, project, failed, deadlineMissed }
   } catch (error) {
     if (!(error instanceof LockTimeoutError)) throw error
     warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     const delivery = (await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false }))
       .delivery
-    return { delivery, project, failed }
+    return { delivery, project, failed, deadlineMissed }
   }
 }
