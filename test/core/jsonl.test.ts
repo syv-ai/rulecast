@@ -25,6 +25,29 @@ describe("jsonl", () => {
     expect(await readRecords(file)).toEqual([{ t: "a" }])
   })
 
+  test("appending after a crash mid-append drops the partial record", async () => {
+    const file = path.join(await createProject({}), "work.jsonl")
+    await appendRecords(file, [{ t: "a" }])
+    await appendFile(file, '{"t":"b"')
+    await appendRecords(file, [{ t: "c" }])
+    expect(await readRecords(file)).toEqual([{ t: "a" }, { t: "c" }])
+  })
+
+  test("appending after a crash on the first record drops the partial record", async () => {
+    const file = path.join(await createProject({}), "work.jsonl")
+    await appendFile(file, '{"t":"b"')
+    await appendRecords(file, [{ t: "c" }])
+    expect(await readRecords(file)).toEqual([{ t: "c" }])
+  })
+
+  test("a partial record longer than one read chunk is dropped whole", async () => {
+    const file = path.join(await createProject({}), "work.jsonl")
+    await appendRecords(file, [{ t: "a" }])
+    await appendFile(file, `{"t":"${"x".repeat(200_000)}`)
+    await appendRecords(file, [{ t: "c" }])
+    expect(await readRecords(file)).toEqual([{ t: "a" }, { t: "c" }])
+  })
+
   test("an unparseable line before the end is corruption", async () => {
     const file = path.join(await createProject({}), "work.jsonl")
     await appendFile(file, 'garbage\n{"t":"a"}\n')
