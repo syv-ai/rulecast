@@ -1,4 +1,3 @@
-import path from "node:path"
 import { parseArgs } from "node:util"
 import { glob } from "tinyglobby"
 
@@ -7,12 +6,9 @@ import { changedFilesSince, mergeBase } from "../core/baseline/git"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runPipeline } from "../core/pipeline"
 import type { CliIo } from "./main"
+import { toProjectPath } from "./project"
 
 export class UsageError extends Error {}
-
-function toProjectPath(root: string, cwd: string, file: string): string {
-  return path.relative(root, path.resolve(cwd, file)).split(path.sep).join("/")
-}
 
 export async function checkCommand(
   root: string,
@@ -36,7 +32,7 @@ export async function checkCommand(
 
   let files: string[]
   if (positionals.length > 0) {
-    files = positionals.map((file) => toProjectPath(root, io.cwd, file))
+    files = positionals.map((file) => toProjectPath(root, io.cwd, file)).filter((file): file is string => file !== null)
   } else if (values.base) {
     files = await changedFilesSince(root, await mergeBase(root, values.base))
   } else {
