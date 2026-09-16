@@ -9,6 +9,7 @@ const common = z.object({
   agent_id: z.string().min(1).optional(),
   agent_type: z.string().optional(),
   source: z.string().optional(),
+  prompt: z.string().optional(),
 })
 
 const fileTool = z.object({
@@ -26,7 +27,15 @@ const readResponse = z.object({
 export function parseClaudeCode(input: unknown): AdapterInput | null {
   const head = common.safeParse(input)
   if (!head.success) return null
-  const { hook_event_name: hook, session_id: id, cwd, agent_id: agentId, agent_type: agentType, source } = head.data
+  const {
+    hook_event_name: hook,
+    session_id: id,
+    cwd,
+    agent_id: agentId,
+    agent_type: agentType,
+    source,
+    prompt,
+  } = head.data
   const session = agentId === undefined ? { id } : { id, agentId }
   const result = (kind: EventKind | null, files: string[] = [], completeRead?: boolean): AdapterInput => ({
     cwd,
@@ -56,7 +65,8 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
       // /compact's summariser runs as a subagent with an empty agent type.
       return result(agentType === "" ? null : "verify")
     case "UserPromptSubmit":
-      return result("prompt")
+      // A background task finishing also submits a prompt; only the user's own prompts reset the stop gate.
+      return result(prompt?.startsWith("<task-notification>") ? null : "prompt")
     case "SessionStart":
       // clear and fork arrive with a new session id, so their stores are already empty.
       if (source === "compact") return result("reset")

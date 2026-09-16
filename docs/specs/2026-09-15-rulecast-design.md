@@ -528,6 +528,7 @@ Installed by `rulecast init` into `.claude/settings.json`, merged with existing 
 - **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
 - Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.
 - `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.
+- `UserPromptSubmit` also fires when a background task finishes, with a `prompt` starting `<task-notification>` and no other distinguishing field. That is not the user: no `prompt` event, so it does not reset the stop gate.
 - `/clear` and `fork` start a new `session_id`, so they begin with empty stores and need no event. Work from before a `/clear` is not verified at the next Stop: `/clear` starts a new task.
 - `rulecast hook` always exits 0 (§14). A directory with no `.rulecast/` above it is not a rulecast project: the hook does nothing and creates no state.
 

@@ -1,0 +1,10 @@
+{
+  "session_id": "f0f56e4a-df68-408e-947a-a2976ea04375",
+  "transcript_path": "/home/user/.claude/projects/-project/f0f56e4a-df68-408e-947a-a2976ea04375.jsonl",
+  "cwd": "/project",
+  "scratchpad_dir": "/tmp/claude/-project/f0f56e4a-df68-408e-947a-a2976ea04375/scratchpad",
+  "prompt_id": "cc2c8be5-7387-4ed1-a7eb-313a429185b2",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<task-notification>\n<task-id>aa316da301ee5fcb5</task-id>\n<tool-use-id>toolu_01KfPD83nWFujw6eKWzsrVjz</tool-use-id>\n<output-file>/tmp/claude/-project/f0f56e4a-df68-408e-947a-a2976ea04375/tasks/aa316da301ee5fcb5.output</output-file>\n<status>completed</status>\n<summary>Agent \"Read src/math.ts and report contents\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The file exists. Full contents of `/project/src/math.ts`:\n\n```typescript\nexport function add(a: number, b: number) {\n  return a + b\n}\n\nexport function subtract(a: number, b: number) {\n  return b - a\n}\n```\n\nSummary: This is a tiny TypeScript utility module exporting two arithmetic functions:\n- `add(a, b)` — returns `a + b` (standard addition).\n- `subtract(a, b)` — returns `b - a`. Note this is reversed from what the name typically implies (a normal `subtract(a, b)` would usually return `a - b`); as written it computes \"b minus a,\" which could be a bug depending on intended usage.\n\nNo other logic, classes, or side effects are present — just two exported pure functions.</result>\n<usage><subagent_tokens>32987</subagent_tokens><tool_uses>1</tool_uses><duration_ms>9283</duration_ms></usage>\n</task-notification>"
+}

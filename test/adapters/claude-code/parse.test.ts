@@ -47,6 +47,7 @@ describe("Claude Code adapter: parse", () => {
     "post-tool-use-failure.read.too-large",
     "subagent-stop.compaction",
     "pre-compact.manual",
+    "user-prompt-submit.task-notification",
     "session-start.clear",
     "session-start.fork",
   ])("%s has no event", (name) => {
