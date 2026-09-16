@@ -1,6 +1,6 @@
 # rulecast — pre-commit-style config, rule repos and commands
 
-**Status:** approved design, not yet planned
+**Status:** approved; folded into `2026-09-15-rulecast-design.md` on 2026-09-16, which is authoritative. Kept as the design record.
 **Date:** 2026-09-16
 **Amends:** `2026-09-15-rulecast-design.md` §4 (rule format and project config), §5 (compilation inputs), §7 (triggers), §9 (storage location), §12 (CLI), §16 (package layout). Everything not named here is unchanged.
 

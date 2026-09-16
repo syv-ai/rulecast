@@ -1,6 +1,6 @@
 # rulecast — interactive `rulecast init`
 
-**Status:** approved design, not yet planned
+**Status:** approved; folded into `2026-09-15-rulecast-design.md` on 2026-09-16, which is authoritative. Kept as the design record.
 **Date:** 2026-09-16
 **Depends on:** `2026-09-16-rulecast-pre-commit-format-design.md` (config file, rule repos, `install`, `validate`). Replaces `init` in `2026-09-15-rulecast-design.md` §12.
 
