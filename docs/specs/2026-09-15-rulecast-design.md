@@ -130,12 +130,20 @@ interface DetectorResult {
   errors: { rule: string | null; message: string }[]   // rule null = the whole run failed
 }
 
+interface DetectorWarm<Config> {
+  rules: { id: string; config: Config }[]   // every rule of this kind in the project
+  cache: Cache
+  cwd: string
+  signal: AbortSignal
+}
+
 interface Detector<Config> {
   kind: string                                    // key under `detect:` in a rule
   schema: ZodType<Config>                         // includes synchronous deep checks
   captures(config: Config): string[]              // template variables every match carries
   events(config: Config): DetectorEvent[]         // default events; a rule's `events` overrides
   run(input: DetectorRun<Config>): Promise<DetectorResult>
+  warm?(input: DetectorWarm<Config>): Promise<void>   // optional: build caches ahead of events (§13)
 }
 
 interface Finding {
@@ -165,12 +173,17 @@ interface Delivery {
   warnings: string[]                 // rulecast's own problems
 }
 
+interface AdapterInput {
+  cwd: string                        // the agent's directory; the project root is found from it
+  event: Event | null                // files may be absolute; the hook command makes them repo-relative
+  warmup: boolean                    // start detector warm-up (§13)
+}
+
 interface Adapter {
   name: string
-  supports: EventKind[]
-  maxContextChars: number | null     // null = unlimited
-  parse(input: unknown): Event | null
-  format(delivery: Delivery, event: Event): { stdout: string; exitCode: number }
+  maxContextChars: number | null     // budget for commit (§9); null = unlimited
+  parse(input: unknown): AdapterInput | null   // null = not an input this adapter handles
+  format(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): { stdout: string; exitCode: number }
 }
 ```
 
@@ -369,7 +382,7 @@ detect:
 | `edit` | `PostToolUse` on `Edit`, `Write` | `violation` rules matching the file whose events include `edit` | the edited file |
 | `verify` | `Stop`, `SubagentStop`; `rulecast check` | `violation` rules whose events include `verify` | Stop: work memory's edited files whose content differs from their snapshot; CLI: §12 |
 | `prompt` | `UserPromptSubmit` | none | none; resets the agent's stop-block counter |
-| `reset` | `SessionStart` with source `compact` or `clear` | none | none; clears the agent's context memory |
+| `reset` | `SessionStart` with source `compact` | none | none; clears the agent's context memory |
 
 ## 8. Baseline
 
@@ -459,6 +472,7 @@ A `touch` from a complete read (`completeRead: true`) of a file records that fil
 - No new error findings: `allow`.
 - New error findings and the agent's stop-block counter is below `stopGate.maxBlocks`: `block`, counter incremented.
 - Otherwise: `capReached` (the agent may stop; the delivery lists what remains).
+- Only `block` reaches the agent. A stop that does not block records nothing in context memory, so what it would have delivered is delivered again at the next event.
 
 ## 10. Rule and file selection
 
@@ -500,24 +514,24 @@ pre-existing (not blocking): backend/no-logic-in-routes ×4 in frontend/src/comp
 
 ### Claude Code adapter
 
-Installed by `rulecast init` into `.claude/settings.json`, merged with existing hooks (existing entries are never modified or removed). Every hook runs `rulecast hook claude-code`.
+Installed by `rulecast init` into `.claude/settings.json`, merged with existing hooks: existing entries are never modified or removed, and a hook whose command runs `rulecast hook claude-code` counts as installed. Every hook runs `rulecast hook claude-code`, or `"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code` when rulecast is installed in the project.
 
 | Hook | Matcher | Event | Output | Hook timeout |
 |---|---|---|---|---|
 | `PostToolUse` | `Read` | `touch` (`completeRead` when `tool_response.file` has `startLine` 1 and `numLines` equal to `totalLines`) | `hookSpecificOutput.additionalContext` | 5 s |
 | `PostToolUse` | `Edit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
-| `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; otherwise nothing, or `systemMessage` on `capReached` | `timeouts.verifyMs` + 10 s |
+| `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; `capReached`: `{ "systemMessage": <agent text> }`; `allow`: nothing | `timeouts.verifyMs` + 10 s |
 | `UserPromptSubmit` | — | `prompt` | none | 5 s |
-| `SessionStart` | `startup\|resume` | none; starts cache warm-up (§13) | none | 5 s |
-| `SessionStart` | `compact\|clear` | `reset` | none | 5 s |
+| `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: none, starts warm-up (§13); `compact`: `reset` | none | 5 s |
 
-- `maxContextChars`: 10,000. Claude Code injects `additionalContext` of up to 10,000 chars whole; above that it replaces all of it with a pointer to a saved file and a 2 KB preview.
-- Session id from `session_id`; agent id from `agent_id`. File paths from `tool_input.file_path` (absolute); `tool_response` paths can be relative.
+- **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview. The adapter declares `maxContextChars` 9,000, so rendering overhead stays under the limit, and cuts output longer than 10,000 chars (possible only when findings alone exceed it) with a line pointing at `rulecast check --format agent`. Block reasons and system messages get the same cut.
+- **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
+- Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.
 - `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.
-- `/clear` and `fork` start a new `session_id`; `resume` and `compact` keep it.
-- `SessionStart` with source `fork` starts a new session with an empty context memory; duplicate injections in a forked session are accepted in 0.1.
+- `/clear` and `fork` start a new `session_id`, so they begin with empty stores and need no event. Work from before a `/clear` is not verified at the next Stop: `/clear` starts a new task.
+- `rulecast hook` always exits 0 (§14). A directory with no `.rulecast/` above it is not a rulecast project: the hook does nothing and creates no state.
 
-Payloads for every row are recorded from Claude Code 2.1.273 in `test/payloads/claude-code/` (findings in its `README.md`), and the adapter is written against them. The Stop and SubagentStop block shape above is confirmed. Claude Code 2.1.273 has no `MultiEdit` tool.
+Payloads for every row are recorded from Claude Code 2.1.273 in `test/payloads/claude-code/` (findings in its `README.md`), and the adapter is written against them. Claude Code 2.1.273 has no `MultiEdit` tool.
 
 ### CLI
 
@@ -531,7 +545,7 @@ rulecast check [files...]       verify event
 rulecast hook <adapter>         read a hook payload on stdin, write the adapter's output
 rulecast validate               print compile diagnostics
 rulecast doctor                 compile, check environment, dry-run every rule
-rulecast warm                   build detector caches (started detached by hooks; §13)
+rulecast warm [--detector <kind>]...   build detector caches (started detached by hooks; §13)
 ```
 
 `check` file selection: explicit arguments (what pre-commit passes); otherwise with `--base`, files changed since the merge base; otherwise every file matching any rule's `files`. Without `--base` and `--session` there is no baseline and every finding is new. The CLI adapter maps error findings to exit code 1; it has no stop decision. CI documentation recommends `--base` so llm rules judge only changed files.
@@ -551,7 +565,7 @@ Mechanisms:
 - persistent, content-addressed caches for detectors with expensive setup;
 - no daemon, no in-process caches.
 
-**Edit deadline.** When `editDeadlineMs` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for all detectors that declare warm-up work.
+**Edit deadline.** When `editDeadlineMs` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
 
 **Perf test.** CI runs a fixture project with 30 rules across ast-grep, regex, path, ruff and command, replays 50 edit events, and fails if p95 exceeds 500 ms.
 
@@ -570,6 +584,7 @@ Hooks fail open; the CLI fails closed.
 | LLM credentials missing | llm rules disabled for the session; one warning | exit 2 unless `--no-llm` |
 | Malformed LLM output | Error for the rules in that call | exit 2 |
 | Store unreadable or lock not acquired within 2 s | Run without session state for this invocation (every reference `full`, no stop block); warning | n/a |
+| Unreadable hook input, unknown adapter, or no `.rulecast/` above the agent's directory | No output | n/a |
 
 Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itself failed. Hook adapters never exit non-zero on internal failure. All errors are logged to `.rulecast/.state/debug.log`.
 
