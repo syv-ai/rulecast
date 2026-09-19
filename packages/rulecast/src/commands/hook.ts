@@ -1,10 +1,11 @@
 import { claudeCodeAdapter } from "../adapters/claude-code/adapter"
-import { compile } from "../core/compile/compile"
+import { compile } from "../core/compile/project"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { warmableKinds } from "../core/detection/warm"
 import { errorMessage } from "../core/errors"
 import { cacheHome, debugLogger, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
+import { cachedRepos } from "../core/repos/provider"
 import type { Adapter, Event } from "../core/types"
 import type { CliIo } from "./main"
 import { findRoot, hasProject, toProjectPath } from "./project"
@@ -30,15 +31,28 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
   if (!parsed || (!parsed.event && !parsed.warmup)) return 0
   const root = findRoot(parsed.cwd)
   if (!hasProject(root)) return 0
-  const stateDir = ensureProjectState(cacheHome(io.env), root)
+  const home = cacheHome(io.env)
+  const stateDir = ensureProjectState(home, root)
   const log = debugLogger(stateDir)
   try {
+    // Hooks never fetch: a pinned repo missing from the cache disables its rules with a warning (spec §4).
+    const compileProject = () => compile({ root, registry, repos: cachedRepos(home) })
     if (parsed.warmup) {
-      const kinds = warmableKinds(await compile(root, registry), registry)
+      const kinds = warmableKinds(await compileProject(), registry)
       if (kinds.length > 0) io.startWarm(root, kinds)
     }
     if (parsed.event) {
-      await handleEvent({ root, stateDir, cwd: parsed.cwd, event: parsed.event, adapter, registry, io, log })
+      await handleEvent({
+        root,
+        stateDir,
+        cwd: parsed.cwd,
+        event: parsed.event,
+        adapter,
+        registry,
+        io,
+        log,
+        compileProject,
+      })
     }
   } catch (error) {
     log(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
@@ -56,25 +70,26 @@ interface EventContext {
   registry: DetectorRegistry
   io: CliIo
   log: (line: string) => void
+  compileProject: () => ReturnType<typeof compile>
 }
 
-async function handleEvent({ root, stateDir, cwd, event, adapter, registry, io, log }: EventContext): Promise<void> {
+async function handleEvent(context: EventContext): Promise<void> {
+  const { root, stateDir, cwd, event, adapter, registry, io, log } = context
   const files = event.files
     .map((file) => toProjectPath(root, cwd, file))
     .filter((file): file is string => file !== null)
   if ((event.kind === "touch" || event.kind === "edit") && files.length === 0) return
   const projectEvent: Event = { ...event, files, cwd: root }
+  const project = await context.compileProject()
   const result = await runPipeline({
-    root,
+    project,
     stateDir,
     event: projectEvent,
     registry,
     maxContextChars: adapter.maxContextChars,
     log,
   })
-  const output = adapter.format(result.delivery, projectEvent, {
-    maxMatchesPerRule: result.project.config.maxMatchesPerRule,
-  })
+  const output = adapter.format(result.delivery, projectEvent, { maxMatchesPerRule: project.config.maxMatchesPerRule })
   if (output.stdout !== "") io.stdout(output.stdout)
   const missed = result.deadlineMissed.filter((kind) => registry.get(kind)?.warm !== undefined)
   if (missed.length > 0) io.startWarm(root, missed)

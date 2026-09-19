@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import type { CompiledRule } from "../compile/compile"
+import type { CompiledRule } from "../compile/rule"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate } from "../template"

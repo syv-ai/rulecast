@@ -1,13 +1,14 @@
 import { computeChanges, isNew } from "./baseline/baseline"
 import { type Snapshot, snapshotOf } from "./baseline/hash"
 import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, startRecord } from "./baseline/store"
-import { type CompiledProject, type CompiledRule, compile } from "./compile/compile"
+import type { CompiledProject } from "./compile/project"
+import type { CompiledRule } from "./compile/rule"
 import { createReferenceResolver } from "./delivery/resolve"
 import { detectorCacheDir, diskCache } from "./detection/cache"
 import { readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
-import { selectTouchRules, selectViolationRules } from "./detection/select"
+import { selectDetectorRules, selectTouchRules } from "./detection/select"
 import { headCommit, mergeBase } from "./git"
 import { type ClassifiedFinding, type DecideInput, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
@@ -16,8 +17,9 @@ import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
 import { type Delivery, type Event, emptyDelivery, type ResolvedReference } from "./types"
 
 export interface PipelineOptions {
-  root: string
-  /** The project's state directory (core/home.ts): sessions and detector caches. */
+  /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
+  project: CompiledProject
+  /** The project's directory in the cache (spec §12): sessions and detector caches. */
   stateDir: string
   event: Event
   registry: DetectorRegistry
@@ -31,7 +33,6 @@ export interface PipelineOptions {
 
 export interface PipelineResult {
   delivery: Delivery
-  project: CompiledProject
   /** rulecast itself failed: compile diagnostics, detector errors or verify timeouts. */
   failed: boolean
   /** Detector kinds whose results were dropped at the edit deadline (§13). */
@@ -41,24 +42,25 @@ export interface PipelineResult {
 type Warning = { key: string; text: string }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-  const { root, event, registry } = options
+  const { project, stateDir, event, registry } = options
+  const { root, config } = project
   const log = options.log ?? (() => {})
-  const project = await compile(root, registry)
-  const { config } = project
-  const warnings: Warning[] = project.diagnostics.map((diagnostic) => ({
-    key: `diagnostic:${diagnostic.source}:${diagnostic.message}`,
-    text: `${diagnostic.source}: ${diagnostic.message} (run rulecast validate)`,
+  // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
+  const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
+  const warnings: Warning[] = errors.map((diagnostic) => ({
+    key: `diagnostic:${diagnostic.source}:${diagnostic.rule ?? ""}:${diagnostic.message}`,
+    text: `${diagnostic.source}${diagnostic.rule ? ` (${diagnostic.rule})` : ""}: ${diagnostic.message} (run ${diagnostic.hint ?? "rulecast validate"})`,
   }))
-  let failed = project.diagnostics.length > 0
+  let failed = errors.length > 0
   const deadlineMissed: string[] = []
   const session = event.session
-    ? { dir: sessionDir(options.stateDir, event.session.id), agent: event.session.agentId ?? "main" }
+    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
     : null
 
   if (event.kind === "prompt" || event.kind === "reset") {
     if (session && event.kind === "prompt") await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     if (session && event.kind === "reset") await appendContext(session.dir, session.agent, [{ t: "reset" }])
-    return { delivery: emptyDelivery(), project, failed, deadlineMissed }
+    return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
 
   let baseline: BaselineState = { started: false, startCommit: null, snapshots: new Map() }
@@ -127,7 +129,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    const selections = selectViolationRules(project.rules, event.kind, files, disabled).filter(
+    const selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
       (selection) => !skip.has(selection.rule.detector!.kind),
     )
     const output = await runDetection({
@@ -136,7 +138,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       selections,
       changes,
       registry,
-      cacheFor: (kind) => diskCache(detectorCacheDir(options.stateDir, kind)),
+      cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
       contextFor: async (rule) => {
         const references: ResolvedReference[] = []
         for (const spec of rule.context) {
@@ -190,17 +192,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     stopGate: event.kind === "verify" && session !== null,
   })
 
-  if (!session) return { delivery: (await decide(inputFor(view))).delivery, project, failed, deadlineMissed }
+  if (!session) return { delivery: (await decide(inputFor(view))).delivery, failed, deadlineMissed }
 
   await appendWork(session.dir, workRecords)
   try {
     const delivery = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery, project, failed, deadlineMissed }
+    return { delivery, failed, deadlineMissed }
   } catch (error) {
     if (!(error instanceof LockTimeoutError)) throw error
     warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     const delivery = (await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false }))
       .delivery
-    return { delivery, project, failed, deadlineMissed }
+    return { delivery, failed, deadlineMissed }
   }
 }

@@ -1,19 +1,19 @@
-import picomatch from "picomatch"
+import type { CompiledRule } from "../../src/core/compile/rule"
 
-import type { CompiledRule } from "../../src/core/compile/compile"
-
-/** Builds a CompiledRule for tests without going through compile(). */
+/** Builds a CompiledRule for tests without going through compile(). `files` is a regex, searched like compile's. */
 export function rule(overrides: Partial<Omit<CompiledRule, "matches">> & { id: string; files?: string }): CompiledRule {
-  const { files = "**", ...rest } = overrides
-  const include = picomatch(files, { dot: true })
+  const { files = "", ...rest } = overrides
+  const include = new RegExp(files)
   return {
-    source: `.rulecast/rules/${overrides.id}.yml`,
+    name: overrides.id,
+    description: null,
+    source: "local",
     severity: "error",
-    on: ["violation"],
-    detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [], events: ["edit", "verify"] },
+    stages: ["edit", "verify"],
+    detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
     message: "{{file}}:{{line}}",
     context: [],
-    matches: (file) => include(file),
+    matches: (file) => include.test(file),
     ...rest,
   }
 }

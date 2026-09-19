@@ -3,6 +3,7 @@ import { appendFileSync } from "node:fs"
 import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 
+import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { TEST_HOME } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
@@ -14,33 +15,33 @@ const RULES = 25
 /** 25 regex rules and 5 path rules. Plan 5 adds ast-grep, ruff and command rules (spec §13). */
 function perfProject(): Record<string, string> {
   const topics = Array.from({ length: RULES }, (_, i) => `## Topic ${i}\n\nGuidance for topic ${i}.\n`)
-  const files: Record<string, string> = {
+  const rules: Record<string, unknown>[] = []
+  for (let i = 0; i < RULES; i++) {
+    rules.push({
+      id: `perf/regex-${i}`,
+      name: `Regex ${i}`,
+      files: "^src/.*\\.ts$",
+      detect: { regex: { pattern: `forbidden${i}\\((?<arg>[^)]*)\\)` } },
+      message: `{{file}}:{{line}} calls forbidden${i}({{arg}}).`,
+      context: [`@conventions/code.md#topic-${i}`],
+    })
+  }
+  for (let i = 0; i < 5; i++) {
+    rules.push({
+      id: `perf/path-${i}`,
+      name: `Path ${i}`,
+      files: "^generated/",
+      severity: "warning",
+      detect: { path: {} },
+      message: "{{file}} is generated.",
+    })
+  }
+  return {
+    ".rulecast-config.yaml": localConfig(rules),
     "conventions/code.md": ["# Code", "", ...topics].join("\n"),
     [FILE]: `${Array.from({ length: 300 }, (_, i) => `export const value${i} = compute(${i})`).join("\n")}\n`,
     "generated/client.ts": "export const client = 1\n",
   }
-  for (let i = 0; i < RULES; i++) {
-    files[`.rulecast/rules/regex-${i}.yml`] = [
-      `id: perf/regex-${i}`,
-      "files: src/**/*.ts",
-      "detect:",
-      `  regex: { pattern: 'forbidden${i}\\((?<arg>[^)]*)\\)' }`,
-      `message: '{{file}}:{{line}} calls forbidden${i}({{arg}}).'`,
-      `context: ['@conventions/code.md#topic-${i}']`,
-      "",
-    ].join("\n")
-  }
-  for (let i = 0; i < 5; i++) {
-    files[`.rulecast/rules/path-${i}.yml`] = [
-      `id: perf/path-${i}`,
-      "files: generated/**",
-      "severity: warning",
-      "detect: { path: {} }",
-      "message: '{{file}} is generated.'",
-      "",
-    ].join("\n")
-  }
-  return files
 }
 
 /** Wall time from process start to exit, as Claude Code experiences it. */

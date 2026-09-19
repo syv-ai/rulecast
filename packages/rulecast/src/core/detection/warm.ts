@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import type { CompiledProject } from "../compile/compile"
+import type { CompiledProject } from "../compile/project"
 import { errorMessage } from "../errors"
 import { LockTimeoutError, withLock } from "../session/lock"
 import { detectorCacheDir, diskCache } from "./cache"

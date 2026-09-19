@@ -3,7 +3,8 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
-import { createFixture } from "../helpers/fixture"
+import { localConfig } from "../helpers/config"
+import { createFixture, fixtureRules } from "../helpers/fixture"
 import { git } from "../helpers/git"
 
 async function run(cwd: string, ...argv: string[]) {
@@ -16,12 +17,12 @@ describe("rulecast CLI", () => {
     const root = await createFixture()
     expect(await run(root, "validate")).toEqual({ code: 0, stdout: "rulecast: 3 rules valid\n", stderr: "" })
     await writeFile(
-      path.join(root, ".rulecast/rules/broken.yml"),
-      "id: broken\nfiles: '**'\ndetect: { nope: {} }\nmessage: m\n",
+      path.join(root, ".rulecast-config.yaml"),
+      localConfig([...fixtureRules, { id: "broken", name: "Broken", detect: { nope: {} }, message: "m" }]),
     )
     expect(await run(root, "validate")).toEqual({
       code: 2,
-      stdout: '.rulecast/rules/broken.yml (broken): unknown detector "nope"\n',
+      stdout: '.rulecast-config.yaml (broken): unknown detector "nope"\n',
       stderr: "",
     })
   })
@@ -38,7 +39,7 @@ describe("rulecast CLI", () => {
   test("check with files resolves them relative to cwd", async () => {
     const root = await createFixture()
     const result = await run(path.join(root, "src"), "check", "client/api.ts", "--format", "json")
-    // cwd is a subdirectory, but the project root is found by walking up to .rulecast.
+    // cwd is a subdirectory, but the project root is found by walking up to .rulecast-config.yaml.
     expect(result.code).toBe(0)
     expect(JSON.parse(result.stdout).findings.map((finding: { rule: string }) => finding.rule)).toEqual([
       "frontend/no-generated-edits",

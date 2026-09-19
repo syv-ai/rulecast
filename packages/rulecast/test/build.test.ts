@@ -10,7 +10,6 @@ import { claudeCodePayload } from "./helpers/payloads"
 
 const exec = promisify(execFile)
 const cli = path.resolve("dist/cli.js")
-/** The built CLI reads RULECAST_HOME from its environment; keep it out of the real cache. */
 const env = { ...process.env, RULECAST_HOME: TEST_HOME }
 
 beforeAll(async () => {

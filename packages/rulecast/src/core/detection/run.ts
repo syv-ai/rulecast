@@ -1,4 +1,4 @@
-import type { CompiledRule } from "../compile/compile"
+import type { CompiledRule } from "../compile/rule"
 import { errorMessage } from "../errors"
 import type { Cache, ChangeSet, DetectorEvent, DetectorResult, Match, ResolvedReference } from "../types"
 import type { DetectorRegistry } from "./registry"

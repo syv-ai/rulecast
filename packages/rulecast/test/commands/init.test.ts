@@ -1,24 +1,23 @@
-import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { defaultConfig, loadConfig } from "../../src/core/compile/config"
+import { parseConfig, readConfigData } from "../../src/core/config/load"
+import { defaultConfig } from "../../src/core/config/schema"
 import { runCli } from "../helpers/cli"
 import { createProject } from "../helpers/project"
 
 const read = (root: string, file: string) => readFile(path.join(root, file), "utf8")
 
 describe("rulecast init", () => {
-  test("scaffolds a valid project and installs the hooks", async () => {
+  test("writes a config with an empty local repo and installs the hooks", async () => {
     const root = await createProject({})
     const result = await runCli(root, ["init"])
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain("created  .rulecast/config.yml")
-    expect(result.stdout).toContain("created  .rulecast/rules/example.yml")
-    expect(result.stdout).toContain("created  conventions/example.md")
+    expect(result.stdout).toContain("created  .rulecast-config.yaml")
     expect(result.stdout).toContain("installed Claude Code hooks in .claude/settings.json")
-    expect(await runCli(root, ["validate"])).toMatchObject({ code: 0, stdout: "rulecast: 1 rule valid\n" })
+    expect(result.stdout).toContain("next: add rules to .rulecast-config.yaml, then run rulecast validate")
+    expect(await runCli(root, ["validate"])).toMatchObject({ code: 0, stdout: "rulecast: 0 rules valid\n" })
     const settings = JSON.parse(await read(root, ".claude/settings.json"))
     expect(Object.keys(settings.hooks).sort()).toEqual([
       "PostToolUse",
@@ -32,24 +31,28 @@ describe("rulecast init", () => {
       command: "rulecast hook claude-code",
       timeout: 70,
     })
-    expect(existsSync(path.join(root, ".rulecast", ".state"))).toBe(false)
   })
 
-  test("the scaffolded config spells out the defaults", async () => {
+  test("the written config holds an empty local repo and default settings", async () => {
     const root = await createProject({})
     await runCli(root, ["init"])
-    expect(await loadConfig(root)).toEqual({ ok: true, config: defaultConfig() })
+    const data = await readConfigData(root)
+    expect(data.ok && parseConfig(data.value)).toEqual({
+      ok: true,
+      value: { ...defaultConfig(), repos: [{ repo: "local", rules: [] }] },
+    })
   })
 
   test("keeps existing files and settings, and a second run changes nothing", async () => {
     const dash = { type: "command", command: "dash-hook stop" }
+    const config = "repos: []\ntimeouts:\n  verify_ms: 20000\n"
     const root = await createProject({
-      ".rulecast/config.yml": "timeouts:\n  verifyMs: 20000\n",
+      ".rulecast-config.yaml": config,
       ".claude/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [dash] }] } }),
     })
     const first = await runCli(root, ["init"])
-    expect(first.stdout).toContain("exists   .rulecast/config.yml")
-    expect(await read(root, ".rulecast/config.yml")).toBe("timeouts:\n  verifyMs: 20000\n")
+    expect(first.stdout).toContain("exists   .rulecast-config.yaml")
+    expect(await read(root, ".rulecast-config.yaml")).toBe(config)
     const installed = await read(root, ".claude/settings.json")
     expect(JSON.parse(installed).hooks.Stop).toEqual([
       { hooks: [dash] },
@@ -59,6 +62,14 @@ describe("rulecast init", () => {
     const second = await runCli(root, ["init"])
     expect(second.stdout).toContain("Claude Code hooks already installed in .claude/settings.json")
     expect(await read(root, ".claude/settings.json")).toBe(installed)
+  })
+
+  test("an invalid config is reported and nothing is installed", async () => {
+    const root = await createProject({ ".rulecast-config.yaml": "repos: []\nmaxMatchesPerRule: 3\n" })
+    const result = await runCli(root, ["init"])
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain(".rulecast-config.yaml: ")
+    expect(result.stderr).toContain("(fix it, then run rulecast init again)")
   })
 
   test("uses the project's own rulecast when it is installed", async () => {

@@ -104,7 +104,7 @@ describe("decide: references", () => {
         touches: [
           rule({
             id: "t",
-            on: ["touch"],
+            stages: ["touch"],
             detector: null,
             message: null,
             context: [ref("@conventions/api.md#retries")],

@@ -3,7 +3,6 @@ import type { ZodType, ZodTypeDef } from "zod"
 export type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset"
 export type DetectorEvent = "edit" | "verify"
 export type Severity = "error" | "warning"
-export type Trigger = "touch" | "violation"
 export type ReferenceMode = "inject" | "read"
 
 export interface Event {

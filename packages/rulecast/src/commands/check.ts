@@ -2,12 +2,14 @@ import { parseArgs } from "node:util"
 import { glob } from "tinyglobby"
 
 import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
+import { compile } from "../core/compile/project"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { changedFilesSince, mergeBase } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
+import { fetchingRepos } from "../core/repos/provider"
 import type { CliIo } from "./main"
-import { toProjectPath } from "./project"
+import { hasProject, toProjectPath } from "./project"
 
 export class UsageError extends Error {}
 
@@ -30,6 +32,7 @@ export async function checkCommand(
   const format = values.format as CliFormat
   if (!CLI_FORMATS.includes(format))
     throw new UsageError(`unknown format "${values.format}" (use ${CLI_FORMATS.join(", ")})`)
+  if (!hasProject(root)) throw new Error(`no .rulecast-config.yaml in ${io.cwd} or its parents`)
 
   let files: string[]
   if (positionals.length > 0) {
@@ -37,18 +40,14 @@ export async function checkCommand(
   } else if (values.base) {
     files = await changedFilesSince(root, await mergeBase(root, values.base))
   } else {
-    files = (
-      await glob(["**/*"], {
-        cwd: root,
-        dot: true,
-        ignore: ["**/node_modules/**", "**/.git/**"],
-      })
-    ).sort()
+    files = (await glob(["**/*"], { cwd: root, dot: true, ignore: ["**/node_modules/**", "**/.git/**"] })).sort()
   }
 
+  const home = cacheHome(io.env)
+  const project = await compile({ root, registry, repos: fetchingRepos(home) })
   const result = await runPipeline({
-    root,
-    stateDir: ensureProjectState(cacheHome(io.env), root),
+    project,
+    stateDir: ensureProjectState(home, root),
     event: {
       kind: "verify",
       files,
@@ -60,7 +59,7 @@ export async function checkCommand(
     maxContextChars: null,
     skipDetectorKinds: values["no-llm"] ? new Set(["llm"]) : undefined,
   })
-  const text = formatDelivery(result.delivery, format, { maxMatchesPerRule: result.project.config.maxMatchesPerRule })
+  const text = formatDelivery(result.delivery, format, { maxMatchesPerRule: project.config.maxMatchesPerRule })
   if (text) io.stdout(`${text}\n`)
   return exitCodeFor(result.delivery, result.failed)
 }

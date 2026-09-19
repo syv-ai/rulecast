@@ -4,12 +4,14 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { z } from "zod"
 
-import { compile } from "../../../src/core/compile/compile"
+import { compile } from "../../../src/core/compile/project"
 import { createRegistry } from "../../../src/core/detection/registry"
 import { warmableKinds, warmDetectors } from "../../../src/core/detection/warm"
+import { cachedRepos } from "../../../src/core/repos/provider"
 import type { Detector, DetectorWarm } from "../../../src/core/types"
 import { builtinDetectors } from "../../../src/detectors"
-import { stateDirFor } from "../../helpers/home"
+import { localConfig } from "../../helpers/config"
+import { stateDirFor, TEST_HOME } from "../../helpers/home"
 import { createProject } from "../../helpers/project"
 
 const schema = z.object({ size: z.number() }).strict()
@@ -33,14 +35,17 @@ async function setup(fail = false) {
   const calls: DetectorWarm<Config>[] = []
   const registry = createRegistry([...builtinDetectors, warmy(calls, fail)])
   const root = await createProject({
-    ".rulecast/rules/warm.yml": "id: warm/a\nfiles: '**/*.ts'\ndetect: { warmy: { size: 2 } }\nmessage: m\n",
-    ".rulecast/rules/plain.yml": "id: plain/b\nfiles: '**/*.ts'\ndetect: { regex: { pattern: x } }\nmessage: m\n",
+    ".rulecast-config.yaml": localConfig([
+      { id: "warm/a", name: "Warm", files: "\\.ts$", detect: { warmy: { size: 2 } }, message: "m" },
+      { id: "plain/b", name: "Plain", files: "\\.ts$", detect: { regex: { pattern: "x" } }, message: "m" },
+    ]),
   })
-  const project = await compile(root, registry)
+  const project = await compile({ root, registry, repos: cachedRepos(TEST_HOME) })
   expect(project.diagnostics).toEqual([])
+  const stateDir = stateDirFor(root)
   const warm = (kinds: string[] | null = null) =>
-    warmDetectors({ root, stateDir: stateDirFor(root), project, registry, kinds, timeoutMs: 5000 })
-  return { root, project, registry, calls, warm }
+    warmDetectors({ root, stateDir, project, registry, kinds, timeoutMs: 5000 })
+  return { root, stateDir, project, registry, calls, warm }
 }
 
 describe("detector warm-up", () => {
@@ -64,19 +69,19 @@ describe("detector warm-up", () => {
   })
 
   test("a kind already warming elsewhere is skipped", async () => {
-    const { root, calls, warm } = await setup()
-    await mkdir(path.join(stateDirFor(root), "warm/warmy/.lock"), { recursive: true })
+    const { stateDir, calls, warm } = await setup()
+    await mkdir(path.join(stateDir, "warm/warmy/.lock"), { recursive: true })
     expect(await warm()).toEqual({ warmed: [], skipped: ["warmy"], errors: [] })
     expect(calls).toEqual([])
   })
 
   test("a failing warm-up is reported and releases its lock", async () => {
-    const { root, warm } = await setup(true)
+    const { stateDir, warm } = await setup(true)
     expect(await warm()).toEqual({
       warmed: [],
       skipped: [],
       errors: [{ kind: "warmy", message: "model build failed" }],
     })
-    expect(existsSync(path.join(stateDirFor(root), "warm/warmy/.lock"))).toBe(false)
+    expect(existsSync(path.join(stateDir, "warm/warmy/.lock"))).toBe(false)
   })
 })

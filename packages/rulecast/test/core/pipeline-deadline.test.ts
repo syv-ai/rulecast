@@ -2,11 +2,11 @@ import { expect, test } from "vitest"
 import { z } from "zod"
 
 import { createRegistry } from "../../src/core/detection/registry"
-import { runPipeline } from "../../src/core/pipeline"
 import type { Detector } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
+import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
-import { stateDirFor } from "../helpers/home"
+import { pipelineAt } from "../helpers/pipeline"
 
 const schema = z.object({}).strict()
 
@@ -21,17 +21,17 @@ const slowDetector: Detector<z.infer<typeof schema>> = {
 
 test("an edit names the detector kinds whose results were dropped at the deadline", async () => {
   const root = await createRepo({
-    ".rulecast/config.yml": "timeouts:\n  editDeadlineMs: 20\n",
-    ".rulecast/rules/slow.yml": "id: slow/rule\nfiles: app/**/*.py\ndetect: { slow: {} }\nmessage: m\n",
+    ".rulecast-config.yaml": localConfig(
+      [{ id: "slow/rule", name: "Slow", files: "^app/.*\\.py$", detect: { slow: {} }, message: "m" }],
+      { timeouts: { edit_deadline_ms: 20 } },
+    ),
     "app/a.py": "x = 1\n",
   })
-  const result = await runPipeline({
+  const result = await pipelineAt(
     root,
-    stateDir: stateDirFor(root),
-    event: { kind: "edit", files: ["app/a.py"], cwd: root, session: { id: "s1" } },
-    registry: createRegistry([...builtinDetectors, slowDetector]),
-    maxContextChars: null,
-  })
+    { kind: "edit", files: ["app/a.py"], cwd: root, session: { id: "s1" } },
+    { registry: createRegistry([...builtinDetectors, slowDetector]) },
+  )
   expect(result.deadlineMissed).toEqual(["slow"])
   expect(result.failed).toBe(false)
 })

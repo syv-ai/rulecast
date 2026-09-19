@@ -2,10 +2,9 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { runPipeline } from "../../src/core/pipeline"
 import type { Event } from "../../src/core/types"
-import { createFixture, registry } from "../helpers/fixture"
-import { stateDirFor } from "../helpers/home"
+import { createFixture } from "../helpers/fixture"
+import { pipelineAt } from "../helpers/pipeline"
 
 const USERS = "app/services/users.py"
 
@@ -13,13 +12,7 @@ async function scenario() {
   const root = await createFixture()
   const send = async (event: Omit<Event, "cwd" | "session"> & { agentId?: string }) => {
     const { agentId, ...rest } = event
-    const result = await runPipeline({
-      root,
-      stateDir: stateDirFor(root),
-      event: { ...rest, cwd: root, session: { id: "s1", agentId } },
-      registry,
-      maxContextChars: null,
-    })
+    const result = await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } })
     return result.delivery
   }
   const write = (content: string) => writeFile(path.join(root, USERS), content)

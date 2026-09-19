@@ -9,7 +9,8 @@ import { createRegistry } from "../../src/core/detection/registry"
 import type { Detector } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
 import { captureIo, runCli } from "../helpers/cli"
-import { createFixture, fixtureFiles } from "../helpers/fixture"
+import { localConfig } from "../helpers/config"
+import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
 import { stateDirFor } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
@@ -31,15 +32,7 @@ describe("rulecast hook claude-code", () => {
     const result = await hook(root, "post-tool-use.read.complete", USERS)
     expect(result.code).toBe(0)
     expect(additionalContext(result.stdout)).toContain("--- conventions/backend.md#services ---")
-  })
-
-  test("session state lives in the cache home, not in the project", async () => {
-    const root = await createFixture()
-    await hook(root, "post-tool-use.read.complete", USERS)
-    const state = stateDirFor(root)
-    expect(readFileSync(path.join(state, "root"), "utf8")).toBe(`${realpathSync(root)}\n`)
-    expect(existsSync(path.join(state, "sessions", "s1", "baseline.jsonl"))).toBe(true)
-    expect(existsSync(path.join(root, ".rulecast", ".state"))).toBe(false)
+    expect(readFileSync(path.join(stateDirFor(root), "root"), "utf8")).toBe(`${realpathSync(root)}\n`)
   })
 
   test("an edit reports the new violation and Stop blocks on it", async () => {
@@ -64,7 +57,6 @@ describe("rulecast hook claude-code", () => {
   test("outside a rulecast project the hook does nothing and creates no state", async () => {
     const root = await createProject({ [USERS]: VIOLATION })
     expect(await hook(root, "post-tool-use.edit", USERS)).toMatchObject({ code: 0, stdout: "", stderr: "" })
-    expect(existsSync(path.join(root, ".rulecast"))).toBe(false)
     expect(existsSync(stateDirFor(root))).toBe(false)
   })
 
@@ -101,8 +93,13 @@ describe("rulecast hook warm-up", () => {
   const slowProject = () =>
     createRepo({
       ...fixtureFiles,
-      ".rulecast/config.yml": "timeouts:\n  editDeadlineMs: 20\n",
-      ".rulecast/rules/slow.yml": "id: slow/rule\nfiles: app/**/*.py\ndetect: { slow: {} }\nmessage: m\n",
+      ".rulecast-config.yaml": localConfig(
+        [
+          ...fixtureRules,
+          { id: "slow/rule", name: "Slow", files: "^app/.*\\.py$", detect: { slow: {} }, message: "m" },
+        ],
+        { timeouts: { edit_deadline_ms: 20 } },
+      ),
     })
 
   async function run(root: string, name: string, withRegistry = registry, file?: string) {

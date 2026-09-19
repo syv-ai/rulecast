@@ -9,7 +9,7 @@ export const CONTEXT_LIMIT = 10_000
 const CONTEXT_BUDGET = 9_000
 
 const BLOCK_PREAMBLE =
-  "This project's rulecast rules (.rulecast/rules) found problems in code changed in this session. Fix them before you finish."
+  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish."
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 

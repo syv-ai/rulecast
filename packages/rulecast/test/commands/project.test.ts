@@ -5,15 +5,16 @@ import { findRoot, hasProject, toProjectPath } from "../../src/commands/project"
 import { createProject } from "../helpers/project"
 
 describe("project paths", () => {
-  test("findRoot walks up to the nearest directory containing .rulecast", async () => {
-    const root = await createProject({ ".rulecast/config.yml": "", "app/deep/x.py": "" })
+  test("findRoot walks up to the nearest directory containing .rulecast-config.yaml", async () => {
+    const root = await createProject({ ".rulecast-config.yaml": "repos: []\n", "app/deep/x.py": "" })
     expect(findRoot(path.join(root, "app/deep"))).toBe(root)
     const bare = await createProject({ "x.py": "" })
     expect(findRoot(bare)).toBe(bare)
   })
 
-  test("hasProject is true only where .rulecast exists", async () => {
-    expect(hasProject(await createProject({ ".rulecast/config.yml": "" }))).toBe(true)
+  test("hasProject is true only where .rulecast-config.yaml exists", async () => {
+    expect(hasProject(await createProject({ ".rulecast-config.yaml": "repos: []\n" }))).toBe(true)
+    expect(hasProject(await createProject({ ".rulecast/config.yml": "" }))).toBe(false)
     expect(hasProject(await createProject({ "x.py": "" }))).toBe(false)
   })
 

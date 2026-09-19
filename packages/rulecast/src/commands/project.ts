@@ -1,16 +1,18 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 
-/** Nearest ancestor of cwd containing .rulecast/, or cwd itself. */
+import { CONFIG_FILE } from "../core/config/load"
+
+/** Nearest ancestor of cwd containing .rulecast-config.yaml, or cwd itself. */
 export function findRoot(cwd: string): string {
   for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
-    if (existsSync(path.join(dir, ".rulecast"))) return dir
+    if (existsSync(path.join(dir, CONFIG_FILE))) return dir
     if (path.dirname(dir) === dir) return path.resolve(cwd)
   }
 }
 
 export function hasProject(root: string): boolean {
-  return existsSync(path.join(root, ".rulecast"))
+  return existsSync(path.join(root, CONFIG_FILE))
 }
 
 /** A file as a repo-relative path with forward slashes, or null when it is not inside root. */

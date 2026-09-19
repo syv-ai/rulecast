@@ -21,7 +21,7 @@ function detector(kind: string, run: Detector<unknown>["run"]): Detector<unknown
 }
 
 const detectorRule = (id: string, kind: string, captures: string[] = []) =>
-  rule({ id, detector: { kind, config: { id }, captures, events: ["edit", "verify"] } })
+  rule({ id, detector: { kind, config: { id }, captures } })
 
 function input(
   selections: { rule: ReturnType<typeof rule>; files: string[] }[],

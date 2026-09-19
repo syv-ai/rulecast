@@ -13,6 +13,6 @@ describe("rulecast warm", () => {
   test("outside a rulecast project it fails", async () => {
     const result = await runCli(await createProject({}), ["warm"])
     expect(result.code).toBe(2)
-    expect(result.stderr).toContain("no .rulecast directory")
+    expect(result.stderr).toContain("no .rulecast-config.yaml")
   })
 })
