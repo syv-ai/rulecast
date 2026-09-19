@@ -17,7 +17,10 @@ describe("rulecast init", () => {
     expect(result.stdout).toContain("created  .rulecast-config.yaml")
     expect(result.stdout).toContain("installed Claude Code hooks in .claude/settings.json")
     expect(result.stdout).toContain("next: add rules to .rulecast-config.yaml, then run rulecast validate")
-    expect(await runCli(root, ["validate"])).toMatchObject({ code: 0, stdout: "rulecast: 0 rules valid\n" })
+    expect(await runCli(root, ["validate"])).toMatchObject({
+      code: 0,
+      stdout: ".rulecast-config.yaml: 0 rules valid\n",
+    })
     const settings = JSON.parse(await read(root, ".claude/settings.json"))
     expect(Object.keys(settings.hooks).sort()).toEqual([
       "PostToolUse",

@@ -25,7 +25,7 @@ export interface CliIo {
 const USAGE = `usage:
   rulecast init
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
-  rulecast validate
+  rulecast validate [file...]
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
 `
@@ -41,7 +41,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "run":
         return await runCommand(root, args, registry, io)
       case "validate":
-        return await validateCommand(root, registry, io)
+        return await validateCommand(root, args, registry, io)
       case "hook":
         return await hookCommand(args, registry, io)
       case "warm":
