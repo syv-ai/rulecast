@@ -1,5 +1,6 @@
 export type WorkRecord =
   | { t: "edited"; file: string }
+  | { t: "accessed"; agent: string; file: string }
   | { t: "stopBlock"; agent: string }
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
@@ -16,6 +17,8 @@ export interface WorkState {
   edited: string[]
   stopBlocks: Map<string, number>
   disabled: Map<string, string>
+  /** Files each agent read or edited, unique, least recently accessed first (§9 reset). */
+  accessed: Map<string, string[]>
 }
 
 export interface ContextState {
@@ -30,7 +33,7 @@ export function preexistingKey(rule: string, file: string): string {
 }
 
 export function emptyWork(): WorkState {
-  return { edited: [], stopBlocks: new Map(), disabled: new Map() }
+  return { edited: [], stopBlocks: new Map(), disabled: new Map(), accessed: new Map() }
 }
 
 export function emptyContext(): ContextState {
@@ -44,6 +47,11 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       case "edited":
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
         break
+      case "accessed": {
+        const files = state.accessed.get(record.agent) ?? []
+        state.accessed.set(record.agent, [...files.filter((file) => file !== record.file), record.file])
+        break
+      }
       case "stopBlock":
         state.stopBlocks.set(record.agent, (state.stopBlocks.get(record.agent) ?? 0) + 1)
         break

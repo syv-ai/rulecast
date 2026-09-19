@@ -85,6 +85,7 @@ async function handleEvent(context: EventContext): Promise<void> {
     event: projectEvent,
     registry,
     maxContextChars: adapter.maxContextChars,
+    restoredFiles: adapter.restoredFiles,
     stopGate: projectEvent.kind === "verify",
     log,
   })

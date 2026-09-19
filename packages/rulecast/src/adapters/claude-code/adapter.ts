@@ -34,6 +34,8 @@ export const claudeCodeAdapter: Adapter = {
   name: "claude-code",
   label: "Claude Code",
   maxContextChars: CONTEXT_BUDGET,
+  /** Recorded from 2.1.278: /compact re-attaches the 5 most recently read, edited or written files. */
+  restoredFiles: 5,
   parse: parseClaudeCode,
   format(delivery, event, options) {
     const text = renderAgentText(delivery, options)
@@ -43,6 +45,10 @@ export const claudeCodeAdapter: Adapter = {
       case "edit":
         return json({
           hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, event) },
+        })
+      case "reset":
+        return json({
+          hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: withinLimit(text, event) },
         })
       case "verify":
         if (delivery.stop === "block")

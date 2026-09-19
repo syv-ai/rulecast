@@ -143,6 +143,8 @@ export interface Adapter {
   label: string
   /** Budget handed to commit (§9); null = unlimited. */
   maxContextChars: number | null
+  /** Recently read or edited files the agent re-attaches to its context after compaction; reset re-delivers their touch context (§9). 0 = none. */
+  restoredFiles: number
   /** null: not an input this adapter handles. */
   parse(input: unknown): AdapterInput | null
   format(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): { stdout: string; exitCode: number }

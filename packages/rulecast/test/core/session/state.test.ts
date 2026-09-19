@@ -22,7 +22,25 @@ describe("foldWork", () => {
         ["sub1", 1],
       ]),
       disabled: new Map([["r1", "boom"]]),
+      accessed: new Map(),
     })
+  })
+
+  test("tracks the files each agent accessed, most recent last", () => {
+    const work = foldWork([
+      { t: "accessed", agent: "main", file: "a.ts" },
+      { t: "accessed", agent: "main", file: "b.ts" },
+      { t: "accessed", agent: "sub1", file: "c.ts" },
+      { t: "accessed", agent: "main", file: "a.ts" },
+    ])
+    expect(work.accessed).toEqual(
+      new Map([
+        ["main", ["b.ts", "a.ts"]],
+        ["sub1", ["c.ts"]],
+      ]),
+    )
+    // Accesses are not edits: Stop verifies only edited files.
+    expect(work.edited).toEqual([])
   })
 
   test("empty", () => {

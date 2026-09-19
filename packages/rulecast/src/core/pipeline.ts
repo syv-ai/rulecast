@@ -25,6 +25,8 @@ export interface PipelineOptions {
   registry: DetectorRegistry
   /** From the adapter; null = unlimited. */
   maxContextChars: number | null
+  /** Recently accessed files the agent re-attaches after compaction (adapter.restoredFiles); reset re-delivers their touch context. */
+  restoredFiles?: number
   /** Detector kinds to skip entirely (run --no-llm). */
   skipDetectorKinds?: ReadonlySet<string>
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
@@ -61,14 +63,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
     : null
 
-  if (event.kind === "prompt" || event.kind === "reset") {
-    if (session && event.kind === "prompt") await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
-    if (session && event.kind === "reset") await appendContext(session.dir, session.agent, [{ t: "reset" }])
+  const restoredFiles = options.restoredFiles ?? 0
+  if (event.kind === "prompt") {
+    if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     return { delivery: emptyDelivery(), failed, deadlineMissed }
+  }
+  if (event.kind === "reset") {
+    if (session) await appendContext(session.dir, session.agent, [{ t: "reset" }])
+    // Without re-attached files there is nothing to re-deliver (§9 reset).
+    if (!session || restoredFiles === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
 
   let baseline: BaselineState = { started: false, startCommit: null, snapshots: new Map() }
-  if (session) {
+  // A reset only delivers touch context: no snapshots, and it does not start the session.
+  if (session && event.kind !== "reset") {
     baseline = await readBaseline(session.dir)
     if (!baseline.started) {
       await appendBaseline(session.dir, [startRecord(await headCommit(root))])
@@ -92,6 +100,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
+    if (session) {
+      // Every file counts, not only files rules match: the agent's harness picks re-attached files from all of them.
+      await appendWork(
+        session.dir,
+        event.files.map((file) => ({ t: "accessed" as const, agent: session.agent, file })),
+      )
+    }
+  }
+
+  if (event.kind === "reset" && session) {
+    // view.context is empty: the reset record was appended above. Newest first, as the harness re-attaches them.
+    const recent = (view.work.accessed.get(session.agent) ?? []).slice(-restoredFiles).reverse()
+    touches = selectTouchRules(project.rules, recent, view.context.touched, disabled)
   }
 
   if (event.kind === "touch") {

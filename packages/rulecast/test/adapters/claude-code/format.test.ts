@@ -69,6 +69,28 @@ describe("Claude Code adapter: format", () => {
     }
   })
 
+  test("a reset delivers the restored conventions as SessionStart additional context", () => {
+    const value = delivery({
+      touches: ["backend/services"],
+      references: [{ ref: "conventions/backend.md#services", state: "full", content: "## Services\nBusiness logic." }],
+    })
+    expect(JSON.parse(format(value, "reset").stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: renderAgentText(value, options) },
+    })
+  })
+
+  test("reset output is held to the same limit", () => {
+    const findings = Array.from({ length: 300 }, (_, i) =>
+      finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
+    )
+    const output = JSON.parse(format(delivery({ findings }), "reset", { maxMatchesPerRule: 1000 }).stdout)
+    expect(output.hookSpecificOutput.additionalContext.length).toBeLessThanOrEqual(CONTEXT_LIMIT)
+  })
+
+  test("Claude Code re-attaches the 5 most recently accessed files after compaction", () => {
+    expect(claudeCodeAdapter.restoredFiles).toBe(5)
+  })
+
   test("the budget handed to commit stays under the limit", () => {
     expect(claudeCodeAdapter.maxContextChars).toBeLessThan(CONTEXT_LIMIT)
   })
