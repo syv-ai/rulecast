@@ -10,7 +10,7 @@ const cli = path.resolve("dist/cli.js")
 const FILE = "src/feature/orders.ts"
 const RULES = 25
 
-/** 25 regex rules and 5 path rules. Plan 3 adds ast-grep, ruff and command rules (spec §13). */
+/** 25 regex rules and 5 path rules. Plan 5 adds ast-grep, ruff and command rules (spec §13). */
 function perfProject(): Record<string, string> {
   const topics = Array.from({ length: RULES }, (_, i) => `## Topic ${i}\n\nGuidance for topic ${i}.\n`)
   const files: Record<string, string> = {

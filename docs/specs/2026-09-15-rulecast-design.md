@@ -1,6 +1,6 @@
 # rulecast — design
 
-**Status:** draft for review (revised after architecture review A–F; 2026-09-16: pre-commit-style config, rule repos and interactive init folded in from `2026-09-16-rulecast-pre-commit-format-design.md` and `2026-09-16-rulecast-interactive-init-design.md`)
+**Status:** draft for review (revised after architecture review A–F; 2026-09-16: pre-commit-style config, rule repos and interactive init folded in from `2026-09-16-rulecast-pre-commit-format-design.md` and `2026-09-16-rulecast-interactive-init-design.md`; 2026-09-19: re-delivery after compaction, `run` and `install` details from planning)
 **Date:** 2026-09-15
 **Package:** `@syv-ai/rulecast` (npm), public OSS under the syv-ai GitHub org
 
@@ -90,7 +90,7 @@ interface Event {
   kind: EventKind
   files: string[]                    // repo-relative; empty for prompt/reset
   completeRead?: boolean             // touch from a read: the whole file was read
-  baseRef?: string                   // verify from the CLI: --from-ref; the baseline is its merge base with HEAD
+  baseCommit?: string                // verify from the CLI: the commit the baseline is read from (run --from-ref: the merge base)
   session?: { id: string; agentId?: string }
   cwd: string
 }
@@ -184,15 +184,18 @@ interface AdapterInput {
 }
 
 interface AdapterInstall {
-  markers: string[]                  // paths whose presence means the project uses this agent (init)
+  markers: string[]                  // paths whose presence means the project uses this agent (init); trailing "/" = directory
   scopes: { scope: "shared" | "personal"; file: string }[]   // settings files hooks can be written to
+  command(local: boolean): string    // the hook command; local = rulecast is installed in the project
   merge(settings: unknown, command: string, verifyMs: number): { settings: unknown; added: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
 }
 
 interface Adapter {
   name: string
+  label: string                      // human name, e.g. "Claude Code"
   maxContextChars: number | null     // budget for commit (§9); null = unlimited
+  restoredFiles: number              // recently accessed files the agent re-attaches after compaction (§9, reset)
   parse(input: unknown): AdapterInput | null   // null = not an input this adapter handles
   format(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): { stdout: string; exitCode: number }
   install: AdapterInstall | null     // null = the agent has no hooks to install (e.g. the CLI)
@@ -453,7 +456,7 @@ detect:
 | `edit` | `PostToolUse` on `Edit`, `Write` | rules with stage `edit` matching the file | the edited file |
 | `verify` | `Stop`, `SubagentStop`; `rulecast run` | rules with stage `verify` | Stop: work memory's edited files whose content differs from their snapshot; CLI: §12 |
 | `prompt` | `UserPromptSubmit` from the user | none | none; resets the agent's stop-block counter |
-| `reset` | `SessionStart` with source `compact` | none | none; clears the agent's context memory |
+| `reset` | `SessionStart` with source `compact` | touch rules matching the restored files | clears the agent's context memory, then the agent's `restoredFiles` most recently read or edited files (no detection) |
 
 ## 8. Baseline
 
@@ -493,7 +496,7 @@ Session owns everything rulecast remembers about a session and every decision ab
 | Store | Contents | Scope | Cleared by |
 |---|---|---|---|
 | **Context memory** | references delivered (ref → covered range + content hash), touch rules fired, pre-existing summaries shown, rule warnings shown | session + agent | `reset` |
-| **Work memory** | edited files; stop-block counter per agent | session | `prompt` resets that agent's counter; nothing clears edited files |
+| **Work memory** | edited files; files each agent read or edited, most recent last; stop-block counter per agent | session | `prompt` resets that agent's counter; nothing clears the file lists |
 
 Files: `sessions/<session-id>/work.jsonl` and `context.<agent-id|main>.jsonl` in the project's cache directory (§12). Agent id comes from the adapter (Claude Code: `agent_id`, present only inside subagents).
 
@@ -502,6 +505,7 @@ Consequences:
 - A subagent has its own context memory, because it has not seen the main agent's context.
 - Edited files are shared, so the main agent's Stop re-verifies files its subagents edited.
 - Compaction clears context memory but not stop-block counters, so a reset cannot restart a Stop loop.
+- After compaction an agent's harness may re-attach recently used files to the new context without the tool calls that trigger `touch` (Claude Code re-attaches the 5 most recently read, edited or written files). So a `reset` clears context memory, then delivers the touch context of the agent's `restoredFiles` most recently accessed files, as a `touch` would. The adapter declares `restoredFiles`; 0 means no re-delivery.
 
 ### Flow
 
@@ -593,10 +597,11 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 | `PostToolUse` | `Edit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
 | `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; `capReached`: `{ "systemMessage": <agent text> }`; `allow`: nothing | `timeouts.verify_ms` + 10 s |
 | `UserPromptSubmit` | — | `prompt` | none | 5 s |
-| `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: none, starts warm-up (§13); `compact`: `reset` | none | 5 s |
+| `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: none, starts warm-up (§13); `compact`: `reset` | `compact`: `hookSpecificOutput.additionalContext` | 5 s |
 
 - **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview. The adapter declares `maxContextChars` 9,000, so rendering overhead stays under the limit, and cuts output longer than 10,000 chars (possible only when findings alone exceed it) with a line pointing at `rulecast run --format agent`. Block reasons and system messages get the same cut.
 - **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
+- **Compaction.** `/compact` re-attaches the main agent's 5 most recently read, edited or written files (a partial read comes back whole, an edited file with its current content) without tool calls, so the adapter declares `restoredFiles` 5. `SessionStart` `compact` output has the same 10,000-char limit as `PostToolUse`.
 - Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.
 - `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.
 - `UserPromptSubmit` also fires when a background task finishes, with a `prompt` starting `<task-notification>` and no other distinguishing field. That is not the user: no `prompt` event, so it does not reset the stop gate.
@@ -604,7 +609,7 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 - `rulecast hook` always exits 0 (§14). A directory with no `.rulecast-config.yaml` above it is not a rulecast project: the hook does nothing and creates no state.
 - Install markers for `init`: `.claude/` or `CLAUDE.md`.
 
-Payloads for every row are recorded from Claude Code 2.1.273 in `test/payloads/claude-code/` (findings in its `README.md`), and the adapter is written against them. Claude Code 2.1.273 has no `MultiEdit` tool.
+Payloads for every row are recorded from Claude Code 2.1.273 in `packages/rulecast/test/payloads/claude-code/` (findings in its `README.md`, including the compaction behaviour recorded with 2.1.278), and the adapter is written against them. Claude Code 2.1.273 has no `MultiEdit` tool.
 
 ### CLI
 
@@ -613,18 +618,18 @@ Command names and flags follow pre-commit where it has an equivalent.
 | Command | Does |
 |---|---|
 | `rulecast init [--rules id,id \| --no-rules] [--agent <name>]... [--scope shared\|personal] [--yes]` | Interactive setup (below) |
-| `rulecast install [--agent <name>]` | Installs agent hooks, merged without modifying existing entries, and fetches missing rule repos |
-| `rulecast uninstall [--agent <name>]` | Removes only the hook entries rulecast added |
-| `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A --to-ref B] [--format terminal\|agent\|json\|sarif] [--session <id>] [--no-llm]` | Verify event |
+| `rulecast install [--agent <name>]... [--scope shared\|personal]` | Installs agent hooks (default: every adapter, shared scope), merged without modifying existing entries, and fetches missing rule repos |
+| `rulecast uninstall [--agent <name>]...` | Removes only the hook entries rulecast added |
+| `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A [--to-ref B]] [--format terminal\|agent\|json\|sarif] [--session <id>] [--no-llm]` | Verify event |
 | `rulecast autoupdate [--freeze] [--repo URL]` | Moves each URL repo's `rev` to its latest tag, preserving comments and formatting; `--freeze` writes the commit SHA with a `# frozen: <tag>` comment |
-| `rulecast try-repo <path\|url> [RULE_ID] [run flags]` | Runs a repo's rules against the project without editing the config (for rule authors) |
+| `rulecast try-repo <path\|url> [RULE_ID] [--ref REV] [run flags]` | Runs a repo's rules against the project without editing the config (for rule authors): a local directory as it is on disk, a URL at `--ref` (default `HEAD`) |
 | `rulecast validate [file…]` | Validates `.rulecast-config.yaml` as a config and `.rulecast-rules.yaml` as a manifest, by filename; with no arguments, whichever exist at the root. Exit 2 on diagnostics |
 | `rulecast clean [--project]` | Deletes the cache, or only the current project's directory |
 | `rulecast hook <adapter>` | Reads a hook payload on stdin, writes the adapter's output |
 | `rulecast warm [--detector <kind>]...` | Builds detector caches (started detached by hooks; §13) |
 | `rulecast doctor` | Compile, check environment, dry-run every rule; prints cache paths |
 
-**`run` file selection:** explicit `--files`; otherwise `--from-ref A --to-ref B` (`--to-ref` defaults to `HEAD`): files changed since the merge base of A and B, read from the working tree, with that merge base as the baseline; otherwise `--all-files`: `git ls-files --cached --others --exclude-standard`; otherwise staged files, as pre-commit does. Without `--from-ref` and `--session` there is no baseline and every finding is new. The CLI adapter maps error findings to exit code 1; it has no stop decision. CI documentation recommends `--from-ref` so llm rules judge only changed files.
+**`run` file selection:** explicit `--files`; otherwise `--from-ref A [--to-ref B]`: files changed since the merge base of A and B (B defaults to `HEAD`; without `--to-ref`, changes up to the working tree including untracked files), read from the working tree, with that merge base as the baseline; otherwise `--all-files`: `git ls-files --cached --others --exclude-standard`; otherwise, with `--session`, the session's edited files, as at a Stop; otherwise staged files, as pre-commit does. Without `--from-ref` and `--session` there is no baseline and every finding is new. `RULE_ID` runs that rule only. The CLI adapter maps error findings to exit code 1; it has no stop decision, so a run never counts as a stop block. CI documentation recommends `--from-ref` so llm rules judge only changed files.
 
 ### `rulecast init`
 
@@ -718,7 +723,7 @@ Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itse
 - **Commands:** `run` file selection per mode, `autoupdate` preserving comments and `--freeze`, `validate` by filename, `install`/`uninstall` round trip, `clean`, cache-home precedence and project hashing.
 - **Init:** detection fixtures per doc case (AGENTS.md; CLAUDE.md importing it; standalone CLAUDE.md; `docs/`; nested AGENTS.md), planning to exact file contents including re-runs, end to end with `--yes` and with scripted answers, no-TTY refusal, clipboard command selection, drafting prompt snapshots, and a check that every agent-doc link exists in the repository.
 - **Baseline:** line normalisation, FNV-1a hashing, Myers change sets (insertions, deletions, reindentation), first-writer-wins, fallbacks, classification.
-- **Session:** scenario tests driven directly with synthetic findings and events — `touch → edit → edit → reset → edit → verify ×4 → prompt → verify`, sections covered by whole files, agent reads, budget fallbacks, subagent isolation — asserted against golden `Delivery` values. No detectors, no fixture repo.
+- **Session:** scenario tests driven directly with synthetic findings and events — `touch → edit → edit → reset → edit → verify ×4 → prompt → verify`, sections covered by whole files, agent reads, budget fallbacks, subagent isolation, a reset re-delivering the touch context of restored files — asserted against golden `Delivery` values. No detectors, no fixture repo.
 - **Detector contract suite** (exported): batching attribution, per-rule and whole-run errors, declared captures present on every match, abort handling, empty input. Plus fixture cases per built-in detector.
 - **Adapter contract suite** (exported): recorded payloads → `Event` snapshots; `Delivery` → output snapshots.
 - **End to end:** a few scenarios through `rulecast hook claude-code` on a fixture repo (TSX + Python).

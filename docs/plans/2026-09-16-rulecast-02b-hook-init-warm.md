@@ -37,7 +37,7 @@ Prerequisite: `2026-09-16-rulecast-02a-adapter.md` is done. This completes plan 
 ## Not in this plan
 
 - **Store corruption fallback (§14 "Store unreadable").** The pipeline still throws `CorruptStoreError`; the hook catches it, logs it and prints nothing. Plan 1's partial-record repair makes this rare. Implement the spec's fallback (run without session state, with a warning) separately.
-- **Perf fixture detectors.** §13 names ast-grep, ruff and command rules; only `regex` and `path` exist yet. Plan 3 adds those rules to `test/perf/edit-hook.test.ts`.
+- **Perf fixture detectors.** §13 names ast-grep, ruff and command rules; only `regex` and `path` exist yet. Plan 5 (was plan 3 before the 2026-09-19 renumbering) adds those rules to `test/perf/edit-hook.test.ts`.
 
 ---
 
@@ -1200,7 +1200,7 @@ const cli = path.resolve("dist/cli.js")
 const FILE = "src/feature/orders.ts"
 const RULES = 25
 
-/** 25 regex rules and 5 path rules. Plan 3 adds ast-grep, ruff and command rules (spec §13). */
+/** 25 regex rules and 5 path rules. Plan 5 adds ast-grep, ruff and command rules (spec §13). */
 function perfProject(): Record<string, string> {
   const topics = Array.from({ length: RULES }, (_, i) => `## Topic ${i}\n\nGuidance for topic ${i}.\n`)
   const files: Record<string, string> = {
@@ -1299,4 +1299,4 @@ Claude goes brr.. via Dash"
 git push origin main
 ```
 
-Plan 2 is done. Before plan 3, dogfood by hand: run `rulecast init` in a scratch project, start `claude` there, and confirm a Read, an Edit with a violation, and a blocked Stop behave as the tests describe.
+Plan 2 is done. Before plan 3 (plan 5 after the 2026-09-19 renumbering), dogfood by hand: run `rulecast init` in a scratch project, start `claude` there, and confirm a Read, an Edit with a violation, and a blocked Stop behave as the tests describe.
