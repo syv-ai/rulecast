@@ -2,6 +2,7 @@ import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
 import { builtinDetectors } from "../detectors"
+import { autoupdateCommand } from "./autoupdate"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
@@ -28,6 +29,7 @@ const USAGE = `usage:
   rulecast install [--agent <name>]... [--scope shared|personal]
   rulecast uninstall [--agent <name>]...
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
+  rulecast autoupdate [--freeze] [--repo URL]...
   rulecast validate [file...]
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
@@ -47,6 +49,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await uninstallCommand(root, args, io)
       case "run":
         return await runCommand(root, args, registry, io)
+      case "autoupdate":
+        return await autoupdateCommand(root, args, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
       case "hook":
