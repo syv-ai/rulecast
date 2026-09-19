@@ -331,7 +331,7 @@ Always available: `file`, `line`, `column`, `text`, `rule`. Each detector declar
 
 A rule repo has `.rulecast-rules.yaml` at its root: a list of complete rules. A manifest rule is the default for every project that selects it; references in it resolve against the rule repo.
 
-The rulecast repository is itself a rule repo (§16): its root manifest is generated from `packages/rules-*/rules.yaml`, with package-prefixed ids (`rules-python` → `python/`) and `@` paths rewritten relative to the repo root. CI fails when the committed manifest is stale. One tag versions the CLI and every rule package.
+The rulecast repository is itself a rule repo (§16): its root manifest is generated from `packages/rules-*/rules.yaml`, with package-prefixed ids and aliases (`rules-python` → `python/`; `rules-general` publishes its ids unprefixed) and `@` paths rewritten relative to the repo root. `pnpm manifest` (`packages/rulecast/scripts/generate-manifest.ts`) writes it, and `pnpm test` fails when the committed manifest is stale or does not compile. One tag versions the CLI and every rule package.
 
 Fetching:
 

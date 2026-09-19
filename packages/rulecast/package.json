@@ -21,6 +21,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean",
+    "manifest": "tsx scripts/generate-manifest.ts",
     "test": "vitest run",
     "test:perf": "RULECAST_PERF=1 vitest run test/perf",
     "typecheck": "tsc --noEmit"
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@types/node": "^20.19.43",
     "tsup": "^8.5.1",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

@@ -1,0 +1,19 @@
+# Published with the "react/" id prefix. "@" paths in context are relative to this directory.
+- id: no-fetch-in-components
+  name: Components get server data through query hooks
+  description: Flags network calls (fetch, axios) made directly in components.
+  files: '(^|/)components/.*\.[jt]sx$'
+  severity: warning
+  detect:
+    regex:
+      pattern: '\bfetch\(|\baxios\.(get|post|put|patch|delete|request)\('
+  message: "{{file}}:{{line}} calls the network from a component. Fetch server data through a query or mutation hook."
+  context:
+    - "@data-fetching.md"
+- id: data-fetching
+  name: Server state lives in the query layer
+  description: Delivers the data-fetching conventions the first time an agent works on a component, route or hook.
+  files: '(^|/)(components|routes|hooks)/.*\.[jt]sx?$'
+  stages: [touch]
+  context:
+    - "@data-fetching.md"

@@ -1,0 +1,30 @@
+# Published with the "python/" id prefix. "@" paths in context are relative to this directory.
+- id: no-httpexception-in-services
+  name: Services raise domain exceptions, not HTTPException
+  description: Flags HTTPException raised in the service layer, which must stay independent of HTTP.
+  files: '(^|/)services/.*\.py$'
+  severity: error
+  detect:
+    regex:
+      pattern: 'raise\s+HTTPException\b'
+  message: "{{file}}:{{line}} raises HTTPException in the service layer. Raise a domain exception; the API layer maps it to an HTTP response."
+  context:
+    - "@errors.md#services-raise-domain-exceptions"
+- id: no-queries-in-services
+  name: Services reach the database through CRUD functions
+  description: Flags database queries written directly in the service layer.
+  files: '(^|/)services/.*\.py$'
+  severity: error
+  detect:
+    regex:
+      pattern: '\b(session|db)\.(exec|execute|query|scalars?)\('
+  message: "{{file}}:{{line}} queries the database from the service layer. Move the query into a CRUD function."
+  context:
+    - "@layering.md#data-access-goes-through-crud"
+- id: layering
+  name: Route, service and CRUD layering
+  description: Delivers the layering conventions the first time an agent works on a route, service or CRUD module.
+  files: '(^|/)(routes|services|crud)/.*\.py$'
+  stages: [touch]
+  context:
+    - "@layering.md"

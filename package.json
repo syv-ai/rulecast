@@ -5,6 +5,7 @@
   "packageManager": "pnpm@10.26.0",
   "scripts": {
     "build": "pnpm --filter @syv-ai/rulecast build",
+    "manifest": "pnpm --filter @syv-ai/rulecast manifest",
     "test": "pnpm -r test",
     "test:perf": "pnpm --filter @syv-ai/rulecast test:perf",
     "typecheck": "pnpm -r typecheck",
