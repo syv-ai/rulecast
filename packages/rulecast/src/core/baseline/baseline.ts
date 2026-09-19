@@ -1,7 +1,7 @@
 import { readSourceFile } from "../detection/per-rule"
+import { fileAtCommit } from "../git"
 import type { ChangeSet, Match } from "../types"
 import { changedLines } from "./changes"
-import { fileAtCommit } from "./git"
 import { type Snapshot, snapshotOf } from "./hash"
 
 export interface BaselineSources {
