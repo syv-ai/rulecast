@@ -302,7 +302,7 @@ The move changes no behaviour, so the existing suite is the test: it must pass u
 - [ ] **Step 1: Record the baseline**
 
 Run: `pnpm test`
-Expected: PASS (214 tests, the perf suite skipped). Note the count; Step 6 must match it.
+Expected: PASS (215 tests at the time of writing, the perf suite skipped). Note the count; Step 6 must match it.
 
 - [ ] **Step 2: Move the package**
 
