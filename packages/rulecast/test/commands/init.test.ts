@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -90,5 +91,14 @@ describe("rulecast init", () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain(".claude/settings.json:")
     expect(await read(root, ".claude/settings.json")).toBe("{ nope")
+  })
+
+  test("hooks installed in the personal settings count as installed", async () => {
+    const root = await createProject({ ".rulecast-config.yaml": "repos: []\n" })
+    expect((await runCli(root, ["install", "--scope", "personal"])).code).toBe(0)
+    const result = await runCli(root, ["init"])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("Claude Code hooks already installed in .claude/settings.local.json")
+    expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)
   })
 })

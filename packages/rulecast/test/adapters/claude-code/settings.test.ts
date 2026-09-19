@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { mergeHooks, SettingsError } from "../../../src/adapters/claude-code/settings"
+import { mergeHooks, removeHooks, SettingsError } from "../../../src/adapters/claude-code/settings"
 
 const COMMAND = "rulecast hook claude-code"
 const hook = (timeout: number) => ({ type: "command", command: COMMAND, timeout })
@@ -61,5 +61,53 @@ describe("Claude Code settings: mergeHooks", () => {
 
   test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {
     expect(() => mergeHooks(bad, COMMAND, 60_000)).toThrow(SettingsError)
+  })
+})
+
+describe("Claude Code settings: removeHooks", () => {
+  const dash = { type: "command", command: "dash-hook stop" }
+
+  test("removes everything mergeHooks added", () => {
+    expect(removeHooks(mergeHooks({}, COMMAND, 60_000).settings)).toEqual({
+      settings: {},
+      removed: [
+        "PostToolUse (Read)",
+        "PostToolUse (Edit|Write)",
+        "Stop",
+        "SubagentStop",
+        "UserPromptSubmit",
+        "SessionStart (startup|resume|compact)",
+      ],
+    })
+  })
+
+  test("keeps every other setting, group and hook, and does not mutate its input", () => {
+    const existing = {
+      permissions: { allow: ["Bash(pnpm test)"] },
+      hooks: {
+        PostToolUse: [{ matcher: "Read", hooks: [dash, hook(5)] }],
+        Stop: [{ hooks: [dash] }],
+        Notification: [],
+      },
+    }
+    const merged = mergeHooks(existing, COMMAND, 60_000).settings
+    const input = structuredClone(merged)
+    const { settings, removed } = removeHooks(input)
+    expect(input).toEqual(merged)
+    expect(settings).toEqual({
+      permissions: existing.permissions,
+      hooks: { PostToolUse: [{ matcher: "Read", hooks: [dash] }], Stop: [{ hooks: [dash] }], Notification: [] },
+    })
+    expect(removed).toContain("PostToolUse (Read)")
+  })
+
+  test("settings without rulecast hooks come back unchanged", () => {
+    const settings = { hooks: { Stop: [{ hooks: [dash] }] } }
+    expect(removeHooks(settings)).toEqual({ settings, removed: [] })
+    expect(removeHooks({})).toEqual({ settings: {}, removed: [] })
+  })
+
+  test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {
+    expect(() => removeHooks(bad)).toThrow(SettingsError)
   })
 })

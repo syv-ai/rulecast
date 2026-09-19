@@ -1,4 +1,4 @@
-import { claudeCodeAdapter } from "../adapters/claude-code/adapter"
+import { ADAPTERS, adapterByName } from "../adapters"
 import { compile } from "../core/compile/project"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { warmableKinds } from "../core/detection/warm"
@@ -10,14 +10,12 @@ import type { Adapter, Event } from "../core/types"
 import type { CliIo } from "./main"
 import { findRoot, hasProject, toProjectPath } from "./project"
 
-const ADAPTERS: Readonly<Record<string, Adapter>> = { "claude-code": claudeCodeAdapter }
-
 /** Hooks fail open (§14): every path exits 0; problems go to stderr and the debug log. */
 export async function hookCommand(args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const name = args[0] ?? ""
-  const adapter = ADAPTERS[name]
+  const adapter = adapterByName(name)
   if (!adapter) {
-    io.stderr(`rulecast: unknown hook adapter "${name}" (use ${Object.keys(ADAPTERS).join(", ")})\n`)
+    io.stderr(`rulecast: unknown hook adapter "${name}" (use ${ADAPTERS.map((known) => known.name).join(", ")})\n`)
     return 0
   }
   let input: unknown

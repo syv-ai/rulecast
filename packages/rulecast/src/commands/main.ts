@@ -4,6 +4,7 @@ import type { Env } from "../core/home"
 import { builtinDetectors } from "../detectors"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
+import { installCommand, uninstallCommand } from "./install"
 import { findRoot } from "./project"
 import { runCommand } from "./run"
 import { UsageError } from "./usage"
@@ -24,6 +25,8 @@ export interface CliIo {
 
 const USAGE = `usage:
   rulecast init
+  rulecast install [--agent <name>]... [--scope shared|personal]
+  rulecast uninstall [--agent <name>]...
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast validate [file...]
   rulecast hook <adapter>
@@ -37,7 +40,11 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   try {
     switch (command) {
       case "init":
-        return await initCommand(root, io)
+        return await initCommand(root, args, io)
+      case "install":
+        return await installCommand(root, args, io)
+      case "uninstall":
+        return await uninstallCommand(root, args, io)
       case "run":
         return await runCommand(root, args, registry, io)
       case "validate":

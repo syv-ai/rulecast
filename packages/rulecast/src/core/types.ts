@@ -124,13 +124,30 @@ export interface AdapterInput {
   warmup: boolean
 }
 
+export type InstallScope = "shared" | "personal"
+
+export interface AdapterInstall {
+  /** Paths whose presence means the project uses this agent (init); a trailing "/" means a directory. */
+  markers: string[]
+  /** Settings files, repo-relative, that hooks can be written to. */
+  scopes: { scope: InstallScope; file: string }[]
+  /** The hook command; local: rulecast is installed in the project's node_modules. */
+  command(local: boolean): string
+  merge(settings: unknown, command: string, verifyMs: number): { settings: unknown; added: string[] }
+  remove(settings: unknown): { settings: unknown; removed: string[] }
+}
+
 export interface Adapter {
   name: string
+  /** Shown to people: "Claude Code". */
+  label: string
   /** Budget handed to commit (§9); null = unlimited. */
   maxContextChars: number | null
   /** null: not an input this adapter handles. */
   parse(input: unknown): AdapterInput | null
   format(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): { stdout: string; exitCode: number }
+  /** null: the agent has no hooks to install. */
+  install: AdapterInstall | null
 }
 
 export function emptyDelivery(): Delivery {

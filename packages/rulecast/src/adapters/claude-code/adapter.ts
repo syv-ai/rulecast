@@ -1,6 +1,7 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
 import type { Adapter, Event } from "../../core/types"
 import { parseClaudeCode } from "./parse"
+import { mergeHooks, removeHooks } from "./settings"
 
 /** Claude Code replaces longer additionalContext with a pointer to a file (test/payloads/claude-code/README.md). */
 export const CONTEXT_LIMIT = 10_000
@@ -31,6 +32,7 @@ const json = (value: unknown) => ({ stdout: JSON.stringify(value), exitCode: 0 }
 
 export const claudeCodeAdapter: Adapter = {
   name: "claude-code",
+  label: "Claude Code",
   maxContextChars: CONTEXT_BUDGET,
   parse: parseClaudeCode,
   format(delivery, event, options) {
@@ -51,5 +53,16 @@ export const claudeCodeAdapter: Adapter = {
       default:
         return NONE
     }
+  },
+  install: {
+    markers: [".claude/", "CLAUDE.md"],
+    scopes: [
+      { scope: "shared", file: ".claude/settings.json" },
+      { scope: "personal", file: ".claude/settings.local.json" },
+    ],
+    command: (local) =>
+      local ? '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code' : "rulecast hook claude-code",
+    merge: mergeHooks,
+    remove: removeHooks,
   },
 }
