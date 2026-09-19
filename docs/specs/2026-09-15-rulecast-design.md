@@ -658,7 +658,7 @@ The rulecast repository publishes agent-facing docs under `agents/`, versioned b
 
 | File | Content |
 |---|---|
-| `agents/SETUP.md` | For agents asked to set rulecast up without the developer running `init`: run `npx @syv-ai/rulecast init --yes`, show the developer the resulting config, continue with `DRAFT-RULES.md` |
+| `agents/SETUP.md` | For agents asked to set rulecast up without the developer running `init`: run `npx @syv-ai/rulecast init --yes --agent <its own adapter>` (so its hooks are installed even when nothing in the project marks it yet), show the developer the resulting config, continue with `DRAFT-RULES.md` |
 | `agents/DRAFT-RULES.md` | Read the named doc and the code it describes; propose conventions that can be checked mechanically (prefer `path`, `regex`, `ast-grep`; `llm` only when nothing else expresses it); for each, show the rule, add it under `repo: local`, run `rulecast validate` and `rulecast run <id> --all-files --format json`, report existing matches, and ask the developer to keep, edit or drop it; conventions that cannot be checked become `stages: [touch]` rules; never change repo rules, overrides or code |
 | `agents/reference/rule-format.md` | Config and rule keys (§4) |
 | `agents/reference/detectors.md` | Each detector's config, captures and default stages (§6) |
