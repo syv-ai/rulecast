@@ -3,6 +3,7 @@ import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
 import { builtinDetectors } from "../detectors"
 import { autoupdateCommand } from "./autoupdate"
+import { cleanCommand } from "./clean"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
@@ -33,6 +34,7 @@ const USAGE = `usage:
   rulecast autoupdate [--freeze] [--repo URL]...
   rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]
   rulecast validate [file...]
+  rulecast clean [--project]
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
 `
@@ -57,6 +59,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await tryRepoCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
+      case "clean":
+        return await cleanCommand(root, args, io)
       case "hook":
         return await hookCommand(args, registry, io)
       case "warm":
