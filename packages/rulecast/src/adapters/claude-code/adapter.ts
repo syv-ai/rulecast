@@ -1,5 +1,5 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
-import type { Adapter } from "../../core/types"
+import type { Adapter, Event } from "../../core/types"
 import { parseClaudeCode } from "./parse"
 
 /** Claude Code replaces longer additionalContext with a pointer to a file (test/payloads/claude-code/README.md). */
@@ -13,11 +13,17 @@ const BLOCK_PREAMBLE =
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
-const CUT = "\n\n…cut to fit Claude Code's hook output limit. Run `rulecast check --format agent` for the full list."
+/** Where the rest of a cut delivery can be read: the session's findings, from the CLI. */
+function cutNotice(event: Event): string {
+  const session = event.session ? `--session ${event.session.id} ` : ""
+  return `\n\n…cut to fit Claude Code's hook output limit. Run \`rulecast run ${session}--format agent\` for the full list.`
+}
 
 /** Only findings can push text past the limit: commit keeps references within the budget. */
-function withinLimit(text: string): string {
-  return text.length <= CONTEXT_LIMIT ? text : text.slice(0, CONTEXT_LIMIT - CUT.length) + CUT
+function withinLimit(text: string, event: Event): string {
+  if (text.length <= CONTEXT_LIMIT) return text
+  const notice = cutNotice(event)
+  return text.slice(0, CONTEXT_LIMIT - notice.length) + notice
 }
 
 const NONE = { stdout: "", exitCode: 0 }
@@ -33,11 +39,14 @@ export const claudeCodeAdapter: Adapter = {
     switch (event.kind) {
       case "touch":
       case "edit":
-        return json({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text) } })
+        return json({
+          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, event) },
+        })
       case "verify":
         if (delivery.stop === "block")
-          return json({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`) })
-        if (delivery.stop === "capReached") return json({ systemMessage: withinLimit(`${CAP_PREAMBLE}\n\n${text}`) })
+          return json({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, event) })
+        if (delivery.stop === "capReached")
+          return json({ systemMessage: withinLimit(`${CAP_PREAMBLE}\n\n${text}`, event) })
         return NONE
       default:
         return NONE

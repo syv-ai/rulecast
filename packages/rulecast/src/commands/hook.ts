@@ -87,6 +87,7 @@ async function handleEvent(context: EventContext): Promise<void> {
     event: projectEvent,
     registry,
     maxContextChars: adapter.maxContextChars,
+    stopGate: projectEvent.kind === "verify",
     log,
   })
   const output = adapter.format(result.delivery, projectEvent, { maxMatchesPerRule: project.config.maxMatchesPerRule })

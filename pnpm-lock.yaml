@@ -20,9 +20,6 @@ importers:
       diff:
         specifier: ^8.0.4
         version: 8.0.4
-      tinyglobby:
-        specifier: ^0.2.17
-        version: 0.2.17
       yaml:
         specifier: ^2.9.1
         version: 2.9.1

@@ -12,7 +12,7 @@ async function scenario() {
   const root = await createFixture()
   const send = async (event: Omit<Event, "cwd" | "session"> & { agentId?: string }) => {
     const { agentId, ...rest } = event
-    const result = await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } })
+    const result = await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } }, { stopGate: true })
     return result.delivery
   }
   const write = (content: string) => writeFile(path.join(root, USERS), content)
@@ -102,5 +102,16 @@ describe("pipeline with a session", () => {
     const delivery = await send({ kind: "edit", files: [USERS] })
     expect(delivery.findings.map((finding) => finding.line)).toEqual([3])
     expect(delivery.touches).toEqual(["backend/services"])
+  })
+
+  test("without the stop gate a verify makes no stop decision and records no block", async () => {
+    const { root, send, write } = await scenario()
+    await send({ kind: "touch", files: [USERS], completeRead: true })
+    await write("def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n")
+    await send({ kind: "edit", files: [USERS] })
+    const cli = await pipelineAt(root, { kind: "verify", files: [], cwd: root, session: { id: "s1" } })
+    expect(cli.delivery.stop).toBeNull()
+    expect(cli.delivery.findings.map((finding) => finding.line)).toEqual([3])
+    expect((await send({ kind: "verify", files: [] })).stop).toBe("block")
   })
 })

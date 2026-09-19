@@ -27,7 +27,6 @@
   },
   "dependencies": {
     "diff": "^8.0.4",
-    "tinyglobby": "^0.2.17",
     "yaml": "^2.9.1",
     "zod": "^3.25.76"
   },

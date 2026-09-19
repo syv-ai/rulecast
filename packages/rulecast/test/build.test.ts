@@ -16,9 +16,11 @@ beforeAll(async () => {
   await exec("pnpm", ["build"])
 }, 60_000)
 
-test("built CLI runs check in a project", async () => {
+test("built CLI runs rulecast run in a project", async () => {
   const root = await createFixture()
-  const failure = await exec("node", [cli, "check", "--format", "agent"], { cwd: root, env }).catch((error) => error)
+  const failure = await exec("node", [cli, "run", "--all-files", "--format", "agent"], { cwd: root, env }).catch(
+    (error) => error,
+  )
   expect(failure.code).toBe(1)
   expect(failure.stdout).toContain("rulecast: 2 rules violated")
   expect(failure.stdout).toContain("--- conventions/backend.md#errors ---")

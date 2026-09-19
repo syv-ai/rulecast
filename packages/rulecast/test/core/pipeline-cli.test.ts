@@ -3,6 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
 
+import { mergeBase } from "../../src/core/git"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureRules } from "../helpers/fixture"
 import { git } from "../helpers/git"
@@ -33,7 +34,12 @@ describe("pipeline without a session", () => {
     const root = await createFixture()
     await git(root, "checkout", "-q", "-b", "feature")
     await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n")
-    const { delivery } = await pipelineAt(root, { kind: "verify", files: [USERS], baseRef: "main", cwd: root })
+    const { delivery } = await pipelineAt(root, {
+      kind: "verify",
+      files: [USERS],
+      baseCommit: await mergeBase(root, "main"),
+      cwd: root,
+    })
     expect(delivery.findings.map((finding) => finding.line)).toEqual([3])
     expect(delivery.preexistingSummary).toEqual([{ rule: "backend/no-httpexception", file: USERS, count: 1 }])
   })
@@ -79,5 +85,15 @@ describe("pipeline without a session", () => {
       "https://example.com/acme/rules@v1.0.0: not in the cache (run rulecast install)",
     ])
     expect(delivery.findings).toHaveLength(1)
+  })
+
+  test("onlyRules restricts detection to the named rules", async () => {
+    const root = await createFixture()
+    const { delivery } = await pipelineAt(
+      root,
+      { kind: "verify", files: [USERS, "src/client/api.ts"], cwd: root },
+      { onlyRules: new Set(["frontend/no-generated-edits"]) },
+    )
+    expect(delivery.findings.map((finding) => finding.rule)).toEqual(["frontend/no-generated-edits"])
   })
 })

@@ -6,7 +6,7 @@ import { type Snapshot, snapshotOf } from "./hash"
 
 export interface BaselineSources {
   snapshots: ReadonlyMap<string, Snapshot>
-  /** Session-start commit (hooks) or merge base (check --base); null for none. */
+  /** Session-start commit (hooks) or merge base (run --from-ref); null for none. */
   fallbackCommit: string | null
 }
 

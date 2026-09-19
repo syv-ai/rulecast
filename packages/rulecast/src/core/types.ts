@@ -11,8 +11,8 @@ export interface Event {
   files: string[]
   /** touch from a read: the whole file was read. */
   completeRead?: boolean
-  /** verify from the CLI: --base. */
-  baseRef?: string
+  /** verify from the CLI: the commit the baseline is read from (the merge base for --from-ref). */
+  baseCommit?: string
   session?: { id: string; agentId?: string }
   cwd: string
 }

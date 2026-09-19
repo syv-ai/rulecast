@@ -2,10 +2,11 @@ import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
 import { builtinDetectors } from "../detectors"
-import { checkCommand, UsageError } from "./check"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
 import { findRoot } from "./project"
+import { runCommand } from "./run"
+import { UsageError } from "./usage"
 import { validateCommand } from "./validate"
 import { warmCommand } from "./warm"
 
@@ -23,7 +24,7 @@ export interface CliIo {
 
 const USAGE = `usage:
   rulecast init
-  rulecast check [files...] [--base <ref>] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
+  rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast validate
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
@@ -37,8 +38,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
     switch (command) {
       case "init":
         return await initCommand(root, io)
-      case "check":
-        return await checkCommand(root, args, registry, io)
+      case "run":
+        return await runCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, registry, io)
       case "hook":

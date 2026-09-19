@@ -9,7 +9,7 @@ import { readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
-import { headCommit, mergeBase } from "./git"
+import { headCommit } from "./git"
 import { type ClassifiedFinding, type DecideInput, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -25,8 +25,12 @@ export interface PipelineOptions {
   registry: DetectorRegistry
   /** From the adapter; null = unlimited. */
   maxContextChars: number | null
-  /** Detector kinds to skip entirely (check --no-llm). */
+  /** Detector kinds to skip entirely (run --no-llm). */
   skipDetectorKinds?: ReadonlySet<string>
+  /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
+  onlyRules?: ReadonlySet<string>
+  /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
+  stopGate?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
 }
@@ -115,22 +119,22 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       )
     }
     if (event.kind === "verify") {
-      if (event.baseRef) {
-        fallbackCommit = await mergeBase(root, event.baseRef)
+      if (event.baseCommit) {
+        fallbackCommit = event.baseCommit
         snapshots = new Map()
       }
       if (event.files.length === 0 && session) files = relevant(view.work.edited)
     }
 
     const changes = await computeChanges(root, files, { snapshots, fallbackCommit })
-    if (event.kind === "verify" && session && !event.baseRef) {
+    if (event.kind === "verify" && session && !event.baseCommit) {
       // Files edited but back to their snapshot content have nothing new.
       files = files.filter((file) => changes.get(file)?.changedLines.length !== 0)
     }
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
     const selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector!.kind),
+      (selection) => !skip.has(selection.rule.detector!.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
     )
     const output = await runDetection({
       root,
@@ -189,7 +193,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxBytes: config.context.maxBytes,
     maxBlocks: config.stopGate.maxBlocks,
     maxContextChars: options.maxContextChars,
-    stopGate: event.kind === "verify" && session !== null,
+    stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
   })
 
   if (!session) return { delivery: (await decide(inputFor(view))).delivery, failed, deadlineMissed }

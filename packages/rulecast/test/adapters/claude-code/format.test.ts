@@ -55,7 +55,7 @@ describe("Claude Code adapter: format", () => {
     expect(output).toEqual({ systemMessage: expect.stringContaining("raises HTTPException(500)") })
   })
 
-  test("output longer than Claude Code's limit is cut with a pointer to rulecast check", () => {
+  test("output longer than Claude Code's limit is cut with a pointer to rulecast run", () => {
     const findings = Array.from({ length: 300 }, (_, i) =>
       finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
     )
@@ -65,11 +65,25 @@ describe("Claude Code adapter: format", () => {
     const stop = JSON.parse(format(big, "verify", wide).stdout).reason as string
     for (const text of [edit, stop]) {
       expect(text.length).toBeLessThanOrEqual(CONTEXT_LIMIT)
-      expect(text).toMatch(/Run `rulecast check --format agent` for the full list\.$/)
+      expect(text).toMatch(/Run `rulecast run --session s1 --format agent` for the full list\.$/)
     }
   })
 
   test("the budget handed to commit stays under the limit", () => {
     expect(claudeCodeAdapter.maxContextChars).toBeLessThan(CONTEXT_LIMIT)
+  })
+
+  test("without a session the cut points at a plain rulecast run", () => {
+    const findings = Array.from({ length: 300 }, (_, i) =>
+      finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
+    )
+    const output = claudeCodeAdapter.format(
+      delivery({ findings }),
+      { kind: "edit", files: [], cwd: "/project" },
+      { maxMatchesPerRule: 1000 },
+    )
+    expect(JSON.parse(output.stdout).hookSpecificOutput.additionalContext).toMatch(
+      /Run `rulecast run --format agent` for the full list\.$/,
+    )
   })
 })
