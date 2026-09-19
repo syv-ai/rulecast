@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest"
 import { repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
+import { git } from "../helpers/git"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -79,6 +80,25 @@ describe("rulecast try-repo", () => {
     expect(parse(result.stdout).references.map((reference) => reference.ref)).toEqual([
       `${repoLabel(url, "v1.0.0")}:docs/http.md#errors`,
     ])
+  })
+
+  test("a relative path to a local git repo is resolved against the current directory, not the checkout", async () => {
+    const root = await createFixture()
+    const url = await createRuleRepo([{ tag: "v1.0.0", files: REPO_FILES }])
+    // A bare repo inside the project, named the way a rule author would type it.
+    await git(root, "clone", "-q", "--bare", url, path.join(root, "vendor-rules.git"))
+    const result = await runCli(root, [
+      "try-repo",
+      "vendor-rules.git",
+      "demo/http",
+      "--ref",
+      "v1.0.0",
+      "--all-files",
+      "--format",
+      "json",
+    ])
+    expect(result.code).toBe(1)
+    expect(parse(result.stdout).findings.map((finding) => finding.rule)).toEqual(["demo/http"])
   })
 
   test("works outside a rulecast project", async () => {

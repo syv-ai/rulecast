@@ -50,7 +50,8 @@ export async function tryRepoCommand(
   const temp = fromDirectory ? null : await mkdtemp(path.join(tmpdir(), "rulecast-try-repo-"))
   try {
     const dir = temp ?? local
-    if (temp !== null) await fetchCheckout(repo, rev, temp)
+    // git runs inside the temp checkout, so a local path must be the one resolved against the caller's cwd.
+    if (temp !== null) await fetchCheckout(directory ? local : repo, rev, temp)
     const label = fromDirectory ? `${path.basename(local)}@${rev}` : repoLabel(repo, rev)
 
     const manifest = await readManifest(dir)
