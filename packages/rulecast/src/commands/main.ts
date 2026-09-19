@@ -34,7 +34,7 @@ export interface CliIo {
 }
 
 const USAGE = `usage:
-  rulecast init
+  rulecast init [--rules id,id | --no-rules] [--agent <name>]... [--scope shared|personal] [--yes]
   rulecast install [--agent <name>]... [--scope shared|personal]
   rulecast uninstall [--agent <name>]...
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
@@ -53,7 +53,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   try {
     switch (command) {
       case "init":
-        return await initCommand(root, args, io)
+        return await initCommand(args, registry, io)
       case "install":
         return await installCommand(root, args, io)
       case "uninstall":
