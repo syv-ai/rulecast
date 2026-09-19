@@ -64,6 +64,7 @@ async function compileRule(
   config: Config,
   registry: DetectorRegistry,
   read: (file: string) => Promise<string | null>,
+  root: string,
 ): Promise<CompiledRule | string> {
   const violation = data.on.includes("violation")
   if (violation && (!data.detect || data.message === undefined)) {
@@ -95,7 +96,7 @@ async function compileRule(
   for (const input of data.context) {
     let spec: ReferenceSpec
     try {
-      spec = parseReference(input, config.context.mode)
+      spec = parseReference(input, config.context.mode, { dir: root, label: null })
     } catch (error) {
       if (error instanceof ReferenceSyntaxError) return error.message
       throw error
@@ -152,7 +153,7 @@ export async function compile(root: string, registry: DetectorRegistry): Promise
       })
       continue
     }
-    const result = await compileRule(parsed.data, file.source, config, registry, read)
+    const result = await compileRule(parsed.data, file.source, config, registry, read, root)
     if (typeof result === "string") {
       diagnostics.push({ source: file.source, rule: parsed.data.id, message: result })
     } else {

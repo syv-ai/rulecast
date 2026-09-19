@@ -103,6 +103,8 @@ export interface DeliveredReference {
   state: "full" | "pointer" | "read" | "missing"
   content?: string
   reason?: "mode" | "budget" | "tooLarge"
+  /** State "read" of a reference from a rule repo: the absolute path of the file to read. */
+  location?: string
 }
 
 export interface Delivery {

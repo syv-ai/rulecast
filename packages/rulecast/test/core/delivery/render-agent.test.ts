@@ -91,4 +91,26 @@ describe("renderAgentText", () => {
       ["rulecast: conventions for the files you are working on", "", "--- conventions/api.md ---", "# API"].join("\n"),
     )
   })
+
+  test("read references with a location name the file to read", () => {
+    const text = renderAgentText(
+      {
+        ...emptyDelivery(),
+        touches: ["python/layering"],
+        references: [
+          { ref: "acme/rules@v1:docs/state.md", state: "read", reason: "mode", location: "/cache/acme/docs/state.md" },
+          { ref: "acme/rules@v1:big.md", state: "read", reason: "budget", location: "/cache/acme/big.md" },
+        ],
+      },
+      { maxMatchesPerRule: 10 },
+    )
+    expect(text).toBe(
+      [
+        "rulecast: conventions for the files you are working on",
+        "",
+        "--- acme/rules@v1:docs/state.md: read /cache/acme/docs/state.md before continuing ---",
+        "--- acme/rules@v1:big.md: read /cache/acme/big.md before continuing (not included, too long for this message) ---",
+      ].join("\n"),
+    )
+  })
 })

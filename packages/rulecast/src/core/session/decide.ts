@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import type { CompiledRule } from "../compile/compile"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
@@ -37,6 +39,11 @@ export interface Decision {
 
 /** Characters a renderer adds around one item; used only for the budget estimate. */
 const ITEM_OVERHEAD = 64
+
+/** Rule repo references have absolute paths; the agent needs that path to read them. */
+function locationOf(spec: ReferenceSpec): { location?: string } {
+  return path.isAbsolute(spec.path) ? { location: spec.path } : {}
+}
 
 function renderFindings(findings: ClassifiedFinding[]): Finding[] {
   const merged = new Map<string, Finding>()
@@ -152,9 +159,9 @@ export async function decide(input: DecideInput): Promise<Decision> {
     } else if (await isCovered(spec, delivered, input.resolver)) {
       delivery.references.push({ ref: spec.ref, state: "pointer" })
     } else if (spec.mode === "read") {
-      delivery.references.push({ ref: spec.ref, state: "read", reason: "mode" })
+      delivery.references.push({ ref: spec.ref, state: "read", reason: "mode", ...locationOf(spec) })
     } else if (resolved.bytes > input.maxBytes) {
-      delivery.references.push({ ref: spec.ref, state: "read", reason: "tooLarge" })
+      delivery.references.push({ ref: spec.ref, state: "read", reason: "tooLarge", ...locationOf(spec) })
     } else {
       candidates.push({ index: delivery.references.length, resolved })
       delivery.references.push({ ref: spec.ref, state: "full", content: resolved.content })
@@ -174,6 +181,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
         ref: resolved.spec.ref,
         state: "read",
         reason: "budget",
+        ...locationOf(resolved.spec),
       } satisfies DeliveredReference
       continue
     }

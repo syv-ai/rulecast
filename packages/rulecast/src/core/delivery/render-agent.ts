@@ -33,10 +33,12 @@ function referenceLines(reference: DeliveredReference): string[] {
       return [`--- ${reference.ref} (provided earlier in this session) ---`]
     case "missing":
       return [`--- ${reference.ref} (missing) ---`]
-    case "read":
+    case "read": {
+      const what = reference.location === undefined ? "read this" : `read ${reference.location}`
       return reference.reason === "mode"
-        ? [`--- ${reference.ref}: read this before continuing ---`]
-        : [`--- ${reference.ref}: read this before continuing (not included, too long for this message) ---`]
+        ? [`--- ${reference.ref}: ${what} before continuing ---`]
+        : [`--- ${reference.ref}: ${what} before continuing (not included, too long for this message) ---`]
+    }
   }
 }
 

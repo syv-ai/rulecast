@@ -16,7 +16,8 @@ const files = {
 }
 const resolver = fakeResolver(files, { "conventions/api.md#errors": ["retries"] })
 
-const ref = (text: string, mode: "inject" | "read" = "inject") => parseReference(text, mode)
+const ref = (text: string, mode: "inject" | "read" = "inject") =>
+  parseReference(text, mode, { dir: "/project", label: null })
 
 const violated = (id: string, context: ReturnType<typeof ref>[]) => ({
   rule: rule({ id, message: "m", context }),
@@ -131,5 +132,30 @@ describe("decide: references", () => {
       ["conventions/api.md#errors", "read", "budget"],
     ])
     expect(decision.context.map((record) => record.t === "delivered" && record.path)).toEqual(["conventions/state.md"])
+  })
+
+  test("read references from a rule repo carry their absolute location", async () => {
+    const repo = { dir: "/cache/repos/acme/v1", label: "acme/rules@v1" }
+    const repoResolver = fakeResolver({
+      "/cache/repos/acme/v1/docs/state.md": "# State",
+      "/cache/repos/acme/v1/big.md": "x".repeat(500),
+    })
+    const decision = await decide(
+      input({
+        resolver: repoResolver,
+        findings: [
+          violated("r1", [parseReference("@docs/state.md", "read", repo), parseReference("@big.md", "inject", repo)]),
+        ],
+      }),
+    )
+    expect(decision.delivery.references).toEqual([
+      {
+        ref: "acme/rules@v1:docs/state.md",
+        state: "read",
+        reason: "mode",
+        location: "/cache/repos/acme/v1/docs/state.md",
+      },
+      { ref: "acme/rules@v1:big.md", state: "read", reason: "tooLarge", location: "/cache/repos/acme/v1/big.md" },
+    ])
   })
 })

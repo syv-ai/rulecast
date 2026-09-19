@@ -24,10 +24,10 @@ export function perRule<Config>(
   }
 }
 
-/** Reads a repo-relative file; null when it no longer exists. */
+/** Reads a repo-relative (or absolute) file; null when it no longer exists. */
 export async function readSourceFile(cwd: string, file: string): Promise<string | null> {
   try {
-    return await readFile(path.join(cwd, file), "utf8")
+    return await readFile(path.resolve(cwd, file), "utf8")
   } catch (error) {
     if (isNotFound(error)) return null
     throw error
