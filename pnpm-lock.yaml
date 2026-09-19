@@ -7,6 +7,15 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      '@biomejs/biome':
+        specifier: 2.5.14
+        version: 2.5.14
+      lefthook:
+        specifier: 2.1.14
+        version: 2.1.14
+
+  packages/rulecast:
     dependencies:
       diff:
         specifier: ^8.0.4
@@ -24,18 +33,12 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@biomejs/biome':
-        specifier: 2.5.14
-        version: 2.5.14
       '@types/node':
         specifier: ^20.19.43
         version: 20.19.43
       '@types/picomatch':
         specifier: ^4.0.3
         version: 4.0.3
-      lefthook:
-        specifier: 2.1.14
-        version: 2.1.14
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.28)(typescript@5.9.3)(yaml@2.9.1)
