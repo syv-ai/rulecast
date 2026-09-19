@@ -18,7 +18,7 @@ The `design-system` detector (§18) gets its own spec after 0.1.
 
 ## Conventions for all plans
 
-- Package manager: pnpm (workspace). Node ≥ 20. ESM only.
+- Package manager: pnpm (workspace). Node ≥ 20.12. ESM only.
 - The CLI package lives in `packages/rulecast/`. Plans 1 and 2 predate the move: their `src/…` and `test/…` paths are now under `packages/rulecast/`.
 - Tests: vitest, under `packages/rulecast/test/` mirroring `src/`.
 - No module-level mutable state anywhere in `src/`. Anything a module needs is passed in.

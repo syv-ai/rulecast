@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12"
   },
   "bin": {
     "rulecast": "./dist/cli.js"
@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clack/prompts": "^1.8.1",
     "diff": "^8.0.4",
     "yaml": "^2.9.1",
     "zod": "^3.25.76"

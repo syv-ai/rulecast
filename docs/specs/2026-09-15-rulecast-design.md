@@ -761,7 +761,7 @@ agents/                      agent-facing docs (§12)
 .rulecast-rules.yaml         generated manifest (§4)
 ```
 
-- TypeScript, Node ≥ 20, published to npm as `@syv-ai/rulecast` with a `rulecast` bin.
+- TypeScript, Node ≥ 20.12 (the floor of `@clack/prompts`), published to npm as `@syv-ai/rulecast` with a `rulecast` bin.
 - Releases via changesets and GitHub Actions; one tag versions the CLI and the rule packages.
 - Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1.
 
