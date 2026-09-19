@@ -4,6 +4,7 @@ import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 
 import { createRepo } from "../helpers/git"
+import { TEST_HOME } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 
 const cli = path.resolve("dist/cli.js")
@@ -47,6 +48,7 @@ function runHook(root: string, payload: unknown): { ms: number; stdout: string }
   const started = performance.now()
   const result = spawnSync(process.execPath, [cli, "hook", "claude-code"], {
     cwd: root,
+    env: { ...process.env, RULECAST_HOME: TEST_HOME },
     input: JSON.stringify(payload),
     encoding: "utf8",
   })

@@ -17,8 +17,8 @@ function safeSegment(value: string): string {
   return /^\.*$/.test(segment) ? `_${segment}` : segment
 }
 
-export function sessionDir(root: string, sessionId: string): string {
-  return path.join(root, ".rulecast", ".state", "sessions", safeSegment(sessionId))
+export function sessionDir(stateDir: string, sessionId: string): string {
+  return path.join(stateDir, "sessions", safeSegment(sessionId))
 }
 
 const workFile = (dir: string) => path.join(dir, "work.jsonl")

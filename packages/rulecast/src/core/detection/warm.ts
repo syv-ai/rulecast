@@ -8,6 +8,8 @@ import type { DetectorRegistry } from "./registry"
 
 export interface WarmOptions {
   root: string
+  /** The project's state directory (core/home.ts): detector caches and warm locks. */
+  stateDir: string
   project: CompiledProject
   registry: DetectorRegistry
   /** null = every kind with warm-up work. */
@@ -36,7 +38,7 @@ export function warmableKinds(project: CompiledProject, registry: DetectorRegist
 }
 
 export async function warmDetectors(options: WarmOptions): Promise<WarmResult> {
-  const { root, project, registry } = options
+  const { root, stateDir, project, registry } = options
   const result: WarmResult = { warmed: [], skipped: [], errors: [] }
   const kinds = warmableKinds(project, registry).filter((kind) => options.kinds?.includes(kind) ?? true)
   const signal = AbortSignal.timeout(options.timeoutMs)
@@ -48,8 +50,8 @@ export async function warmDetectors(options: WarmOptions): Promise<WarmResult> {
         .map((rule) => ({ id: rule.id, config: rule.detector!.config }))
       try {
         await withLock(
-          path.join(root, ".rulecast", ".state", "warm", kind),
-          () => detector.warm!({ rules, cache: diskCache(detectorCacheDir(root, kind)), cwd: root, signal }),
+          path.join(stateDir, "warm", kind),
+          () => detector.warm!({ rules, cache: diskCache(detectorCacheDir(stateDir, kind)), cwd: root, signal }),
           WARM_LOCK,
         )
         result.warmed.push(kind)

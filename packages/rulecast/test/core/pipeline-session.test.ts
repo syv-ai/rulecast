@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest"
 import { runPipeline } from "../../src/core/pipeline"
 import type { Event } from "../../src/core/types"
 import { createFixture, registry } from "../helpers/fixture"
+import { stateDirFor } from "../helpers/home"
 
 const USERS = "app/services/users.py"
 
@@ -14,6 +15,7 @@ async function scenario() {
     const { agentId, ...rest } = event
     const result = await runPipeline({
       root,
+      stateDir: stateDirFor(root),
       event: { ...rest, cwd: root, session: { id: "s1", agentId } },
       registry,
       maxContextChars: null,

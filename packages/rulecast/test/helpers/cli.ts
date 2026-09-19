@@ -1,4 +1,6 @@
 import { type CliIo, main } from "../../src/commands/main"
+import type { Env } from "../../src/core/home"
+import { testEnv } from "./home"
 
 export interface CapturedOutput {
   stdout: string
@@ -7,10 +9,12 @@ export interface CapturedOutput {
   warmed: { root: string; kinds: string[] }[]
 }
 
-export function captureIo(cwd: string, stdin = ""): { io: CliIo; output: CapturedOutput } {
+/** In-process CLI I/O. The environment defaults to this test file's own RULECAST_HOME. */
+export function captureIo(cwd: string, stdin = "", env: Env = testEnv): { io: CliIo; output: CapturedOutput } {
   const output: CapturedOutput = { stdout: "", stderr: "", warmed: [] }
   const io: CliIo = {
     cwd,
+    env,
     stdout: (text) => {
       output.stdout += text
     },
@@ -25,8 +29,13 @@ export function captureIo(cwd: string, stdin = ""): { io: CliIo; output: Capture
   return { io, output }
 }
 
-export async function runCli(cwd: string, argv: string[], stdin = ""): Promise<CapturedOutput & { code: number }> {
-  const { io, output } = captureIo(cwd, stdin)
+export async function runCli(
+  cwd: string,
+  argv: string[],
+  stdin = "",
+  env: Env = testEnv,
+): Promise<CapturedOutput & { code: number }> {
+  const { io, output } = captureIo(cwd, stdin, env)
   const code = await main(argv, io)
   return { code, ...output }
 }

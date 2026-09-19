@@ -17,6 +17,8 @@ import { type Delivery, type Event, emptyDelivery, type ResolvedReference } from
 
 export interface PipelineOptions {
   root: string
+  /** The project's state directory (core/home.ts): sessions and detector caches. */
+  stateDir: string
   event: Event
   registry: DetectorRegistry
   /** From the adapter; null = unlimited. */
@@ -50,7 +52,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let failed = project.diagnostics.length > 0
   const deadlineMissed: string[] = []
   const session = event.session
-    ? { dir: sessionDir(root, event.session.id), agent: event.session.agentId ?? "main" }
+    ? { dir: sessionDir(options.stateDir, event.session.id), agent: event.session.agentId ?? "main" }
     : null
 
   if (event.kind === "prompt" || event.kind === "reset") {
@@ -134,7 +136,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       selections,
       changes,
       registry,
-      cacheFor: (kind) => diskCache(detectorCacheDir(root, kind)),
+      cacheFor: (kind) => diskCache(detectorCacheDir(options.stateDir, kind)),
       contextFor: async (rule) => {
         const references: ResolvedReference[] = []
         for (const spec of rule.context) {

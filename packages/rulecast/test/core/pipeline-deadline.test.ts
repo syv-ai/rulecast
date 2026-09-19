@@ -6,6 +6,7 @@ import { runPipeline } from "../../src/core/pipeline"
 import type { Detector } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
 import { createRepo } from "../helpers/git"
+import { stateDirFor } from "../helpers/home"
 
 const schema = z.object({}).strict()
 
@@ -26,6 +27,7 @@ test("an edit names the detector kinds whose results were dropped at the deadlin
   })
   const result = await runPipeline({
     root,
+    stateDir: stateDirFor(root),
     event: { kind: "edit", files: ["app/a.py"], cwd: root, session: { id: "s1" } },
     registry: createRegistry([...builtinDetectors, slowDetector]),
     maxContextChars: null,

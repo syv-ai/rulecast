@@ -9,6 +9,7 @@ import { createRegistry } from "../../../src/core/detection/registry"
 import { warmableKinds, warmDetectors } from "../../../src/core/detection/warm"
 import type { Detector, DetectorWarm } from "../../../src/core/types"
 import { builtinDetectors } from "../../../src/detectors"
+import { stateDirFor } from "../../helpers/home"
 import { createProject } from "../../helpers/project"
 
 const schema = z.object({ size: z.number() }).strict()
@@ -37,7 +38,8 @@ async function setup(fail = false) {
   })
   const project = await compile(root, registry)
   expect(project.diagnostics).toEqual([])
-  const warm = (kinds: string[] | null = null) => warmDetectors({ root, project, registry, kinds, timeoutMs: 5000 })
+  const warm = (kinds: string[] | null = null) =>
+    warmDetectors({ root, stateDir: stateDirFor(root), project, registry, kinds, timeoutMs: 5000 })
   return { root, project, registry, calls, warm }
 }
 
@@ -63,7 +65,7 @@ describe("detector warm-up", () => {
 
   test("a kind already warming elsewhere is skipped", async () => {
     const { root, calls, warm } = await setup()
-    await mkdir(path.join(root, ".rulecast/.state/warm/warmy/.lock"), { recursive: true })
+    await mkdir(path.join(stateDirFor(root), "warm/warmy/.lock"), { recursive: true })
     expect(await warm()).toEqual({ warmed: [], skipped: ["warmy"], errors: [] })
     expect(calls).toEqual([])
   })
@@ -75,6 +77,6 @@ describe("detector warm-up", () => {
       skipped: [],
       errors: [{ kind: "warmy", message: "model build failed" }],
     })
-    expect(existsSync(path.join(root, ".rulecast/.state/warm/warmy/.lock"))).toBe(false)
+    expect(existsSync(path.join(stateDirFor(root), "warm/warmy/.lock"))).toBe(false)
   })
 })

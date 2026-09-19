@@ -3,7 +3,7 @@ import { parseArgs } from "node:util"
 import { compile } from "../core/compile/compile"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { warmDetectors } from "../core/detection/warm"
-import { debugLogger, ensureStateDir } from "../core/state-dir"
+import { cacheHome, debugLogger, ensureProjectState } from "../core/home"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 
@@ -18,10 +18,11 @@ export async function warmCommand(
 ): Promise<number> {
   const { values } = parseArgs({ args, options: { detector: { type: "string", multiple: true } } })
   if (!hasProject(root)) throw new Error(`no .rulecast directory in ${root} or its parents (run rulecast init)`)
-  ensureStateDir(root)
-  const log = debugLogger(root)
+  const stateDir = ensureProjectState(cacheHome(io.env), root)
+  const log = debugLogger(stateDir)
   const result = await warmDetectors({
     root,
+    stateDir,
     project: await compile(root, registry),
     registry,
     kinds: values.detector ?? null,

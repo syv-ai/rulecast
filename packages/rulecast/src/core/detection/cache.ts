@@ -39,7 +39,7 @@ export function diskCache(dir: string): Cache {
   }
 }
 
-/** Cache directory for a detector kind inside a project. */
-export function detectorCacheDir(root: string, kind: string): string {
-  return path.join(root, ".rulecast", ".state", "cache", kind)
+/** Cache directory for a detector kind in a project's state directory. */
+export function detectorCacheDir(stateDir: string, kind: string): string {
+  return path.join(stateDir, "cache", kind)
 }

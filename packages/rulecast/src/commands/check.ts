@@ -4,6 +4,7 @@ import { glob } from "tinyglobby"
 import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { changedFilesSince, mergeBase } from "../core/git"
+import { cacheHome, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
 import type { CliIo } from "./main"
 import { toProjectPath } from "./project"
@@ -40,13 +41,14 @@ export async function checkCommand(
       await glob(["**/*"], {
         cwd: root,
         dot: true,
-        ignore: ["**/node_modules/**", "**/.git/**", ".rulecast/.state/**"],
+        ignore: ["**/node_modules/**", "**/.git/**"],
       })
     ).sort()
   }
 
   const result = await runPipeline({
     root,
+    stateDir: ensureProjectState(cacheHome(io.env), root),
     event: {
       kind: "verify",
       files,

@@ -8,6 +8,7 @@ const script = process.argv[1]!
 
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
+  env: process.env,
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
   readStdin: () => readAll(process.stdin),

@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest"
 import { runPipeline } from "../../src/core/pipeline"
 import { createFixture, registry } from "../helpers/fixture"
 import { git } from "../helpers/git"
+import { stateDirFor } from "../helpers/home"
 
 const USERS = "app/services/users.py"
 
@@ -13,6 +14,7 @@ describe("pipeline without a session", () => {
     const root = await createFixture()
     const { delivery, failed } = await runPipeline({
       root,
+      stateDir: stateDirFor(root),
       event: { kind: "verify", files: [USERS, "src/client/api.ts", "README.md"], cwd: root },
       registry,
       maxContextChars: null,
@@ -34,6 +36,7 @@ describe("pipeline without a session", () => {
     await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n")
     const { delivery } = await runPipeline({
       root,
+      stateDir: stateDirFor(root),
       event: { kind: "verify", files: [USERS], baseRef: "main", cwd: root },
       registry,
       maxContextChars: null,
@@ -46,6 +49,7 @@ describe("pipeline without a session", () => {
     const root = await createFixture()
     const { delivery } = await runPipeline({
       root,
+      stateDir: stateDirFor(root),
       event: { kind: "verify", files: [USERS], cwd: root },
       registry,
       maxContextChars: null,
@@ -62,6 +66,7 @@ describe("pipeline without a session", () => {
     )
     const { delivery, failed } = await runPipeline({
       root,
+      stateDir: stateDirFor(root),
       event: { kind: "verify", files: [USERS], cwd: root },
       registry,
       maxContextChars: null,

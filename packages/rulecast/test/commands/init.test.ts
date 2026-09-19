@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -31,7 +32,7 @@ describe("rulecast init", () => {
       command: "rulecast hook claude-code",
       timeout: 70,
     })
-    expect(await read(root, ".rulecast/.state/.gitignore")).toBe("*\n")
+    expect(existsSync(path.join(root, ".rulecast", ".state"))).toBe(false)
   })
 
   test("the scaffolded config spells out the defaults", async () => {

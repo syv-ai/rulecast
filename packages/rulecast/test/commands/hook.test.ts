@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -11,6 +11,7 @@ import { builtinDetectors } from "../../src/detectors"
 import { captureIo, runCli } from "../helpers/cli"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
+import { stateDirFor } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { createProject } from "../helpers/project"
 
@@ -30,7 +31,15 @@ describe("rulecast hook claude-code", () => {
     const result = await hook(root, "post-tool-use.read.complete", USERS)
     expect(result.code).toBe(0)
     expect(additionalContext(result.stdout)).toContain("--- conventions/backend.md#services ---")
-    expect(readFileSync(path.join(root, ".rulecast/.state/.gitignore"), "utf8")).toBe("*\n")
+  })
+
+  test("session state lives in the cache home, not in the project", async () => {
+    const root = await createFixture()
+    await hook(root, "post-tool-use.read.complete", USERS)
+    const state = stateDirFor(root)
+    expect(readFileSync(path.join(state, "root"), "utf8")).toBe(`${realpathSync(root)}\n`)
+    expect(existsSync(path.join(state, "sessions", "s1", "baseline.jsonl"))).toBe(true)
+    expect(existsSync(path.join(root, ".rulecast", ".state"))).toBe(false)
   })
 
   test("an edit reports the new violation and Stop blocks on it", async () => {
@@ -56,6 +65,7 @@ describe("rulecast hook claude-code", () => {
     const root = await createProject({ [USERS]: VIOLATION })
     expect(await hook(root, "post-tool-use.edit", USERS)).toMatchObject({ code: 0, stdout: "", stderr: "" })
     expect(existsSync(path.join(root, ".rulecast"))).toBe(false)
+    expect(existsSync(stateDirFor(root))).toBe(false)
   })
 
   test("files outside the project are ignored", async () => {

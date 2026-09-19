@@ -5,10 +5,13 @@ import { promisify } from "node:util"
 import { beforeAll, expect, test } from "vitest"
 
 import { createFixture } from "./helpers/fixture"
+import { TEST_HOME } from "./helpers/home"
 import { claudeCodePayload } from "./helpers/payloads"
 
 const exec = promisify(execFile)
 const cli = path.resolve("dist/cli.js")
+/** The built CLI reads RULECAST_HOME from its environment; keep it out of the real cache. */
+const env = { ...process.env, RULECAST_HOME: TEST_HOME }
 
 beforeAll(async () => {
   await exec("pnpm", ["build"])
@@ -16,7 +19,7 @@ beforeAll(async () => {
 
 test("built CLI runs check in a project", async () => {
   const root = await createFixture()
-  const failure = await exec("node", [cli, "check", "--format", "agent"], { cwd: root }).catch((error) => error)
+  const failure = await exec("node", [cli, "check", "--format", "agent"], { cwd: root, env }).catch((error) => error)
   expect(failure.code).toBe(1)
   expect(failure.stdout).toContain("rulecast: 2 rules violated")
   expect(failure.stdout).toContain("--- conventions/backend.md#errors ---")
@@ -31,6 +34,7 @@ test("built CLI answers a Claude Code edit hook", async () => {
   const payload = claudeCodePayload("post-tool-use.edit", { root, file: "app/services/users.py", sessionId: "s1" })
   const result = spawnSync(process.execPath, [cli, "hook", "claude-code"], {
     cwd: root,
+    env,
     input: JSON.stringify(payload),
     encoding: "utf8",
   })

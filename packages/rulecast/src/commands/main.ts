@@ -1,5 +1,6 @@
 import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
+import type { Env } from "../core/home"
 import { builtinDetectors } from "../detectors"
 import { checkCommand, UsageError } from "./check"
 import { hookCommand } from "./hook"
@@ -10,6 +11,8 @@ import { warmCommand } from "./warm"
 
 export interface CliIo {
   cwd: string
+  /** Environment variables; the cache home comes from RULECAST_HOME or XDG_CACHE_HOME (core/home.ts). */
+  env: Env
   stdout(text: string): void
   stderr(text: string): void
   /** All of stdin. */

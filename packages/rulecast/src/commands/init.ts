@@ -5,7 +5,6 @@ import path from "node:path"
 import { mergeHooks } from "../adapters/claude-code/settings"
 import { loadConfig } from "../core/compile/config"
 import { errorMessage, isNotFound } from "../core/errors"
-import { ensureStateDir } from "../core/state-dir"
 import type { CliIo } from "./main"
 
 const SETTINGS = ".claude/settings.json"
@@ -59,7 +58,6 @@ export async function initCommand(root: string, io: CliIo): Promise<number> {
     await writeFile(full, content)
     io.stdout(`created  ${file}\n`)
   }
-  ensureStateDir(root)
 
   const config = await loadConfig(root)
   if (!config.ok) throw new Error(`${config.message} (fix it, then run rulecast init again)`)
