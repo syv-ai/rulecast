@@ -33,6 +33,8 @@ describe("rulecast hook claude-code", () => {
     expect(result.code).toBe(0)
     expect(additionalContext(result.stdout)).toContain("--- conventions/backend.md#services ---")
     expect(readFileSync(path.join(stateDirFor(root), "root"), "utf8")).toBe(`${realpathSync(root)}\n`)
+    // The hook wires the pipeline to the state directory it created: session state lands under it.
+    expect(existsSync(path.join(stateDirFor(root), "sessions", "s1", "baseline.jsonl"))).toBe(true)
   })
 
   test("an edit reports the new violation and Stop blocks on it", async () => {

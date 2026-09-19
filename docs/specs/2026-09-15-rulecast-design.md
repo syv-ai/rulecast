@@ -348,7 +348,7 @@ Checks, each diagnostic naming the rule and, for repo rules, the repo and rev:
 - the config and every manifest parse and match their zod schemas, including each detector's `schema` (which carries synchronous deep checks, e.g. that an ast-grep rule object compiles);
 - `rev` is present for URL repos and absent for `local`; a branch-like `rev` is a warning;
 - each pinned repo is in the cache (hooks) or can be fetched (CLI); its manifest exists;
-- every config `id` exists in its repo's manifest; ids are unique within a repo and aliases across the config;
+- every config `id` exists in its repo's manifest; rule identities (`id`, or `alias` when one is given) are unique across the whole config, not only within a repo;
 - `minimum_rulecast_version` (config and rules) is not newer than the running rulecast;
 - `local` and manifest rules have `name`; rules with `detect` have `message`; `stages: [touch]` rules have `context` and no `detect`;
 - `files` and `exclude` regexes compile; type tags are known;
@@ -360,7 +360,7 @@ Referenced content is not read beyond anchor resolution; delivery reads it. Comp
 Consumers:
 
 - **hook** — rules with diagnostics are skipped; a warning naming them is delivered once per agent context (§9).
-- **validate** — prints diagnostics; exit 2 if any.
+- **validate** — prints diagnostics; exit 2 if any is an error, 0 when the run produced only warnings.
 - **init** — validates what it wrote.
 - **doctor** — compilation, then environment checks (linter binaries, `@ast-grep/napi`, LLM credentials, hook installation, cache paths), then a dry run of every rule on one matching file.
 
