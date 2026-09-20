@@ -37,7 +37,8 @@ describe("claude-code provider", () => {
     expect(argv).toContain("--no-session-persistence")
     expect(argv).toContain("--system-prompt")
     expect(argv).toContain("--tools")
-    expect(await stubStdin(root, "claude")).toEqual([PROMPT.replace(/\n$/, "")])
+    // The stub records stdin byte for byte, so this pins the prompt reaching the model exactly.
+    expect(await stubStdin(root, "claude")).toEqual([PROMPT])
   })
 
   test("passes a --json-schema that describes the findings shape", async () => {

@@ -3,6 +3,7 @@ import path from "node:path"
 
 import type { DetectorFixture } from "../../src/testing/detector-contract"
 import { brokenTool, linkTool } from "../helpers/linters"
+import { stubAgentCli } from "../helpers/llm"
 
 const PY = "import os\n\n\ndef get(id):\n    try:\n        return fetch(id)\n    except ValueError:\n        pass\n"
 const JS = 'console.log("hi")\nconst unused = 1\ndebugger\n'
@@ -44,5 +45,21 @@ export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
     config: { tool: "oxlint", rules: ["no-debugger"] },
     matching: ["src/a.js"],
     failing: { config: { tool: "ruff" }, matching: ["src/a.js"] },
+  },
+  llm: {
+    files: { "app/a.py": PY },
+    // A stub claude in the fixture's node_modules/.bin, where the provider looks first: no
+    // network, no credentials, no cost, and the same answer every run.
+    prepare: (root) => stubAgentCli(root, "claude", { broken: ["broken-model"] }),
+    config: { model: "haiku", question: "Does this function swallow an exception?" },
+    matching: ["app/a.py"],
+    // The contract runs with an empty `changes` map, so app/a.py is *absent* rather than empty and
+    // is sent as a whole-file judgement — an empty change set would be skipped and the contract's
+    // "must produce at least one finding" case could never pass.
+    //
+    // The failing config names a model the stub answers unparseably, which is a per-rule error.
+    // A missing binary would not do: spec §14 makes that a whole-run failure, and the contract
+    // asserts one rule's failure is never reported as one.
+    failing: { config: { model: "broken-model", question: "Anything." }, matching: ["app/a.py"] },
   },
 }

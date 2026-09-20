@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -10,75 +10,92 @@ function binDir(root: string): string {
 }
 
 export interface StubAgentOptions {
-  /** Models the stub answers with unparseable output, for a deterministic per-rule failure. */
+  /** Models the stub answers unparseably, for a deterministic per-rule failure. */
   broken?: string[]
-  /** What the stub prints instead of the recorded claude envelope (OpenCode prints plain text). */
+  /** Printed verbatim instead of the recorded envelope (OpenCode prints plain text). */
   stdout?: string
   exitCode?: number
 }
 
 /**
- * A stub agent CLI in <root>/node_modules/.bin. It appends its argv to <root>/<name>.argv and its
- * stdin to <root>/<name>.stdin — appends, so a test can count how many calls a run made — then
- * prints the recorded answer.
+ * A stub agent CLI in <root>/node_modules/.bin. Each call writes its argv and its prompt to its own
+ * directory under <root>/<name>.calls/, so a test can count the calls a run made and read each
+ * prompt. One directory per call, not one appended file: the detector runs its calls concurrently,
+ * and two processes appending a multi-kilobyte prompt to one file interleave.
  *
- * **The stub is prompt-sensitive.** The recording names rule `r1`, but callers use whatever ids
- * they need, so the stub reads the first `### <id>` heading out of the prompt on stdin and
- * substitutes it for `r1`. One recording therefore serves every test, the contract suite's `a`,
- * `b`, `good` and `bad` included. See test/payloads/llm/README.md.
+ * **The stub answers about whatever the prompt asked.** The recording names rule `r1`, but callers
+ * use whatever ids they need — the detector contract suite uses `a`, `b`, `good` and `bad`. So the
+ * stub reads every `### <id>` heading out of the prompt and emits one copy of the recorded finding
+ * per rule, which is also what a real model does when two rules ask about the same line.
+ *
+ * It is a Node script with the running node's absolute path in its shebang, so it works whatever a
+ * test has done to PATH — and tests do stub PATH, to keep a machine's real `claude` out of reach.
  */
 export async function stubAgentCli(root: string, name: string, options: StubAgentOptions = {}): Promise<void> {
   await mkdir(binDir(root), { recursive: true })
-  const answer = options.stdout ?? (await readFile(path.join(payloads, "claude-code.json"), "utf8"))
-  const answerFile = path.join(binDir(root), `${name}.answer`)
-  await writeFile(answerFile, answer)
+  const callsDir = path.join(root, `${name}.calls`)
+  await mkdir(callsDir, { recursive: true })
 
-  const argvFile = path.join(root, `${name}.argv`)
-  const stdinFile = path.join(root, `${name}.stdin`)
-  const broken = options.broken ?? []
-  const script = [
-    "#!/bin/sh",
-    `printf '%s\\n' "$*" >> ${quote(argvFile)}`,
-    `prompt=$(cat)`,
-    `printf '%s\\n\\0---\\0\\n' "$prompt" >> ${quote(stdinFile)}`,
-    ...broken.map((model) => `case "$*" in *${model}*) echo 'I had a think and decided not to answer.'; exit 0;; esac`),
-    // The first "### <id>" heading of the prompt is the rule this call is about.
-    `rule=$(printf '%s' "$prompt" | sed -n 's/^### \\([^ ]*\\).*/\\1/p' | head -n 1)`,
-    `if [ -n "$rule" ]; then sed "s|\\"r1\\"|\\"$rule\\"|g" ${quote(answerFile)}; else cat ${quote(answerFile)}; fi`,
-    `exit ${options.exitCode ?? 0}`,
-    "",
-  ].join("\n")
+  const recording = JSON.parse(await readFile(path.join(payloads, "claude-code.json"), "utf8"))
+  const script = `#!${process.execPath}
+const { mkdirSync, writeFileSync } = require("node:fs")
+const { join } = require("node:path")
+
+const CALLS = ${JSON.stringify(callsDir)}
+const BROKEN = ${JSON.stringify(options.broken ?? [])}
+const VERBATIM = ${JSON.stringify(options.stdout ?? null)}
+const RECORDING = ${JSON.stringify(recording)}
+const EXIT_CODE = ${options.exitCode ?? 0}
+
+const argv = process.argv.slice(2).join(" ")
+const chunks = []
+process.stdin.on("data", (chunk) => chunks.push(chunk))
+process.stdin.on("end", () => {
+  const prompt = Buffer.concat(chunks).toString("utf8")
+  const dir = join(CALLS, String(process.pid))
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "argv"), argv)
+  writeFileSync(join(dir, "stdin"), prompt)
+
+  if (BROKEN.some((model) => argv.includes(model))) {
+    process.stdout.write("I had a think and decided not to answer.\\n")
+    process.exit(EXIT_CODE)
+  }
+  if (VERBATIM !== null) {
+    process.stdout.write(VERBATIM)
+    process.exit(EXIT_CODE)
+  }
+
+  const rules = [...prompt.matchAll(/^### (\\S+)/gm)].map((match) => match[1])
+  const template = RECORDING.structured_output.findings
+  const findings = rules.flatMap((rule) => template.map((finding) => ({ ...finding, rule })))
+  const answer = { ...RECORDING, structured_output: { findings }, result: JSON.stringify({ findings }) }
+  process.stdout.write(JSON.stringify(answer))
+  process.exit(EXIT_CODE)
+})
+`
   const file = path.join(binDir(root), name)
   await writeFile(file, script)
   await chmod(file, 0o755)
 }
 
-function quote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`
+/** The argv of each call the stub received. Calls run concurrently, so the order is not meaningful. */
+export function stubArgv(root: string, name: string): Promise<string[]> {
+  return callFiles(root, name, "argv")
 }
 
-/** The argv of each call the stub received, in order. */
-export async function stubArgv(root: string, name: string): Promise<string[]> {
-  return lines(await read(path.join(root, `${name}.argv`)))
+/** The prompt of each call the stub received. */
+export function stubStdin(root: string, name: string): Promise<string[]> {
+  return callFiles(root, name, "stdin")
 }
 
-/** The prompt of each call the stub received, in order. */
-export async function stubStdin(root: string, name: string): Promise<string[]> {
-  const text = await read(path.join(root, `${name}.stdin`))
-  return text
-    .split("\n\0---\0\n")
-    .filter((call) => call.length > 0)
-    .map((call) => call.replace(/\n$/, ""))
-}
-
-async function read(file: string): Promise<string> {
+async function callFiles(root: string, name: string, which: "argv" | "stdin"): Promise<string[]> {
+  const dir = path.join(root, `${name}.calls`)
+  let calls: string[]
   try {
-    return await readFile(file, "utf8")
+    calls = await readdir(dir)
   } catch {
-    return ""
+    return []
   }
-}
-
-function lines(text: string): string[] {
-  return text.split("\n").filter((line) => line.length > 0)
+  return Promise.all(calls.sort().map((call) => readFile(path.join(dir, call, which), "utf8")))
 }
