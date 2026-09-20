@@ -208,6 +208,37 @@ describe("compile: local rules", () => {
       'rule "dup" is configured more than once: give one an alias',
     ])
   })
+
+  test("awaits a detector schema with an async refinement", async () => {
+    const asyncProbe: Detector<{ value: string }> = {
+      kind: "async-probe",
+      schema: z
+        .object({ value: z.string() })
+        .strict()
+        .superRefine(async (config, ctx) => {
+          await Promise.resolve()
+          if (config.value === "bad") ctx.addIssue({ code: "custom", path: ["value"], message: "value is bad" })
+        }),
+      captures: () => [],
+      events: () => ["edit", "verify"],
+      run: async () => ({ findings: [], errors: [] }),
+    }
+    const root = await createProject({
+      ".rulecast-config.yaml": stringify(
+        local(
+          { id: "ok", name: "Ok", detect: { "async-probe": { value: "fine" } }, message: "{{file}}" },
+          { id: "nope", name: "Nope", detect: { "async-probe": { value: "bad" } }, message: "{{file}}" },
+        ),
+      ),
+    })
+    const project = await compile({
+      root,
+      registry: createRegistry([asyncProbe]),
+      repos: cachedRepos(TEST_HOME),
+    })
+    expect(project.rules.map((rule) => rule.id)).toEqual(["ok"])
+    expect(project.diagnostics.map((d) => d.message)).toEqual(["detect.async-probe: value: value is bad"])
+  })
 })
 
 describe("compile: the config", () => {

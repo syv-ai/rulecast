@@ -345,7 +345,7 @@ One compilation step turns the project config and the manifests of its pinned re
 
 Checks, each diagnostic naming the rule and, for repo rules, the repo and rev:
 
-- the config and every manifest parse and match their zod schemas, including each detector's `schema` (which carries synchronous deep checks, e.g. that an ast-grep rule object compiles);
+- the config and every manifest parse and match their zod schemas, including each detector's `schema`, which carries deep checks — e.g. that an ast-grep rule object compiles. Schemas are parsed asynchronously, so a detector may load what it needs to check a config (ast-grep loads its parser) instead of importing it in every process;
 - `rev` is present for URL repos and absent for `local`; a branch-like `rev` is a warning;
 - each pinned repo is in the cache (hooks) or can be fetched (CLI); its manifest exists;
 - every config `id` exists in its repo's manifest; rule identities (`id`, or `alias` when one is given) are unique across the whole config, not only within a repo;

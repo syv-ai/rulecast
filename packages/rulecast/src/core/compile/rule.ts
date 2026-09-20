@@ -67,7 +67,9 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     const [kind, rawConfig] = Object.entries(data.detect)[0]!
     const implementation = context.registry.get(kind)
     if (!implementation) return `unknown detector "${kind}"`
-    const parsed = implementation.schema.safeParse(rawConfig ?? {})
+    // Detector schemas may refine asynchronously: ast-grep compiles the rule object against the
+    // real parser, which it loads on demand (plan 5a). A synchronous schema is unaffected.
+    const parsed = await implementation.schema.safeParseAsync(rawConfig ?? {})
     if (!parsed.success) return `detect.${kind}: ${formatZodError(parsed.error)}`
     detector = { kind, config: parsed.data, captures: implementation.captures(parsed.data) }
     defaultStages = implementation.events(parsed.data)
