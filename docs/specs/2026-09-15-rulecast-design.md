@@ -683,7 +683,7 @@ Separate checkouts and worktrees of one repository get separate project director
 
 **Requirement:** the `edit` hook completes in under 500 ms at p95, measured from process start to exit, with a 30-rule project and warm caches, excluding llm rules.
 
-Budget: process start with `@ast-grep/napi` ~80–120 ms; compile and session open ~20 ms; detection and change sets within `timeouts.edit_deadline_ms` (350 ms); commit and rendering the remainder.
+Budget: process start with `@ast-grep/napi` ~4 ms on top of Node's own start, measured warm (the standalone binary is far slower, §16); compile and session open ~20 ms; detection and change sets within `timeouts.edit_deadline_ms` (350 ms); commit and rendering the remainder.
 
 Mechanisms:
 
@@ -765,7 +765,9 @@ agents/                      agent-facing docs (§12)
 - Releases via changesets and GitHub Actions; one tag versions the CLI and the rule packages.
 - Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1.
 
-**Early risk:** the standalone binary must embed `@ast-grep/napi`'s native module. Verified in the first implementation milestone; if it fails, the binary ships without the `ast-grep` detector and `doctor` reports it unavailable.
+**Resolved (2026-09-20, plan 5a):** `bun build --compile` embeds both `@ast-grep/napi`'s native module and `@ast-grep/lang-python`'s prebuilt parser; a binary run from a directory with no `node_modules` matches Python patterns. `test/binary.test.ts` keeps it that way, and skips where `bun` is absent. The detector reaches the native module only through a dynamic `import()` with a literal specifier: neither `createRequire` nor a computed specifier is bundled by bun, and must not be used on that path.
+
+Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, which extracts and `dlopen`s it on every run — one `rulecast run` over a one-rule fixture took ~110 ms under Node and ~370 ms as a binary on an Apple M3 Pro. The npm/Node path is the primary distribution and stays fast; the binary's hook latency is a release concern of its own.
 
 ## 17. Releases
 
