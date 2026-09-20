@@ -13,6 +13,7 @@ export const pathDetector: Detector<z.infer<typeof schema>> = {
   run: perRule(async (rule, input) => {
     const matches: Match[] = []
     for (const file of rule.files) {
+      input.signal.throwIfAborted()
       const text = await readSourceFile(input.cwd, file)
       if (text === null) continue
       // The whole file, so any change in it counts as new (spec §8).

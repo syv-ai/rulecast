@@ -2,6 +2,7 @@ import { execFile, spawnSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 import { beforeAll, expect, test } from "vitest"
 
@@ -111,4 +112,15 @@ test("built CLI runs an ast-grep rule", async () => {
   )
   expect(failure.code).toBe(1)
   expect(failure.stdout).toContain("app/a.py:4 swallows an exception.")
+}, 30_000)
+
+test("built package exports the contract suites and imports no test framework", async () => {
+  const entry = path.resolve("dist/index.js")
+  const source = readFileSync(entry, "utf8")
+  for (const framework of ["vitest", "node:test", "@jest/globals"]) {
+    expect(source, `dist/index.js must not import ${framework}`).not.toContain(`"${framework}"`)
+  }
+  const exported = await import(pathToFileURL(entry).href)
+  expect(typeof exported.detectorContract).toBe("function")
+  expect(typeof exported.adapterContract).toBe("function")
 }, 30_000)
