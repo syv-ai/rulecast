@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
@@ -122,6 +122,16 @@ describe("linter detector", () => {
     })
   })
 
+  test("{{text}} is the source line even on a last line with no trailing newline", async () => {
+    // oxlint never reports an end column, so the excerpt runs to the end of the line. A file whose
+    // last line has no newline has no next line to stop at, which used to leave {{text}} empty.
+    const root = await createProject({ "src/a.js": "const x = 1\ndebugger" })
+    await linkTool(root, "oxlint")
+    const result = await run(root, [ruleFor("r", { tool: "oxlint", rules: ["no-debugger"] }, ["src/a.js"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings[0]!.match.text).toBe("debugger")
+  })
+
   test("unreadable tool output fails that tool's rules", async () => {
     const root = await createProject({ "app/a.py": PY })
     await stubTool(root, "ruff")
@@ -129,6 +139,24 @@ describe("linter detector", () => {
     const result = await run(root, [ruleFor("py", { tool: "ruff" }, ["app/a.py"])])
     expect(result.findings).toEqual([])
     expect(result.errors[0]!.message).toContain("ruff output is not JSON")
+  })
+
+  test("an unreadable file fails that tool's rules, not the whole run", async () => {
+    // The eslint stub reports src/a.js, which is a directory here, so reading it for {{text}}
+    // throws EISDIR. readSourceFile only swallows ENOENT, and a throw out of run() would be a
+    // whole-run error disabling every tool in the run rather than just eslint's rules.
+    const root = await createProject({ "src/other.js": JS })
+    await mkdir(path.join(root, "src/a.js"), { recursive: true })
+    await stubTool(root, "eslint")
+    await linkTool(root, "oxlint")
+    const result = await run(root, [
+      ruleFor("es", { tool: "eslint" }, ["src/a.js"]),
+      ruleFor("js", { tool: "oxlint", rules: ["no-debugger"] }, ["src/other.js"]),
+    ])
+    expect(result.errors.map((error) => error.rule)).toEqual(["es"])
+    expect(result.errors[0]!.message).toContain("EISDIR")
+    // oxlint ran beside it and is unaffected.
+    expect(result.findings.map((finding) => finding.rule)).toEqual(["js"])
   })
 
   test("a tool whose rules select no files does not run", async () => {

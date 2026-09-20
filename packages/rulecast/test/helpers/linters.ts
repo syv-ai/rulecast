@@ -57,3 +57,11 @@ export async function stubTool(root: string, tool: string, options: { exitCode?:
 export async function stubArgv(root: string, tool: string): Promise<string> {
   return (await readFile(path.join(root, `${tool}.argv`), "utf8")).trim()
 }
+
+/** A tool that resolves but produces unusable output, so a rule using it fails on any machine. */
+export async function brokenTool(root: string, tool: string): Promise<void> {
+  await mkdir(binDir(root), { recursive: true })
+  const script = path.join(binDir(root), tool)
+  await writeFile(script, "#!/bin/sh\necho 'not json'\n")
+  await chmod(script, 0o755)
+}

@@ -29,10 +29,16 @@ function excerpt(source: string | null, finding: LinterFinding): string {
   if (source === null) return ""
   const starts = lineStarts(source)
   const from = offsetAt(starts, finding.line, finding.column, source.length)
-  const to =
-    finding.endColumn === null
-      ? offsetAt(starts, finding.endLine + 1, 1, source.length)
-      : offsetAt(starts, finding.endLine, finding.endColumn, source.length)
+  let to: number
+  if (finding.endColumn === null) {
+    // No end column: take the rest of the line. Not the start of the next one — a last line with
+    // no trailing newline has no next line to start, and offsetAt would clamp back to this line's
+    // start, leaving the excerpt empty.
+    const newline = source.indexOf("\n", from)
+    to = newline === -1 ? source.length : newline
+  } else {
+    to = offsetAt(starts, finding.endLine, finding.endColumn, source.length)
+  }
   return source.slice(from, Math.max(from, to)).replace(/\n$/, "")
 }
 
@@ -72,30 +78,31 @@ export const linterDetector: Detector<LinterConfig> = {
       [...byTool].map(async ([tool, rules]) => {
         const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
         if (files.length === 0) return
-        let findings: LinterFinding[]
+        // Everything that can fail for this tool is inside one guard, reading the files for
+        // {{text}} included: an unreadable file must not escape as a whole-run error and take the
+        // other tools down with it (spec §14).
         try {
-          findings = await runTool(tool, files, input.cwd, input.signal)
+          const findings = await runTool(tool, files, input.cwd, input.signal)
+          for (const finding of findings) {
+            const match: Match = {
+              file: finding.file,
+              line: finding.line,
+              endLine: finding.endLine,
+              column: finding.column,
+              text: excerpt(await read(finding.file), finding),
+              captures: { message: finding.message, ruleId: finding.ruleId },
+            }
+            for (const rule of rules) {
+              if (!rule.files.includes(finding.file)) continue
+              if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
+              result.findings.push({ rule: rule.id, match })
+            }
+          }
         } catch (error) {
           if (input.signal.aborted) throw error
           // One error per rule: a whole-run error would disable the other tools too.
           const message = errorMessage(error)
           for (const rule of rules) result.errors.push({ rule: rule.id, message })
-          return
-        }
-        for (const finding of findings) {
-          const match: Match = {
-            file: finding.file,
-            line: finding.line,
-            endLine: finding.endLine,
-            column: finding.column,
-            text: excerpt(await read(finding.file), finding),
-            captures: { message: finding.message, ruleId: finding.ruleId },
-          }
-          for (const rule of rules) {
-            if (!rule.files.includes(finding.file)) continue
-            if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
-            result.findings.push({ rule: rule.id, match })
-          }
         }
       }),
     )

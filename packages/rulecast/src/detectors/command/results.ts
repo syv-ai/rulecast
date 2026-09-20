@@ -1,4 +1,6 @@
+import { realpathSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import type { Match } from "../../core/types"
 
@@ -15,11 +17,33 @@ function parseJson(output: string): unknown {
   }
 }
 
-/** A path from a tool, made repo-relative with forward slashes. */
+/**
+ * A path from a checker, made repo-relative with forward slashes.
+ *
+ * Two things a checker does that naive relativisation gets wrong: SARIF requires `uri` to be
+ * percent-encoded, and resolving a path (Python's `Path.resolve()`, say) follows symlinks, so a
+ * project under a symlinked root — every macOS temp directory — comes back as a realpath that
+ * does not sit under `cwd`. Either way the finding would be attributed to a path no rule selected
+ * and silently dropped. The linter detector does the same thing for the same reason.
+ */
 export function repoRelative(file: string, cwd: string): string {
-  const withoutScheme = file.startsWith("file://") ? new URL(file).pathname : file
-  const relative = path.isAbsolute(withoutScheme) ? path.relative(cwd, withoutScheme) : withoutScheme
-  return relative.split(path.sep).join("/")
+  const withoutScheme = file.startsWith("file://") ? fileURLToPath(file) : file
+  if (!path.isAbsolute(withoutScheme)) return withoutScheme.split(path.sep).join("/")
+  for (const root of rootsOf(cwd)) {
+    const relative = path.relative(root, withoutScheme)
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) return relative.split(path.sep).join("/")
+  }
+  return path.relative(cwd, withoutScheme).split(path.sep).join("/")
+}
+
+/** A root and its realpath, so repoRelative can try both. */
+function rootsOf(root: string): string[] {
+  try {
+    const real = realpathSync(root)
+    return real === root ? [root] : [root, real]
+  } catch {
+    return [root]
+  }
 }
 
 /**

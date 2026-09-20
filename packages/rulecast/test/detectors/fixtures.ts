@@ -2,7 +2,7 @@ import { chmod } from "node:fs/promises"
 import path from "node:path"
 
 import type { DetectorFixture } from "../../src/testing/detector-contract"
-import { linkTool } from "../helpers/linters"
+import { brokenTool, linkTool } from "../helpers/linters"
 
 const PY = "import os\n\n\ndef get(id):\n    try:\n        return fetch(id)\n    except ValueError:\n        pass\n"
 const JS = 'console.log("hi")\nconst unused = 1\ndebugger\n'
@@ -35,10 +35,14 @@ export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
   },
   linter: {
     files: { "src/a.js": JS },
-    prepare: (root) => linkTool(root, "oxlint"),
+    prepare: async (root) => {
+      await linkTool(root, "oxlint")
+      // A ruff that resolves but prints nonsense. Relying on ruff being absent would make this
+      // fixture pass or fail depending on the machine.
+      await brokenTool(root, "ruff")
+    },
     config: { tool: "oxlint", rules: ["no-debugger"] },
     matching: ["src/a.js"],
-    // ruff is not a workspace devDependency, so the rule cannot resolve its tool.
     failing: { config: { tool: "ruff" }, matching: ["src/a.js"] },
   },
 }

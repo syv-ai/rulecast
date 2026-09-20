@@ -1,3 +1,7 @@
+import { realpathSync } from "node:fs"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { matchesFromJson, matchesFromSarif } from "../../../src/detectors/command/results"
@@ -108,6 +112,28 @@ describe("matchesFromSarif", () => {
     expect(matchesFromSarif(withUri, ["layer"], cwd)).toEqual([
       { file: "app/s.py", line: 1, endLine: 1, column: 1, text: "", captures: { layer: "svc" } },
     ])
+  })
+
+  test("decodes a percent-encoded file:// uri", () => {
+    // SARIF 2.1.0 requires uri to be percent-encoded, so a path with a space arrives escaped.
+    const encoded = JSON.stringify({
+      runs: [
+        {
+          results: [{ locations: [{ physicalLocation: { artifactLocation: { uri: "file:///repo/my%20file.py" } } }] }],
+        },
+      ],
+    })
+    expect(matchesFromSarif(encoded, [], cwd)[0]!.file).toBe("my file.py")
+  })
+
+  test("relativises a path the checker resolved through a symlink", async () => {
+    // A checker that calls Path.resolve() reports a realpath; macOS /tmp is a symlink to
+    // /private/tmp. Without this the finding names a path no rule selected and is dropped.
+    const root = await mkdtemp(path.join(tmpdir(), "rulecast-cmd-symlink-"))
+    const real = realpathSync(root)
+    expect(real, "this test needs a symlinked temp directory").not.toBe(root)
+    const json = JSON.stringify([{ file: path.join(real, "src/a.py"), line: 1 }])
+    expect(matchesFromJson(json, [], root)[0]!.file).toBe("src/a.py")
   })
 
   test("rejects output that is not SARIF", () => {

@@ -72,9 +72,23 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
         const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
         for (const file of files) {
           input.signal.throwIfAborted()
-          const source = await readSourceFile(input.cwd, file)
-          if (source === null) continue
-          const root = parser.parse(source).root() as unknown as Node
+          let root: Node
+          try {
+            const source = await readSourceFile(input.cwd, file)
+            if (source === null) continue
+            root = parser.parse(source).root() as unknown as Node
+          } catch (error) {
+            if (input.signal.aborted) throw error
+            // Reading or parsing is per-language work, so it fails the rules of this language
+            // only. Letting it throw would be a whole-run error across every language (spec §14).
+            const message = errorMessage(error)
+            for (const rule of rules) {
+              if (rule.files.includes(file) && !result.errors.some((existing) => existing.rule === rule.id)) {
+                result.errors.push({ rule: rule.id, message })
+              }
+            }
+            continue
+          }
           for (const rule of rules) {
             if (!rule.files.includes(file)) continue
             try {
