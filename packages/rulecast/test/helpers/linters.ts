@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -16,12 +16,20 @@ export function realTool(tool: string): string | null {
   return existsSync(binary) ? binary : null
 }
 
-/** Symlinks a real tool into the fixture. Throws when it is not installed: this must not skip silently. */
+/**
+ * Puts a real tool in the fixture's node_modules/.bin. It forwards rather than symlinking: pnpm's
+ * .bin entries are shell shims that locate the package from their own path, so a symlink to one
+ * resolves against the fixture and fails with MODULE_NOT_FOUND. `exec` keeps $0 at the real shim.
+ *
+ * Throws when the tool is not installed: a fixture must not quietly test nothing.
+ */
 export async function linkTool(root: string, tool: string): Promise<void> {
   const binary = realTool(tool)
   if (binary === null) throw new Error(`${tool} is not installed in the workspace; run pnpm install`)
   await mkdir(binDir(root), { recursive: true })
-  await symlink(binary, path.join(binDir(root), tool))
+  const forwarder = path.join(binDir(root), tool)
+  await writeFile(forwarder, `#!/bin/sh\nexec ${JSON.stringify(binary)} "$@"\n`)
+  await chmod(forwarder, 0o755)
 }
 
 /** A stub that replays a recording and writes the argv it was called with to <root>/<tool>.argv. */
