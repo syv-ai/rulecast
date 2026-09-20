@@ -13,8 +13,7 @@ const DEFAULTS = {
   timeouts: { editDeadlineMs: 350, verifyMs: 60000 },
   stopGate: { maxBlocks: 1 },
   llm: {
-    provider: "anthropic",
-    model: "claude-haiku-4-5-20251001",
+    provider: "claude-code",
     baseUrl: null,
     apiKeyEnv: "ANTHROPIC_API_KEY",
     maxFilesPerVerify: 10,
@@ -39,7 +38,6 @@ describe("configSchema", () => {
       stop_gate: { max_blocks: 2 },
       llm: {
         provider: "openai-compatible",
-        model: "m",
         base_url: "http://localhost:11434/v1",
         api_key_env: "KEY",
         max_files_per_verify: 4,
@@ -64,7 +62,6 @@ describe("configSchema", () => {
       stopGate: { maxBlocks: 2 },
       llm: {
         provider: "openai-compatible",
-        model: "m",
         baseUrl: "http://localhost:11434/v1",
         apiKeyEnv: "KEY",
         maxFilesPerVerify: 4,
@@ -80,6 +77,15 @@ describe("configSchema", () => {
     expect(configSchema.safeParse({ repos: [{ repo: "local", rules: [], hooks: [] }] }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], minimum_rulecast_version: "v1" }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], default_stages: ["commit"] }).success).toBe(false)
+  })
+
+  test("llm names the four providers and has no project-wide model", () => {
+    for (const provider of ["claude-code", "opencode", "anthropic", "openai-compatible"]) {
+      expect(configSchema.parse({ repos: [], llm: { provider } }).llm.provider).toBe(provider)
+    }
+    expect(configSchema.safeParse({ repos: [], llm: { provider: "gemini" } }).success).toBe(false)
+    // Every llm rule names its own model (plan 6a, Decision 1); a project-wide default is gone.
+    expect(configSchema.safeParse({ repos: [], llm: { model: "haiku" } }).success).toBe(false)
   })
 
   test("repo entries keep their rules unparsed; rev rules are left to compile", () => {

@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { referenceInputSchema } from "../references"
+import { LLM_PROVIDERS } from "../types"
 
 export const STAGES = ["touch", "edit", "verify"] as const
 export type Stage = (typeof STAGES)[number]
@@ -77,8 +78,8 @@ export const configSchema = z
       .default({}),
     llm: z
       .object({
-        provider: z.enum(["anthropic", "openai-compatible"]).default("anthropic"),
-        model: z.string().default("claude-haiku-4-5-20251001"),
+        // No `model`: every llm rule names its own (plan 6a, Decision 1).
+        provider: z.enum(LLM_PROVIDERS).default("claude-code"),
         base_url: z.string().nullable().default(null),
         api_key_env: z.string().default("ANTHROPIC_API_KEY"),
         max_files_per_verify: z.number().int().positive().default(10),
@@ -99,7 +100,6 @@ export const configSchema = z
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
     llm: {
       provider: input.llm.provider,
-      model: input.llm.model,
       baseUrl: input.llm.base_url,
       apiKeyEnv: input.llm.api_key_env,
       maxFilesPerVerify: input.llm.max_files_per_verify,

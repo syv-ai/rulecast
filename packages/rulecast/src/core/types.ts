@@ -44,6 +44,27 @@ export interface ResolvedReference {
   content: string
 }
 
+export const LLM_PROVIDERS = ["claude-code", "opencode", "anthropic", "openai-compatible"] as const
+export type LlmProviderName = (typeof LLM_PROVIDERS)[number]
+
+/** Project-level `llm` settings from .rulecast-config.yaml (spec §6, §12). */
+export interface LlmSettings {
+  provider: LlmProviderName
+  /** Overrides the provider's own endpoint; the only way to reach Azure OpenAI or Ollama. */
+  baseUrl: string | null
+  apiKeyEnv: string
+  maxFilesPerVerify: number
+}
+
+/** Project settings the core passes to every detector run; only `llm` reads them today. */
+export interface DetectorSettings {
+  llm: LlmSettings
+}
+
+export function defaultDetectorSettings(): DetectorSettings {
+  return { llm: { provider: "claude-code", baseUrl: null, apiKeyEnv: "ANTHROPIC_API_KEY", maxFilesPerVerify: 10 } }
+}
+
 export interface DetectorRuleInput<Config> {
   id: string
   config: Config
