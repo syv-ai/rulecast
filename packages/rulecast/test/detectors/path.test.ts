@@ -29,5 +29,5 @@ test("path detector matches each existing file across all its lines", async () =
 })
 
 test("built-in detectors have unique kinds", () => {
-  expect(builtinDetectors.map((detector) => detector.kind)).toEqual(["regex", "path"])
+  expect(builtinDetectors.map((detector) => detector.kind)).toEqual(["regex", "path", "ast-grep"])
 })

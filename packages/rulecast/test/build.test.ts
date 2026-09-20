@@ -1,11 +1,12 @@
 import { execFile, spawnSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 import { beforeAll, expect, test } from "vitest"
 
 import { createCatalogRepo } from "./helpers/catalog"
+import { localConfig } from "./helpers/config"
 import { createFixture } from "./helpers/fixture"
 import { createRepo } from "./helpers/git"
 import { TEST_HOME } from "./helpers/home"
@@ -69,3 +70,45 @@ test("built CLI runs init --yes and keeps @clack/prompts out of its entry", asyn
   expect(chunk, "cli.js dynamically imports the clack chunk").toBeDefined()
   expect(imports(path.join(path.dirname(cli), chunk!))).toContain("@clack/prompts")
 }, 60_000)
+
+test("built package reaches ast-grep only through a dynamic import", () => {
+  // A static import anywhere would load the native module in every hook process, including the
+  // many projects with no ast-grep rule. tsup splits builtinDetectors into a chunk that both
+  // entries import, so the specifier lives there, not in cli.js: what matters is that loading
+  // the chunk does not load the native module. load.ts's import() is the only way in.
+  const dir = path.dirname(cli)
+  const sources = readdirSync(dir)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => [name, readFileSync(path.join(dir, name), "utf8")] as const)
+  for (const [name, source] of sources) {
+    expect(source, `${name} must not import ast-grep statically`).not.toMatch(/from\s*"@ast-grep\/[\w-]+"/)
+  }
+  const dynamic = (specifier: string) => sources.some(([, source]) => source.includes(`import("${specifier}")`))
+  expect(dynamic("@ast-grep/napi"), "a chunk dynamically imports @ast-grep/napi").toBe(true)
+  expect(dynamic("@ast-grep/lang-python"), "a chunk dynamically imports @ast-grep/lang-python").toBe(true)
+})
+
+test("built CLI runs an ast-grep rule", async () => {
+  const root = await createRepo({
+    ".rulecast-config.yaml": localConfig([
+      {
+        id: "no-silent-except",
+        name: "No silent except",
+        files: "\\.py$",
+        detect: {
+          "ast-grep": {
+            language: "python",
+            rule: { kind: "except_clause", has: { kind: "block", has: { kind: "pass_statement" } } },
+          },
+        },
+        message: "{{file}}:{{line}} swallows an exception.",
+      },
+    ]),
+    "app/a.py": "def f():\n    try:\n        g()\n    except ValueError:\n        pass\n",
+  })
+  const failure = await exec("node", [cli, "run", "--all-files", "--format", "agent"], { cwd: root, env }).catch(
+    (error) => error,
+  )
+  expect(failure.code).toBe(1)
+  expect(failure.stdout).toContain("app/a.py:4 swallows an exception.")
+}, 30_000)
