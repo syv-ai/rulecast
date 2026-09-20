@@ -405,7 +405,7 @@ detect:
     rule: { pattern: "raise HTTPException($$$ARGS)", inside: { kind: function_definition } }
 ```
 
-Uses `@ast-grep/napi`. Parses each file once per language and runs every rule for that language against the parsed tree. Captures: metavariable names found anywhere in the rule object (`$NAME` → `NAME`, `$$$NAMES` → `NAMES`, multi-node captures comma-joined). Events: `edit`, `verify`.
+Uses `@ast-grep/napi`. Parses each file once per language and runs every rule for that language against the parsed tree. Languages: `css`, `html`, `javascript`, `python`, `tsx`, `typescript` — `python` through `@ast-grep/lang-python`, registered at load. Keys: `language` and `rule`, plus optional `constraints` and `utils` (ast-grep's own). Captures: metavariable names found anywhere in the config (`$NAME` → `NAME`, `$$$NAMES` → `NAMES`, multi-node captures comma-joined, `$_NAME` non-capturing). Events: `edit`, `verify`.
 
 ### `command`
 
