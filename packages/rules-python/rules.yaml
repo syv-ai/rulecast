@@ -28,3 +28,20 @@
   stages: [touch]
   context:
     - "@layering.md"
+- id: no-silent-except
+  name: No silently swallowed exceptions
+  description: Flags an except clause whose only statement is pass, which hides the failure.
+  files: '\.py$'
+  severity: error
+  detect:
+    ast-grep:
+      language: python
+      rule:
+        kind: except_clause
+        has:
+          kind: block
+          has:
+            kind: pass_statement
+  message: "{{file}}:{{line}} swallows an exception with a bare pass. Handle it, log it, or let it propagate."
+  context:
+    - "@errors.md#swallowed-exceptions"

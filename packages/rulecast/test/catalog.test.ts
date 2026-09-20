@@ -19,8 +19,10 @@ const CATALOG = [
   "python/no-httpexception-in-services",
   "python/no-queries-in-services",
   "python/layering",
+  "python/no-silent-except",
   "react/no-fetch-in-components",
   "react/data-fetching",
+  "react/no-inline-style",
 ]
 
 interface Case {
@@ -111,6 +113,34 @@ const cases: Case[] = [
     fires: true,
   },
   { rule: "react/data-fetching", kind: "touch", file: "src/utils/format.ts", content: "export {}\n", fires: false },
+  {
+    rule: "python/no-silent-except",
+    kind: "verify",
+    file: "app/services/users.py",
+    content: "def get():\n    try:\n        fetch()\n    except ValueError:\n        pass\n",
+    fires: true,
+  },
+  {
+    rule: "python/no-silent-except",
+    kind: "verify",
+    file: "app/services/users.py",
+    content: "def get():\n    try:\n        fetch()\n    except ValueError:\n        log.warning('missing')\n",
+    fires: false,
+  },
+  {
+    rule: "react/no-inline-style",
+    kind: "verify",
+    file: "src/components/Card.tsx",
+    content: "export const Card = () => <div style={{ padding: 8 }}>x</div>\n",
+    fires: true,
+  },
+  {
+    rule: "react/no-inline-style",
+    kind: "verify",
+    file: "src/components/Card.tsx",
+    content: 'export const Card = () => <div className="p-2">x</div>\n',
+    fires: false,
+  },
 ]
 
 describe("the rulecast repository's rule manifest", () => {

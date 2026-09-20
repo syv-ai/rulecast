@@ -17,3 +17,18 @@
   stages: [touch]
   context:
     - "@data-fetching.md"
+- id: no-inline-style
+  name: No inline style props
+  description: Flags style={{ ... }} on JSX elements, which bypasses the design system.
+  files: '(^|/)(components|routes)/.*\.[jt]sx$'
+  severity: warning
+  detect:
+    ast-grep:
+      language: tsx
+      rule:
+        pattern:
+          context: '<div style={{ $$$PROPS }}/>'
+          selector: jsx_attribute
+  message: "{{file}}:{{line}} styles inline with {{text}}. Use the design system's classes so the value stays themeable."
+  context:
+    - "@styling.md#inline-styles"

@@ -40,6 +40,23 @@
     - touch
   context:
     - "@packages/rules-python/layering.md"
+- id: python/no-silent-except
+  name: No silently swallowed exceptions
+  description: Flags an except clause whose only statement is pass, which hides the failure.
+  files: \.py$
+  severity: error
+  detect:
+    ast-grep:
+      language: python
+      rule:
+        kind: except_clause
+        has:
+          kind: block
+          has:
+            kind: pass_statement
+  message: "{{file}}:{{line}} swallows an exception with a bare pass. Handle it, log it, or let it propagate."
+  context:
+    - "@packages/rules-python/errors.md#swallowed-exceptions"
 - id: react/no-fetch-in-components
   name: Components get server data through query hooks
   description: Flags network calls (fetch, axios) made directly in components.
@@ -59,3 +76,18 @@
     - touch
   context:
     - "@packages/rules-react/data-fetching.md"
+- id: react/no-inline-style
+  name: No inline style props
+  description: Flags style={{ ... }} on JSX elements, which bypasses the design system.
+  files: (^|/)(components|routes)/.*\.[jt]sx$
+  severity: warning
+  detect:
+    ast-grep:
+      language: tsx
+      rule:
+        pattern:
+          context: <div style={{ $$$PROPS }}/>
+          selector: jsx_attribute
+  message: "{{file}}:{{line}} styles inline with {{text}}. Use the design system's classes so the value stays themeable."
+  context:
+    - "@packages/rules-react/styling.md#inline-styles"

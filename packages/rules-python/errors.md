@@ -27,3 +27,22 @@ Why: the same service runs from routes, background jobs, scripts and tests, whic
 ## Messages users see
 
 Write the user-facing message on the domain exception, in the language the product uses. Routes and handlers pass it through; they don't rewrite it.
+
+## Swallowed exceptions
+
+An `except` clause whose body is nothing but `pass` throws the failure away. The
+call looked like it worked, the caller carries on with missing data, and nothing
+in the logs says why.
+
+If the failure is genuinely expected and harmless, say so and say why:
+
+```python
+try:
+    cache.delete(key)
+except KeyError:
+    logger.debug("cache entry %s was already gone", key)
+```
+
+If it is not expected, let it propagate. A traceback at the right moment is worth
+more than a silent wrong answer later. Catching a broad `Exception` only to
+`pass` is the same bug with a wider blast radius.
