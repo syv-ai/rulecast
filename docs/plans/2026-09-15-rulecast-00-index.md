@@ -21,5 +21,5 @@ The `design-system` detector (§18) gets its own spec after 0.1.
 - Package manager: pnpm (workspace). Node ≥ 20.12. ESM only.
 - The CLI package lives in `packages/rulecast/`. Plans 1 and 2 predate the move: their `src/…` and `test/…` paths are now under `packages/rulecast/`.
 - Tests: vitest, under `packages/rulecast/test/` mirroring `src/`.
-- No module-level mutable state anywhere in `src/`. Anything a module needs is passed in.
+- No module-level mutable state anywhere in `src/`. Anything a module needs is passed in. The single exception is `src/detectors/ast-grep/load.ts`, which memoises a process-global native-module registration (plan 5a, Decision 2).
 - Commit after every task. Commit messages end with the line `Claude goes brr.. via Dash`.

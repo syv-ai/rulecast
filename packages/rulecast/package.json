@@ -27,6 +27,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ast-grep/lang-python": "^0.0.6",
+    "@ast-grep/napi": "^0.45.3",
     "@clack/prompts": "^1.8.1",
     "diff": "^8.0.4",
     "yaml": "^2.9.1",

@@ -56,7 +56,7 @@ rulecast composes with a project's existing general-purpose linters (ruff, ESLin
 
 ## 3. Architecture
 
-Every hook invocation is a fresh process. No module-level mutable state: everything a module needs is passed in, and everything that must outlive the process is on disk in the user cache (§12, Cache and state). rulecast writes nothing inside the project except the files the developer asks `init` or `install` to write.
+Every hook invocation is a fresh process. No module-level mutable state: everything a module needs is passed in, and everything that must outlive the process is on disk in the user cache (§12, Cache and state). The one exception is loading a native module: `@ast-grep/napi` and its dynamic languages register themselves process-globally, so the detector memoises that load (§6). rulecast writes nothing inside the project except the files the developer asks `init` or `install` to write.
 
 ```
 input ──▶ adapter.parse ──▶ Event
@@ -374,7 +374,7 @@ Consumers:
 - **Captures.** Every match carries exactly the names in `captures(config)` for its rule, as strings (possibly empty).
 - **Default stages.** `events(config)` gives the rule's default detection stages, so one detector kind can place slow tools on `verify` only.
 - **Cancellation.** Detectors observe `signal`. Work still running when it fires is discarded (§13).
-- **Cache.** Detectors that persist work use `cache`, keyed by content hashes. No module-level state.
+- **Cache.** Detectors that persist work use `cache`, keyed by content hashes. No module-level state, except memoising a native module whose own registration is process-global — `ast-grep` does this, and nothing derived from a rule, project or event may live there.
 
 The contract is exported as a test suite (§15) that third-party detectors run.
 
