@@ -20,6 +20,14 @@ export type * from "./core/types"
 export { emptyDelivery } from "./core/types"
 export { VERSION } from "./core/version"
 export { builtinDetectors } from "./detectors"
+export { MODEL_ALIASES, resolveModel } from "./detectors/llm/models"
+export { providerByName } from "./detectors/llm/providers/index"
+export {
+  type LlmFinding,
+  type LlmProvider,
+  type LlmRequest,
+  LlmUnavailableError,
+} from "./detectors/llm/providers/types"
 export { type AdapterFixture, adapterContract } from "./testing/adapter-contract"
 export type { ContractCase } from "./testing/contract"
 export { type DetectorFixture, detectorContract } from "./testing/detector-contract"
