@@ -1,0 +1,26 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 3680,
+  "num_turns": 2,
+  "result": "{\"findings\":[{\"rule\":\"r1\",\"line\":2,\"text\":\"print(\\\"x\\\")\",\"reason\":\"Line uses print(), which the rule forbids\"}]}",
+  "structured_output": {
+    "findings": [
+      {
+        "rule": "r1",
+        "line": 2,
+        "text": "print(\"x\")",
+        "reason": "Line uses print(), which the rule forbids"
+      }
+    ]
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 1254,
+      "outputTokens": 301,
+      "costUSD": 0.0012,
+      "canonicalModel": "claude-haiku-4-5"
+    }
+  }
+}
