@@ -17,3 +17,10 @@ export function positionAt(starts: number[], offset: number): { line: number; co
   }
   return { line: low + 1, column: offset - starts[low]! + 1 }
 }
+
+/** String offset of a 1-based line and column, clamped to a file of `length` characters. */
+export function offsetAt(starts: number[], line: number, column: number, length: number): number {
+  const index = Math.min(Math.max(line, 1), starts.length) - 1
+  const offset = starts[index]! + Math.max(column, 1) - 1
+  return Math.min(Math.max(offset, 0), length)
+}
