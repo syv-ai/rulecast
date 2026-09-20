@@ -28,6 +28,64 @@ detect:
 - Captures: none. `{{text}}` is the file path.
 - Default stages: `edit`, `verify`.
 
+## `ast-grep`
+
+```yaml
+detect:
+  ast-grep:
+    language: python
+    rule:
+      pattern: "raise HTTPException($$$ARGS)"
+      inside: { kind: function_definition }
+```
+
+- `language`: one of `css`, `html`, `javascript`, `python`, `tsx`, `typescript`. Use `tsx` for both `.tsx` and `.jsx`; it also parses plain TypeScript.
+- `rule`: an [ast-grep rule object](https://ast-grep.github.io/reference/rule.html) — `pattern`, `kind`, `regex`, `inside`, `has`, `all`, `any`, `not`, and the rest. It is compiled when you run `rulecast validate`, so a rule ast-grep rejects is caught before any agent sees it.
+- `constraints` and `utils`: optional, exactly as in ast-grep's own YAML.
+- Captures: every metavariable in the config. `$NAME` gives `{{NAME}}` (one node, empty when it did not match); `$$$NAMES` gives `{{NAMES}}` with the matched nodes joined by `, `. A metavariable starting with an underscore (`$_TMP`) matches without capturing.
+- Position and `{{text}}`: the matched node's start, and its source.
+- Default stages: `edit`, `verify`.
+
+**Matching something that is not a whole statement.** A bare pattern has to parse on its own, which a JSX attribute or a lone argument does not. Give the pattern a context to parse in, and a selector for the node you actually want:
+
+```yaml
+rule:
+  pattern:
+    context: '<div style={{ $$$PROPS }}/>'
+    selector: jsx_attribute
+```
+
+That matches a `style` attribute on any element — the `<div>` is only there so the snippet parses.
+
+## `command`
+
+```yaml
+detect:
+  command:
+    run: ["uv", "run", "python", "scripts/check_layers.py", "{{files}}"]
+    output: json            # json | sarif
+    captures: [layer, target]
+```
+
+- `run`: the command and its arguments, run from the project root. The argument that is exactly `{{files}}` is replaced by the rule's files; if there is no such argument, the files are appended. A rule that selects no files does not run the command at all.
+- `output`: `json` is an array of `{ file, line, endLine?, column?, text?, ...captures }`. `file` may be absolute or repo-relative. `sarif` is read as SARIF 2.1.0, taking `runs[].results[]`; a result with no location is skipped, and captures are read from the result's `properties`.
+- `captures`: the names your message uses. Each must be a string on **every** result — a missing one disables the rule, so the mistake is visible rather than silently blank. A capture may not shadow `file`, `line`, `column`, `text` or `rule`.
+- The exit code is ignored: finding something is not failing. Output that cannot be parsed disables the rule and is reported by `rulecast validate`.
+- Default stages: `edit`, `verify`.
+
+## `linter`
+
+```yaml
+detect:
+  linter: { tool: ruff, rules: [T201] }
+```
+
+- `tool`: `ruff`, `oxlint` or `eslint`. rulecast looks for it in the project's `node_modules/.bin`, then — for `ruff` in a project with a `pyproject.toml` — as `uv run ruff`, then on `PATH`. A tool that is not installed disables its own rules and nothing else.
+- `rules`: the linter's own rule ids to report. Leave it out to take every finding the tool reports.
+- One process per tool per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
+- Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
+- Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**, because it is slow enough to be felt on every edit. Write `stages: [edit, verify]` if you want it anyway.
+
 ## Coming later
 
-`ast-grep` (structural patterns), `command` (your own script), `linter` (ruff, oxlint, eslint) and `llm` (a model's judgement) are designed but not in this version: `rulecast validate` reports `unknown detector` for them. Until then, write the convention as a `regex` rule when a text pattern catches it well, or as a `stages: [touch]` rule that delivers the section.
+`llm` (a model's judgement on a file, for conventions no pattern can express) is designed but not in this version: `rulecast validate` reports `unknown detector` for it. Until then, write the convention as a `stages: [touch]` rule that delivers the section, so the agent reads it before it writes the code.
