@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises"
+import { realpathSync } from "node:fs"
+import { mkdtemp, readFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
@@ -71,6 +73,16 @@ describe("tool adapters", () => {
     expect(TOOLS.ruff.parse("[]", ROOT)).toEqual([])
     expect(TOOLS.oxlint.parse('{"diagnostics":[]}', ROOT)).toEqual([])
     expect(TOOLS.eslint.parse('[{"filePath":"/repo/a.js","messages":[]}]', ROOT)).toEqual([])
+  })
+
+  test("relativises a path the tool resolved through a symlink", async () => {
+    // macOS /tmp is a symlink to /private/tmp and eslint reports realpaths, so a root given as
+    // /tmp/x comes back as /private/tmp/x. Without this the file never matches the rule's.
+    const root = await mkdtemp(path.join(tmpdir(), "rulecast-symlink-"))
+    const real = realpathSync(root)
+    expect(real, "this test needs a symlinked temp directory").not.toBe(root)
+    const stdout = JSON.stringify([{ filePath: path.join(real, "src/a.js"), messages: [{ ruleId: "x", line: 1 }] }])
+    expect(TOOLS.eslint.parse(stdout, root)[0]!.file).toBe("src/a.js")
   })
 
   test("unreadable output is an error naming the tool", () => {

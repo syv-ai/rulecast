@@ -417,7 +417,7 @@ detect:
     captures: [layer, target]
 ```
 
-Runs the command once per rule via `perRule`, with the rule's files substituted for `{{files}}` (or appended). `json` output is an array of `{ file, line, endLine?, column?, text?, ...captures }`; `sarif` output is read as SARIF 2.1.0 results. Every declared capture must be a string field of every result; a missing one is a rule error. Exit code is ignored; unparseable stdout is a rule error. Captures: as declared. Events: `edit`, `verify`.
+Runs the command once per rule via `perRule`, with the rule's files replacing the argv element that is exactly `{{files}}`, or appended when there is none. A rule that selects no files does not run. `sarif` captures are read from a result's `properties`, falling back to the result itself. `json` output is an array of `{ file, line, endLine?, column?, text?, ...captures }`; `sarif` output is read as SARIF 2.1.0 results. Every declared capture must be a string field of every result; a missing one is a rule error. Exit code is ignored; unparseable stdout is a rule error. Captures: as declared. Events: `edit`, `verify`.
 
 ### `linter`
 
@@ -426,7 +426,7 @@ detect:
   linter: { tool: ruff, rules: [T201] }
 ```
 
-Runs each tool once per event in JSON mode over the union of files selected by its rules, then attributes findings to rules by linter rule id (all findings when a rule omits `rules`). Tools in 0.1: `ruff`, `oxlint`, `eslint`, resolved from the project (`node_modules/.bin`, `uv run`, then `PATH`). Captures: `message`, `ruleId`. Events: `edit`, `verify` for `ruff` and `oxlint`; `verify` only for `eslint`.
+Runs each tool once per event in JSON mode over the union of files selected by its rules, then attributes findings to rules by linter rule id (all findings when a rule omits `rules`). Tools in 0.1: `ruff`, `oxlint`, `eslint`, resolved from the project: `node_modules/.bin`, then `uv run` for a Python tool in a project with a `pyproject.toml`, then `PATH`. `{{text}}` is the source the finding points at, and a path the tool resolved through a symlink is still matched to the project. A tool that cannot run disables its own rules only, never the other tools in the same run. Captures: `message`, `ruleId`. Events: `edit`, `verify` for `ruff` and `oxlint`; `verify` only for `eslint`.
 
 ### `llm`
 
@@ -726,6 +726,7 @@ Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itse
 - **Session:** scenario tests driven directly with synthetic findings and events — `touch → edit → edit → reset → edit → verify ×4 → prompt → verify`, sections covered by whole files, agent reads, budget fallbacks, subagent isolation, a reset re-delivering the touch context of restored files — asserted against golden `Delivery` values. No detectors, no fixture repo.
 - **Detector contract suite** (exported): batching attribution, per-rule and whole-run errors, declared captures present on every match, abort handling, empty input. Plus fixture cases per built-in detector.
 - **Adapter contract suite** (exported): recorded payloads → `Event` snapshots; `Delivery` → output snapshots.
+- **Linters:** oxlint runs for real (a devDependency, forwarded into the fixture's `node_modules/.bin`); ruff and eslint are replayed from recordings under `test/payloads/linter/`, with `RULECAST_LINTERS=1` running whichever real binaries the machine has and checking the recordings still describe them.
 - **End to end:** a few scenarios through `rulecast hook claude-code` on a fixture repo (TSX + Python).
 - **Perf test:** §13.
 - **LLM:** recorded-response fake behind the provider interface; one opt-in live test per provider.
