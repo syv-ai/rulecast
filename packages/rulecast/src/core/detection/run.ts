@@ -1,6 +1,14 @@
 import type { CompiledRule } from "../compile/rule"
 import { errorMessage } from "../errors"
-import type { Cache, ChangeSet, DetectorEvent, DetectorResult, Match, ResolvedReference } from "../types"
+import type {
+  Cache,
+  ChangeSet,
+  DetectorEvent,
+  DetectorResult,
+  DetectorSettings,
+  Match,
+  ResolvedReference,
+} from "../types"
 import type { DetectorRegistry } from "./registry"
 import type { Selection } from "./select"
 
@@ -12,6 +20,7 @@ export interface DetectionInput {
   registry: DetectorRegistry
   cacheFor(kind: string): Cache
   contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
+  settings: DetectorSettings
   timeoutMs: number
 }
 
@@ -61,6 +70,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
             rules,
             changes: input.changes,
             cache: input.cacheFor(kind),
+            settings: input.settings,
             cwd: input.root,
             signal: controller.signal,
           }),

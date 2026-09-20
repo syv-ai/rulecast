@@ -4,7 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../../src/core/detection/cache"
-import type { DetectorRuleInput } from "../../../src/core/types"
+import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { argvFor, commandDetector } from "../../../src/detectors/command/detector"
 import type { CommandConfig } from "../../../src/detectors/command/schema"
 import { createProject } from "../../helpers/project"
@@ -30,6 +30,7 @@ const run = (cwd: string, rules: DetectorRuleInput<CommandConfig>[]) =>
     rules,
     changes: new Map(),
     cache: memoryCache(),
+    settings: defaultDetectorSettings(),
     cwd,
     signal: new AbortController().signal,
   })

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 
 import { memoryCache } from "../core/detection/cache"
 import type { AnyDetector } from "../core/detection/registry"
-import type { DetectorEvent, DetectorResult } from "../core/types"
+import { type DetectorEvent, type DetectorResult, defaultDetectorSettings } from "../core/types"
 import { type ContractCase, contractProject } from "./contract"
 
 export interface DetectorFixture {
@@ -36,6 +36,7 @@ function run(detector: AnyDetector, rules: unknown[], cwd: string, signal: Abort
     rules: rules as any,
     changes: new Map(),
     cache: memoryCache(),
+    settings: defaultDetectorSettings(),
     cwd,
     signal,
   })

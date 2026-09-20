@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../../src/core/detection/cache"
-import type { DetectorRuleInput } from "../../../src/core/types"
+import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
 import { linkTool, stubArgv, stubTool } from "../../helpers/linters"
@@ -22,6 +22,7 @@ const run = (cwd: string, rules: DetectorRuleInput<LinterConfig>[], event: "edit
     rules,
     changes: new Map(),
     cache: memoryCache(),
+    settings: defaultDetectorSettings(),
     cwd,
     signal: new AbortController().signal,
   })

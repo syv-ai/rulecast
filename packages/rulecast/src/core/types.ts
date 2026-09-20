@@ -78,6 +78,8 @@ export interface DetectorRun<Config> {
   /** File absent = no baseline, the whole file is new. */
   changes: ReadonlyMap<string, ChangeSet>
   cache: Cache
+  /** Project settings from .rulecast-config.yaml; a detector that needs none ignores them. */
+  settings: DetectorSettings
   cwd: string
   signal: AbortSignal
 }

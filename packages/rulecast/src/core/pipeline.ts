@@ -172,6 +172,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         }
         return references
       },
+      settings: { llm: config.llm },
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
     })
 

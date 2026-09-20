@@ -4,7 +4,7 @@ import { z } from "zod"
 import { memoryCache } from "../../../src/core/detection/cache"
 import { createRegistry } from "../../../src/core/detection/registry"
 import { runDetection } from "../../../src/core/detection/run"
-import type { Detector, DetectorRun, Match } from "../../../src/core/types"
+import { type Detector, type DetectorRun, defaultDetectorSettings, type Match } from "../../../src/core/types"
 import { rule } from "../../helpers/rules"
 
 const match = (file: string, captures: Record<string, string> = {}): Match => ({
@@ -36,11 +36,25 @@ function input(
     registry: createRegistry(detectors),
     cacheFor: () => memoryCache(),
     contextFor: async () => [],
+    settings: defaultDetectorSettings(),
     timeoutMs,
   }
 }
 
 describe("runDetection", () => {
+  test("hands every detector the project's llm settings", async () => {
+    const calls: DetectorRun<unknown>[] = []
+    const a = detector("a", async (run) => {
+      calls.push(run)
+      return { findings: [], errors: [] }
+    })
+    const settings = {
+      llm: { provider: "opencode" as const, baseUrl: "http://x.test", apiKeyEnv: "KEY", maxFilesPerVerify: 3 },
+    }
+    await runDetection({ ...input([{ rule: detectorRule("r1", "a"), files: ["x.ts"] }], [a]), settings })
+    expect(calls[0]!.settings).toEqual(settings)
+  })
+
   test("calls each detector kind once with all its rules", async () => {
     const calls: DetectorRun<unknown>[] = []
     const a = detector("a", async (run) => {

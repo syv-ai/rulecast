@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { memoryCache } from "../../../src/core/detection/cache"
 import { perRule } from "../../../src/core/detection/per-rule"
-import type { DetectorRun, Match } from "../../../src/core/types"
+import { type DetectorRun, defaultDetectorSettings, type Match } from "../../../src/core/types"
 
 function run(rules: string[]): DetectorRun<null> {
   return {
@@ -9,6 +9,7 @@ function run(rules: string[]): DetectorRun<null> {
     rules: rules.map((id) => ({ id, config: null, files: ["a.ts"], context: [] })),
     changes: new Map(),
     cache: memoryCache(),
+    settings: defaultDetectorSettings(),
     cwd: "/tmp",
     signal: new AbortController().signal,
   }

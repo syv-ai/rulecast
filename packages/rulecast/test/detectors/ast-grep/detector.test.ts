@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../../src/core/detection/cache"
-import type { DetectorRuleInput } from "../../../src/core/types"
+import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { astGrepDetector } from "../../../src/detectors/ast-grep/detector"
 import type { AstGrepConfig } from "../../../src/detectors/ast-grep/schema"
 import { createProject } from "../../helpers/project"
@@ -12,7 +12,15 @@ async function ruleFor(id: string, config: unknown, files: string[]): Promise<De
 }
 
 const run = async (cwd: string, rules: DetectorRuleInput<AstGrepConfig>[], signal = new AbortController().signal) =>
-  astGrepDetector.run({ event: "edit", rules, changes: new Map(), cache: memoryCache(), cwd, signal })
+  astGrepDetector.run({
+    event: "edit",
+    rules,
+    changes: new Map(),
+    cache: memoryCache(),
+    settings: defaultDetectorSettings(),
+    cwd,
+    signal,
+  })
 
 const PY =
   "def get(id):\n    if not id:\n        raise HTTPException(404, detail='missing')\n    raise HTTPException(403)\n"

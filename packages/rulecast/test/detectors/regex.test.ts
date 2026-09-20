@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../src/core/detection/cache"
+import { defaultDetectorSettings } from "../../src/core/types"
 import { regexDetector } from "../../src/detectors/regex"
 import { createProject } from "../helpers/project"
 
@@ -32,6 +33,7 @@ describe("regex detector", () => {
       ],
       changes: new Map(),
       cache: memoryCache(),
+      settings: defaultDetectorSettings(),
       cwd,
       signal: new AbortController().signal,
     })
