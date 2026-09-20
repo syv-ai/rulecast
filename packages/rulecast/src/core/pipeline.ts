@@ -4,6 +4,7 @@ import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, start
 import type { CompiledProject } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { createReferenceResolver } from "./delivery/resolve"
+import { applyFileBudget } from "./detection/budget"
 import { detectorCacheDir, diskCache } from "./detection/cache"
 import { readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
@@ -154,9 +155,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    const selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
+    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
       (selection) => !skip.has(selection.rule.detector!.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
     )
+    // Spec §6: at most llm.max_files_per_verify files per verify, most recently edited first.
+    // work.edited is least recently edited first, so it is reversed.
+    let overBudget: string[] = []
+    if (event.kind === "verify") {
+      const budgeted = applyFileBudget("llm", selections, config.llm.maxFilesPerVerify, [...view.work.edited].reverse())
+      selections = budgeted.selections
+      overBudget = budgeted.skipped
+    }
     const output = await runDetection({
       root,
       event: event.kind,
@@ -187,6 +196,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       warnings.push({
         key: `detector:${error.kind}:${error.rules.join(",")}:${error.message}`,
         text: `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. Disabled for this session.`,
+      })
+    }
+    if (overBudget.length > 0) {
+      // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
+      // failure, so it must not change the exit code.
+      warnings.push({
+        key: `llm-budget:${overBudget.join(",")}`,
+        text: `llm rules checked ${config.llm.maxFilesPerVerify} files; ${overBudget.length} were not checked: ${overBudget.join(", ")}. Raise llm.max_files_per_verify, or run rulecast run --files on them.`,
       })
     }
     for (const timeout of output.timedOut) {
