@@ -59,7 +59,10 @@ describe("linter detector", () => {
     // set changes between releases, and this test is not about which rules it ships.
     const all = result.findings.filter((finding) => finding.rule === "everything")
     expect(all.every((finding) => finding.match.file === "src/a.js")).toBe(true)
-    expect(all.map((finding) => finding.match.captures.ruleId)).toContain("no-debugger")
+    // More than the filtered rule's one id, which is the whole point of omitting `rules`.
+    const allIds = all.map((finding) => finding.match.captures.ruleId)
+    expect(allIds).toContain("no-debugger")
+    expect(allIds).toContain("no-unused-vars")
   })
 
   test("passes the union of files to the tool exactly once", async () => {
