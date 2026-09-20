@@ -27,7 +27,12 @@ const PROJECT: Record<string, string> = {
   "AGENTS.md": "# Agents\n\n## Errors\n\nServices raise domain exceptions.\n",
   "CLAUDE.md": "@AGENTS.md\n",
 }
-const PYTHON = ["python/layering", "python/no-httpexception-in-services", "python/no-queries-in-services"]
+const PYTHON = [
+  "python/layering",
+  "python/no-httpexception-in-services",
+  "python/no-queries-in-services",
+  "python/no-silent-except",
+]
 const PROMPT =
   "Read https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/DRAFT-RULES.md\n" +
   "and follow it to draft rulecast rules for this project from AGENTS.md."
@@ -52,7 +57,7 @@ describe("rulecast init --yes", () => {
     const settings = JSON.parse(await read(root, ".claude/settings.json"))
     expect(settings.hooks.Stop[0].hooks[0].command).toBe("rulecast hook claude-code")
     expect(result.stdout).toContain("python · AGENTS.md (imported by CLAUDE.md) · Claude Code (CLAUDE.md)")
-    expect(result.stdout).toContain("rulecast validate: 3 rules valid")
+    expect(result.stdout).toContain("rulecast validate: 4 rules valid")
     expect(result.stdout).toContain(PROMPT)
     expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")
     expect(result.copied).toEqual([])
@@ -69,7 +74,9 @@ describe("rulecast init --yes", () => {
     const result = await runCli(root, ["init", "--yes"], "", env)
     expect(result.code).toBe(0)
     const after = await read(root, CONFIG_FILE)
-    expect(ids(after)).toEqual([...PYTHON, "react/data-fetching", "react/no-fetch-in-components"].sort())
+    expect(ids(after)).toEqual(
+      [...PYTHON, "react/data-fetching", "react/no-fetch-in-components", "react/no-inline-style"].sort(),
+    )
     const local = before.indexOf("  - repo: local")
     expect(after.startsWith(before.slice(0, local))).toBe(true)
     expect(after.endsWith(before.slice(local))).toBe(true)
@@ -132,7 +139,7 @@ describe("rulecast init without a terminal", () => {
     const root = await createRepo(PROJECT)
     const result = await runCli(root, ["init"], "", env)
     expect(result.code).toBe(2)
-    expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 3 rules from .+@v0\.2\.0\n/)
+    expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 4 rules from .+@v0\.2\.0\n/)
     expect(result.stdout).toContain(".claude/settings.json  +6 hooks (Claude Code)")
     expect(result.stdout).toContain("Rerun with --yes")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
@@ -163,7 +170,7 @@ describe("rulecast init in a terminal", () => {
     ])
     const [rules, conventions] = script.asked
     expect([...(rules!.initial as string[])].sort()).toEqual(PYTHON)
-    expect(rules!.values).toHaveLength(6)
+    expect(rules!.values).toHaveLength(8)
     expect(conventions!.values).toEqual(["", "@AGENTS.md", "@AGENTS.md#agents", "@AGENTS.md#errors"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
       { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
@@ -184,8 +191,8 @@ describe("rulecast init in a terminal", () => {
 
   test("declining the review writes nothing", async () => {
     const root = await createRepo(PROJECT)
-    // Rules, three conventions (one per preselected rule), agents, scope, then "Write?".
-    const script = scriptedPrompter([ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, false])
+    // Rules, four conventions (one per preselected rule), agents, scope, then "Write?".
+    const script = scriptedPrompter([ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, false])
     const result = await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
     expect(result.code).toBe(0)
     expect(script.shown.at(-1)).toBe("Nothing written.")
