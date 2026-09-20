@@ -1,0 +1,48 @@
+[
+  {
+    "filePath": "__ROOT__/src/a.js",
+    "messages": [
+      {
+        "ruleId": "no-console",
+        "severity": 2,
+        "message": "Unexpected console statement.",
+        "line": 1,
+        "column": 1,
+        "messageId": "unexpected",
+        "endLine": 1,
+        "endColumn": 12,
+        "suggestions": [
+          {
+            "fix": {
+              "range": [0, 17],
+              "text": ""
+            },
+            "messageId": "removeConsole",
+            "data": {
+              "propertyName": "log"
+            },
+            "desc": "Remove the console.log()."
+          }
+        ]
+      },
+      {
+        "ruleId": "no-debugger",
+        "severity": 1,
+        "message": "Unexpected 'debugger' statement.",
+        "line": 3,
+        "column": 1,
+        "messageId": "unexpected",
+        "endLine": 3,
+        "endColumn": 9
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 1,
+    "fatalErrorCount": 0,
+    "warningCount": 1,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "console.log(\"hi\")\nconst unused = 1\ndebugger\n",
+    "usedDeprecatedRules": []
+  }
+]
