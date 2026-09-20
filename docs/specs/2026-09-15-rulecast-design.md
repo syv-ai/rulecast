@@ -694,7 +694,7 @@ Mechanisms:
 
 **Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
 
-**Perf test.** CI runs a fixture project with 30 rules across ast-grep, regex, path, ruff and command, replays 50 edit events, and fails if p95 exceeds 500 ms.
+**Perf test.** CI runs a fixture project with 30 rules across ast-grep, regex, path, `linter` (oxlint — the one linter that can be a workspace devDependency, §15) and command, replays 50 edit events, and fails if p95 exceeds 500 ms. Measured 2026-09-20 on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load. Most of the growth over a regex-only project is subprocess start, one per external tool per event.
 
 ## 14. Error handling
 
