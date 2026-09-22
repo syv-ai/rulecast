@@ -6,19 +6,23 @@
   "scripts": {
     "binary": "pnpm --filter @syv-ai/rulecast binary",
     "build": "pnpm --filter @syv-ai/rulecast build",
+    "changeset": "changeset",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
     "manifest": "pnpm --filter @syv-ai/rulecast manifest",
     "prepare": "lefthook install",
     "readme": "pnpm --filter @syv-ai/rulecast readme",
+    "release": "pnpm build && changeset publish",
     "sync-version": "pnpm --filter @syv-ai/rulecast sync-version",
     "test": "pnpm -r test",
     "test:perf": "pnpm --filter @syv-ai/rulecast test:perf",
     "typecheck": "pnpm -r typecheck",
+    "version-packages": "changeset version && pnpm sync-version",
     "vitest": "pnpm --filter @syv-ai/rulecast exec vitest"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@changesets/cli": "^3.0.3",
     "lefthook": "2.1.14"
   }
 }

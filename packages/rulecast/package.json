@@ -2,7 +2,24 @@
   "name": "@syv-ai/rulecast",
   "version": "0.0.0",
   "description": "Deliver project conventions to coding agents at the moment they matter.",
+  "keywords": [
+    "claude-code",
+    "coding-agent",
+    "coding-agents",
+    "conventions",
+    "lint",
+    "hooks",
+    "ast-grep",
+    "agents"
+  ],
   "license": "MIT",
+  "homepage": "https://github.com/syv-ai/rulecast#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syv-ai/rulecast.git",
+    "directory": "packages/rulecast"
+  },
+  "bugs": "https://github.com/syv-ai/rulecast/issues",
   "type": "module",
   "engines": {
     "node": ">=20.12"
@@ -19,6 +36,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "binary": "tsx scripts/build-binary.ts",
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean",
