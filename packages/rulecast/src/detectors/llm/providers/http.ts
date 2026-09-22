@@ -1,4 +1,5 @@
-import { type LlmRequest, LlmUnavailableError } from "./types"
+import type { LlmSettings } from "../../../core/types"
+import { type LlmAvailability, type LlmRequest, LlmUnavailableError } from "./types"
 
 /** The configured base_url, or the provider's own API. Spec §6, widened to both HTTP providers. */
 export function endpoint(baseUrl: string | null, fallback: string, path: string): string {
@@ -42,4 +43,16 @@ export async function postJson(
     throw new Error(message)
   }
   return response.json()
+}
+
+/** The key is set, and where the call would go. Never opens a socket: `rulecast doctor` (spec §5). */
+export function keyAvailability(
+  settings: LlmSettings,
+  env: NodeJS.ProcessEnv,
+  fallback: string,
+  path: string,
+): LlmAvailability {
+  return env[settings.apiKeyEnv]
+    ? { ok: true, detail: endpoint(settings.baseUrl, fallback, path) }
+    : { ok: false, detail: `$${settings.apiKeyEnv} is not set` }
 }

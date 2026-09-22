@@ -22,6 +22,10 @@ function counting(answer: () => LlmFinding[] = () => FINDINGS): LlmProvider & { 
       provider.calls++
       return answer()
     },
+    // The cache is what these tests are about; the backend is always reachable.
+    async available() {
+      return { ok: true, detail: "fake" }
+    },
   }
   return provider
 }

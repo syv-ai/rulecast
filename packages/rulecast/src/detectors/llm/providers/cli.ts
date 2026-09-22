@@ -3,7 +3,8 @@ import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
 import { isNotFound } from "../../../core/errors"
-import { LlmUnavailableError } from "./types"
+import { onPath } from "../../../core/which"
+import { type LlmAvailability, LlmUnavailableError } from "./types"
 
 export interface CliResult {
   stdout: string
@@ -60,4 +61,13 @@ export function runCli(
       })
     })
   })
+}
+
+/** resolveCli, then the PATH: what `available` reports for a CLI provider. */
+export async function cliAvailable(name: string, cwd: string): Promise<LlmAvailability> {
+  const resolved = await resolveCli(name, cwd)
+  if (resolved !== name) return { ok: true, detail: resolved }
+  return (await onPath(name))
+    ? { ok: true, detail: `${name} (PATH)` }
+    : { ok: false, detail: `${name} is not installed` }
 }

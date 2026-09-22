@@ -1,5 +1,5 @@
 import { extractFindingsJson } from "./extract"
-import { apiKey, endpoint, postJson } from "./http"
+import { apiKey, endpoint, keyAvailability, postJson } from "./http"
 import { type LlmFinding, type LlmProvider, type LlmRequest, responseSchema } from "./types"
 
 /** The origin, without a version prefix, as the Anthropic SDKs define `base_url`. */
@@ -37,4 +37,5 @@ export const anthropicProvider: LlmProvider = {
     if (scanned.success) return scanned.data.findings
     throw new Error(`the anthropic API returned no usable JSON: ${text.trim().slice(0, 200)}`)
   },
+  available: async ({ settings, env }) => keyAvailability(settings, env, API, "/v1/messages"),
 }

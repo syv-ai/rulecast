@@ -1,6 +1,14 @@
 import { readSourceFile } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
-import type { ChangeSet, Detector, DetectorResult, DetectorRuleInput, LlmSettings, Match } from "../../core/types"
+import type {
+  ChangeSet,
+  CheckResult,
+  Detector,
+  DetectorResult,
+  DetectorRuleInput,
+  LlmSettings,
+  Match,
+} from "../../core/types"
 import { askCached, callKey } from "./call"
 import { resolveModel } from "./models"
 import { buildPrompt, type PromptRule } from "./prompt"
@@ -104,6 +112,14 @@ function toFindings(call: Call, answered: LlmFinding[]): { rule: string; match: 
   return findings
 }
 
+/**
+ * Why an alias cannot be used with a provider. runCall prefixes it with the model; doctor's check
+ * does not, because its result already names the model. One sentence, so the two cannot drift.
+ */
+function unmappedModel(provider: LlmSettings["provider"]): string {
+  return `no name for the ${provider} provider; use that provider's own model name`
+}
+
 async function runCall(
   call: Call,
   provider: LlmProvider,
@@ -111,11 +127,7 @@ async function runCall(
   input: Parameters<Detector<LlmConfig>["run"]>[0],
 ): Promise<{ rule: string; match: Match }[]> {
   const model = resolveModel(call.model, settings.provider)
-  if (model === null) {
-    throw new Error(
-      `model "${call.model}" has no name for the ${settings.provider} provider; use that provider's own model name`,
-    )
-  }
+  if (model === null) throw new Error(`model "${call.model}" has ${unmappedModel(settings.provider)}`)
   const rules = promptRules(call.rules)
   const key = callKey({
     file: call.file,
@@ -187,5 +199,55 @@ export const llmDetector: Detector<LlmConfig> = {
       result.findings.push(...outcome.findings)
     }
     return result
+  },
+  /**
+   * The two pre-flight checks plan 6a deferred here: is the backend reachable at all, and does
+   * every rule's model alias have a name for it. Both are environmental and free — nothing in this
+   * method calls a model, which is also why doctor does not dry-run llm rules.
+   */
+  async check(input): Promise<CheckResult[]> {
+    const settings = input.settings.llm
+    const ids = input.rules.map((rule) => rule.id)
+
+    let provider: LlmProvider
+    try {
+      provider = providerByName(settings.provider)
+    } catch (error) {
+      return [{ what: settings.provider, level: "error", detail: errorMessage(error), rules: ids }]
+    }
+    const reachable = await provider.available({ settings, env: input.env, cwd: input.cwd })
+    const results: CheckResult[] = [
+      {
+        what: settings.provider,
+        level: reachable.ok ? "ok" : "error",
+        detail: reachable.detail,
+        rules: reachable.ok ? [] : ids,
+      },
+    ]
+
+    // One result per distinct model, in first-use order: every rule naming it shares its fate.
+    const byModel = new Map<string, string[]>()
+    for (const rule of input.rules) {
+      byModel.set(rule.config.model, [...(byModel.get(rule.config.model) ?? []), rule.id])
+    }
+    for (const [model, rules] of byModel) {
+      const resolved = resolveModel(model, settings.provider)
+      results.push(
+        resolved === null
+          ? {
+              what: `model "${model}"`,
+              level: "error",
+              detail: unmappedModel(settings.provider),
+              rules,
+            }
+          : {
+              what: `model "${model}"`,
+              level: "ok",
+              detail: resolved === model ? "passed through" : resolved,
+              rules: [],
+            },
+      )
+    }
+    return results
   },
 }

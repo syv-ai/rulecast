@@ -1,4 +1,4 @@
-import { resolveCli, runCli } from "./cli"
+import { cliAvailable, resolveCli, runCli } from "./cli"
 import { extractFindingsJson } from "./extract"
 import { FINDINGS_SCHEMA, type LlmFinding, type LlmProvider, type LlmRequest, responseSchema } from "./types"
 
@@ -66,6 +66,7 @@ export const claudeCodeProvider: LlmProvider = {
       `claude returned no usable JSON (exit ${result.code}): ${firstLine(result.stderr || result.stdout)}`,
     )
   },
+  available: ({ cwd }) => cliAvailable("claude", cwd),
 }
 
 function parseJson(text: string): unknown {

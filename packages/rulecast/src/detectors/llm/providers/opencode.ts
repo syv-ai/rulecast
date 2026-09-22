@@ -1,4 +1,4 @@
-import { resolveCli, runCli } from "./cli"
+import { cliAvailable, resolveCli, runCli } from "./cli"
 import { extractFindingsJson } from "./extract"
 import { type LlmFinding, type LlmProvider, type LlmRequest, responseSchema } from "./types"
 
@@ -41,6 +41,7 @@ export const opencodeProvider: LlmProvider = {
       `opencode returned no usable JSON (exit ${result.code}): ${firstLine(result.stderr || result.stdout)}`,
     )
   },
+  available: ({ cwd }) => cliAvailable("opencode", cwd),
 }
 
 function firstLine(text: string): string {

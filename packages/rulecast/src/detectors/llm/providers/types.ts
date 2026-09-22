@@ -56,7 +56,20 @@ export interface LlmRequest {
  */
 export class LlmUnavailableError extends Error {}
 
+/** What `rulecast doctor` learns about a backend without calling it (spec §5). */
+export interface LlmAvailability {
+  ok: boolean
+  /** The resolved binary or the endpoint when ok; why not when it is not. */
+  detail: string
+}
+
 export interface LlmProvider {
   name: string
   ask(request: LlmRequest): Promise<LlmFinding[]>
+  /**
+   * Can this backend be reached at all — the binary exists, or the key is set. Environmental, so
+   * it never calls the model: a false answer here is the same situation ask() would report as
+   * LlmUnavailableError, found before anything is spent.
+   */
+  available(input: { settings: LlmSettings; env: NodeJS.ProcessEnv; cwd: string }): Promise<LlmAvailability>
 }

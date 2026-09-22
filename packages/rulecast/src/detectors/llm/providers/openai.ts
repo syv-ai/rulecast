@@ -1,5 +1,5 @@
 import { extractFindingsJson } from "./extract"
-import { apiKey, endpoint, postJson } from "./http"
+import { apiKey, endpoint, keyAvailability, postJson } from "./http"
 import { type LlmFinding, type LlmProvider, type LlmRequest, responseSchema } from "./types"
 
 /**
@@ -34,4 +34,5 @@ export const openaiCompatibleProvider: LlmProvider = {
     if (scanned.success) return scanned.data.findings
     throw new Error(`the ${request.settings.provider} API returned no usable JSON: ${text.trim().slice(0, 200)}`)
   },
+  available: async ({ settings, env }) => keyAvailability(settings, env, API, "/chat/completions"),
 }
