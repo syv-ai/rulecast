@@ -1,7 +1,12 @@
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { generateVersionFile, withVersion } from "../../scripts/sync-version"
+import { run } from "../helpers/script"
+
+const packageDir = fileURLToPath(new URL("../../", import.meta.url))
 
 const SOURCE = [
   "/** A comment that must survive. */",
@@ -34,4 +39,19 @@ describe("sync-version", () => {
     const { target, source } = await generateVersionFile()
     expect(await readFile(target, "utf8"), "src/core/version.ts is stale: run pnpm sync-version").toBe(source)
   })
+})
+
+test("--check exits 1 when version.ts is stale, and 0 when it is not", async () => {
+  // The CI gate that keeps a published binary from reporting the wrong version rests on this.
+  const script = path.join(packageDir, "scripts/sync-version.ts")
+  await expect(run(script)).resolves.toBe(0)
+  const target = path.join(packageDir, "src/core/version.ts")
+  const original = await readFile(target, "utf8")
+  try {
+    await writeFile(target, withVersion(original, "9.9.9"))
+    await expect(run(script)).resolves.toBe(1)
+  } finally {
+    await writeFile(target, original)
+  }
+  await expect(run(script)).resolves.toBe(0)
 })

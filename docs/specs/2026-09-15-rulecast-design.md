@@ -704,7 +704,7 @@ Mechanisms:
 
 **The 500 ms gate is local, on real hardware.** `pnpm test:perf` on a developer machine asserts it. CI runs the same fixture and reports p50/p95 into the job summary without asserting (`RULECAST_PERF_GATE=0`): a shared runner spawning one subprocess per external tool per event is several times slower than the hardware the promise is made about, and a build that goes red because a runner was busy is the fastest way to teach people to ignore CI. Both modes still assert that every event produced the expected finding — a perf run that measured a hook doing nothing would be worse than no measurement.
 
-Measured on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load (2026-09-20, five detectors); p50 188 ms, p95 203 ms (2026-09-22, all six). Most of the growth over a regex-only project is subprocess start, one per external tool per event.
+Measured on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load (2026-09-20, five detectors); p50 188 ms, p95 203 ms (2026-09-22, all six). On a GitHub `ubuntu-latest` runner, the same fixture: **p50 235 ms, p95 247 ms** (2026-09-22) — the first numbers this project has from hardware other than one laptop. Most of the growth over a regex-only project is subprocess start, one per external tool per event.
 
 ## 14. Error handling
 

@@ -12,8 +12,13 @@ import { TEST_HOME } from "./helpers/home"
 
 const exec = promisify(execFile)
 const hasBun = spawnSync("bun", ["--version"], { encoding: "utf8" }).status === 0
-/** A prebuilt binary needs no bun; without one, the describe builds its own and so does. */
-const canRun = hasBun || (process.env.RULECAST_BINARY !== undefined && existsSync(process.env.RULECAST_BINARY))
+/**
+ * A prebuilt binary needs no bun; without one, the describe builds its own and so needs bun.
+ * Set-but-missing still runs, so beforeAll can fail loudly rather than skipping the check CI
+ * relies on.
+ */
+const prebuilt = process.env.RULECAST_BINARY
+const canRun = hasBun || prebuilt !== undefined
 
 const PY_RULE = {
   id: "no-silent-except",
@@ -40,8 +45,11 @@ describe.runIf(canRun)("standalone binary", () => {
   beforeAll(async () => {
     // CI builds the binary once per platform with `pnpm binary` and points this at it; locally,
     // with nothing set, it builds its own. One definition of "the binary works" for both.
-    const prebuilt = process.env.RULECAST_BINARY
-    if (prebuilt !== undefined && existsSync(prebuilt)) {
+    if (prebuilt !== undefined) {
+      // Never fall back to building: CI sets this to the artifact the job just produced, and the
+      // whole point of the job is to catch a name or path that does not match. Building our own
+      // would make it green on exactly that mistake.
+      if (!existsSync(prebuilt)) throw new Error(`RULECAST_BINARY is set to ${prebuilt}, which does not exist`)
       binary = prebuilt
       return
     }

@@ -16,8 +16,16 @@ const packageDir = fileURLToPath(new URL("../", import.meta.url))
  * No Windows: core/which.ts and detectors/linter/resolve.ts shell out to /bin/sh, commands/spawn.ts
  * assumes POSIX detached spawning, and nothing in the suite would catch a regression there.
  */
-export const BINARY_TARGETS = ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"] as const
-export type BinaryTarget = (typeof BINARY_TARGETS)[number]
+export const BINARY_RUNNERS = {
+  "linux-x64": "ubuntu-latest",
+  "linux-arm64": "ubuntu-24.04-arm",
+  "darwin-arm64": "macos-latest",
+  // macos-13 was retired on 2025-12-04; macos-15-intel is the Intel image.
+  "darwin-x64": "macos-15-intel",
+} as const
+
+export const BINARY_TARGETS = Object.keys(BINARY_RUNNERS) as [BinaryTarget, ...BinaryTarget[]]
+export type BinaryTarget = keyof typeof BINARY_RUNNERS
 
 /** The target this machine builds for. Throws rather than guessing on a platform 0.1 does not ship. */
 export function hostTarget(platform: string = process.platform, arch: string = process.arch): BinaryTarget {

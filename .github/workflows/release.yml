@@ -37,13 +37,37 @@ jobs:
       # With pending changesets this opens or updates the version PR and stops. With none, and a
       # version that is not on npm yet, it publishes, tags, and cuts the GitHub Release that
       # binaries.yml then attaches binaries to.
-      - uses: changesets/action@v1
+      - id: changesets
+        uses: changesets/action@v1
         with:
           version: pnpm version-packages
           publish: pnpm release
           title: "release: version packages"
           commit: "release: version packages"
+          # rulecast tags itself, below. changesets would tag a workspace package
+          # `@syv-ai/rulecast@0.1.0`, and this repository is also a rule repo consumed by git tag:
+          # latestTag (core/repos/tags.ts) accepts only vX.Y.Z, so that tag would make
+          # `rulecast init` report "no version tags" and offer nobody any catalog rules.
+          createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+
+      # Only after a successful publish. The tag is what the catalog, the drafting prompt and
+      # `rulecast autoupdate` all resolve, and what binaries.yml hangs its uploads on.
+      - name: Tag and release
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./packages/rulecast/package.json').version")
+          pnpm release-notes > /tmp/notes.md
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file /tmp/notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # lefthook's pre-push runs the suite. On the version-PR push that is a useful gate, but
+          # here npm publish has already happened: a flaky test would leave the package published
+          # with no tag, no release, and so no binaries, and an npm version cannot be republished.
+          LEFTHOOK: "0"

@@ -55,7 +55,7 @@ repos:
 
 A rule with `context` and no `detect` delivers guidance the first time an agent touches a matching file, with nothing to catch. That is how you carry over a convention no pattern can express.
 
-The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-format.md).
+The full format is in [`agents/reference/rule-format.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md).
 
 ## Detectors
 
@@ -68,7 +68,7 @@ The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-
 | `linter` | ruff, oxlint or eslint findings, narrowed to the rules you care about | edit (eslint: verify) |
 | `llm` | Conventions nothing mechanical expresses, judged by a model | verify only |
 
-`llm` rules are opt-in, name their own model, and run only when the agent stops — never on an edit. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
+`llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md).
 
 ## Commands
 
@@ -93,8 +93,8 @@ If something is configured but quiet, `rulecast doctor` says why: it compiles th
 
 rulecast ships docs written for coding agents, not for people:
 
-- [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
-- [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
+- [`agents/SETUP.md`](https://github.com/syv-ai/rulecast/blob/main/agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
+- [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 
@@ -115,7 +115,7 @@ Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 ## Performance
 
-The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The last local measurement, on an Apple M3 Pro with all six detectors configured, was p50 171 ms and p95 214 ms.
+The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The last local measurement, on an Apple M3 Pro with all six detectors configured, was p50 188 ms and p95 203 ms. A shared GitHub runner is slower — p50 235 ms, p95 247 ms — which is why CI reports the numbers rather than gating on them.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 
@@ -127,4 +127,4 @@ Next: adapters for Codex, Cursor and OpenCode; Biome; rule tests (good and bad e
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/syv-ai/rulecast/blob/main/LICENSE).
