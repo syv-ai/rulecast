@@ -98,6 +98,28 @@ export interface DetectorWarm<Config> {
   signal: AbortSignal
 }
 
+export interface DetectorCheck<Config> {
+  /** Every rule of this detector kind in the project. */
+  rules: { id: string; config: Config }[]
+  /** Project settings from .rulecast-config.yaml; the same value a run gets. */
+  settings: DetectorSettings
+  /** The process environment, so a check can look for credentials without reaching for process.env. */
+  env: Readonly<Record<string, string | undefined>>
+  cwd: string
+  signal: AbortSignal
+}
+
+/** One thing `rulecast doctor` asked a detector about, and the answer (spec §5). */
+export interface CheckResult {
+  /** What was checked, as a person would name it: "ruff", "ast-grep", `model "haiku"`. */
+  what: string
+  level: "ok" | "warning" | "error"
+  /** Why: a resolved path when it worked, the reason when it did not. */
+  detail: string
+  /** The rules this result decides the fate of; empty when it is about the kind as a whole. */
+  rules: string[]
+}
+
 export interface Detector<Config> {
   kind: string
   /** Input is unknown: schemas may apply defaults and refinements. */
@@ -107,6 +129,8 @@ export interface Detector<Config> {
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>
+  /** Optional: report what this detector's rules need from the environment (rulecast doctor, §5). */
+  check?(input: DetectorCheck<Config>): Promise<CheckResult[]>
 }
 
 export interface Finding {
