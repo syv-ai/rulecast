@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Generated files are checked, never regenerated: a CI that commits can push mid-review.
+      - run: pnpm manifest --check
+      - run: pnpm readme --check
+      - run: pnpm sync-version --check
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20.12 is the floor spec §16 sets and had never been run; 24 is what the project was
+        # written on. bun is deliberately absent, so test/binary.test.ts skips — the binary has its
+        # own job, and building it inside this matrix would double the suite's wall time for no
+        # extra signal.
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Several tests run dist/cli.js; building once up front keeps the first of them from paying
+      # the whole 60 s build inside its own timeout.
+      - run: pnpm build
+      - run: pnpm test
