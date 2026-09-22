@@ -2,6 +2,8 @@
 
 A rule's `detect` names one detector and its config. The message template of every match can use `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}` (the matched text) and `{{rule}}`, plus the detector's captures. Any other variable is a `rulecast validate` error.
 
+A detector needs things the project may not have: a linter binary, a parser, an API key. `rulecast doctor` reports what each configured rule needs and whether it is there, so run it after drafting a rule that names a tool.
+
 ## `regex`
 
 ```yaml

@@ -362,7 +362,7 @@ Consumers:
 - **hook** — rules with diagnostics are skipped; a warning naming them is delivered once per agent context (§9).
 - **validate** — prints diagnostics; exit 2 if any is an error, 0 when the run produced only warnings.
 - **init** — validates what it wrote.
-- **doctor** — compilation, then environment checks (linter binaries, `@ast-grep/napi`, LLM credentials, hook installation, cache paths), then a dry run of every rule on one matching file.
+- **doctor** — compilation, then environment checks (linter binaries, `@ast-grep/napi`, LLM credentials, hook installation, cache paths), then a dry run of every rule on one matching file, each rule alone so a failure names it. The environment checks belong to the detectors, behind `check` (§6). `llm` rules are not dry-run — a model call costs money — so their `check` is what doctor reports for them instead: is the provider reachable, and does every rule's `model` resolve for it. Errors exit 2; warnings (an uninstalled adapter, a rule no file matches) do not.
 
 ## 6. Detectors
 
@@ -375,6 +375,7 @@ Consumers:
 - **Default stages.** `events(config)` gives the rule's default detection stages, so one detector kind can place slow tools on `verify` only.
 - **Cancellation.** Detectors observe `signal`. Work still running when it fires is discarded (§13).
 - **Cache.** Detectors that persist work use `cache`, keyed by content hashes. No module-level state, except memoising a native module whose own registration is process-global — `ast-grep` does this, and nothing derived from a rule, project or event may live there.
+- **Checks.** A detector may implement `check` to report what its rules need from the environment: binaries, native modules, credentials, a model name a provider can express. `rulecast doctor` runs it for every kind a project uses (§5); nothing else does. It never runs the tool it is asking about.
 
 The contract is exported as a test suite (§15) that third-party detectors run.
 
