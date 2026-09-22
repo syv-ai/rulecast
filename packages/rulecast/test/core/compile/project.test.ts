@@ -2,12 +2,12 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
 import { z } from "zod"
-
 import { compile, compileManifest } from "../../../src/core/compile/project"
 import { createRegistry } from "../../../src/core/detection/registry"
 import { repoDir, repoLabel } from "../../../src/core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../../../src/core/repos/provider"
 import type { Detector } from "../../../src/core/types"
+import { VERSION } from "../../../src/core/version"
 import { TEST_HOME } from "../../helpers/home"
 import { createProject } from "../../helpers/project"
 import { createRuleRepo } from "../../helpers/rule-repo"
@@ -189,7 +189,7 @@ describe("compile: local rules", () => {
       ["missing-anchor", 'anchor "#nope" not found in docs/api.md'],
       ["bad-syntax", 'reference "docs/api.md" must start with "@"'],
       ["escapes", 'reference "@../secrets.md" leaves its root'],
-      ["too-new", "requires rulecast 99.0.0 or newer (running 0.0.0)"],
+      ["too-new", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
       ["no-name", "name: Required"],
       ["Bad Id", "id: must be lowercase segments separated by /"],
       [null, "(root): Expected object, received string"],
@@ -279,7 +279,11 @@ describe("compile: the config", () => {
   test("a config newer than rulecast, or a bad global regex, disables every rule", async () => {
     const tooNew = await compileConfig({ ...local(detectRule("a")), minimum_rulecast_version: "99.0.0" })
     expect(tooNew.rules).toEqual([])
-    expect(tooNew.diagnostics.map((d) => d.message)).toEqual(["requires rulecast 99.0.0 or newer (running 0.0.0)"])
+    expect(tooNew.diagnostics.map((d) => d.message)).toEqual([
+      // Not the literal version: `changeset version` bumps it, and a literal here fails the
+      // suite inside the release job and blocks the version commit from being pushed.
+      `requires rulecast 99.0.0 or newer (running ${VERSION})`,
+    ])
     const badRegex = await compileConfig({ ...local(detectRule("a")), files: "(" })
     expect(badRegex.rules).toEqual([])
     expect(badRegex.diagnostics.map((d) => d.message)).toEqual([expect.stringMatching(/^files: invalid regex: /)])

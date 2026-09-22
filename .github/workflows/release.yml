@@ -29,6 +29,11 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
 
+      # `pnpm install` runs lefthook install, so the push this action makes runs pre-push, which
+      # runs the suite. That is deliberate — it caught a test that hard-coded "running 0.0.0" and
+      # would have broken the 0.1.0 bump — but it means a test failure here surfaces as
+      # "failed to push some refs". Read the log above the git error.
+      #
       # With pending changesets this opens or updates the version PR and stops. With none, and a
       # version that is not on npm yet, it publishes, tags, and cuts the GitHub Release that
       # binaries.yml then attaches binaries to.
