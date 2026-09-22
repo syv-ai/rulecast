@@ -1,6 +1,6 @@
 import { readSourceFile } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
-import type { Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
+import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import type { Language } from "./languages"
 import { parserFor } from "./load"
 import { type Metavariable, metavariables } from "./metavars"
@@ -106,5 +106,12 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
       }),
     )
     return result
+  },
+  async check(input): Promise<CheckResult[]> {
+    // One result for the kind, not one per language: the native module either loads or it does
+    // not, and when it does not every ast-grep rule is out for the same reason.
+    const languages = [...new Set(input.rules.map((rule) => rule.config.language as Language))].sort()
+    for (const language of languages) await parserFor(language)
+    return [{ what: "ast-grep", level: "ok", detail: languages.join(", "), rules: [] }]
   },
 }
