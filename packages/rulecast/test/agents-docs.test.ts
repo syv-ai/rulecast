@@ -25,6 +25,17 @@ function repositoryPaths(text: string): string[] {
   return [...text.matchAll(REPOSITORY_URL)].map((match) => match[1]!)
 }
 
+const REPOSITORY_REF =
+  /https:\/\/(?:raw\.githubusercontent\.com\/syv-ai\/rulecast|github\.com\/syv-ai\/rulecast\/blob)\/([^/\s]+)\//g
+
+/** The ref segment of every rulecast raw or blob URL in `text`. */
+function repositoryRefs(text: string): string[] {
+  return [...text.matchAll(REPOSITORY_REF)].map((match) => match[1]!)
+}
+
+/** A tag, or a placeholder something fills in at run time. Not a branch. */
+const PINNABLE = /^(v\d+\.\d+\.\d+|<[a-z]+>|\$\{[A-Za-z_$][\w$]*\}|%s)$/
+
 async function filesUnder(dir: string, extension: string): Promise<string[]> {
   const entries = await readdir(path.join(repoRoot, dir), { recursive: true })
   return entries
@@ -67,6 +78,33 @@ describe("agent docs", () => {
       "https://github.com/syv-ai/rulecast or `https://raw.githubusercontent.com/syv-ai/rulecast/<tag>/agents/SETUP.md`.",
     ].join("\n")
     expect(repositoryPaths(text)).toEqual(["agents/DRAFT-RULES.md", "agents/reference/detectors.md", "agents/SETUP.md"])
+  })
+
+  test("no rulecast repository URL is pinned to a branch", async () => {
+    // A URL on `main` resolves only as long as main still has that file; a tag resolves forever,
+    // and the agent docs are versioned by tag (spec §12). Placeholders are fine — whatever fills
+    // them in supplies the tag.
+    const files = [...(await filesUnder("agents", ".md")), ...(await filesUnder("packages/rulecast/src", ".ts"))]
+    const failures: string[] = []
+    let checked = 0
+    for (const file of files) {
+      for (const ref of repositoryRefs(await readFile(file, "utf8"))) {
+        checked++
+        if (!PINNABLE.test(ref)) failures.push(`${path.relative(repoRoot, file)} → pinned to "${ref}"`)
+      }
+    }
+    expect(failures).toEqual([])
+    expect(checked, "no rulecast URL found at all — has the regex drifted?").toBeGreaterThan(0)
+  })
+
+  test("repositoryRefs reads the ref segment, and only a tag or a placeholder passes", () => {
+    const text = [
+      "https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/DRAFT-RULES.md",
+      `https://raw.githubusercontent.com/syv-ai/rulecast/\${tag}/agents/SETUP.md`,
+      "https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md",
+    ].join("\n")
+    expect(repositoryRefs(text)).toEqual(["v0.2.0", `\${tag}`, "main"])
+    expect(repositoryRefs(text).filter((ref) => !PINNABLE.test(ref))).toEqual(["main"])
   })
 
   test("every rulecast repository URL in agents/ and src/ points at a file in the repository", async () => {
