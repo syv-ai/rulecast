@@ -219,7 +219,7 @@ context: { mode: inject, max_bytes: 32768 }
 max_matches_per_rule: 10
 timeouts: { edit_deadline_ms: 350, verify_ms: 60000 }
 stop_gate: { max_blocks: 1 }
-llm: { provider: anthropic, model: claude-haiku-4-5-20251001, base_url: null, api_key_env: ANTHROPIC_API_KEY, max_files_per_verify: 10 }
+llm: { provider: claude-code, base_url: null, api_key_env: ANTHROPIC_API_KEY, max_files_per_verify: 10 }
 
 repos:
   - repo: https://github.com/syv-ai/rulecast
@@ -271,7 +271,7 @@ repos:
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline for edit events |
 | `timeouts.verify_ms` | `60000` | Detection timeout for verify events |
 | `stop_gate.max_blocks` | `1` | Stop blocks per agent per user prompt |
-| `llm.provider`, `model`, `base_url`, `api_key_env`, `max_files_per_verify` | `anthropic`, `claude-haiku-4-5-20251001`, `null`, `ANTHROPIC_API_KEY`, `10` | §6 `llm` |
+| `llm.provider`, `base_url`, `api_key_env`, `max_files_per_verify` | `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | §6 `llm`. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible`; `base_url` applies to the last two. No `model`: every llm rule names its own |
 
 ### Repo entries
 
@@ -433,17 +433,22 @@ Runs each tool once per event in JSON mode over the union of files selected by i
 ```yaml
 detect:
   llm:
+    model: haiku            # required: an alias, or the provider's own model name
     question: >
       Does this route do more than parse input, call a service,
       and return the result? Report each offending line.
     grounding: true         # default: send the rule's context references
 ```
 
-- **Call shape.** One call per file, covering every llm rule selected for that file. The prompt contains each rule's id and question, the current file with changed lines marked (from `changes`; no marks and a whole-file judgement when the file has no change set), and, for rules with `grounding: true`, the rule's resolved references regardless of their delivery mode. The model is told to report only on changed lines when marks are present, and answers with structured output `{ findings: [{ rule, line, text, reason }] }`.
+- **Model.** Required on every rule; there is no project-wide default, so the cost of a rule is always chosen by whoever wrote it. It is either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable`, which each provider maps to its own name so a rule in a shared repo works whatever the reader configured — or the exact name the configured provider uses, passed through untouched. An alias a provider cannot express (every alias under `openai-compatible`) is a per-rule error naming both.
+- **Call shape.** One call per file **and model**, covering every llm rule selected for that file with that model. The prompt contains each rule's id and question, the current file with changed lines marked (from `changes`; no marks and a whole-file judgement when the file has no change set), and, for rules with `grounding: true`, the rule's resolved references regardless of their delivery mode. The model is told to report only on changed lines when marks are present, and answers with structured output `{ findings: [{ rule, line, text, reason }] }`.
 - **Skip.** Files whose change set is empty are not sent.
 - **Stages.** `verify` only by default; `stages: [edit, verify]` opts in.
-- **Providers.** `anthropic` and `openai-compatible` (OpenAI, Azure OpenAI, Ollama and others via `base_url`), behind a provider interface.
-- **Cache.** Key: hash of file content, change set, model, and the ids, configs and grounding content of the rules in the call. Unchanged files make no calls on repeated verifies.
+- **Providers,** behind a provider interface, chosen once per project with `llm.provider`:
+  - `claude-code` (the default) — shells out to `claude -p` with `--json-schema`, and needs no API key on a machine signed in to Claude Code. Run lean (`--system-prompt`, `--tools ""`, `--restricted`, `--strict-mcp-config`, `--no-session-persistence`): without those flags it drags Claude Code's system prompt, the project's `CLAUDE.md` and its plugins into every call, measured at 23,046 input tokens against 1,254.
+  - `opencode` — shells out to `opencode run`. No schema flag, so the answer is scraped out of its output; the prompt goes in argv, which bounds it at 128 KiB.
+  - `anthropic` and `openai-compatible` (OpenAI, Azure OpenAI, Ollama and others) — read `api_key_env`, and both honour `base_url`.
+- **Cache.** Key: hash of file content, change set, provider, model, and the ids, configs and grounding content of the rules in the call. Unchanged files make no calls on repeated verifies.
 - **Budget.** At most `llm.max_files_per_verify` files per verify, most recently edited first; skipped files are named in a warning.
 - **Captures.** `reason`.
 - **Consent.** `rulecast init` never preselects llm rules. Documentation states that file contents are sent to the configured provider.
@@ -729,7 +734,7 @@ Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itse
 - **Linters:** oxlint runs for real (a devDependency, forwarded into the fixture's `node_modules/.bin`); ruff and eslint are replayed from recordings under `test/payloads/linter/`, with `RULECAST_LINTERS=1` running whichever real binaries the machine has and checking the recordings still describe them.
 - **End to end:** a few scenarios through `rulecast hook claude-code` on a fixture repo (TSX + Python).
 - **Perf test:** §13.
-- **LLM:** recorded-response fake behind the provider interface; one opt-in live test per provider.
+- **LLM:** a stub agent CLI in a fixture's `node_modules/.bin` replaying `test/payloads/llm/` for `claude-code` and `opencode`; a local `node:http` server for `anthropic` and `openai-compatible`, which also pins the request each sends. `RULECAST_LLM=1` makes one real call per provider the machine can reach, skipping the others by name and asserting the shape of the answer rather than the model's words. No test in `pnpm test` calls a model or opens a socket to one.
 - **Dogfooding:** aka-agents2, with rules drafted from its `AGENTS.md`/`CLAUDE.md` through the drafting prompt (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`, `useUnsavedWork` on close paths).
 
 ## 16. Package layout and distribution
