@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
@@ -30,7 +30,10 @@ export function hostTarget(platform: string = process.platform, arch: string = p
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const target = hostTarget()
-  const outfile = path.join(packageDir, "dist", `rulecast-${target}`)
+  // Not dist/: package.json's `files` is ["dist"], so a binary left there would be published to
+  // npm as a 65 MB tarball the next time anyone ran `pnpm binary` before `pnpm publish`.
+  const outfile = path.join(packageDir, "binaries", `rulecast-${target}`)
+  await mkdir(path.dirname(outfile), { recursive: true })
   await exec("pnpm", ["build"], { cwd: packageDir })
   await exec("bun", ["build", path.join(packageDir, "dist/cli.js"), "--compile", "--outfile", outfile])
   const { size } = await stat(outfile)

@@ -37,15 +37,15 @@ jobs:
       - run: pnpm vitest run test/binary.test.ts
         working-directory: packages/rulecast
         env:
-          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/dist/rulecast-${{ matrix.target }}
+          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/binaries/rulecast-${{ matrix.target }}
 
       # A binary nobody can verify is a binary nobody should run.
       - name: Checksum
-        working-directory: packages/rulecast/dist
+        working-directory: packages/rulecast/binaries
         run: shasum -a 256 "rulecast-${{ matrix.target }}" > "rulecast-${{ matrix.target }}.sha256"
 
       - name: Attach to the release
-        working-directory: packages/rulecast/dist
+        working-directory: packages/rulecast/binaries
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
             "rulecast-${{ matrix.target }}" "rulecast-${{ matrix.target }}.sha256" \

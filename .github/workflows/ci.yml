@@ -78,7 +78,7 @@ jobs:
       - run: pnpm vitest run test/binary.test.ts
         working-directory: packages/rulecast
         env:
-          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/dist/rulecast-${{ matrix.target }}
+          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/binaries/rulecast-${{ matrix.target }}
 
   # Reports, never gates (see the RULECAST_PERF_GATE comment in test/perf/edit-hook.test.ts and
   # spec §13). Not `continue-on-error`: a failed step annotated on a green build is a fake green.

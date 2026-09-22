@@ -774,7 +774,8 @@ agents/                      agent-facing docs (§12)
 
 - TypeScript, Node ≥ 20.12 (the floor of `@clack/prompts`), published to npm as `@syv-ai/rulecast` with a `rulecast` bin.
 - Releases via changesets and GitHub Actions; one tag versions the CLI and the rule packages.
-- Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1.
+- Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1. **Built natively on each platform** (linux x64/arm64, darwin arm64/x64): `--target` would embed whatever `@ast-grep/napi` resolved on the *building* machine, so a cross-compiled binary carries the wrong native module and fails at the first ast-grep rule, in a way no test on the build machine can see. It is written to `packages/rulecast/binaries/`, not `dist/`, because `files` is `["dist"]` and a 65 MB binary must never reach the npm tarball.
+- **Windows is not supported in 0.1.** `core/which.ts` and `detectors/linter/resolve.ts` shell out to `/bin/sh`, `commands/spawn.ts` assumes POSIX detached spawning, and nothing in the suite would catch a regression there.
 
 **Resolved (2026-09-20, plan 5a):** `bun build --compile` embeds both `@ast-grep/napi`'s native module and `@ast-grep/lang-python`'s prebuilt parser; a binary run from a directory with no `node_modules` matches Python patterns. `test/binary.test.ts` keeps it that way, and skips where `bun` is absent. The detector reaches the native module only through a dynamic `import()` with a literal specifier: neither `createRequire` nor a computed specifier is bundled by bun, and must not be used on that path.
 
