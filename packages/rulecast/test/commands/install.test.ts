@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs"
-import { readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { claudeCodeAdapter } from "../../src/adapters/claude-code/adapter"
+import { hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
@@ -105,6 +106,37 @@ describe("rulecast install", () => {
     const outside = await runCli(await createProject({}), ["install"])
     expect(outside.code).toBe(2)
     expect(outside.stderr).toContain("no .rulecast-config.yaml in")
+  })
+})
+
+describe("hooksInstalled", () => {
+  const installed = (root: string) => hooksInstalled(root, claudeCodeAdapter, 30_000)
+
+  test("null when the project has no settings file at all", async () => {
+    expect(await installed(await createFixture())).toBeNull()
+  })
+
+  test("null when a settings file exists but holds other hooks", async () => {
+    const root = await createFixture()
+    await mkdir(path.join(root, ".claude"), { recursive: true })
+    await writeFile(
+      path.join(root, SHARED),
+      JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Read", hooks: [{ type: "command", command: "true" }] }] } }),
+    )
+    expect(await installed(root)).toBeNull()
+  })
+
+  test("the file the hooks are in, once install has run", async () => {
+    const root = await createFixture()
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    expect(await installed(root)).toBe(SHARED)
+  })
+
+  test("a hook counts wherever it is: personal hooks satisfy a shared question", async () => {
+    const root = await createFixture()
+    expect(await runCli(root, ["install", "--scope", "personal"])).toMatchObject({ code: 0 })
+    expect(existsSync(path.join(root, SHARED))).toBe(false)
+    expect(await installed(root)).toBe(PERSONAL)
   })
 })
 

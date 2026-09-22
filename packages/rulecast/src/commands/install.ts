@@ -52,8 +52,23 @@ function inFile<T>(file: string, transform: () => T): T {
 }
 
 /**
- * Adds the adapter's hooks to its settings file for `scope`. Hooks already present in any of the adapter's
- * settings files count as installed: then nothing is written and `added` is empty.
+ * The adapter's settings file its hooks are already in, or null. A hook counts wherever it is
+ * (spec §12), so install and doctor agree on what "installed" means.
+ */
+export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: number): Promise<string | null> {
+  const install = installOf(adapter)
+  const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
+  for (const { file } of install.scopes) {
+    const current = await readSettings(root, file)
+    if (current === null) continue
+    if (inFile(file, () => install.merge(current.value, command, verifyMs)).added.length === 0) return file
+  }
+  return null
+}
+
+/**
+ * Adds the adapter's hooks to its settings file for `scope`. Hooks already present in any of the
+ * adapter's settings files count as installed: then nothing is written and `added` is empty.
  */
 export async function installHooks(
   root: string,
@@ -63,13 +78,8 @@ export async function installHooks(
 ): Promise<{ file: string; added: string[] }> {
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
-  for (const { file } of install.scopes) {
-    const current = await readSettings(root, file)
-    if (current === null) continue
-    if (inFile(file, () => install.merge(current.value, command, verifyMs)).added.length === 0) {
-      return { file, added: [] }
-    }
-  }
+  const already = await hooksInstalled(root, adapter, verifyMs)
+  if (already !== null) return { file: already, added: [] }
   const target = install.scopes.find((candidate) => candidate.scope === scope)
   if (!target) throw new UsageError(`${adapter.name} has no ${scope} settings`)
   const current = (await readSettings(root, target.file))?.value ?? {}
