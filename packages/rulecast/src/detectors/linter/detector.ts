@@ -4,8 +4,8 @@ import { promisify } from "node:util"
 import { readSourceFile } from "../../core/detection/per-rule"
 import { lineStarts, offsetAt } from "../../core/detection/positions"
 import { errorMessage, isNotFound } from "../../core/errors"
-import type { Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
-import { resolveTool } from "./resolve"
+import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
+import { describeTool, resolveTool } from "./resolve"
 import { type LinterConfig, linterSchema, type ToolName } from "./schema"
 import { type LinterFinding, TOOLS } from "./tools"
 
@@ -107,5 +107,20 @@ export const linterDetector: Detector<LinterConfig> = {
       }),
     )
     return result
+  },
+  async check(input) {
+    // One result per tool, in first-use order: every rule naming a tool shares its fate.
+    const byTool = new Map<ToolName, string[]>()
+    for (const rule of input.rules) {
+      byTool.set(rule.config.tool, [...(byTool.get(rule.config.tool) ?? []), rule.id])
+    }
+    return Promise.all(
+      [...byTool].map(async ([tool, rules]): Promise<CheckResult> => {
+        const described = await describeTool(tool, input.cwd)
+        if (!described.found) return { what: tool, level: "error", detail: "not installed", rules }
+        const detail = described.how === "path" ? `${described.command} (PATH)` : described.command
+        return { what: tool, level: "ok", detail, rules: [] }
+      }),
+    )
   },
 }
