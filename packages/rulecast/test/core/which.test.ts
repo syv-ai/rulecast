@@ -15,6 +15,12 @@ describe("onPath", () => {
     expect(await onPath("definitely-not-a-real-binary-9x7")).toBe(false)
   })
 
+  test("an aborted signal gives up instead of waiting for the shell", async () => {
+    // Without this, doctor's 30 s deadline is decorative: a PATH entry on a stalled network mount
+    // makes `command -v` block and checkDetectors never settles.
+    expect(await onPath("sh", AbortSignal.abort())).toBe(false)
+  })
+
   test("treats its argument as an argument, not as shell text", async () => {
     // execFile's own `shell` option would join file and arguments into one command line, so a name
     // carrying a metacharacter would *run*. doctor asks this about a command rule's argv[0], which

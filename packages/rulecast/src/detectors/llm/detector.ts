@@ -215,7 +215,12 @@ export const llmDetector: Detector<LlmConfig> = {
     } catch (error) {
       return [{ what: settings.provider, level: "error", detail: errorMessage(error), rules: ids }]
     }
-    const reachable = await provider.available({ settings, env: input.env, cwd: input.cwd })
+    const reachable = await provider.available({
+      settings,
+      env: input.env,
+      cwd: input.cwd,
+      signal: input.signal,
+    })
     const results: CheckResult[] = [
       {
         what: settings.provider,

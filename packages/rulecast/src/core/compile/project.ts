@@ -20,6 +20,12 @@ export interface Diagnostic {
   hint?: string
 }
 
+/** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
+export function diagnosticText(diagnostic: Diagnostic): string {
+  const rule = diagnostic.rule ? ` (${diagnostic.rule})` : ""
+  return `${diagnostic.source}${rule}: ${diagnostic.message}`
+}
+
 export interface CompiledProject {
   root: string
   config: Config

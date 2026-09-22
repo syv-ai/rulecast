@@ -64,10 +64,10 @@ export function runCli(
 }
 
 /** resolveCli, then the PATH: what `available` reports for a CLI provider. */
-export async function cliAvailable(name: string, cwd: string): Promise<LlmAvailability> {
+export async function cliAvailable(name: string, cwd: string, signal?: AbortSignal): Promise<LlmAvailability> {
   const resolved = await resolveCli(name, cwd)
   if (resolved !== name) return { ok: true, detail: resolved }
-  return (await onPath(name))
+  return (await onPath(name, signal))
     ? { ok: true, detail: `${name} (PATH)` }
     : { ok: false, detail: `${name} is not installed` }
 }

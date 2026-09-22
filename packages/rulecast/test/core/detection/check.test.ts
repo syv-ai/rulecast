@@ -35,10 +35,11 @@ const ok = (what: string): CheckResult => ({ what, level: "ok", detail: "fine", 
 async function setup(results: CheckResult[] | Error = [ok("first"), ok("second")]) {
   const calls: DetectorCheck<Config>[] = []
   // "idle" has a check but no rule in the project; "regex" has rules but no check.
+  const idleCalls: DetectorCheck<Config>[] = []
   const registry = createRegistry([
     ...builtinDetectors,
     checky("checky", calls, results),
-    checky("idle", [], [ok("never")]),
+    checky("idle", idleCalls, [ok("never")]),
   ])
   const root = await createProject({
     ".rulecast-config.yaml": localConfig([
@@ -51,7 +52,7 @@ async function setup(results: CheckResult[] | Error = [ok("first"), ok("second")
   expect(project.diagnostics).toEqual([])
   const env = { RULECAST_HOME: TEST_HOME, MADE_UP: "yes" }
   const check = () => checkDetectors({ project, registry, settings: defaultDetectorSettings(), env, timeoutMs: 5000 })
-  return { root, project, registry, calls, env, check }
+  return { root, project, registry, calls, idleCalls, env, check }
 }
 
 describe("detector checks", () => {
@@ -82,13 +83,10 @@ describe("detector checks", () => {
   })
 
   test("a detector with no rule in the project is not called", async () => {
-    const { registry, check } = await setup()
-    const idle = registry.get("idle")!
-    const calls: unknown[] = []
-    // The "idle" detector was built with its own empty call list; its results must not appear.
-    expect(idle.check).toBeDefined()
+    const { registry, idleCalls, check } = await setup()
+    expect(registry.get("idle")!.check, "the idle detector must have a check to skip").toBeDefined()
     expect((await check()).map((result) => result.what)).toEqual(["first", "second"])
-    expect(calls).toEqual([])
+    expect(idleCalls, "a detector with no rule in the project must not be called").toEqual([])
   })
 
   test("a check that throws becomes one error naming the kind and every rule of it", async () => {

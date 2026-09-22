@@ -60,8 +60,14 @@ export interface DescribedTool {
 export async function describeTool(
   tool: ToolName,
   root: string,
-  available: (command: string) => boolean | Promise<boolean> = onPath,
+  options: {
+    /** Give up when doctor's deadline passes; a PATH lookup can block on a stalled mount. */
+    signal?: AbortSignal
+    /** Injected by tests to exercise the uv branch without a uv on the machine. */
+    available?: (command: string) => boolean | Promise<boolean>
+  } = {},
 ): Promise<DescribedTool> {
+  const available = options.available ?? ((command: string) => onPath(command, options.signal))
   const resolved = await resolveTool(tool, root, available)
   if (path.isAbsolute(resolved.command)) {
     // resolveTool only returns an absolute path after testing it for X_OK, so it exists.

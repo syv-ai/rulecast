@@ -116,7 +116,7 @@ export const linterDetector: Detector<LinterConfig> = {
     }
     return Promise.all(
       [...byTool].map(async ([tool, rules]): Promise<CheckResult> => {
-        const described = await describeTool(tool, input.cwd)
+        const described = await describeTool(tool, input.cwd, { signal: input.signal })
         if (!described.found) return { what: tool, level: "error", detail: "not installed", rules }
         const detail = described.how === "path" ? `${described.command} (PATH)` : described.command
         return { what: tool, level: "ok", detail, rules: [] }

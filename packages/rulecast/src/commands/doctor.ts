@@ -1,6 +1,6 @@
 import { ADAPTERS } from "../adapters"
 import type { CompiledProject } from "../core/compile/project"
-import { compile, type Diagnostic } from "../core/compile/project"
+import { compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
@@ -36,12 +36,6 @@ function naming(rules: string[]): string {
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`
-}
-
-/** validate's wording, so the two commands describe a diagnostic the same way. */
-export function diagnosticText(diagnostic: Diagnostic): string {
-  const rule = diagnostic.rule ? ` (${diagnostic.rule})` : ""
-  return `${diagnostic.source}${rule}: ${diagnostic.message}`
 }
 
 /**

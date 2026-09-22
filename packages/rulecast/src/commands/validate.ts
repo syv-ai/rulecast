@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 
-import { compile, compileManifest, type Diagnostic } from "../core/compile/project"
+import { compile, compileManifest, type Diagnostic, diagnosticText } from "../core/compile/project"
 import type { CompiledRule } from "../core/compile/rule"
 import { CONFIG_FILE, MANIFEST_FILE } from "../core/config/load"
 import type { DetectorRegistry } from "../core/detection/registry"
@@ -12,10 +12,9 @@ import { UsageError } from "./usage"
 
 type Validated = { rules: CompiledRule[]; diagnostics: Diagnostic[] }
 
+/** doctor puts the level in its own column; validate prefixes it. */
 function formatDiagnostic(diagnostic: Diagnostic): string {
-  const level = diagnostic.level === "warning" ? "warning: " : ""
-  const rule = diagnostic.rule ? ` (${diagnostic.rule})` : ""
-  return `${level}${diagnostic.source}${rule}: ${diagnostic.message}`
+  return `${diagnostic.level === "warning" ? "warning: " : ""}${diagnosticText(diagnostic)}`
 }
 
 /** Validates `.rulecast-config.yaml` as a config and `.rulecast-rules.yaml` as a manifest, by file name. */

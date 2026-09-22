@@ -131,6 +131,7 @@ describe("llm detector check", () => {
         detail: "claude-haiku-4-5-20251001",
         rules: [],
       })
+      expect(await callCount(root, "claude")).toBe(0)
     })
 
     test("a name that is not an alias passes through", async () => {

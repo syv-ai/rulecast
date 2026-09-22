@@ -25,9 +25,13 @@ export function argvFor(run: string[], files: string[]): string[] {
  * a bare name is a PATH lookup. Nothing is executed: doctor must not run a project's checker just
  * to find out whether it exists.
  */
-async function reachable(command: string, cwd: string): Promise<{ level: "ok" | "error"; detail: string }> {
+async function reachable(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<{ level: "ok" | "error"; detail: string }> {
   if (!command.includes("/")) {
-    return (await onPath(command))
+    return (await onPath(command, signal))
       ? { level: "ok", detail: `${command} (PATH)` }
       : { level: "error", detail: "not installed" }
   }
@@ -78,7 +82,7 @@ export const commandDetector: Detector<CommandConfig> = {
     }
     return Promise.all(
       [...byCommand].map(async ([command, rules]): Promise<CheckResult> => {
-        const { level, detail } = await reachable(command, input.cwd)
+        const { level, detail } = await reachable(command, input.cwd, input.signal)
         return { what: command, level, detail, rules: level === "ok" ? [] : rules }
       }),
     )

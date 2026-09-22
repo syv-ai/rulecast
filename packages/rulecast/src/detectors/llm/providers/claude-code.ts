@@ -66,7 +66,7 @@ export const claudeCodeProvider: LlmProvider = {
       `claude returned no usable JSON (exit ${result.code}): ${firstLine(result.stderr || result.stdout)}`,
     )
   },
-  available: ({ cwd }) => cliAvailable("claude", cwd),
+  available: ({ cwd, signal }) => cliAvailable("claude", cwd, signal),
 }
 
 function parseJson(text: string): unknown {

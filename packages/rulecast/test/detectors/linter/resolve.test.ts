@@ -43,7 +43,7 @@ describe("describeTool", () => {
     const binary = path.join(root, "node_modules", ".bin", "oxlint")
     await writeFile(binary, "#!/bin/sh\n")
     await chmod(binary, 0o755)
-    expect(await describeTool("oxlint", root, () => true)).toEqual({
+    expect(await describeTool("oxlint", root, { available: () => true })).toEqual({
       command: "node_modules/.bin/oxlint",
       how: "local",
       found: true,
@@ -52,7 +52,7 @@ describe("describeTool", () => {
 
   test("the uv branch is reported as the command a person would type", async () => {
     const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n" })
-    expect(await describeTool("ruff", root, (command) => command === "uv")).toEqual({
+    expect(await describeTool("ruff", root, { available: (command) => command === "uv" })).toEqual({
       command: "uv run -- ruff",
       how: "uv",
       found: true,
@@ -61,7 +61,15 @@ describe("describeTool", () => {
 
   test("a bare name is found only when something on the PATH provides it", async () => {
     const root = await createProject({})
-    expect(await describeTool("eslint", root, () => true)).toEqual({ command: "eslint", how: "path", found: true })
-    expect(await describeTool("eslint", root, () => false)).toEqual({ command: "eslint", how: "path", found: false })
+    expect(await describeTool("eslint", root, { available: () => true })).toEqual({
+      command: "eslint",
+      how: "path",
+      found: true,
+    })
+    expect(await describeTool("eslint", root, { available: () => false })).toEqual({
+      command: "eslint",
+      how: "path",
+      found: false,
+    })
   })
 })

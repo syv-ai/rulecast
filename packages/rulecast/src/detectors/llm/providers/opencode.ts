@@ -41,7 +41,7 @@ export const opencodeProvider: LlmProvider = {
       `opencode returned no usable JSON (exit ${result.code}): ${firstLine(result.stderr || result.stdout)}`,
     )
   },
-  available: ({ cwd }) => cliAvailable("opencode", cwd),
+  available: ({ cwd, signal }) => cliAvailable("opencode", cwd, signal),
 }
 
 function firstLine(text: string): string {

@@ -11,6 +11,7 @@ import { createRepo } from "../helpers/git"
 import { stateDirFor, TEST_HOME } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
+import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
 /** doctor reads a real environment; nothing the machine happens to have installed may decide a test. */
@@ -85,11 +86,15 @@ describe("rulecast doctor", () => {
         repos: [{ repo, rev: "main", rules: [{ id: "demo/no-print" }] }],
       }),
       "src/x.ts": "const x = 1\n",
+      "app.py": "value = 1\n",
     })
     const result = await doctor(root)
     expect(result.stdout).toContain("looks like a branch")
+    expect(result.stdout).toContain("ok       demo/no-print — app.py, no match")
     expect(result.stdout).toContain("1 rule, 0 errors, 1 warning")
-    expect(result.stdout).toContain("1 warning")
+    // The summary, not the config line: the config's warning plus the uninstalled hooks. Asserted
+    // on the final line so it cannot be satisfied by the substring inside "0 errors, 1 warning".
+    expect(result.stdout.trimEnd().split("\n").at(-1)).toBe("0 errors, 2 warnings")
     expect(result.code).toBe(0)
   })
 
@@ -140,6 +145,22 @@ describe("rulecast doctor", () => {
     const result = await doctor(root)
     expect(result.stdout).toContain("error    ./check.sh — not executable (shell)")
     expect(result.code).toBe(2)
+  })
+
+  test("more than three rules sharing a failure are truncated", async () => {
+    const rules = ["a", "b", "c", "d", "e"].map((id) => ({
+      id,
+      name: id,
+      files: "\\.ts$",
+      detect: { command: { run: ["definitely-not-a-real-binary-9x7"] } },
+      message: "{{file}}:{{line}} bad.",
+    }))
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig(rules),
+      "src/x.ts": "const x = 1\n",
+    })
+    const result = await doctor(root)
+    expect(result.stdout).toContain("not installed (a, b, c and 2 more)")
   })
 
   test("a project with no hooks installed warns and still exits 0", async () => {
@@ -232,6 +253,48 @@ describe("rulecast doctor", () => {
       })
       const result = await doctor(root)
       expect(result.stdout).toContain("ok       ctx — context only, nothing to run")
+      expect(result.code).toBe(0)
+    })
+
+    test("environment and dry-run errors are counted together", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "missing-tool",
+            name: "Missing tool",
+            files: "\\.ts$",
+            detect: { command: { run: ["./absent.sh"] } },
+            message: "{{file}}:{{line}} bad.",
+          },
+          {
+            id: "bad-output",
+            name: "Bad output",
+            files: "\\.ts$",
+            detect: { command: { run: ["./bad.sh", "{{files}}"] } },
+            message: "{{file}}:{{line}} bad.",
+          },
+        ]),
+        "src/x.ts": "const x = 1\n",
+        "bad.sh": "#!/bin/sh\necho 'not json'\n",
+      })
+      await chmod(path.join(root, "bad.sh"), 0o755)
+      const result = await doctor(root)
+      // ./absent.sh fails the environment check and then its own dry run; ./bad.sh passes the
+      // environment check and fails the dry run on its output. All three reach one summary.
+      expect(result.stdout).toContain("error    ./absent.sh — no such file (missing-tool)")
+      expect(result.stdout).toMatch(/error {4}missing-tool — /)
+      expect(result.stdout).toMatch(/error {4}bad-output — /)
+      expect(result.stdout.trimEnd().split("\n").at(-1)).toBe("3 errors, 1 warning")
+      expect(result.code).toBe(2)
+    })
+
+    test("a project that is not a git repository says so instead of throwing", async () => {
+      const root = await createProject({
+        ".rulecast-config.yaml": localConfig([RULE("a")]),
+        "src/x.ts": "const forbidden = 1\n",
+      })
+      const result = await doctor(root)
+      expect(result.stdout).toMatch(/warning {2}not run — /)
       expect(result.code).toBe(0)
     })
 

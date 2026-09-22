@@ -54,7 +54,7 @@ Paths under `src/` and `test/` are in `packages/rulecast/`.
 | `src/detectors/llm/providers/{claude-code,opencode}.ts` | `available`: the binary resolves |
 | `src/detectors/llm/providers/{anthropic,openai}.ts` | `available`: `api_key_env` is set; reports the endpoint |
 | `src/detectors/llm/detector.ts` | `check`: the provider is available, and every rule's `model` resolves |
-| `src/commands/install.ts` | Exports `hooksInstalled(root, adapter)`, lifted out of `installHooks` |
+| `src/commands/install.ts` | Exports `hooksInstalled(root, adapter, verifyMs)`, lifted out of `installHooks` |
 | `src/commands/doctor.ts` | The command: sections, statuses, exit code |
 | `src/commands/main.ts` | `doctor` in `USAGE` and in the `switch` |
 | `src/index.ts` | Exports `CheckResult`, `DetectorCheck`, `checkDetectors` |
@@ -335,7 +335,7 @@ export async function cliAvailable(name: string, cwd: string): Promise<{ ok: boo
 
 ```ts
 /** The adapter's settings file its hooks are already in, or null. A hook counts wherever it is (spec §12). */
-export async function hooksInstalled(root: string, adapter: Adapter): Promise<string | null>
+export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: number): Promise<string | null>
 ```
 
 `installHooks` then calls it, so there is one definition of "installed" and `doctor` cannot drift from `install`.

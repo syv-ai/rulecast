@@ -71,5 +71,11 @@ export interface LlmProvider {
    * it never calls the model: a false answer here is the same situation ask() would report as
    * LlmUnavailableError, found before anything is spent.
    */
-  available(input: { settings: LlmSettings; env: NodeJS.ProcessEnv; cwd: string }): Promise<LlmAvailability>
+  available(input: {
+    settings: LlmSettings
+    env: NodeJS.ProcessEnv
+    cwd: string
+    /** Give up when doctor's deadline passes: a PATH lookup can block on a stalled mount. */
+    signal: AbortSignal
+  }): Promise<LlmAvailability>
 }
