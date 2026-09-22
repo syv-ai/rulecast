@@ -10,7 +10,7 @@ import type {
   Match,
 } from "../../core/types"
 import { askCached, callKey } from "./call"
-import { resolveModel } from "./models"
+import { MODEL_ALIASES, resolveModel } from "./models"
 import { buildPrompt, type PromptRule } from "./prompt"
 import { providerByName } from "./providers/index"
 import { type LlmFinding, type LlmProvider, LlmUnavailableError } from "./providers/types"
@@ -248,7 +248,10 @@ export const llmDetector: Detector<LlmConfig> = {
           : {
               what: `model "${model}"`,
               level: "ok",
-              detail: resolved === model ? "passed through" : resolved,
+              // "passed through" is only true of a name that is not an alias at all. An alias that
+              // resolves to itself — haiku for the claude-code provider — is still an alias, and
+              // saying otherwise reads as "rulecast does not know this model".
+              detail: MODEL_ALIASES.includes(model) ? `${settings.provider} calls it ${resolved}` : "passed through",
               rules: [],
             },
       )

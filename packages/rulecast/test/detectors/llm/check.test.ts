@@ -118,6 +118,20 @@ describe("llm detector check", () => {
   })
 
   describe("every rule's model resolves", () => {
+    test("an alias that resolves to itself is still named as an alias", async () => {
+      // Found by dogfooding: haiku is `haiku` for the claude-code provider, and reporting that as
+      // "passed through" reads as "rulecast does not know this model".
+      const root = await createProject({})
+      await stubAgentCli(root, "claude")
+      const results = await check(root, [{ id: "a", model: "haiku" }])
+      expect(results[1]).toEqual({
+        what: 'model "haiku"',
+        level: "ok",
+        detail: "claude-code calls it haiku",
+        rules: [],
+      })
+    })
+
     test("an alias that maps reports the provider's own name for it", async () => {
       const root = await createProject({})
       await stubAgentCli(root, "claude")
@@ -128,7 +142,7 @@ describe("llm detector check", () => {
       expect(results[1]).toEqual({
         what: 'model "haiku"',
         level: "ok",
-        detail: "claude-haiku-4-5-20251001",
+        detail: "anthropic calls it claude-haiku-4-5-20251001",
         rules: [],
       })
       expect(await callCount(root, "claude")).toBe(0)
