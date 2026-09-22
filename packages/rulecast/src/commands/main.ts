@@ -5,6 +5,7 @@ import { builtinDetectors } from "../detectors"
 import type { Prompter } from "../init/prompts"
 import { autoupdateCommand } from "./autoupdate"
 import { cleanCommand } from "./clean"
+import { doctorCommand } from "./doctor"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
@@ -44,6 +45,7 @@ const USAGE = `usage:
   rulecast clean [--project]
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
+  rulecast doctor
 `
 
 export async function main(argv: string[], io: CliIo): Promise<number> {
@@ -72,6 +74,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await hookCommand(args, registry, io)
       case "warm":
         return await warmCommand(root, args, registry, io)
+      case "doctor":
+        return await doctorCommand(root, args, registry, io)
       case undefined:
       case "help":
       case "--help":

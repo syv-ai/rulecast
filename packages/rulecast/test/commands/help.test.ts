@@ -14,6 +14,7 @@ const USAGE = `usage:
   rulecast clean [--project]
   rulecast hook <adapter>
   rulecast warm [--detector <kind>]...
+  rulecast doctor
 `
 
 test("help prints every command", async () => {
