@@ -24,6 +24,9 @@ beforeAll(async () => {
 /** A Python project whose CLAUDE.md imports AGENTS.md (so Claude Code is detected). */
 const PROJECT: Record<string, string> = {
   "app/services/users.py": "def get():\n    return None\n",
+  // Matches python/thin-routes, the catalog's one llm rule — so every assertion on PYTHON below
+  // is also an assertion that an llm rule is never ticked for someone (spec §6, Consent).
+  "app/api/users.py": "@router.get('/users')\ndef list_users():\n    return svc.list()\n",
   "AGENTS.md": "# Agents\n\n## Errors\n\nServices raise domain exceptions.\n",
   "CLAUDE.md": "@AGENTS.md\n",
 }
@@ -61,6 +64,19 @@ describe("rulecast init --yes", () => {
     expect(result.stdout).toContain(PROMPT)
     expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")
     expect(result.copied).toEqual([])
+  })
+
+  test("--yes never installs an llm rule, however well it matches", async () => {
+    const root = await createRepo(PROJECT)
+    await runCli(root, ["init", "--yes"], "", env)
+    expect(ids(await read(root, CONFIG_FILE))).not.toContain("python/thin-routes")
+  })
+
+  test("--rules installs an llm rule, because naming it is the consent", async () => {
+    const root = await createRepo(PROJECT)
+    const result = await runCli(root, ["init", "--rules", "python/thin-routes", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(ids(await read(root, CONFIG_FILE))).toEqual(["python/thin-routes"])
   })
 
   test("re-running only adds rules, keeping the existing text and hooks", async () => {
@@ -170,7 +186,7 @@ describe("rulecast init in a terminal", () => {
     ])
     const [rules, conventions] = script.asked
     expect([...(rules!.initial as string[])].sort()).toEqual(PYTHON)
-    expect(rules!.values).toHaveLength(8)
+    expect(rules!.values).toHaveLength(9)
     expect(conventions!.values).toEqual(["", "@AGENTS.md", "@AGENTS.md#agents", "@AGENTS.md#errors"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
       { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
@@ -178,6 +194,21 @@ describe("rulecast init in a terminal", () => {
     expect(existsSync(path.join(root, ".claude/settings.local.json"))).toBe(true)
     expect(result.copied).toEqual([PROMPT])
     expect(script.shown.at(-1)).toBe("Commit .rulecast-config.yaml.")
+  })
+
+  test("an llm rule is offered with its cost in the hint, but never ticked", async () => {
+    const root = await createRepo(PROJECT)
+    const script = scriptedPrompter([[], ACCEPT, "personal", true, true])
+    await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
+
+    const rules = script.asked[0]!
+    expect(rules.values).toContain("python/thin-routes")
+    // It matches app/api/users.py, so only the consent rule keeps it out of the ticked set.
+    expect(rules.initial as string[]).not.toContain("python/thin-routes")
+    const hint = (rules.hints as Record<string, string>)["python/thin-routes"]!
+    expect(hint).toContain("llm")
+    expect(hint).toContain("haiku")
+    expect(hint).toContain("sends")
   })
 
   test("Ctrl+C exits 130 and writes nothing", async () => {

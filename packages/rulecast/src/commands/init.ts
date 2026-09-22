@@ -165,8 +165,13 @@ async function chooseRules(
     if (unknown !== undefined) throw new UsageError(`"${unknown}" is not a rule in ${catalog.label}`)
     return available.filter((rule) => flags.rules!.includes(rule.id))
   }
-  // Preselected: rules that apply to at least one project file.
-  const preselected = available.filter((rule) => files.some((file) => rule.matches(file))).map((rule) => rule.id)
+  // Preselected: rules that apply to at least one project file — except llm rules. Spec §6,
+  // Consent: an llm rule sends file contents to a third party and costs money per file, so it is
+  // never ticked on someone's behalf. It is still offered, and --rules still installs it. This
+  // also covers --yes and the no-TTY path, which take `preselected` directly below.
+  const preselected = available
+    .filter((rule) => rule.detector?.kind !== "llm" && files.some((file) => rule.matches(file)))
+    .map((rule) => rule.id)
   if (ui.prompter === null) return available.filter((rule) => preselected.includes(rule.id))
   if (available.length === 0) {
     ui.say(`Every rule from ${catalog.label} is already configured.`, "Rules")
@@ -180,7 +185,7 @@ async function chooseRules(
     choices.push({
       value: rule.id,
       label: group === "general" ? rule.id : rule.id.slice(group.length + 1),
-      hint: done ? "installed" : (rule.description ?? rule.name),
+      hint: done ? "installed" : hintFor(rule),
       disabled: done,
     })
     groups[group] = choices
@@ -191,6 +196,14 @@ async function chooseRules(
     initialValues: preselected,
   })
   return available.filter((rule) => chosen.includes(rule.id))
+}
+
+/** An llm rule says what it costs and where the file goes, so ticking it is an informed choice. */
+function hintFor(rule: CompiledRule): string {
+  const description = rule.description ?? rule.name
+  if (rule.detector?.kind !== "llm") return description
+  const model = (rule.detector.config as { model?: string }).model ?? "a model"
+  return `llm · ${model} · sends file contents to your provider — ${description}`
 }
 
 async function chooseConventions(rules: CompiledRule[], detection: Detection, ui: Ui): Promise<RuleSelection[]> {

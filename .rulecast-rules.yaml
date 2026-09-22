@@ -57,6 +57,19 @@
   message: "{{file}}:{{line}} swallows an exception with a bare pass. Handle it, log it, or let it propagate."
   context:
     - "@packages/rules-python/errors.md#swallowed-exceptions"
+- id: python/thin-routes
+  name: Route handlers stay thin
+  description: A model judges whether a route does more than parse input, call a service and return. Sends file contents to your configured LLM provider.
+  files: ^app/(api|routers)/.*\.py$
+  severity: warning
+  detect:
+    llm:
+      model: haiku
+      question: |
+        Does this route handler do more than parse input, call a service and return the result — business logic, database access, or error translation written inline? Report each offending line.
+  message: "{{file}}:{{line}} does work that belongs in a service. {{reason}}"
+  context:
+    - "@packages/rules-python/layering.md#business-logic-goes-in-services"
 - id: react/no-fetch-in-components
   name: Components get server data through query hooks
   description: Flags network calls (fetch, axios) made directly in components.

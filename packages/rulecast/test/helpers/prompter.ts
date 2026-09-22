@@ -12,6 +12,8 @@ export interface AskedPrompt {
   message: string
   /** Selectable values, in order. */
   values: string[]
+  /** Each selectable value's hint, when it has one. */
+  hints: Record<string, string>
   initial: string | string[] | boolean
 }
 
@@ -28,6 +30,10 @@ export function scriptedPrompter(answers: ScriptedAnswer[]): ScriptedPrompter {
   const asked: AskedPrompt[] = []
   const shown: string[] = []
   const selectable = (choices: Choice[]) => choices.filter((choice) => !choice.disabled).map((choice) => choice.value)
+  const hintsOf = (choices: Choice[]): Record<string, string> =>
+    Object.fromEntries(
+      choices.filter((choice) => choice.hint !== undefined).map((choice) => [choice.value, choice.hint!]),
+    )
 
   function next(prompt: AskedPrompt): ScriptedAnswer {
     asked.push(prompt)
@@ -55,12 +61,25 @@ export function scriptedPrompter(answers: ScriptedAnswer[]): ScriptedPrompter {
         kind: "groupMultiselect",
         message,
         values: selectable(Object.values(groups).flat()),
+        hints: hintsOf(Object.values(groups).flat()),
         initial: initialValues,
       }),
     multiselect: async ({ message, choices, initialValues }) =>
-      values({ kind: "multiselect", message, values: selectable(choices), initial: initialValues }),
+      values({
+        kind: "multiselect",
+        message,
+        values: selectable(choices),
+        hints: hintsOf(choices),
+        initial: initialValues,
+      }),
     select: async ({ message, choices, initialValue }) => {
-      const prompt: AskedPrompt = { kind: "select", message, values: selectable(choices), initial: initialValue }
+      const prompt: AskedPrompt = {
+        kind: "select",
+        message,
+        values: selectable(choices),
+        hints: hintsOf(choices),
+        initial: initialValue,
+      }
       const answer = next(prompt)
       if (typeof answer !== "string" || !prompt.values.includes(answer)) {
         throw new Error(
@@ -70,7 +89,7 @@ export function scriptedPrompter(answers: ScriptedAnswer[]): ScriptedPrompter {
       return answer
     },
     confirm: async ({ message, initialValue }) => {
-      const answer = next({ kind: "confirm", message, values: [], initial: initialValue })
+      const answer = next({ kind: "confirm", message, values: [], hints: {}, initial: initialValue })
       if (typeof answer !== "boolean") throw new Error(`invalid answer ${JSON.stringify(answer)} to "${message}"`)
       return answer
     },

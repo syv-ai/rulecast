@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { beforeAll, describe, expect, test } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { generateManifest } from "../scripts/manifest"
 import { compileManifest } from "../src/core/compile/project"
@@ -10,6 +10,7 @@ import { defaultConfig } from "../src/core/config/schema"
 import { runPipeline } from "../src/core/pipeline"
 import { registry } from "./helpers/fixture"
 import { stateDirFor } from "./helpers/home"
+import { stubAgentCli } from "./helpers/llm"
 import { createProject } from "./helpers/project"
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url))
@@ -20,6 +21,7 @@ const CATALOG = [
   "python/no-queries-in-services",
   "python/layering",
   "python/no-silent-except",
+  "python/thin-routes",
   "react/no-fetch-in-components",
   "react/data-fetching",
   "react/no-inline-style",
@@ -141,6 +143,23 @@ const cases: Case[] = [
     content: 'export const Card = () => <div className="p-2">x</div>\n',
     fires: false,
   },
+  // An llm rule's judgement belongs to the model, so what the catalog can check is that it is
+  // wired up: the right files reach it, and a finding renders through {{reason}}. The stub answers
+  // for whatever rule the prompt names, so the quiet case is a file the rule does not select.
+  {
+    rule: "python/thin-routes",
+    kind: "verify",
+    file: "app/api/users.py",
+    content: "@router.get('/users')\ndef list_users(session):\n    return session.exec(select(User)).all()\n",
+    fires: true,
+  },
+  {
+    rule: "python/thin-routes",
+    kind: "verify",
+    file: "app/services/users.py",
+    content: SERVICE_OK,
+    fires: false,
+  },
 ]
 
 describe("the rulecast repository's rule manifest", () => {
@@ -161,6 +180,10 @@ describe("catalog rules", () => {
   beforeAll(async () => {
     rules = (await compileManifest(repoRoot, registry)).rules
   })
+  // No case may reach a real model: the stub below is found by absolute path in each fixture's
+  // node_modules/.bin, and a PATH without claude on it closes the fallback.
+  beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"))
+  afterEach(() => vi.unstubAllEnvs())
 
   test("every rule has a case where it fires and one where it does not", () => {
     for (const id of CATALOG) {
@@ -177,6 +200,7 @@ describe("catalog rules", () => {
 
   test.each(cases)("$rule on $file ($kind) fires: $fires", async ({ rule, kind, file, content, fires }) => {
     const root = await createProject({ [file]: content })
+    await stubAgentCli(root, "claude")
     const { delivery } = await runPipeline({
       project: { root, config: defaultConfig(), rules, diagnostics: [] },
       stateDir: stateDirFor(root),
