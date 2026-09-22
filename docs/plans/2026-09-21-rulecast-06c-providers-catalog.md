@@ -118,6 +118,7 @@ Paths under `src/` and `test/` are in `packages/rulecast/` unless they start wit
 **Behaviour:** the same, against `/v1/chat/completions`, with `Authorization: Bearer`.
 
 - [ ] Write failing tests mirroring Task 2's list, plus: the request body has **no** `response_format` key (Decision 2 — pin it, or someone will add it back), and `base_url` unset sends the request to `https://api.openai.com`.
+- [ ] **Carried over from 6b:** add the unmapped-alias case to `test/detectors/llm/detector.test.ts`. It could not be written in 6b — with only `claude-code` built, `providerByName("openai-compatible")` threw first, so the run failed with "not available in this build" before `resolveModel` was reached, and 6b pins that behaviour instead. Now that the provider is real: an llm rule with `model: haiku` under `provider: openai-compatible` is a **per-rule** error whose message names both `haiku` and `openai-compatible`.
 - [ ] Implement, reading `choices[0].message.content` and passing it to `extractFindingsJson`.
 - [ ] `providerByName` now returns a real provider for all four names; delete the placeholder throws 6a left in it.
 - [ ] Verify: `pnpm vitest run test/detectors/llm/providers/` → all four provider suites pass; `pnpm test` → everything passes.

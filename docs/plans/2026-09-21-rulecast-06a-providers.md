@@ -68,7 +68,7 @@ Prerequisite: plan 5 is done (`e3f8831`). Continue with `2026-09-21-rulecast-06b
 - **No test in `pnpm test` may call a real model.** Every provider test in this plan runs against a stub binary in the fixture's `node_modules/.bin`. Live tests arrive in 6c, gated behind `RULECAST_LLM=1`.
 - lefthook runs biome (with `--write`, re-staging fixes) and `pnpm typecheck` on commit, and `pnpm test` on push. Never bypass them; fix the cause. Biome runs with `--error-on-warnings`, so unsorted imports and unsorted `export` lines in `src/index.ts` fail a commit — run `pnpm lint:fix` before committing.
 - Stage files by exact path (`git add <paths>`), then a plain `git commit`. Never `git add -A`, `git commit -- <paths>`, stash, reset or checkout. Check that `git commit` exited 0; don't filter its output through `grep` or `tail`.
-- Commit after every task. Commit messages end with a blank line and `Claude goes brr.. via Dash`. Commit straight to `main`; `git fetch` before pushing.
+- Commit after every task. Commit messages end with a blank line and `Via [syv-ai/dash](https://github.com/syv-ai/dash)`. Commit straight to `main`; `git fetch` before pushing.
 
 ## File structure
 
