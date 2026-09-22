@@ -1,4 +1,5 @@
 import { execFile, spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -11,6 +12,8 @@ import { TEST_HOME } from "./helpers/home"
 
 const exec = promisify(execFile)
 const hasBun = spawnSync("bun", ["--version"], { encoding: "utf8" }).status === 0
+/** A prebuilt binary needs no bun; without one, the describe builds its own and so does. */
+const canRun = hasBun || (process.env.RULECAST_BINARY !== undefined && existsSync(process.env.RULECAST_BINARY))
 
 const PY_RULE = {
   id: "no-silent-except",
@@ -31,10 +34,17 @@ const PY_RULE = {
  * under Node, so this proves bun's bundler rewrote them into the binary. The binary is built
  * outside the repository and run from a temp directory: nothing can resolve node_modules there.
  */
-describe.runIf(hasBun)("standalone binary", () => {
+describe.runIf(canRun)("standalone binary", () => {
   let binary: string
 
   beforeAll(async () => {
+    // CI builds the binary once per platform with `pnpm binary` and points this at it; locally,
+    // with nothing set, it builds its own. One definition of "the binary works" for both.
+    const prebuilt = process.env.RULECAST_BINARY
+    if (prebuilt !== undefined && existsSync(prebuilt)) {
+      binary = prebuilt
+      return
+    }
     await exec("pnpm", ["build"])
     const out = await mkdtemp(path.join(tmpdir(), "rulecast-binary-"))
     binary = path.join(out, "rulecast")

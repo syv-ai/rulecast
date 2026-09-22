@@ -1,12 +1,11 @@
-import { realpathSync } from "node:fs"
-import { mkdtemp, readFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { linterSchema } from "../../../src/detectors/linter/schema"
 import { TOOLS } from "../../../src/detectors/linter/tools"
+import { symlinkedDir } from "../../helpers/symlink"
 
 const payloads = fileURLToPath(new URL("../../payloads/linter/", import.meta.url))
 const ROOT = "/repo"
@@ -76,11 +75,9 @@ describe("tool adapters", () => {
   })
 
   test("relativises a path the tool resolved through a symlink", async () => {
-    // macOS /tmp is a symlink to /private/tmp and eslint reports realpaths, so a root given as
-    // /tmp/x comes back as /private/tmp/x. Without this the file never matches the rule's.
-    const root = await mkdtemp(path.join(tmpdir(), "rulecast-symlink-"))
-    const real = realpathSync(root)
-    expect(real, "this test needs a symlinked temp directory").not.toBe(root)
+    // eslint reports realpaths, so a root given as a symlinked path comes back resolved. Without
+    // this the file never matches the rule's.
+    const { root, real } = await symlinkedDir("rulecast-symlink")
     const stdout = JSON.stringify([{ filePath: path.join(real, "src/a.js"), messages: [{ ruleId: "x", line: 1 }] }])
     expect(TOOLS.eslint.parse(stdout, root)[0]!.file).toBe("src/a.js")
   })

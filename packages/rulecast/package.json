@@ -20,6 +20,7 @@
     "dist"
   ],
   "scripts": {
+    "binary": "tsx scripts/build-binary.ts",
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean",
     "manifest": "tsx scripts/generate-manifest.ts",
     "readme": "tsx scripts/readme.ts",

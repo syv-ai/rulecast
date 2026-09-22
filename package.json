@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@10.26.0",
   "scripts": {
+    "binary": "pnpm --filter @syv-ai/rulecast binary",
     "build": "pnpm --filter @syv-ai/rulecast build",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",

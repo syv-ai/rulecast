@@ -49,3 +49,33 @@ jobs:
       # the whole 60 s build inside its own timeout.
       - run: pnpm build
       - run: pnpm test
+
+  binary:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each platform builds on its own runner. `bun build --compile --target=…` would embed
+        # whatever @ast-grep/napi resolved on the *building* machine, so a cross-compiled binary
+        # carries the wrong native module and dies at the first ast-grep rule. See
+        # packages/rulecast/scripts/build-binary.ts for the same list.
+        include:
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: macos-latest, target: darwin-arm64 }
+          - { os: macos-13, target: darwin-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm binary
+      # The one check that matters: it runs where no node_modules can be resolved.
+      - run: pnpm vitest run test/binary.test.ts
+        working-directory: packages/rulecast
+        env:
+          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/dist/rulecast-${{ matrix.target }}

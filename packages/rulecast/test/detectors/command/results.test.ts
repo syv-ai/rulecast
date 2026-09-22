@@ -1,11 +1,9 @@
-import { realpathSync } from "node:fs"
-import { mkdtemp } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { matchesFromJson, matchesFromSarif } from "../../../src/detectors/command/results"
 import { commandSchema } from "../../../src/detectors/command/schema"
+import { symlinkedDir } from "../../helpers/symlink"
 
 const cwd = "/repo"
 
@@ -127,11 +125,9 @@ describe("matchesFromSarif", () => {
   })
 
   test("relativises a path the checker resolved through a symlink", async () => {
-    // A checker that calls Path.resolve() reports a realpath; macOS /tmp is a symlink to
-    // /private/tmp. Without this the finding names a path no rule selected and is dropped.
-    const root = await mkdtemp(path.join(tmpdir(), "rulecast-cmd-symlink-"))
-    const real = realpathSync(root)
-    expect(real, "this test needs a symlinked temp directory").not.toBe(root)
+    // A checker that calls Path.resolve() reports a realpath. Without this the finding names a
+    // path no rule selected and is dropped.
+    const { root, real } = await symlinkedDir("rulecast-cmd-symlink")
     const json = JSON.stringify([{ file: path.join(real, "src/a.py"), line: 1 }])
     expect(matchesFromJson(json, [], root)[0]!.file).toBe("src/a.py")
   })
