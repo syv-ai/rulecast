@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process"
 import { access, constants } from "node:fs/promises"
 import path from "node:path"
-import { promisify } from "node:util"
 
+import { onPath } from "../../core/which"
 import type { ToolName } from "./schema"
-
-const exec = promisify(execFile)
 
 export interface ResolvedTool {
   command: string
@@ -19,15 +16,6 @@ const PYTHON_TOOLS: ReadonlySet<string> = new Set(["ruff"])
 async function reachable(file: string, mode: number): Promise<boolean> {
   try {
     await access(file, mode)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function onPath(command: string): Promise<boolean> {
-  try {
-    await exec("command", ["-v", command], { shell: "/bin/sh" })
     return true
   } catch {
     return false
