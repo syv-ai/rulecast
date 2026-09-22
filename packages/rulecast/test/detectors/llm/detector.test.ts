@@ -10,6 +10,7 @@ import {
 import { llmDetector } from "../../../src/detectors/llm/detector"
 import type { LlmConfig } from "../../../src/detectors/llm/schema"
 import { stubAgentCli, stubArgv, stubStdin } from "../../helpers/llm"
+import { fakeApi } from "../../helpers/llm-server"
 import { createProject } from "../../helpers/project"
 
 const PY = "def get(id):\n    print('fetching', id)\n    return id\n"
@@ -176,10 +177,36 @@ describe("llm detector", () => {
     expect(result.findings.map((f) => f.rule)).toEqual(["good"])
   })
 
-  test("a provider this build does not have disables every llm rule", async () => {
+  test("a model alias the provider cannot express is a per-rule error naming both", async () => {
     const root = await project()
+    // openai-compatible has no mapping for "haiku" on purpose: those projects name their own
+    // models, and a wrong guess would be worse than a clear error.
     const result = await run(root, [rule("r1", ["app/a.py"])], { llm: { provider: "openai-compatible" } })
-    expect(result.errors).toEqual([{ rule: null, message: expect.stringContaining("openai-compatible") }])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]!.rule).toBe("r1")
+    expect(result.errors[0]!.message).toMatch(/haiku/)
+    expect(result.errors[0]!.message).toMatch(/openai-compatible/)
+  })
+
+  test("one rule's unmappable alias leaves the others working, over an HTTP provider", async () => {
+    vi.stubEnv("KEY", "sk-test")
+    const api = await fakeApi(() => [
+      200,
+      { choices: [{ message: { content: '{"findings":[{"rule":"explicit","line":2,"reason":"prints"}]}' } }] },
+    ])
+    try {
+      const root = await project()
+      const result = await run(
+        root,
+        // "haiku" has no openai-compatible mapping; "gpt-5-mini" is not an alias, so it goes verbatim.
+        [rule("aliased", ["app/a.py"], "haiku"), rule("explicit", ["app/a.py"], "gpt-5-mini")],
+        { llm: { provider: "openai-compatible", baseUrl: api.url, apiKeyEnv: "KEY" } },
+      )
+      expect(result.errors.map((e) => e.rule)).toEqual(["aliased"])
+      expect(result.findings.map((f) => f.rule)).toEqual(["explicit"])
+    } finally {
+      await api.close()
+    }
   })
 
   test("a file that no longer exists is skipped", async () => {
