@@ -700,7 +700,11 @@ Mechanisms:
 
 **Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
 
-**Perf test.** CI runs a fixture project with 30 rules across ast-grep, regex, path, `linter` (oxlint — the one linter that can be a workspace devDependency, §15) and command, replays 50 edit events, and fails if p95 exceeds 500 ms. Measured 2026-09-20 on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load. Most of the growth over a regex-only project is subprocess start, one per external tool per event.
+**Perf test.** A fixture project with 30 rules across ast-grep, regex, path, `linter` (oxlint — the one linter that can be a workspace devDependency, §15) and command, replaying 50 edit events.
+
+**The 500 ms gate is local, on real hardware.** `pnpm test:perf` on a developer machine asserts it. CI runs the same fixture and reports p50/p95 into the job summary without asserting (`RULECAST_PERF_GATE=0`): a shared runner spawning one subprocess per external tool per event is several times slower than the hardware the promise is made about, and a build that goes red because a runner was busy is the fastest way to teach people to ignore CI. Both modes still assert that every event produced the expected finding — a perf run that measured a hook doing nothing would be worse than no measurement.
+
+Measured on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load (2026-09-20, five detectors); p50 188 ms, p95 203 ms (2026-09-22, all six). Most of the growth over a regex-only project is subprocess start, one per external tool per event.
 
 ## 14. Error handling
 

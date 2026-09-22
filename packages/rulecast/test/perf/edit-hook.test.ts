@@ -116,6 +116,10 @@ describe.runIf(process.env.RULECAST_PERF === "1")("edit hook performance", () =>
     const p50 = times[Math.ceil(times.length * 0.5) - 1]!
     const p95 = times[Math.ceil(times.length * 0.95) - 1]!
     console.log(`edit hook: p50 ${p50.toFixed(0)} ms, p95 ${p95.toFixed(0)} ms`)
-    expect(p95).toBeLessThan(500)
+    // RULECAST_PERF_GATE=0 measures and prints without asserting. A shared CI runner spawning one
+    // subprocess per external tool per event is several times slower than the hardware the 500 ms
+    // promise is made about, and a build that goes red because a runner was busy teaches people to
+    // ignore CI. The gate stays a local check on real hardware (spec §13).
+    if (process.env.RULECAST_PERF_GATE !== "0") expect(p95).toBeLessThan(500)
   }, 120_000)
 })
