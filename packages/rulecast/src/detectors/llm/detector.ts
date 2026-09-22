@@ -122,6 +122,7 @@ async function runCall(
     source: call.source,
     changedLines: call.changedLines,
     provider: settings.provider,
+    baseUrl: settings.baseUrl,
     model,
     rules: call.rules.map((rule, index) => ({
       id: rule.id,

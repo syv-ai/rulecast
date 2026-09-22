@@ -53,6 +53,10 @@ export const claudeCodeProvider: LlmProvider = {
       if (typeof envelope.result === "string") {
         const fromResult = responseSchema.safeParse(parseJson(envelope.result))
         if (fromResult.success) return fromResult.data.findings
+        // Scan the *unescaped* reply, not the envelope around it: inside result.stdout the
+        // answer's quotes are backslash-escaped, so nothing there parses as JSON.
+        const scannedResult = responseSchema.safeParse(extractFindingsJson(envelope.result))
+        if (scannedResult.success) return scannedResult.data.findings
       }
     }
 

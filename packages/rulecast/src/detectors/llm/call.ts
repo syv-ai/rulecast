@@ -9,14 +9,18 @@ export interface CallKeyInput {
   source: string
   changedLines: [number, number][] | null
   provider: LlmProviderName
+  /** Part of the key: within one provider, base_url is what picks the backend. */
+  baseUrl: string | null
   model: string
   rules: { id: string; config: LlmConfig; grounding: { ref: string; content: string }[] }[]
 }
 
 /**
  * Spec §6: "hash of file content, change set, model, and the ids, configs and grounding content of
- * the rules in the call", plus the provider — the same alias resolves to a different model for a
- * different provider, so switching backends must not read the old answers.
+ * the rules in the call", plus the provider and its base_url. The same alias resolves to a
+ * different model for a different provider, and within one provider base_url is what chooses the
+ * backend — a local Ollama and a hosted gateway can serve different models under one name. Neither
+ * may read the other's answers out of a cache that never expires.
  *
  * Rules are sorted by id, so the same set of rules is one call however they were grouped.
  */
@@ -26,6 +30,7 @@ export function callKey(input: CallKeyInput): string {
     source: input.source,
     changedLines: input.changedLines,
     provider: input.provider,
+    baseUrl: input.baseUrl,
     model: input.model,
     rules: [...input.rules]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))

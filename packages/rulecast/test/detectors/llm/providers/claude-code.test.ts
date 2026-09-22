@@ -70,6 +70,19 @@ describe("claude-code provider", () => {
     expect(await claudeCodeProvider.ask(request(root))).toEqual([{ rule: "r1", line: 2, reason: "prints" }])
   })
 
+  test("falls back to scanning the result string when the model wrapped its JSON in prose", async () => {
+    const root = await createProject({})
+    await stubAgentCli(root, "claude", {
+      stdout: JSON.stringify({
+        is_error: false,
+        // No structured_output, and `result` is prose around the JSON. Scanning the raw envelope
+        // instead of this string finds nothing: the inner quotes are backslash-escaped there.
+        result: 'Here is what I found:\n```json\n{"findings":[{"rule":"r1","line":2,"reason":"prints"}]}\n```\n',
+      }),
+    })
+    expect(await claudeCodeProvider.ask(request(root))).toEqual([{ rule: "r1", line: 2, reason: "prints" }])
+  })
+
   test("falls back to scanning stdout when it is not an envelope at all", async () => {
     const root = await createProject({})
     await stubAgentCli(root, "claude", {

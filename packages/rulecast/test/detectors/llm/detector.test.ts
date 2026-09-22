@@ -1,6 +1,7 @@
+import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { memoryCache } from "../../../src/core/detection/cache"
+import { diskCache, memoryCache } from "../../../src/core/detection/cache"
 import {
   type ChangeSet,
   type DetectorRuleInput,
@@ -207,6 +208,30 @@ describe("llm detector", () => {
     } finally {
       await api.close()
     }
+  })
+
+  test("a second run over the same disk cache makes no call", async () => {
+    // Spec §6: "Unchanged files make no calls on repeated verifies." The unit test in call.test.ts
+    // uses an in-memory cache, which cannot show that the key survives a process boundary — and
+    // the real cache is a directory of JSON files read by a fresh CLI process every time.
+    const root = await project()
+    const cacheDir = path.join(root, ".cache")
+    const twice = () =>
+      llmDetector.run({
+        event: "verify",
+        rules: [rule("r1", ["app/a.py"])],
+        changes: new Map(),
+        cache: diskCache(cacheDir),
+        settings: defaultDetectorSettings(),
+        cwd: root,
+        signal: new AbortController().signal,
+      })
+
+    const first = await twice()
+    const second = await twice()
+    expect(await stubArgv(root, "claude")).toHaveLength(1)
+    expect(second.findings).toEqual(first.findings)
+    expect(second.findings.length).toBeGreaterThan(0)
   })
 
   test("a file that no longer exists is skipped", async () => {

@@ -66,6 +66,28 @@ describe("pipeline: the llm file budget", () => {
     expect(await stubArgv(root, "claude")).toHaveLength(1)
   })
 
+  test("no provider to reach is ONE warning naming every llm rule, and exit 2", async () => {
+    // Spec §14: "LLM credentials missing → llm rules disabled for the session; one warning".
+    // One warning per rule would be noise, and it is the difference this test exists to hold.
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig(
+        [
+          { ...RULES[0]!, id: "py/thin" },
+          { ...RULES[0]!, id: "py/thick", detect: { llm: { model: "sonnet", question: "And this?" } } },
+        ],
+        { llm: { provider: "anthropic", api_key_env: "DEFINITELY_NOT_SET" } },
+      ),
+      "app/a.py": "def get(id):\n    return id\n",
+    })
+    const result = await pipelineAt(root, { kind: "verify", files: ["app/a.py"], cwd: root })
+
+    expect(result.delivery.warnings).toHaveLength(1)
+    expect(result.delivery.warnings[0]).toContain("py/thin")
+    expect(result.delivery.warnings[0]).toContain("py/thick")
+    expect(result.delivery.warnings[0]).toContain("DEFINITELY_NOT_SET")
+    expect(result.failed).toBe(true)
+  })
+
   test("--no-llm skips the rules before the budget ever sees them", async () => {
     const { root, send } = await scenario()
     const session = { id: "s3" }

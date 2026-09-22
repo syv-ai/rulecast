@@ -42,6 +42,7 @@ const base: CallKeyInput = {
   source: "print('x')\n",
   changedLines: [[1, 1]],
   provider: "claude-code",
+  baseUrl: null,
   model: "haiku",
   rules: [{ id: "r1", config: { model: "haiku", question: "q", grounding: true }, grounding: [] }],
 }
@@ -80,6 +81,10 @@ describe("callKey", () => {
     ["the model", { ...base, model: "sonnet" }],
     // The same alias resolves differently per provider, so switching provider must not read old answers.
     ["the provider", { ...base, provider: "anthropic" }],
+    // base_url picks a backend within one provider just as much: a local Ollama and a hosted
+    // gateway can serve different models under the same name.
+    ["the base url", { ...base, baseUrl: "http://localhost:11434/v1" }],
+    ["the base url changing again", { ...base, baseUrl: "https://gateway.test/v1" }],
     ["a rule id", { ...base, rules: [{ ...base.rules[0]!, id: "r2" }] }],
     [
       "a rule's question",

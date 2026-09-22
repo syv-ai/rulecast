@@ -109,6 +109,31 @@ describe("runDetection", () => {
     expect(order).toEqual(["slow:start", "fast", "slow:end"])
   })
 
+  test("a rule: null error disables every rule of that kind, as one error naming them", async () => {
+    // Spec §14: "Detector error for a whole run → all rules in the run disabled for the session;
+    // one warning naming them". The llm detector reports this when there is no binary and no
+    // credentials, where one warning per rule would be noise.
+    const unavailable = detector("unavailable", async () => ({
+      findings: [{ rule: "r1", match: match("a") }],
+      errors: [{ rule: null, message: "ANTHROPIC_API_KEY is not set" }],
+    }))
+    const output = await runDetection(
+      input(
+        [
+          { rule: detectorRule("r1", "unavailable"), files: ["a"] },
+          { rule: detectorRule("r2", "unavailable"), files: ["a"] },
+          { rule: detectorRule("r3", "unavailable"), files: ["a"] },
+        ],
+        [unavailable],
+      ),
+    )
+    expect(output.errors).toEqual([
+      { kind: "unavailable", rules: ["r1", "r2", "r3"], message: "ANTHROPIC_API_KEY is not set" },
+    ])
+    // Any findings that came back with it are dropped: the run did not really happen.
+    expect(output.findings).toEqual([])
+  })
+
   test("per-rule errors drop that rule's findings; thrown errors fail the whole run", async () => {
     const partial = detector("partial", async () => ({
       findings: [
