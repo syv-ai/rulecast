@@ -1,0 +1,54 @@
+name: binaries
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  attach:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same four as ci.yml and packages/rulecast/scripts/build-binary.ts. Each builds on its
+        # own runner because bun cannot cross-compile a binary that embeds @ast-grep/napi's
+        # platform-specific native module.
+        include:
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: macos-latest, target: darwin-arm64 }
+          - { os: macos-13, target: darwin-x64 }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm binary
+
+      # Prove it runs before attaching it to a release people will download.
+      - run: pnpm vitest run test/binary.test.ts
+        working-directory: packages/rulecast
+        env:
+          RULECAST_BINARY: ${{ github.workspace }}/packages/rulecast/dist/rulecast-${{ matrix.target }}
+
+      # A binary nobody can verify is a binary nobody should run.
+      - name: Checksum
+        working-directory: packages/rulecast/dist
+        run: shasum -a 256 "rulecast-${{ matrix.target }}" > "rulecast-${{ matrix.target }}.sha256"
+
+      - name: Attach to the release
+        working-directory: packages/rulecast/dist
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "rulecast-${{ matrix.target }}" "rulecast-${{ matrix.target }}.sha256" \
+            --clobber --repo "${{ github.repository }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
