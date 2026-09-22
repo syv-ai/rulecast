@@ -43,7 +43,7 @@ repos:
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run` |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
-| `llm.provider`, `llm.model`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `anthropic`, `claude-haiku-4-5-20251001`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector (not available yet) |
+| `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible`. There is no `llm.model`: every llm rule names its own |
 
 ## Repo entries
 

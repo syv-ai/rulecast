@@ -86,6 +86,27 @@ detect:
 - Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
 - Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**, because it is slow enough to be felt on every edit. Write `stages: [edit, verify]` if you want it anyway.
 
-## Coming later
+## `llm`
 
-`llm` (a model's judgement on a file, for conventions no pattern can express) is designed but not in this version: `rulecast validate` reports `unknown detector` for it. Until then, write the convention as a `stages: [touch]` rule that delivers the section, so the agent reads it before it writes the code.
+```yaml
+detect:
+  llm:
+    model: haiku
+    question: >
+      Does this route do more than parse input, call a service,
+      and return the result? Report each offending line.
+    grounding: true
+```
+
+- `model`: **required, no default.** Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which every provider maps to its own name, or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. There is no project-wide default on purpose: the cost of a rule is chosen by whoever writes it.
+- `question`: what the model is asked about the file. Ask for specific lines — "Report each offending line" — or you get an essay instead of findings.
+- `grounding`: defaults to `true`. Sends the rule's `context` references with the question, whatever their delivery mode, so the model judges against your conventions rather than its own taste. Set it to `false` when the question stands alone.
+- One call per file **and model**, covering every llm rule that selected that file. Three llm rules on one file all using `haiku` cost one call; a fourth using `sonnet` costs a second.
+- Files with no changed lines are not sent at all. When there is a change set the changed lines are marked and the model is told to report only those; with no change set it judges the whole file.
+- Answers are cached on the file's content, the change set, the provider, the model and the rules' questions and grounding. Re-running a verify with nothing changed makes no calls.
+- At most `llm.max_files_per_verify` files per verify (default 10), most recently edited first. The rest are named in a warning.
+- Captures: `{{reason}}`, the model's explanation. `{{text}}` is the line from the file, not the model's quote of it.
+- Default stages: **`verify` only.** A model call takes seconds; it has no business in an edit hook. Write `stages: [edit, verify]` if you want it anyway.
+- Providers are configured once for the project, in `llm.provider`: `claude-code` (the default — shells out to `claude -p`, and needs no API key on a machine signed in to Claude Code), `opencode`, `anthropic` and `openai-compatible` (the last two read `llm.api_key_env` and honour `llm.base_url`, which is how you reach Azure OpenAI or a local Ollama).
+
+**An llm rule sends the file's contents and the rule's grounding to the configured provider, and costs money for every file that is not already cached.** It is the right answer only when no pattern can express the convention. Reach for `path`, `regex` and `ast-grep` first: they are free, instant and exact. If you cannot write the check mechanically but the convention still matters, a `stages: [touch]` rule that delivers the section is usually better than asking a model — it puts the convention in front of the agent before the code is written, instead of judging it afterwards.
