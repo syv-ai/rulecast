@@ -740,7 +740,7 @@ Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itse
 - **End to end:** a few scenarios through `rulecast hook claude-code` on a fixture repo (TSX + Python).
 - **Perf test:** §13.
 - **LLM:** a stub agent CLI in a fixture's `node_modules/.bin` replaying `test/payloads/llm/` for `claude-code` and `opencode`; a local `node:http` server for `anthropic` and `openai-compatible`, which also pins the request each sends. `RULECAST_LLM=1` makes one real call per provider the machine can reach, skipping the others by name and asserting the shape of the answer rather than the model's words. No test in `pnpm test` calls a model or opens a socket to one.
-- **Dogfooding:** aka-agents2, with rules drafted from its `AGENTS.md`/`CLAUDE.md` through the drafting prompt (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`, `useUnsavedWork` on close paths).
+- **Dogfooding:** aka-agents2, with rules drafted from its `CLAUDE.md` through the drafting prompt. **Done 2026-09-22** on a throwaway clone; see `docs/dogfooding/2026-09-22-aka-agents2.md`. Three of the four named conventions (service/CRUD layering, no `HTTPException` in services, no edits to `frontend/src/client/`) were already covered by catalog rules, since the starter catalog was drawn from this project; drafting added a local `path` rule that catches all 17 files of the generated client where the catalog's extension match caught 15. The fourth, `useUnsavedWork` on close paths, became the `llm` rule and found six real issues. It turned up three defects, all fixed: a multi-line match corrupting the message, an unactionable verify-timeout warning, and doctor mislabelling an alias that resolves to itself.
 
 ## 16. Package layout and distribution
 
@@ -786,7 +786,7 @@ Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, 
 | Release | Scope |
 |---|---|
 | **0.1** | Everything in this document: pre-commit-style config, rule repos and the monorepo manifest, compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `install`, `uninstall`, `run`, `autoupdate`, `try-repo`, `validate`, `clean`, `hook`, `warm`, `doctor`; first rule packages; agent docs; perf test; npm package and GitHub Releases binary; public repository; dogfooded on aka-agents2 |
-| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`) |
+| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — dogfooding measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
 
 ## 18. Follow-up sub-project: `design-system` detector
