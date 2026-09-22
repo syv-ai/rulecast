@@ -5,14 +5,15 @@
   "packageManager": "pnpm@10.26.0",
   "scripts": {
     "build": "pnpm --filter @syv-ai/rulecast build",
+    "lint": "biome check --error-on-warnings",
+    "lint:fix": "biome check --write",
     "manifest": "pnpm --filter @syv-ai/rulecast manifest",
+    "prepare": "lefthook install",
+    "readme": "pnpm --filter @syv-ai/rulecast readme",
     "test": "pnpm -r test",
     "test:perf": "pnpm --filter @syv-ai/rulecast test:perf",
     "typecheck": "pnpm -r typecheck",
-    "vitest": "pnpm --filter @syv-ai/rulecast exec vitest",
-    "lint": "biome check --error-on-warnings",
-    "lint:fix": "biome check --write",
-    "prepare": "lefthook install"
+    "vitest": "pnpm --filter @syv-ai/rulecast exec vitest"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
