@@ -18,9 +18,13 @@ A live call costs money, needs credentials or a signed-in Claude Code, and gives
 answer every time — none of which belongs in `pnpm test`. The stub makes the provider tests free,
 offline and deterministic.
 
-`test/detectors/llm/live.test.ts` is where these recordings get checked against reality: run it
+The two HTTP providers have no recording: `test/helpers/llm-server.ts` answers them from a local
+`node:http` server, which also lets a test assert on the request that was sent.
+
+`test/detectors/llm/live.test.ts` is where all four stand-ins get checked against reality: run it
 with `RULECAST_LLM=1` and it makes one real call per provider the machine can reach, asserting the
-shape of what comes back rather than the model's words.
+shape of what comes back rather than the model's words. A provider it cannot reach — no binary on
+`PATH`, no API key — is skipped by name with a printed reason, never silently passed.
 
 ## The stub is prompt-sensitive
 
