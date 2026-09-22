@@ -107,6 +107,15 @@ detect:
 - At most `llm.max_files_per_verify` files per verify (default 10), most recently edited first. The rest are named in a warning.
 - Captures: `{{reason}}`, the model's explanation. `{{text}}` is the line from the file, not the model's quote of it.
 - Default stages: **`verify` only.** A model call takes seconds; it has no business in an edit hook. Write `stages: [edit, verify]` if you want it anyway.
-- Providers are configured once for the project, in `llm.provider`: `claude-code` (the default — shells out to `claude -p`, and needs no API key on a machine signed in to Claude Code), `opencode`, `anthropic` and `openai-compatible` (the last two read `llm.api_key_env` and honour `llm.base_url`, which is how you reach Azure OpenAI or a local Ollama).
+- Providers are configured once for the project, in `llm.provider`:
+
+  | Provider | Needs | `llm.base_url` |
+  |---|---|---|
+  | `claude-code` (default) | `claude` on `PATH`, signed in. No API key | ignored |
+  | `opencode` | `opencode` on `PATH` | ignored |
+  | `anthropic` | `llm.api_key_env` (default `ANTHROPIC_API_KEY`) | the origin, e.g. `https://api.anthropic.com`; rulecast appends `/v1/messages` |
+  | `openai-compatible` | `llm.api_key_env` | includes the version prefix, e.g. `http://localhost:11434/v1` for Ollama; rulecast appends `/chat/completions` |
+
+  Each `base_url` follows its own ecosystem's SDK convention, so a URL copied from your provider's docs works as written. **Azure OpenAI is not supported in 0.1**: it needs a per-deployment path with an `api-version` query string and an `api-key` header, which no `base_url` can express.
 
 **An llm rule sends the file's contents and the rule's grounding to the configured provider, and costs money for every file that is not already cached.** It is the right answer only when no pattern can express the convention. Reach for `path`, `regex` and `ast-grep` first: they are free, instant and exact. If you cannot write the check mechanically but the convention still matters, a `stages: [touch]` rule that delivers the section is usually better than asking a model — it puts the convention in front of the agent before the code is written, instead of judging it afterwards.

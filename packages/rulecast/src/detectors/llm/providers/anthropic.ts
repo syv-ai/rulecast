@@ -2,6 +2,7 @@ import { extractFindingsJson } from "./extract"
 import { apiKey, endpoint, postJson } from "./http"
 import { type LlmFinding, type LlmProvider, type LlmRequest, responseSchema } from "./types"
 
+/** The origin, without a version prefix, as the Anthropic SDKs define `base_url`. */
 const API = "https://api.anthropic.com"
 const VERSION = "2023-06-01"
 

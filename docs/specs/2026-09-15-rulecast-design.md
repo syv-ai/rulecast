@@ -447,7 +447,7 @@ detect:
 - **Providers,** behind a provider interface, chosen once per project with `llm.provider`:
   - `claude-code` (the default) — shells out to `claude -p` with `--json-schema`, and needs no API key on a machine signed in to Claude Code. Run lean (`--system-prompt`, `--tools ""`, `--restricted`, `--strict-mcp-config`, `--no-session-persistence`): without those flags it drags Claude Code's system prompt, the project's `CLAUDE.md` and its plugins into every call, measured at 23,046 input tokens against 1,254.
   - `opencode` — shells out to `opencode run`. No schema flag, so the answer is scraped out of its output; the prompt goes in argv, which bounds it at 128 KiB.
-  - `anthropic` and `openai-compatible` (OpenAI, Azure OpenAI, Ollama and others) — read `api_key_env`, and both honour `base_url`.
+  - `anthropic` and `openai-compatible` (OpenAI, Ollama, a gateway) — read `api_key_env`, and both honour `base_url`, each following its own ecosystem's SDK convention: for `anthropic` it is the origin and rulecast appends `/v1/messages`; for `openai-compatible` it carries the version prefix (`http://localhost:11434/v1`) and rulecast appends `/chat/completions`. **Azure OpenAI is out of scope for 0.1** — it needs a per-deployment path with an `api-version` query string and an `api-key` header, which no `base_url` expresses.
 - **Cache.** Key: hash of file content, change set, provider, model, and the ids, configs and grounding content of the rules in the call. Unchanged files make no calls on repeated verifies.
 - **Budget.** At most `llm.max_files_per_verify` files per verify, most recently edited first; skipped files are named in a warning.
 - **Captures.** `reason`.
@@ -780,7 +780,7 @@ Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, 
 | Release | Scope |
 |---|---|
 | **0.1** | Everything in this document: pre-commit-style config, rule repos and the monorepo manifest, compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `install`, `uninstall`, `run`, `autoupdate`, `try-repo`, `validate`, `clean`, `hook`, `warm`, `doctor`; first rule packages; agent docs; perf test; npm package and GitHub Releases binary; public repository; dogfooded on aka-agents2 |
-| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`) |
+| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`) |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
 
 ## 18. Follow-up sub-project: `design-system` detector
