@@ -66,7 +66,8 @@ process.stdin.on("end", () => {
     process.exit(EXIT_CODE)
   }
 
-  const rules = [...prompt.matchAll(/^### (\\S+)/gm)].map((match) => match[1])
+  // OpenCode takes the prompt as an argument, not on stdin, so look in both.
+  const rules = [...(prompt || argv).matchAll(/^### (\\S+)/gm)].map((match) => match[1])
   const template = RECORDING.structured_output.findings
   const findings = rules.flatMap((rule) => template.map((finding) => ({ ...finding, rule })))
   const answer = { ...RECORDING, structured_output: { findings }, result: JSON.stringify({ findings }) }
