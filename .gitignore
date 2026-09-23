@@ -11,3 +11,8 @@ binaries/
 
 # Not ours.
 .dash/
+
+# Credentials. Nothing here is ever committed, whatever a tool writes into it.
+.env
+.env.*
+!.env.example
