@@ -43,11 +43,11 @@
     "binary": "tsx scripts/build-binary.ts",
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean",
     "manifest": "tsx scripts/generate-manifest.ts",
+    "perf": "tsx scripts/perf.ts",
     "readme": "tsx scripts/readme.ts",
     "release-notes": "tsx scripts/release-notes.ts",
     "sync-version": "tsx scripts/sync-version.ts",
     "test": "vitest run",
-    "test:perf": "RULECAST_PERF=1 vitest run test/perf",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

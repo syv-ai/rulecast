@@ -1,21 +1,30 @@
 import { execFileSync, spawnSync } from "node:child_process"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, mkdtempSync } from "node:fs"
 import { chmod } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
-import { beforeAll, describe, expect, test } from "vitest"
+import { fileURLToPath } from "node:url"
 
-import { localConfig } from "../helpers/config"
-import { createRepo } from "../helpers/git"
-import { TEST_HOME } from "../helpers/home"
-import { linkTool } from "../helpers/linters"
-import { claudeCodePayload } from "../helpers/payloads"
+import { localConfig } from "../test/helpers/config"
+import { createRepo } from "../test/helpers/git"
+import { linkTool } from "../test/helpers/linters"
+import { claudeCodePayload } from "../test/helpers/payloads"
 
-const cli = path.resolve("dist/cli.js")
+const packageDir = fileURLToPath(new URL("../", import.meta.url))
+const cli = path.join(packageDir, "dist/cli.js")
+
+/** Its own cache home, so a measurement never depends on, or disturbs, a real one. */
+const HOME = mkdtempSync(path.join(tmpdir(), "rulecast-perf-"))
+
 const FILE = "src/feature/orders.ts"
 const REGEX_RULES = 12
 const PATH_RULES = 5
 const AST_RULES = 8
 const LINTER_RULES = 4
+const EVENTS = 50
+
+/** Spec §13's requirement: the edit hook under this at p95, with warm caches. */
+export const BUDGET_MS = 500
 
 /** Spec §13: 30 rules across ast-grep, regex, path, a linter and command. */
 function perfProject(): Record<string, string> {
@@ -83,7 +92,7 @@ function runHook(root: string, payload: unknown): { ms: number; stdout: string }
   const started = performance.now()
   const result = spawnSync(process.execPath, [cli, "hook", "claude-code"], {
     cwd: root,
-    env: { ...process.env, RULECAST_HOME: TEST_HOME },
+    env: { ...process.env, RULECAST_HOME: HOME },
     input: JSON.stringify(payload),
     encoding: "utf8",
   })
@@ -92,34 +101,43 @@ function runHook(root: string, payload: unknown): { ms: number; stdout: string }
   return { ms, stdout: result.stdout }
 }
 
-describe.runIf(process.env.RULECAST_PERF === "1")("edit hook performance", () => {
-  beforeAll(() => {
-    execFileSync("pnpm", ["build"])
-  }, 60_000)
+export interface Measurement {
+  p50: number
+  p95: number
+  max: number
+  events: number
+  rules: number
+}
 
-  test("p95 of 50 edit events stays under 500 ms", async () => {
-    const root = await createRepo(perfProject())
-    await chmod(path.join(root, "perf-check.sh"), 0o755)
-    await linkTool(root, "oxlint")
-    const payload = (name: string) => claudeCodePayload(name, { root, file: FILE, sessionId: "perf" })
-    runHook(root, payload("post-tool-use.read.complete"))
-    for (let i = 0; i < 3; i++) runHook(root, payload("post-tool-use.edit"))
+/**
+ * Replays EVENTS edit hooks over the fixture and returns the percentiles.
+ *
+ * Every event is checked to have produced its expected finding: a measurement of a hook that
+ * quietly did nothing would be worse than no measurement.
+ */
+export async function measureEditHook(): Promise<Measurement> {
+  execFileSync("pnpm", ["build"], { cwd: packageDir, stdio: "ignore" })
+  const project = perfProject()
+  const root = await createRepo(project)
+  await chmod(path.join(root, "perf-check.sh"), 0o755)
+  await linkTool(root, "oxlint")
+  const payload = (name: string) => claudeCodePayload(name, { root, file: FILE, sessionId: "perf" })
 
-    const times: number[] = []
-    for (let i = 0; i < 50; i++) {
-      appendFileSync(path.join(root, FILE), `export const added${i} = forbidden${i % REGEX_RULES}(${i})\n`)
-      const { ms, stdout } = runHook(root, payload("post-tool-use.edit"))
-      expect(stdout).toContain(`forbidden${i % REGEX_RULES}(${i})`)
-      times.push(ms)
-    }
-    times.sort((a, b) => a - b)
-    const p50 = times[Math.ceil(times.length * 0.5) - 1]!
-    const p95 = times[Math.ceil(times.length * 0.95) - 1]!
-    console.log(`edit hook: p50 ${p50.toFixed(0)} ms, p95 ${p95.toFixed(0)} ms`)
-    // RULECAST_PERF_GATE=0 measures and prints without asserting. A shared CI runner spawning one
-    // subprocess per external tool per event is several times slower than the hardware the 500 ms
-    // promise is made about, and a build that goes red because a runner was busy teaches people to
-    // ignore CI. The gate stays a local check on real hardware (spec §13).
-    if (process.env.RULECAST_PERF_GATE !== "0") expect(p95).toBeLessThan(500)
-  }, 120_000)
-})
+  // Warm the caches: the requirement is about a warm hook, not a cold one.
+  runHook(root, payload("post-tool-use.read.complete"))
+  for (let i = 0; i < 3; i++) runHook(root, payload("post-tool-use.edit"))
+
+  const times: number[] = []
+  for (let i = 0; i < EVENTS; i++) {
+    appendFileSync(path.join(root, FILE), `export const added${i} = forbidden${i % REGEX_RULES}(${i})\n`)
+    const { ms, stdout } = runHook(root, payload("post-tool-use.edit"))
+    const expected = `forbidden${i % REGEX_RULES}(${i})`
+    if (!stdout.includes(expected)) throw new Error(`event ${i} delivered no finding for ${expected}`)
+    times.push(ms)
+  }
+
+  times.sort((a, b) => a - b)
+  const at = (q: number) => times[Math.ceil(times.length * q) - 1]!
+  const rules = REGEX_RULES + PATH_RULES + AST_RULES + LINTER_RULES + 1
+  return { p50: at(0.5), p95: at(0.95), max: times.at(-1)!, events: EVENTS, rules }
+}

@@ -14,7 +14,7 @@ Prerequisite: plan 3 (`2026-09-19-rulecast-03a-monorepo-config.md` to `03e-repos
 
 ## Decisions this plan implements
 
-1. **Catalog contents.** The user approved this starter set on 2026-09-19. It is drawn from aka-agents2's `CLAUDE.md` conventions but written generically. Only the `regex` and `path` detectors and touch rules are used, because `ast-grep` arrives in plan 5.
+1. **Catalog contents.** The user approved this starter set on 2026-09-19. It is drawn from the target's `CLAUDE.md` conventions but written generically. Only the `regex` and `path` detectors and touch rules are used, because `ast-grep` arrives in plan 5.
 
    | Id | Kind | Severity | Files |
    |---|---|---|---|

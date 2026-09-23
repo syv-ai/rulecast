@@ -244,7 +244,7 @@ The spec is split into seven plans. Each produces working, tested software on it
 | 4 | Interactive init | Catalog rule packages (`rules-general`, `rules-python`, `rules-react`) and the generated root manifest, agent docs under `agents/`, interactive `rulecast init` | §4 (rule repos), §12 (`init`, agent docs), §15 (init) | Written, in two parts executed in order: `2026-09-19-rulecast-04a-catalog-docs.md` (tasks 1–2), `04b-init.md` (3–9) |
 | 5 | Structural and external detectors | `ast-grep`, `command`, `linter` (ruff, oxlint, eslint); exported detector and adapter contract suites | §6, §15 | Written after plan 4 |
 | 6 | LLM detector | `llm` detector, providers, cache, budget | §6 (`llm`) | Written after plan 5 |
-| 7 | Distribution | `rulecast doctor`, standalone binary, release pipeline, public repository (needed by the drafting prompt's raw GitHub links), aka-agents2 dogfooding | §5 (doctor), §16, §17 | Written after plan 6 |
+| 7 | Distribution | `rulecast doctor`, standalone binary, release pipeline, public repository (needed by the drafting prompt's raw GitHub links), dogfooding on a private client codebase | §5 (doctor), §16, §17 | Written after plan 6 |
 
 The `design-system` detector (§18) gets its own spec after 0.1.
 

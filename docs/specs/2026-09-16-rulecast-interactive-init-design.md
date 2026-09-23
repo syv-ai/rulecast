@@ -14,7 +14,7 @@
 
 ```
 $ npx @syv-ai/rulecast init
-┌ rulecast init · ~/repos/aka-agents2
+┌ rulecast init · ~/repos/my-app
 │ Detected  python (pyproject.toml) · typescript + react (frontend/)
 │           AGENTS.md (imported by CLAUDE.md) · docs/ · Claude Code (.claude/)
 │

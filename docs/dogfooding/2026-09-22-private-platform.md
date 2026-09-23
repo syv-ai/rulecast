@@ -1,4 +1,4 @@
-# Dogfooding rulecast on aka-agents2
+# Dogfooding rulecast on a private platform
 
 **Date:** 2026-09-22 · **Target:** a private FastAPI + React platform, 1,945 tracked files (854 `.py`, 444 `.tsx`, 401 `.ts`), at its `v1.98.0` release commit · **rulecast:** the 0.1 candidate, built from source
 

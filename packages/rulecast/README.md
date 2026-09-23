@@ -115,7 +115,7 @@ Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 ## Performance
 
-The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The last local measurement, on an Apple M3 Pro with all six detectors configured, was p50 188 ms and p95 203 ms. A shared GitHub runner is slower and more variable — p50 218–235 ms, p95 237–247 ms across runs — which is why CI reports the numbers rather than gating on them.
+The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. `pnpm perf` replays 50 edit events and checks it. The last measurement, on an Apple M3 Pro with all six detectors configured, was p50 170 ms and p95 187 ms.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 
