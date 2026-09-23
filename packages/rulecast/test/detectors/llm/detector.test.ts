@@ -12,7 +12,7 @@ import { llmDetector } from "../../../src/detectors/llm/detector"
 import type { LlmConfig } from "../../../src/detectors/llm/schema"
 import { stubAgentCli, stubArgv, stubStdin } from "../../helpers/llm"
 import { fakeApi } from "../../helpers/llm-server"
-import { createProject } from "../../helpers/project"
+import { createProject, fromDisk } from "../../helpers/project"
 
 const PY = "def get(id):\n    print('fetching', id)\n    return id\n"
 
@@ -36,6 +36,7 @@ function run(
     event: "verify",
     rules,
     changes: options.changes ?? new Map(),
+    read: fromDisk(cwd),
     cache: memoryCache(),
     settings: { llm: { ...settings.llm, ...options.llm } },
     cwd,
@@ -221,6 +222,7 @@ describe("llm detector", () => {
         event: "verify",
         rules: [rule("r1", ["app/a.py"])],
         changes: new Map(),
+        read: fromDisk(root),
         cache: diskCache(cacheDir),
         settings: defaultDetectorSettings(),
         cwd: root,

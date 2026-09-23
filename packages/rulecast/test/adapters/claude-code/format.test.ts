@@ -69,6 +69,24 @@ describe("Claude Code adapter: format", () => {
     }
   })
 
+  test("a guard with findings denies the write, with the rule and its section as the reason", () => {
+    const value = delivery({
+      findings: [finding()],
+      references: [{ ref: "conventions/backend.md#errors", state: "full", content: "## Errors\nRaise your own." }],
+    })
+    const output = JSON.parse(format(value, "guard").stdout)
+    expect(output.hookSpecificOutput.hookEventName).toBe("PreToolUse")
+    expect(output.hookSpecificOutput.permissionDecision).toBe("deny")
+    const reason = output.hookSpecificOutput.permissionDecisionReason as string
+    expect(reason).toContain("refuse this write")
+    expect(reason).toContain("raises HTTPException(500)")
+    expect(reason).toContain("## Errors")
+  })
+
+  test("a guard with nothing to say prints nothing, and the write goes ahead", () => {
+    expect(format(delivery(), "guard")).toEqual({ stdout: "", exitCode: 0 })
+  })
+
   test("the cut lands on a line break, never mid-word", () => {
     const findings = Array.from({ length: 300 }, (_, i) =>
       finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),

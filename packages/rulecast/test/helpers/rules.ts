@@ -9,6 +9,7 @@ export function rule(overrides: Partial<Omit<CompiledRule, "matches">> & { id: s
     description: null,
     source: "local",
     severity: "error",
+    refuseWrite: false,
     stages: ["edit", "verify"],
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
     message: "{{file}}:{{line}}",

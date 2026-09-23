@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { perRule, readSourceFile } from "../core/detection/per-rule"
+import { perRule } from "../core/detection/per-rule"
 import { lineStarts, positionAt } from "../core/detection/positions"
 import { errorMessage } from "../core/errors"
 import type { Detector, Match } from "../core/types"
@@ -35,12 +35,13 @@ export const regexDetector: Detector<RegexConfig> = {
   schema,
   captures: (config) => groupNames(config.pattern),
   events: () => ["edit", "verify"],
+  guards: true,
   run: perRule(async (rule, input) => {
     const names = groupNames(rule.config.pattern)
     const matches: Match[] = []
     for (const file of rule.files) {
       input.signal.throwIfAborted()
-      const text = await readSourceFile(input.cwd, file)
+      const text = await input.read(file)
       if (text === null) continue
       const starts = lineStarts(text)
       for (const found of text.matchAll(new RegExp(rule.config.pattern, `${rule.config.flags}g`))) {

@@ -25,6 +25,7 @@ const ruleKeys = {
   stages: stagesSchema.optional(),
   minimum_rulecast_version: versionSchema.optional(),
   severity: z.enum(["error", "warning"]).optional(),
+  refuse_write: z.boolean().optional(),
   detect: z
     .record(z.unknown())
     .refine((value) => Object.keys(value).length === 1, "must name exactly one detector")
@@ -76,6 +77,10 @@ export const configSchema = z
       .object({ max_blocks: z.number().int().nonnegative().default(1) })
       .strict()
       .default({}),
+    refuse_gate: z
+      .object({ max_refusals: z.number().int().nonnegative().default(1) })
+      .strict()
+      .default({}),
     llm: z
       .object({
         // No `model`: every llm rule names its own (plan 6a, Decision 1).
@@ -98,6 +103,7 @@ export const configSchema = z
     maxMatchesPerRule: input.max_matches_per_rule,
     timeouts: { editDeadlineMs: input.timeouts.edit_deadline_ms, verifyMs: input.timeouts.verify_ms },
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
+    refuseGate: { maxRefusals: input.refuse_gate.max_refusals },
     llm: {
       provider: input.llm.provider,
       baseUrl: input.llm.base_url,

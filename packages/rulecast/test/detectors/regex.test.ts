@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest"
 import { memoryCache } from "../../src/core/detection/cache"
 import { defaultDetectorSettings } from "../../src/core/types"
 import { regexDetector } from "../../src/detectors/regex"
-import { createProject } from "../helpers/project"
+import { createProject, fromDisk } from "../helpers/project"
 
 describe("regex detector", () => {
   test("schema applies default flags and rejects invalid patterns", () => {
@@ -32,6 +32,7 @@ describe("regex detector", () => {
         },
       ],
       changes: new Map(),
+      read: fromDisk(cwd),
       cache: memoryCache(),
       settings: defaultDetectorSettings(),
       cwd,

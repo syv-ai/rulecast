@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { AdapterInput, EventKind } from "../../core/types"
+import type { AdapterInput, EventKind, WriteIntent } from "../../core/types"
 
 const common = z.object({
   hook_event_name: z.string(),
@@ -20,6 +20,17 @@ const fileTool = z.object({
 const readResponse = z.object({
   tool_response: z.object({
     file: z.object({ startLine: z.number(), numLines: z.number(), totalLines: z.number() }),
+  }),
+})
+
+/** What Write and Edit say they are about to do; anything else shaped differently is left alone. */
+const writeInput = z.object({
+  tool_input: z.object({
+    file_path: z.string().min(1),
+    content: z.string().optional(),
+    old_string: z.string().optional(),
+    new_string: z.string().optional(),
+    replace_all: z.boolean().optional(),
   }),
 })
 
@@ -45,6 +56,30 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
   })
 
   switch (hook) {
+    case "PreToolUse": {
+      const tool = fileTool.safeParse(input)
+      if (!tool.success) return result(null)
+      const { tool_name: name } = tool.data
+      if (name !== "Edit" && name !== "Write") return result(null)
+      const write = writeInput.safeParse(input)
+      if (!write.success) return result(null)
+      const {
+        file_path: file,
+        content,
+        old_string: find,
+        new_string: replace,
+        replace_all: all,
+      } = write.data.tool_input
+      const intent: WriteIntent | null =
+        content !== undefined
+          ? { content }
+          : find !== undefined && replace !== undefined
+            ? { edit: { find, replace, all: all === true } }
+            : null
+      // A shape rulecast does not recognise is not a shape it may refuse.
+      if (intent === null) return result(null)
+      return { ...result("guard", [file]), event: { kind: "guard", files: [file], cwd, session, intent } }
+    }
     case "PostToolUse": {
       const tool = fileTool.safeParse(input)
       if (!tool.success) return result(null)

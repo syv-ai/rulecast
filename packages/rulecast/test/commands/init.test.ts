@@ -156,7 +156,7 @@ describe("rulecast init without a terminal", () => {
     const result = await runCli(root, ["init"], "", env)
     expect(result.code).toBe(2)
     expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 4 rules from .+@v0\.2\.0\n/)
-    expect(result.stdout).toContain(".claude/settings.json  +6 hooks (Claude Code)")
+    expect(result.stdout).toContain(".claude/settings.json  +7 hooks (Claude Code)")
     expect(result.stdout).toContain("Rerun with --yes")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)

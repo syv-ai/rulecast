@@ -31,6 +31,44 @@ describe("Claude Code adapter: parse", () => {
     })
   })
 
+  test("pre-tool-use.edit → guard carrying the replacement the tool will make", () => {
+    const { payload, parsed } = parse("pre-tool-use.edit")
+    expect(parsed).toEqual({
+      cwd: "/project",
+      warmup: false,
+      event: {
+        kind: "guard",
+        files: ["/project/src/math.ts"],
+        cwd: "/project",
+        session: { id: payload.session_id },
+        intent: {
+          edit: {
+            find: "export function sub(a: number, b: number) {",
+            replace: "export function subtract(a: number, b: number) {",
+            all: false,
+          },
+        },
+      },
+    })
+  })
+
+  test("pre-tool-use.write → guard carrying the whole file", () => {
+    const { parsed } = parse("pre-tool-use.write")
+    expect(parsed?.event?.kind).toBe("guard")
+    expect(parsed?.event?.intent).toEqual({ content: "export const added = 1\n" })
+  })
+
+  test("a PreToolUse for a tool that is not a write has no event", () => {
+    const payload = { ...claudeCodePayload("pre-tool-use.edit"), tool_name: "Bash" }
+    expect(parseClaudeCode(payload)?.event).toBeNull()
+  })
+
+  test("a write whose shape rulecast does not recognise has no event, so it cannot be refused", () => {
+    const payload = claudeCodePayload("pre-tool-use.edit")
+    payload.tool_input = { file_path: "/project/src/math.ts" }
+    expect(parseClaudeCode(payload)?.event).toBeNull()
+  })
+
   test.each<[string, EventKind]>([
     ["post-tool-use.read.subagent", "touch"],
     ["post-tool-use.edit.subagent", "edit"],

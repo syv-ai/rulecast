@@ -14,6 +14,9 @@ const BLOCK_PREAMBLE =
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
+const DENY_PREAMBLE =
+  "This project's rulecast rules (.rulecast-config.yaml) refuse this write. Change what you are writing, or the file you are writing it to, and try again."
+
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
   if (delivery.overflowPath !== null) {
@@ -52,6 +55,16 @@ export const claudeCodeAdapter: Adapter = {
     const text = renderAgentText(delivery, options)
     if (text === "") return NONE
     switch (event.kind) {
+      case "guard":
+        // The write has not happened: permissionDecisionReason is what the model is shown instead
+        // of the tool's result, so it carries the rule and the section that explains it.
+        return json({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: withinLimit(`${DENY_PREAMBLE}\n\n${text}`, delivery, event),
+          },
+        })
       case "touch":
       case "edit":
         return json({

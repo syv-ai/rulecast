@@ -1,0 +1,19 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "c0ee902d-0f7b-434a-9f28-d9b720e1e64c",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/project/src/math.ts",
+    "old_string": "export function sub(a: number, b: number) {",
+    "new_string": "export function subtract(a: number, b: number) {",
+    "replace_all": false
+  },
+  "tool_use_id": "toolu_01786jyjmV7XQv1BU3F687Bb"
+}

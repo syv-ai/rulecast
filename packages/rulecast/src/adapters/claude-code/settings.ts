@@ -14,6 +14,9 @@ const isRulecastHook = (hook: unknown): boolean =>
 function hookGroups(verifyMs: number): { event: string; matcher?: string; timeout: number }[] {
   const verifyTimeout = Math.ceil(verifyMs / 1000) + 10
   return [
+    // Before the write, for refuse_write rules. It answers nothing at all unless the project has
+    // one, so the cost on an ordinary edit is starting rulecast and compiling the config.
+    { event: "PreToolUse", matcher: "Edit|Write", timeout: 5 },
     { event: "PostToolUse", matcher: "Read", timeout: 5 },
     { event: "PostToolUse", matcher: "Edit|Write", timeout: 5 },
     { event: "Stop", timeout: verifyTimeout },

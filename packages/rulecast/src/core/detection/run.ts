@@ -17,6 +17,8 @@ export interface DetectionInput {
   event: DetectorEvent
   selections: Selection[]
   changes: ReadonlyMap<string, ChangeSet>
+  /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
+  read(file: string): Promise<string | null>
   registry: DetectorRegistry
   cacheFor(kind: string): Cache
   contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
@@ -68,6 +70,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
           detector.run({
             event: input.event,
             rules,
+            read: input.read,
             changes: input.changes,
             cache: input.cacheFor(kind),
             settings: input.settings,

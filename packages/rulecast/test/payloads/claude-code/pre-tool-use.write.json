@@ -1,0 +1,17 @@
+{
+  "session_id": "8d1f5483-8088-4e67-9cb2-92b086212653",
+  "transcript_path": "/home/user/.claude/projects/-project/8d1f5483-8088-4e67-9cb2-92b086212653.jsonl",
+  "cwd": "/project",
+  "prompt_id": "12c260b6-dd17-4f4f-8060-555953a52add",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/project/src/new.ts",
+    "content": "export const added = 1\n"
+  },
+  "tool_use_id": "toolu_012QRiY7StbGxCAptXgFjgyS"
+}

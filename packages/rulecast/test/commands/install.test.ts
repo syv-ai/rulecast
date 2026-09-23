@@ -23,10 +23,11 @@ describe("rulecast install", () => {
     const root = await createFixture()
     const first = await runCli(root, ["install"])
     expect(first.code).toBe(0)
-    expect(first.stdout).toContain("installed Claude Code hooks in .claude/settings.json: PostToolUse (Read)")
+    expect(first.stdout).toContain("installed Claude Code hooks in .claude/settings.json: PreToolUse (Edit|Write)")
     const settings = await settingsOf(root)
     expect(Object.keys(settings.hooks).sort()).toEqual([
       "PostToolUse",
+      "PreToolUse",
       "SessionStart",
       "Stop",
       "SubagentStop",

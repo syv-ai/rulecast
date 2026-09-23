@@ -7,7 +7,7 @@ import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/co
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
 import { linkTool, stubArgv, stubTool } from "../../helpers/linters"
-import { createProject } from "../../helpers/project"
+import { createProject, fromDisk } from "../../helpers/project"
 
 const ruleFor = (id: string, config: unknown, files: string[]): DetectorRuleInput<LinterConfig> => ({
   id,
@@ -21,6 +21,7 @@ const run = (cwd: string, rules: DetectorRuleInput<LinterConfig>[], event: "edit
     event,
     rules,
     changes: new Map(),
+    read: fromDisk(cwd),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,

@@ -33,6 +33,8 @@ function input(
     event: "edit" as const,
     selections,
     changes: new Map(),
+    // These detectors are fakes that never read a file.
+    read: async () => null,
     registry: createRegistry(detectors),
     cacheFor: () => memoryCache(),
     contextFor: async () => [],

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 
 import { memoryCache } from "../core/detection/cache"
+import { readSourceFile } from "../core/detection/per-rule"
 import type { AnyDetector } from "../core/detection/registry"
 import { type DetectorEvent, type DetectorResult, defaultDetectorSettings } from "../core/types"
 import { type ContractCase, contractProject } from "./contract"
@@ -35,6 +36,7 @@ function run(detector: AnyDetector, rules: unknown[], cwd: string, signal: Abort
     // biome-ignore lint/suspicious/noExplicitAny: the registry erases each detector's config type.
     rules: rules as any,
     changes: new Map(),
+    read: (file) => readSourceFile(cwd, file),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,

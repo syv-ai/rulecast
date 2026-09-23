@@ -1,4 +1,3 @@
-import { readSourceFile } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import type { Language } from "./languages"
@@ -49,6 +48,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
   schema: astGrepSchema,
   captures: captureNames,
   events: () => ["edit", "verify"],
+  guards: true,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     const byLanguage = new Map<Language, DetectorRuleInput<AstGrepConfig>[]>()
@@ -74,7 +74,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
           input.signal.throwIfAborted()
           let root: Node
           try {
-            const source = await readSourceFile(input.cwd, file)
+            const source = await input.read(file)
             if (source === null) continue
             root = parser.parse(source).root() as unknown as Node
           } catch (error) {

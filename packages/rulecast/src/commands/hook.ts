@@ -76,7 +76,9 @@ async function handleEvent(context: EventContext): Promise<void> {
   const files = event.files
     .map((file) => toProjectPath(root, cwd, file))
     .filter((file): file is string => file !== null)
-  if ((event.kind === "touch" || event.kind === "edit") && files.length === 0) return
+  // A file outside the project is nothing rulecast has rules about — and for a guard, nothing it
+  // may refuse.
+  if ((event.kind === "touch" || event.kind === "edit" || event.kind === "guard") && files.length === 0) return
   const projectEvent: Event = { ...event, files, cwd: root }
   const project = await context.compileProject()
   const result = await runPipeline({

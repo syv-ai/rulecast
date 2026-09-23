@@ -4,6 +4,7 @@ import { compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
+import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
@@ -179,6 +180,7 @@ async function dryRun(project: CompiledProject, registry: DetectorRegistry): Pro
       event: "verify",
       selections: [{ rule, files: [file] }],
       changes: new Map(),
+      read: (name) => readSourceFile(project.root, name),
       registry,
       cacheFor: () => memoryCache(),
       // Only the llm detector reads context, and llm rules never reach here.

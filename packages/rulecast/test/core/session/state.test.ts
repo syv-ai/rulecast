@@ -21,6 +21,7 @@ describe("foldWork", () => {
         ["main", 1],
         ["sub1", 1],
       ]),
+      refusals: new Map(),
       disabled: new Map([["r1", "boom"]]),
       accessed: new Map(),
     })

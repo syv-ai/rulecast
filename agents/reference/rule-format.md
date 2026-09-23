@@ -43,6 +43,7 @@ repos:
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run` |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
+| `refuse_gate.max_refusals` | `1` | Writes a `refuse_write` rule may refuse per file per session |
 | `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible`. There is no `llm.model`: every llm rule names its own |
 
 ## Repo entries
@@ -66,12 +67,44 @@ repos:
 | `exclude_types` | no | The file has none of these |
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
+| `refuse_write` | no, default `false` | Refuse the edit itself when this rule fires on what the agent is writing (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos |
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
+
+### Refusing a write
+
+`severity` decides how loud a finding is after the fact: `error` blocks the agent's stop, `warning`
+never blocks. `refuse_write` is a different axis — it refuses the edit itself, before the file
+changes, and the agent is shown the rule's message and the section it cites instead of a result.
+
+```yaml
+- id: codegen/no-edit-client
+  files: '^src/client/'
+  detect:
+    path: {}
+  refuse_write: true
+  message: "{{file}} is generated from openapi.yaml. Edit the schema and run `pnpm codegen`."
+```
+
+Use it where the right answer is "not this file, not this way" — generated code, a vendored
+directory, a secret that must not be committed — rather than for anything the agent could fix after
+writing it. Three things it does not do, all deliberate:
+
+- **It only fires on what the agent is writing.** The same violation already in the file, on a line
+  the edit does not touch, is reported after the write as usual. A rule that fires on an absence
+  ("every service needs a docstring") can never refuse, because the evidence is not in the new text.
+- **It gives up rather than guess.** If the edit cannot be applied exactly as the tool describes it
+  — `old_string` missing, or appearing twice without `replace_all` — the write goes ahead.
+- **It refuses once per file per session** (`refuse_gate.max_refusals`), so a rule cannot trap an
+  agent that has no way to satisfy it.
+
+`refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`.
+`linter`, `command` and `llm` hand a path to another program, which would read the file as it still
+is, so `rulecast validate` rejects them.
 
 ### Messages
 

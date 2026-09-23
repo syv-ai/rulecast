@@ -12,6 +12,7 @@ import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
 import { headCommit } from "./git"
+import { guardWrite } from "./guard"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -77,8 +78,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   let baseline: BaselineState = { started: false, startCommit: null, snapshots: new Map() }
-  // A reset only delivers touch context: no snapshots, and it does not start the session.
-  if (session && event.kind !== "reset") {
+  // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
+  // takes snapshots, and neither starts the session.
+  if (session && event.kind !== "reset" && event.kind !== "guard") {
     baseline = await readBaseline(session.dir)
     if (!baseline.started) {
       await appendBaseline(session.dir, [startRecord(await headCommit(root))])
@@ -95,6 +97,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const workRecords: WorkRecord[] = []
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
+
+  if (event.kind === "guard") {
+    const delivery = await guardWrite({
+      root,
+      config,
+      registry,
+      stateDir,
+      event,
+      rules: project.rules,
+      disabled,
+      work: view.work,
+      resolver,
+      maxContextChars: options.maxContextChars,
+      log,
+      record: session ? (records) => appendWork(session.dir, records) : async () => {},
+    })
+    return { delivery, failed, deadlineMissed }
+  }
 
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
@@ -172,6 +192,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event: event.kind,
       selections,
       changes,
+      read: (file) => readSourceFile(root, file),
       registry,
       cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
       contextFor: async (rule) => {

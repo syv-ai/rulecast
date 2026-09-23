@@ -42,7 +42,7 @@ describe("planInit", () => {
         file: ".claude/settings.json",
         content: merged({}),
         created: true,
-        summary: "+6 hooks (Claude Code)",
+        summary: "+7 hooks (Claude Code)",
         commit: true,
       },
     ])
@@ -63,7 +63,7 @@ describe("planInit", () => {
         file: ".claude/settings.local.json",
         content: merged(existing, true),
         created: false,
-        summary: "+6 hooks (Claude Code)",
+        summary: "+7 hooks (Claude Code)",
         commit: false,
       },
     ])
@@ -103,7 +103,7 @@ test("reviewText aligns one line per file", () => {
   expect(
     reviewText([
       { file: CONFIG_FILE, content: "", created: true, summary: "new, 2 rules", commit: true },
-      { file: ".claude/settings.json", content: "", created: true, summary: "+6 hooks (Claude Code)", commit: true },
+      { file: ".claude/settings.json", content: "", created: true, summary: "+7 hooks (Claude Code)", commit: true },
     ]),
-  ).toBe(".rulecast-config.yaml  new, 2 rules\n.claude/settings.json  +6 hooks (Claude Code)")
+  ).toBe(".rulecast-config.yaml  new, 2 rules\n.claude/settings.json  +7 hooks (Claude Code)")
 })

@@ -4,7 +4,7 @@ import { memoryCache } from "../../src/core/detection/cache"
 import { defaultDetectorSettings } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
 import { pathDetector } from "../../src/detectors/path"
-import { createProject } from "../helpers/project"
+import { createProject, fromDisk } from "../helpers/project"
 
 test("path detector matches each existing file across all its lines", async () => {
   const cwd = await createProject({ "src/client/api.ts": "export const a = 1\nexport const b = 2\n" })
@@ -14,6 +14,7 @@ test("path detector matches each existing file across all its lines", async () =
     event: "edit",
     rules: [{ id: "no-generated-edits", config: {}, files: ["src/client/api.ts", "src/client/gone.ts"], context: [] }],
     changes: new Map(),
+    read: fromDisk(cwd),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,

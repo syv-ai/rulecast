@@ -4,7 +4,7 @@ import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { astGrepDetector } from "../../../src/detectors/ast-grep/detector"
 import type { AstGrepConfig } from "../../../src/detectors/ast-grep/schema"
-import { createProject } from "../../helpers/project"
+import { createProject, fromDisk } from "../../helpers/project"
 
 async function ruleFor(id: string, config: unknown, files: string[]): Promise<DetectorRuleInput<AstGrepConfig>> {
   const parsed = await astGrepDetector.schema.parseAsync(config)
@@ -16,6 +16,7 @@ const run = async (cwd: string, rules: DetectorRuleInput<AstGrepConfig>[], signa
     event: "edit",
     rules,
     changes: new Map(),
+    read: fromDisk(cwd),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,

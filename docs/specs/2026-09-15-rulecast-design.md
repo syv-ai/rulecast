@@ -558,6 +558,20 @@ Without a limit (`rulecast run`) nothing is trimmed: `json` and `sarif` carry ev
 
 When the floor itself does not fit, the delivery as it stood before the budget touched it is written to `<state dir>/deliveries/<session>-<timestamp>.md`, the three most recent per session are kept, and `overflowPath` names the file. The renderer ends the message with it, so the agent can act on what it was given and read the rest without running a command. A file that cannot be written is not an error: the message is the delivery, and the file is the remainder.
 
+**Guard**
+
+A `guard` event asks whether a write should happen at all. The adapter reports the tool call's intent — a whole file (`content`), or a replacement inside the current one (`find`/`replace`/`all`) — and `propose()` turns it into the file's proposed content plus the character ranges being inserted. A rule with `refuse_write` whose detector fires **inside one of those ranges** refuses the write; the delivery is rendered as usual, so the agent is shown the message and the section it cites in place of the tool's result.
+
+Every uncertainty allows the write, because a refusal the agent cannot act on is worse than a finding delivered a moment late:
+
+- `propose()` returns null — `find` missing, or present twice without `all` — and nothing is refused.
+- A match outside the inserted ranges is not the agent's own text. A `path` match is the exception: it is the file, and writing the file is what the rule forbids.
+- A detector that errors or passes `timeouts.edit_deadline_ms` produces no findings, so it refuses nothing.
+- `refuse_gate.max_refusals` (default 1) caps refusals per rule per file per session, recorded as a `refused` work record. Past the cap the write goes through.
+- `refuse_write` requires a detector with `guards: true` (`regex`, `path`, `ast-grep`): one that reads only through the run's `read`. `linter`, `command` and `llm` pass a path to another program, which would judge the file as it still is, so compile rejects them.
+
+A guard takes no snapshots, starts no session, and records nothing as delivered: the write it describes may never happen.
+
 **Grouping**
 
 A rule that fired three or more times, whose `message` is at least 40 characters of literal text, is rendered as the message once — its variables shown as `{name}` — followed by one line per site: the location, then that site's captures, or a packed list of locations when the message has nothing that varies. Below either threshold, or for a message that is nearly all variables (`{{file}}:{{line}} {{text}}`, how a `linter` or `command` rule passes its detector's own wording through), each finding is rendered whole as before. Grouping is lossless — nothing is dropped, it is only not repeated — so it applies at every size, not only near the budget.
@@ -617,6 +631,7 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 
 | Hook | Matcher | Event | Output | Hook timeout |
 |---|---|---|---|---|
+| `PreToolUse` | `Edit\|Write` | `guard`, carrying `tool_input` as a write intent (`content`, or `old_string`/`new_string`/`replace_all`) | findings: `{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": <agent text> } }`; nothing to say: nothing | 5 s |
 | `PostToolUse` | `Read` | `touch` (`completeRead` when `tool_response.file` has `startLine` 1 and `numLines` equal to `totalLines`) | `hookSpecificOutput.additionalContext` | 5 s |
 | `PostToolUse` | `Edit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
 | `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; `capReached`: `{ "systemMessage": <agent text> }`; `allow`: nothing | `timeouts.verify_ms` + 10 s |
@@ -723,6 +738,8 @@ Mechanisms:
 **`pnpm perf`, on real hardware, is the measurement.** It builds, replays the events and prints p50/p95/max against the budget, exiting non-zero when p95 misses it. **CI does not measure performance**: a shared runner spawning one subprocess per external tool per event is several times slower than the hardware the promise is made about, so its numbers answer no question anyone has, and a job that goes red because a runner was busy teaches people to ignore CI. The script asserts that every event produced its expected finding — a measurement of a hook that quietly did nothing would be worse than none.
 
 Measured on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load (2026-09-20, five detectors); **p50 170 ms, p95 187 ms** (2026-09-23, all six). A GitHub `ubuntu-latest` runner measured p50 218–235 ms, p95 237–247 ms on the same fixture — slower and more variable, which is why the budget is checked here and not there. Most of the growth over a regex-only project is subprocess start, one per external tool per event.
+
+**The guard costs a process per write.** `PreToolUse` runs before every Edit and Write, ahead of the tool rather than beside it, and measured **~80 ms** on the same machine (2026-09-23) — the same whether a `refuse_write` rule matches the file or none does, because the time is node starting and the config compiling, not detection. Projects with no `refuse_write` rule pay it too. That is the price of the hook being installed unconditionally, which is what makes adding a refusing rule later work without another `rulecast install`.
 
 ## 14. Error handling
 

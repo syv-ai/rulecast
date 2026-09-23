@@ -12,6 +12,7 @@ const DEFAULTS = {
   maxMatchesPerRule: 10,
   timeouts: { editDeadlineMs: 350, verifyMs: 60000 },
   stopGate: { maxBlocks: 1 },
+  refuseGate: { maxRefusals: 1 },
   llm: {
     provider: "claude-code",
     baseUrl: null,
@@ -60,6 +61,7 @@ describe("configSchema", () => {
       maxMatchesPerRule: 3,
       timeouts: { editDeadlineMs: 200, verifyMs: 5000 },
       stopGate: { maxBlocks: 2 },
+      refuseGate: { maxRefusals: 1 },
       llm: {
         provider: "openai-compatible",
         baseUrl: "http://localhost:11434/v1",

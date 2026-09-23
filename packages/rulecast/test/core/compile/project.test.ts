@@ -20,7 +20,17 @@ const fake: Detector<{ capture?: string; slow?: boolean }> = {
   run: async () => ({ findings: [], errors: [] }),
 }
 
-const registry = createRegistry([fake])
+/** Like `fake`, but able to judge a file it is handed: enough for refuse_write to be allowed. */
+const guarding: Detector<Record<string, never>> = {
+  kind: "guarding",
+  schema: z.object({}).strict(),
+  captures: () => [],
+  events: () => ["edit", "verify"],
+  guards: true,
+  run: async () => ({ findings: [], errors: [] }),
+}
+
+const registry = createRegistry([fake, guarding])
 
 const conventions = "# API\n\n## Errors\nMap them.\n"
 
@@ -162,6 +172,9 @@ describe("compile: local rules", () => {
         detectRule("unknown-detector", { detect: { nope: {} } }),
         detectRule("bad-config", { detect: { fake: { colour: 1 } } }),
         detectRule("bad-variable", { message: "{{reason}}" }),
+        detectRule("refuse-unguardable", { detect: { fake: {} }, refuse_write: true }),
+        detectRule("refuse-verify-only", { detect: { guarding: {} }, refuse_write: true, stages: ["verify"] }),
+        touchRule("refuse-without-detect", { refuse_write: true }),
         detectRule("bad-regex", { files: "(" }),
         detectRule("bad-type", { types: ["cobol"] }),
         touchRule("missing-file", { context: ["@docs/nope.md"] }),
@@ -183,6 +196,9 @@ describe("compile: local rules", () => {
       ["unknown-detector", 'unknown detector "nope"'],
       ["bad-config", "detect.fake: (root): Unrecognized key(s) in object: 'colour'"],
       ["bad-variable", 'unknown template variable "reason"'],
+      ["refuse-unguardable", "refuse_write needs a detector that can judge a file before it is written; fake cannot"],
+      ["refuse-verify-only", "refuse_write needs edit among the rule's stages"],
+      ["refuse-without-detect", "refuse_write needs detect: there is nothing to refuse a write for"],
       ["bad-regex", expect.stringMatching(/^files: invalid regex: /)],
       ["bad-type", 'unknown file type "cobol"'],
       ["missing-file", "referenced file not found: docs/nope.md"],

@@ -7,7 +7,7 @@ import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { argvFor, commandDetector } from "../../../src/detectors/command/detector"
 import type { CommandConfig } from "../../../src/detectors/command/schema"
-import { createProject } from "../../helpers/project"
+import { createProject, fromDisk } from "../../helpers/project"
 
 /** A shell script in the project that prints `body`'s output. */
 async function script(root: string, name: string, body: string): Promise<string> {
@@ -29,6 +29,7 @@ const run = (cwd: string, rules: DetectorRuleInput<CommandConfig>[]) =>
     event: "edit",
     rules,
     changes: new Map(),
+    read: fromDisk(cwd),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,

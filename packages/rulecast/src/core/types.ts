@@ -1,14 +1,28 @@
 import type { ZodType, ZodTypeDef } from "zod"
 
-export type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset"
+export type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset" | "guard"
 export type DetectorEvent = "edit" | "verify"
 export type Severity = "error" | "warning"
 export type ReferenceMode = "inject" | "read"
+
+/**
+ * What a `guard` event's write would do, as the agent's tool call describes it and before anything
+ * has touched the disk. The adapter reports the intent; the pipeline turns it into the file's
+ * proposed content, because only the pipeline may read the file it will be applied to.
+ */
+export interface WriteIntent {
+  /** The whole file, for a tool that supplies it (Write).*/
+  content?: string
+  /** A replacement inside the current file (Edit). */
+  edit?: { find: string; replace: string; all: boolean }
+}
 
 export interface Event {
   kind: EventKind
   /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt and reset. */
   files: string[]
+  /** guard only: what the agent is about to write to `files[0]`. */
+  intent?: WriteIntent
   /** touch from a read: the whole file was read. */
   completeRead?: boolean
   /** verify from the CLI: the commit the baseline is read from (the merge base for --from-ref). */
@@ -75,6 +89,12 @@ export interface DetectorRuleInput<Config> {
 export interface DetectorRun<Config> {
   event: DetectorEvent
   rules: DetectorRuleInput<Config>[]
+  /**
+   * The file's content, null when it no longer exists. A detector that can read a file itself must
+   * use this instead: before a write, the content that matters is the one the agent proposed, which
+   * is not on disk and never will be if the write is refused.
+   */
+  read(file: string): Promise<string | null>
   /** File absent = no baseline, the whole file is new. */
   changes: ReadonlyMap<string, ChangeSet>
   cache: Cache
@@ -126,6 +146,12 @@ export interface Detector<Config> {
   schema: ZodType<Config, ZodTypeDef, unknown>
   captures(config: Config): string[]
   events(config: Config): DetectorEvent[]
+  /**
+   * Whether this detector reads only through `read`, and so can judge a write before it happens
+   * (`refuse_write`). False for anything that hands a path to another program: the proposed file is
+   * not on disk, so ruff, eslint, ast-grep's CLI or a `command` script would judge the old one.
+   */
+  guards?: boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>

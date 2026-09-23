@@ -10,6 +10,7 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(mergeHooks({}, COMMAND, 60_000)).toEqual({
       settings: {
         hooks: {
+          PreToolUse: [{ matcher: "Edit|Write", hooks: [hook(5)] }],
           PostToolUse: [
             { matcher: "Read", hooks: [hook(5)] },
             { matcher: "Edit|Write", hooks: [hook(5)] },
@@ -21,6 +22,7 @@ describe("Claude Code settings: mergeHooks", () => {
         },
       },
       added: [
+        "PreToolUse (Edit|Write)",
         "PostToolUse (Read)",
         "PostToolUse (Edit|Write)",
         "Stop",
@@ -71,6 +73,7 @@ describe("Claude Code settings: removeHooks", () => {
     expect(removeHooks(mergeHooks({}, COMMAND, 60_000).settings)).toEqual({
       settings: {},
       removed: [
+        "PreToolUse (Edit|Write)",
         "PostToolUse (Read)",
         "PostToolUse (Edit|Write)",
         "Stop",

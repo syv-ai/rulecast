@@ -24,6 +24,8 @@ export interface CompiledRule {
   /** "local", or the rule repo label ("syv-ai/rulecast@v0.2.0"). */
   source: string
   severity: Severity
+  /** Refuse the agent's write when this rule fires on what it is writing (spec §9, Guard). */
+  refuseWrite: boolean
   stages: Stage[]
   matches(file: string): boolean
   detector: CompiledDetector | null
@@ -81,10 +83,19 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     if (!stages.includes("edit") && !stages.includes("verify")) {
       return "stages [touch] never run the detector: add edit or verify, or remove detect"
     }
+    if (data.refuse_write) {
+      // Refusing happens before the write, so the detector must judge content it is handed rather
+      // than a path it reads: a linter, a command or a model would judge the file as it still is.
+      if (context.registry.get(detector.kind)?.guards !== true) {
+        return `refuse_write needs a detector that can judge a file before it is written; ${detector.kind} cannot`
+      }
+      if (!stages.includes("edit")) return "refuse_write needs edit among the rule's stages"
+    }
     const known = new Set<string>([...CORE_VARIABLES, ...detector.captures])
     const unknown = templateVariables(data.message).find((name) => !known.has(name))
     if (unknown) return `unknown template variable "${unknown}"`
   } else {
+    if (data.refuse_write) return "refuse_write needs detect: there is nothing to refuse a write for"
     if (stages.some((stage) => stage !== "touch")) return "rules without detect need stages: [touch]"
     if (data.message !== undefined) return "message needs detect"
     if (!data.context?.length) return "rules without detect need context"
@@ -123,6 +134,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     description: data.description ?? null,
     source: input.source,
     severity: data.severity ?? "error",
+    refuseWrite: data.refuse_write === true,
     stages,
     matches: (file) => global(file) && filter(file),
     detector,

@@ -8,6 +8,7 @@ function run(rules: string[]): DetectorRun<null> {
     event: "edit",
     rules: rules.map((id) => ({ id, config: null, files: ["a.ts"], context: [] })),
     changes: new Map(),
+    read: async () => null,
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd: "/tmp",

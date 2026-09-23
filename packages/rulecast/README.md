@@ -70,6 +70,21 @@ The full format is in [`agents/reference/rule-format.md`](https://github.com/syv
 
 `llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md).
 
+## Refusing a write
+
+Some rules are not advice. `refuse_write: true` refuses the edit before it happens, and the agent gets your message and the doc section in place of the tool's result:
+
+```yaml
+- id: codegen/no-edit-client
+  files: '^src/client/'
+  detect:
+    path: {}
+  refuse_write: true
+  message: "{{file}} is generated from openapi.yaml. Edit the schema and run `pnpm codegen`."
+```
+
+A refusal only ever rests on the text the agent is writing, never on a reconstruction rulecast is unsure of, and it happens once per file per session — so a rule can stop a mistake without trapping the agent. Generated code, vendored directories, files that must not change. Everything else is better reported after the write, which is what the other rules do.
+
 ## Commands
 
 | Command | Does |

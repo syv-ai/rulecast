@@ -2,6 +2,7 @@ export type WorkRecord =
   | { t: "edited"; file: string }
   | { t: "accessed"; agent: string; file: string }
   | { t: "stopBlock"; agent: string }
+  | { t: "refused"; rule: string; file: string }
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
 
@@ -16,6 +17,8 @@ export interface WorkState {
   /** Unique, least recently edited first. */
   edited: string[]
   stopBlocks: Map<string, number>
+  /** How often each rule has refused a write to each file: the refuse gate's counter. */
+  refusals: Map<string, number>
   disabled: Map<string, string>
   /** Files each agent read or edited, unique, least recently accessed first (§9 reset). */
   accessed: Map<string, string[]>
@@ -32,8 +35,11 @@ export function preexistingKey(rule: string, file: string): string {
   return `${rule} ${file}`
 }
 
+/** A refusal is counted per rule and file: one rule may legitimately refuse several files. */
+export const refusalKey = preexistingKey
+
 export function emptyWork(): WorkState {
-  return { edited: [], stopBlocks: new Map(), disabled: new Map(), accessed: new Map() }
+  return { edited: [], stopBlocks: new Map(), refusals: new Map(), disabled: new Map(), accessed: new Map() }
 }
 
 export function emptyContext(): ContextState {
@@ -55,6 +61,11 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       case "stopBlock":
         state.stopBlocks.set(record.agent, (state.stopBlocks.get(record.agent) ?? 0) + 1)
         break
+      case "refused": {
+        const key = refusalKey(record.rule, record.file)
+        state.refusals.set(key, (state.refusals.get(key) ?? 0) + 1)
+        break
+      }
       case "prompt":
         state.stopBlocks.delete(record.agent)
         break
