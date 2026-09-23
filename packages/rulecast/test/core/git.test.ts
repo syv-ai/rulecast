@@ -75,4 +75,22 @@ describe("git helpers", () => {
     expect(await mergeBase(root, "main", "feature")).toBe(base)
     expect(await changedFilesBetween(root, base, "feature")).toEqual(["a.ts"])
   })
+
+  test("a git environment inherited from a hook does not redirect rulecast at another repository", async () => {
+    const elsewhere = await createRepo({ "elsewhere.ts": "x\n" })
+    const root = await createRepo({ "a.ts": "a\n" })
+    const head = (await headCommit(root))!
+    const saved = { ...process.env }
+    // What a pre-commit hook running `rulecast run` inherits from the git that invoked it.
+    process.env.GIT_DIR = path.join(elsewhere, ".git")
+    process.env.GIT_WORK_TREE = elsewhere
+    process.env.GIT_INDEX_FILE = path.join(elsewhere, ".git", "index")
+    try {
+      expect(await headCommit(root)).toBe(head)
+      expect(await allFiles(root)).toEqual(["a.ts"])
+      expect(await fileAtCommit(root, head, "a.ts")).toBe("a\n")
+    } finally {
+      process.env = saved
+    }
+  })
 })

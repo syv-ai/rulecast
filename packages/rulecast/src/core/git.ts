@@ -5,13 +5,34 @@ const exec = promisify(execFile)
 
 export type GitResult = { ok: true; stdout: string } | { ok: false; stderr: string }
 
+/**
+ * Git exports these to every hook it runs, and they override `cwd`. rulecast always says which
+ * directory it means, so a caller invoked from a git hook — a pre-commit hook running
+ * `rulecast run`, or anything under `git push` — must not be redirected to the hook's repository.
+ */
+const INHERITED = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_PREFIX",
+]
+
+function environment(extra?: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...extra }
+  for (const name of INHERITED) delete env[name]
+  return env
+}
+
 /** Runs git; a non-zero exit is a result, not an exception. `env` is added to the process environment. */
 export async function git(cwd: string, args: string[], env?: Readonly<Record<string, string>>): Promise<GitResult> {
   try {
     const { stdout } = await exec("git", args, {
       cwd,
       maxBuffer: 64 * 1024 * 1024,
-      env: env ? { ...process.env, ...env } : undefined,
+      env: environment(env),
     })
     return { ok: true, stdout }
   } catch (error) {
