@@ -58,13 +58,37 @@ jobs:
           # empty one gets in the way of the OIDC exchange. No NPM_CONFIG_PROVENANCE either —
           # trusted publishing attests without being asked.
 
-      # Only after a successful publish. The tag is what the catalog, the drafting prompt and
-      # `rulecast autoupdate` all resolve, and what binaries.yml hangs its uploads on.
+      # The tag is what the catalog, the drafting prompt and `rulecast autoupdate` all resolve, and
+      # what binaries.yml hangs its uploads on.
+      #
+      # This does not ask changesets/action whether it published. That output is parsed out of the
+      # publish command's stdout, looking for "New tag:" lines that `changeset` v3 no longer prints
+      # — it prints "Successfully published:" — so it reads false on a release that did publish,
+      # and 0.1.0 and 0.1.1 both shipped untagged before anyone noticed. The registry is the
+      # authority instead: if the version in package.json is on npm and has no tag here, tag it.
+      # That is also self-healing, since a later run will finish a release that stopped halfway.
       - name: Tag and release
-        if: steps.changesets.outputs.published == 'true'
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./packages/rulecast/package.json').version")
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is already tagged; nothing to do."
+            exit 0
+          fi
+          # npm takes a couple of minutes to make a new version visible, so wait rather than
+          # conclude it was never published.
+          for attempt in $(seq 1 20); do
+            if npm view "@syv-ai/rulecast@$VERSION" version >/dev/null 2>&1; then
+              published=yes
+              break
+            fi
+            echo "waiting for $VERSION to appear on npm ($attempt/20)…"
+            sleep 15
+          done
+          if [ "${published:-no}" != "yes" ]; then
+            echo "$VERSION is not on npm; this run published nothing to tag."
+            exit 0
+          fi
           pnpm release-notes > /tmp/notes.md
           git tag "v$VERSION"
           git push origin "v$VERSION"
