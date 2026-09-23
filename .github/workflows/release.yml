@@ -14,7 +14,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # npm provenance: the published package carries a signed link back to this workflow run.
+      # Trusted publishing: npm exchanges this workflow's OIDC token for a short-lived credential,
+      # which is what authorises the publish — there is no npm token in this repository. It also
+      # generates provenance by itself, so the published package still carries a signed link back
+      # to this run. Configured on npmjs.com against syv-ai/rulecast and this file's name.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -51,8 +54,9 @@ jobs:
           createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          # No NODE_AUTH_TOKEN: setup-node's registry-url writes an .npmrc pointing at it, and an
+          # empty one gets in the way of the OIDC exchange. No NPM_CONFIG_PROVENANCE either —
+          # trusted publishing attests without being asked.
 
       # Only after a successful publish. The tag is what the catalog, the drafting prompt and
       # `rulecast autoupdate` all resolve, and what binaries.yml hangs its uploads on.
