@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -62,7 +62,12 @@ describe("writeOverflow", () => {
   })
 
   test("a directory it cannot write to is not an error: the message is the delivery", () => {
-    expect(writeOverflow("/proc/nonexistent/rulecast", "s1", delivery(1), at(1))).toBeNull()
+    // A path *under a regular file*: mkdir there is ENOTDIR on every platform. Naming a real
+    // system directory instead — /proc was the first attempt — is not portable, and on Linux it
+    // left the vitest worker unable to exit.
+    const file = path.join(stateDir(), "not-a-directory")
+    writeFileSync(file, "x")
+    expect(writeOverflow(path.join(file, "deliveries"), "s1", delivery(1), at(1))).toBeNull()
   })
 
   test("a session id with path separators cannot escape the deliveries directory", () => {
