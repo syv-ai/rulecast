@@ -35,13 +35,14 @@ describe("session", () => {
         const alreadyWarned = view.context.warned.has("w")
         return {
           delivery: { ...emptyDelivery(), warnings: alreadyWarned ? [] : ["once"] },
+          overflow: null,
           work: [{ t: "stopBlock", agent: "main" }],
           context: alreadyWarned ? [] : [{ t: "warned", key: "w" }],
         }
       })
     const results = await Promise.all([commit(), commit()])
     // Whichever commit takes the lock first warns; the other sees its record.
-    expect(results.map((delivery) => delivery.warnings.join()).sort()).toEqual(["", "once"])
+    expect(results.map(({ delivery }) => delivery.warnings.join()).sort()).toEqual(["", "once"])
     const view = await openSession(dir, "main")
     expect(view.work.stopBlocks.get("main")).toBe(2)
   })

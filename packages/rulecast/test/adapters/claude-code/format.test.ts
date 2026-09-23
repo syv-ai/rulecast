@@ -69,6 +69,28 @@ describe("Claude Code adapter: format", () => {
     }
   })
 
+  test("the cut lands on a line break, never mid-word", () => {
+    const findings = Array.from({ length: 300 }, (_, i) =>
+      finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
+    )
+    const text = JSON.parse(format(delivery({ findings }), "edit", { maxMatchesPerRule: 1000 }).stdout)
+      .hookSpecificOutput.additionalContext as string
+    const [kept] = text.split("\n\n…cut to fit")
+    expect(kept!.endsWith("x".repeat(60))).toBe(true)
+  })
+
+  test("a cut delivery points at the file commit wrote, when there is one", () => {
+    const findings = Array.from({ length: 300 }, (_, i) =>
+      finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
+    )
+    const big = delivery({ findings, overflowPath: "/cache/projects/ab12/deliveries/s1-2026-09-23.md" })
+    const text = JSON.parse(format(big, "edit", { maxMatchesPerRule: 1000 }).stdout).hookSpecificOutput
+      .additionalContext as string
+    expect(text.length).toBeLessThanOrEqual(CONTEXT_LIMIT)
+    expect(text).toMatch(/The whole delivery is in \/cache\/projects\/ab12\/deliveries\/s1-2026-09-23\.md\.$/)
+    expect(text).not.toContain("rulecast run --session")
+  })
+
   test("a reset delivers the restored conventions as SessionStart additional context", () => {
     const value = delivery({
       touches: ["backend/services"],

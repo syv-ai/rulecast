@@ -3,6 +3,7 @@ import { type Snapshot, snapshotOf } from "./baseline/hash"
 import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, startRecord } from "./baseline/store"
 import type { CompiledProject } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
+import { writeOverflow } from "./delivery/persist"
 import { createReferenceResolver } from "./delivery/resolve"
 import { applyFileBudget } from "./detection/budget"
 import { detectorCacheDir, diskCache } from "./detection/cache"
@@ -11,7 +12,7 @@ import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
 import { headCommit } from "./git"
-import { type ClassifiedFinding, type DecideInput, decide } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
@@ -236,20 +237,28 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxBytes: config.context.maxBytes,
     maxBlocks: config.stopGate.maxBlocks,
     maxContextChars: options.maxContextChars,
+    maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
   })
 
-  if (!session) return { delivery: (await decide(inputFor(view))).delivery, failed, deadlineMissed }
+  // A delivery the budget had to cut rules out of is written whole, and the message says where.
+  const persisted = (decision: Decision): Delivery => {
+    if (decision.overflow !== null) {
+      decision.delivery.overflowPath = writeOverflow(stateDir, event.session?.id ?? null, decision.overflow)
+    }
+    return decision.delivery
+  }
+
+  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed }
 
   await appendWork(session.dir, workRecords)
   try {
-    const delivery = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery, failed, deadlineMissed }
+    const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
+    return { delivery: persisted(decision), failed, deadlineMissed }
   } catch (error) {
     if (!(error instanceof LockTimeoutError)) throw error
     warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
-    const delivery = (await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false }))
-      .delivery
-    return { delivery, failed, deadlineMissed }
+    const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
+    return { delivery: persisted(decision), failed, deadlineMissed }
   }
 }

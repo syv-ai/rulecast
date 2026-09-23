@@ -29,3 +29,24 @@ export function renderTemplate(template: string, values: Record<string, string>)
     return oneLine(value)
   })
 }
+
+/** The template with its variables shown as {name}: what a grouped rendering prints once, above the sites. */
+export function templateSkeleton(template: string): string {
+  return template.replace(VARIABLE, (_, name: string) => `{${name}}`)
+}
+
+/**
+ * How much of a template is literal text. Grouping pays for itself in proportion to this: a message
+ * that is mostly prose is worth printing once, and "{{file}}:{{line}} {{text}}" is not.
+ */
+export function templateLiteralLength(template: string): number {
+  return oneLine(template.replace(VARIABLE, "")).length
+}
+
+/** Rendered in the location prefix of a grouped site line, so never listed as one of its values. */
+const LOCATION_VARIABLES = new Set(["file", "line", "column", "rule"])
+
+/** The template's variables that vary per site: everything the location prefix does not already say. */
+export function templateBindings(template: string): string[] {
+  return templateVariables(template).filter((name) => !LOCATION_VARIABLES.has(name))
+}

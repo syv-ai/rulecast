@@ -142,6 +142,8 @@ export interface Finding {
   column: number
   message: string
   count: number
+  /** The detector's captures and the matched text, for a grouped rendering's per-site line. */
+  captures?: Record<string, string>
 }
 
 export interface DeliveredReference {
@@ -153,6 +155,15 @@ export interface DeliveredReference {
   location?: string
 }
 
+/** What the context budget left out. A renderer says how much is missing; it never recomputes it. */
+export interface Omitted {
+  /** Findings of a rule that is still delivered, and how many files they were in. */
+  findings: { rule: string; count: number; files: number }[]
+  /** Rules dropped whole, with their findings: only when the floor itself did not fit. */
+  rules: number
+  preexisting: number
+}
+
 export interface Delivery {
   findings: Finding[]
   preexistingSummary: { rule: string; file: string; count: number }[]
@@ -160,6 +171,11 @@ export interface Delivery {
   touches: string[]
   stop: "block" | "allow" | "capReached" | null
   warnings: string[]
+  /** `message` template per rule with findings: the skeleton a grouped rendering prints once. */
+  templates: Record<string, string>
+  omitted: Omitted
+  /** Absolute path of the untrimmed delivery, written when even the floor did not fit; null when it did. */
+  overflowPath: string | null
 }
 
 export interface AdapterInput {
@@ -200,5 +216,15 @@ export interface Adapter {
 }
 
 export function emptyDelivery(): Delivery {
-  return { findings: [], preexistingSummary: [], references: [], touches: [], stop: null, warnings: [] }
+  return {
+    findings: [],
+    preexistingSummary: [],
+    references: [],
+    touches: [],
+    stop: null,
+    warnings: [],
+    templates: {},
+    omitted: { findings: [], rules: 0, preexisting: 0 },
+    overflowPath: null,
+  }
 }

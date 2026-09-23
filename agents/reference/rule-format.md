@@ -73,6 +73,10 @@ repos:
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
 
+### Messages
+
+A rule that fires three or more times has its `message` printed once, with the variables shown as `{name}`, and one line per site under it carrying that site's values. So write the message as one sentence that holds for every site — what to do instead, not just what is wrong — and let the capture groups carry what differs. A message that is nearly all variables, such as `"{{file}}:{{line}} {{text}}"`, has nothing to print once and is repeated per finding as before.
+
 ### File types
 
 `file` (every file), `text` (every extension below), `python` (`.py`, `.pyi`), `pyi`, `ts` (`.ts`, `.mts`, `.cts`), `tsx`, `javascript` (`.js`, `.mjs`, `.cjs`), `jsx`, `markdown` (`.md`), `mdx`, `yaml` (`.yaml`, `.yml`), `json`, `toml`, `css`, `scss`, `html`, `shell` (`.sh`), `sql`, `go`, `rust` (`.rs`), `plain-text` (`.txt`). `ts` does not include `tsx`: write `types_or: [ts, tsx]`. An unknown tag is a `rulecast validate` error.

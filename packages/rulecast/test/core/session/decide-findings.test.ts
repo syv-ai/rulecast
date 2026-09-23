@@ -31,6 +31,7 @@ function input(overrides: Partial<DecideInput> = {}): DecideInput {
     maxBytes: 32768,
     maxBlocks: 3,
     maxContextChars: null,
+    maxMatchesPerRule: 10,
     stopGate: false,
     ...overrides,
   }
@@ -57,6 +58,7 @@ describe("decide: findings", () => {
         column: 3,
         message: "a.ts:3 imports Docs",
         count: 2,
+        captures: { NAMES: "Docs" },
       },
       {
         rule: "style/warn",
@@ -67,6 +69,8 @@ describe("decide: findings", () => {
         column: 3,
         message: "consider style/warn",
         count: 1,
+        // {{rule}} is in the location prefix, so this message has nothing to list per site.
+        captures: undefined,
       },
     ])
   })

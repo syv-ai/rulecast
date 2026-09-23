@@ -542,7 +542,25 @@ The lock is a lock file per session directory, considered stale after 5 s; it is
 
 **Budget**
 
-When the adapter declares `maxContextChars`, commit fills the delivery in priority order: new error findings, new warning findings, pre-existing summaries, references in order. Findings and summaries are never dropped; a reference that does not fit gets state `read` with reason `budget` and is not recorded. Renderers never drop content, so what is recorded is what was delivered.
+When the adapter declares `maxContextChars`, commit fills the delivery to a floor first, then to what is left over.
+
+The **floor** is the header, the warnings, and — for every rule that fired, errors before warnings — its first finding together with the doc sections it cites. Each rule is charged as one item, its block measured by the renderer itself (`measureRuleBlock`), so the budget spends the characters the output will actually use. A rule whose item does not fit is **dropped whole**, counted in `omitted.rules`, and any section cited only by dropped rules is dropped with it: a section explaining a finding the agent cannot see explains nothing. A touch rule is never dropped — its reference is the whole delivery, and the session has already recorded the rule as touched.
+
+What is left over is filled in this order, which is the reverse of what is worth losing:
+
+1. **Reference contents.** A reference whose content does not fit keeps its line and gets state `read` with reason `budget`, and is not recorded as delivered.
+2. **Pre-existing summaries.** One that does not fit is counted in `omitted.preexisting` and, like a reference, is not recorded — so it is offered again.
+3. **The rules' remaining matches**, one per rule per pass, so a rule that fired forty times cannot crowd out the others, and never past `max_matches_per_rule`. What is left out is counted per rule in `omitted.findings`, which the renderer reports as "…and N more in M files".
+
+Without a limit (`rulecast run`) nothing is trimmed: `json` and `sarif` carry every finding.
+
+**Overflow**
+
+When the floor itself does not fit, the delivery as it stood before the budget touched it is written to `<state dir>/deliveries/<session>-<timestamp>.md`, the three most recent per session are kept, and `overflowPath` names the file. The renderer ends the message with it, so the agent can act on what it was given and read the rest without running a command. A file that cannot be written is not an error: the message is the delivery, and the file is the remainder.
+
+**Grouping**
+
+A rule that fired three or more times, whose `message` is at least 40 characters of literal text, is rendered as the message once — its variables shown as `{name}` — followed by one line per site: the location, then that site's captures, or a packed list of locations when the message has nothing that varies. Below either threshold, or for a message that is nearly all variables (`{{file}}:{{line}} {{text}}`, how a `linter` or `command` rule passes its detector's own wording through), each finding is rendered whole as before. Grouping is lossless — nothing is dropped, it is only not repeated — so it applies at every size, not only near the budget.
 
 **Agent reads**
 
@@ -605,7 +623,7 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 | `UserPromptSubmit` | — | `prompt` | none | 5 s |
 | `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: none, starts warm-up (§13); `compact`: `reset` | `compact`: `hookSpecificOutput.additionalContext` | 5 s |
 
-- **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview. The adapter declares `maxContextChars` 9,000, so rendering overhead stays under the limit, and cuts output longer than 10,000 chars (possible only when findings alone exceed it) with a line pointing at `rulecast run --format agent`. Block reasons and system messages get the same cut.
+- **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview — a preview that is the first 2 KB, not the part worth reading. The adapter declares `maxContextChars` 9,000 so the budget (§9) keeps output under the limit on its own. Anything still longer is cut at a line break, never mid-word, with a line naming the overflow file when there is one and pointing at `rulecast run --format agent` when there is not. Block reasons and system messages get the same cut.
 - **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
 - **Compaction.** `/compact` re-attaches the main agent's 5 most recently read, edited or written files (a partial read comes back whole, an edited file with its current content) without tool calls, so the adapter declares `restoredFiles` 5. `SessionStart` `compact` output has the same 10,000-char limit as `PostToolUse`.
 - Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.

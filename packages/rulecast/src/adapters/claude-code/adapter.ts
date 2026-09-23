@@ -1,5 +1,5 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
-import type { Adapter, Event } from "../../core/types"
+import type { Adapter, Delivery, Event } from "../../core/types"
 import { parseClaudeCode } from "./parse"
 import { mergeHooks, removeHooks } from "./settings"
 
@@ -14,17 +14,28 @@ const BLOCK_PREAMBLE =
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
-/** Where the rest of a cut delivery can be read: the session's findings, from the CLI. */
-function cutNotice(event: Event): string {
+/** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
+function cutNotice(delivery: Delivery, event: Event): string {
+  if (delivery.overflowPath !== null) {
+    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${delivery.overflowPath}.`
+  }
   const session = event.session ? `--session ${event.session.id} ` : ""
   return `\n\n…cut to fit Claude Code's hook output limit. Run \`rulecast run ${session}--format agent\` for the full list.`
 }
 
-/** Only findings can push text past the limit: commit keeps references within the budget. */
-function withinLimit(text: string, event: Event): string {
+/**
+ * The last resort. The budget in decide() measures what the renderer will produce, so text reaching
+ * this point means the estimate was beaten — by a preamble, or by a message longer than any measure
+ * of it. Cut at a line, never mid-word: the tail of a delivery is a doc section, and half a sentence
+ * of documentation is worse than none.
+ */
+function withinLimit(text: string, delivery: Delivery, event: Event): string {
   if (text.length <= CONTEXT_LIMIT) return text
-  const notice = cutNotice(event)
-  return text.slice(0, CONTEXT_LIMIT - notice.length) + notice
+  const notice = cutNotice(delivery, event)
+  const room = CONTEXT_LIMIT - notice.length
+  const cut = text.slice(0, room)
+  const lastLine = cut.lastIndexOf("\n")
+  return (lastLine > room / 2 ? cut.slice(0, lastLine) : cut.trimEnd()) + notice
 }
 
 const NONE = { stdout: "", exitCode: 0 }
@@ -44,17 +55,17 @@ export const claudeCodeAdapter: Adapter = {
       case "touch":
       case "edit":
         return json({
-          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, event) },
+          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, delivery, event) },
         })
       case "reset":
         return json({
-          hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: withinLimit(text, event) },
+          hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: withinLimit(text, delivery, event) },
         })
       case "verify":
         if (delivery.stop === "block")
-          return json({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, event) })
+          return json({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, delivery, event) })
         if (delivery.stop === "capReached")
-          return json({ systemMessage: withinLimit(`${CAP_PREAMBLE}\n\n${text}`, event) })
+          return json({ systemMessage: withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event) })
         return NONE
       default:
         return NONE

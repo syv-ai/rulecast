@@ -1,7 +1,6 @@
 import path from "node:path"
 
 import { appendRecords, readRecords } from "../jsonl"
-import type { Delivery } from "../types"
 import type { Decision } from "./decide"
 import { withLock } from "./lock"
 import { type ContextRecord, type ContextState, foldContext, foldWork, type WorkRecord, type WorkState } from "./state"
@@ -45,11 +44,11 @@ export async function commitSession(
   dir: string,
   agent: string,
   decideWith: (view: SessionView) => Promise<Decision>,
-): Promise<Delivery> {
+): Promise<Decision> {
   return withLock(dir, async () => {
     const decision = await decideWith(await openSession(dir, agent))
     await appendWork(dir, decision.work)
     await appendContext(dir, agent, decision.context)
-    return decision.delivery
+    return decision
   })
 }

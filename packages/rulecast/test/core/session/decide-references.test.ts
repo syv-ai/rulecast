@@ -38,6 +38,7 @@ function input(overrides: Partial<DecideInput>): DecideInput {
     maxBytes: 100,
     maxBlocks: 3,
     maxContextChars: null,
+    maxMatchesPerRule: 10,
     stopGate: false,
     ...overrides,
   }
@@ -123,7 +124,7 @@ describe("decide: references", () => {
   test("references beyond the budget become read and are not recorded", async () => {
     const decision = await decide(
       input({
-        maxContextChars: 160,
+        maxContextChars: 390,
         findings: [violated("r", [ref("@conventions/state.md"), ref("@conventions/api.md#errors")])],
       }),
     )
