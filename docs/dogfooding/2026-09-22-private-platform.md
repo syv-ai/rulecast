@@ -56,7 +56,7 @@ Drafted as an `llm` rule over `components/**/*(Dialog|Drawer).tsx`, `model: haik
 
 ## Open question for the user
 
-**Should `timeouts.verify_ms` default higher than 60 s?** Measured here: one `haiku` call on a 135-line file took 89 s; four concurrent calls took 32 s in total; a 4 KB file took 10 s. The variance is wide and the tail exceeds the default. The catalog itself ships an `llm` rule (`python/thin-routes`), so a project that enables it with default settings can hit this.
+**Should `timeouts.verify_ms` default higher than 60 s?** Measured here: one `haiku` call on a 135-line file took 89 s; four concurrent calls took 32 s in total; a 4 KB file took 10 s. The variance is wide and the tail exceeds the default. It reaches nobody by accident — `init` never ticks an `llm` rule for anyone (spec §6, Consent), so only a project that deliberately turned one on can meet it — but that project meets it on its first verify.
 
 Raising it changes how long an agent's Stop may block — the Claude Code Stop hook timeout is `verify_ms + 10 s` (spec §12) — so it is a product decision, not a bug fix. The options are: leave 60 s and document that `llm` rules need it raised; raise the default to ~120–180 s; or give `llm` its own timeout separate from the rest of a verify.
 
