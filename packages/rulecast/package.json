@@ -48,6 +48,7 @@
     "release-notes": "tsx scripts/release-notes.ts",
     "sync-version": "tsx scripts/sync-version.ts",
     "test": "vitest run",
+    "test:linux": "tsx scripts/test-linux.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
