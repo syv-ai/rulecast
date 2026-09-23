@@ -1,5 +1,13 @@
 # @syv-ai/rulecast
 
+## 0.1.1
+
+### Patch Changes
+
+- 193ec4a: Published through npm trusted publishing.
+  
+  Releases are now authorised by the release workflow's own OIDC identity rather than by a long-lived npm token, and every published tarball carries a provenance attestation tying it to the workflow run that built it. There is no npm publish token in the repository.
+
 ## 0.1.0
 
 ### Minor Changes
