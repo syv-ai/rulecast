@@ -44,6 +44,7 @@
     "access": "public"
   },
   "scripts": {
+    "bench": "tsx scripts/bench.ts",
     "binary": "tsx scripts/build-binary.ts",
     "build": "tsup src/index.ts src/internal.ts src/cli.ts --format esm --dts --clean",
     "manifest": "tsx scripts/generate-manifest.ts",
