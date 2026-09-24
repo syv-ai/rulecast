@@ -1,5 +1,5 @@
 /** The running rulecast version. test/core/version.test.ts keeps it equal to package.json. */
-export const VERSION = "0.1.1"
+export const VERSION = "0.2.0"
 
 export function parseVersion(text: string): [number, number, number] | null {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(text)
