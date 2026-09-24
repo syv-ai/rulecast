@@ -50,6 +50,17 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   // A pure deletion adds nothing that a rule could fire on.
   if (proposal.inserts.length === 0) return emptyDelivery()
 
+  // The size ceiling, measured on the proposed content rather than the file on disk: this is a
+  // write that has not happened yet, and the text the agent is about to write is what a detector
+  // would parse. Every rule reaching here guards, so every one of them runs in this process, ahead
+  // of the write — `ast-grep` parses in native code that no timeout interrupts, so a large enough
+  // proposal is seconds of an agent blocked on its own tool call. Logged, not warned about, and
+  // allowing the write is what this function does with every other doubt.
+  if (proposal.content.length > input.config.maxFileBytes) {
+    input.log(`guard: ${file} is over max_file_bytes (${input.config.maxFileBytes}); allowing the write`)
+    return emptyDelivery()
+  }
+
   const selections = selectDetectorRules(rules, "edit", [file], input.disabled)
   if (selections.length === 0) return emptyDelivery()
 

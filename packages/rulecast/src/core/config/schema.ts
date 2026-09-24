@@ -66,6 +66,13 @@ export const configSchema = z
       .strict()
       .default({}),
     max_matches_per_rule: z.number().int().positive().default(10),
+    /**
+     * Files above this many bytes are skipped by the in-process detectors on edit and guard, where
+     * an agent is waiting. `ast-grep` parses in native code, which the vm timeout that bounds
+     * `regex` cannot interrupt: a 2.6 MB TypeScript file measured 762 ms, and the cost is linear,
+     * so 26 MB would be 7.6 s of a blocked write. verify has seconds to spend and always runs.
+     */
+    max_file_bytes: z.number().int().positive().default(1048576),
     timeouts: z
       .object({
         edit_deadline_ms: z.number().int().positive().default(350),
@@ -101,6 +108,7 @@ export const configSchema = z
     defaultStages: input.default_stages ?? null,
     context: { mode: input.context.mode, maxBytes: input.context.max_bytes },
     maxMatchesPerRule: input.max_matches_per_rule,
+    maxFileBytes: input.max_file_bytes,
     timeouts: { editDeadlineMs: input.timeouts.edit_deadline_ms, verifyMs: input.timeouts.verify_ms },
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
     refuseGate: { maxRefusals: input.refuse_gate.max_refusals },

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 
 import { DeadlineError, errorMessage, isNotFound } from "../errors"
@@ -35,5 +35,20 @@ export async function readSourceFile(cwd: string, file: string): Promise<string 
   } catch (error) {
     if (isNotFound(error)) return null
     throw error
+  }
+}
+
+/**
+ * How large a file is, without reading it; null when it is not there.
+ *
+ * A file that cannot be stat'ed at all is null too, and so is never skipped: the size ceiling
+ * decides whether to do less work, and a doubt there resolves the way the rest of the hook does,
+ * by going ahead (§14).
+ */
+export async function fileBytes(cwd: string, file: string): Promise<number | null> {
+  try {
+    return (await stat(path.resolve(cwd, file))).size
+  } catch {
+    return null
   }
 }

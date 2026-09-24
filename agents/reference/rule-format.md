@@ -40,6 +40,7 @@ repos:
 | `context.mode` | `inject` | Default reference mode: `inject` or `read` |
 | `context.max_bytes` | `32768` | A larger reference is delivered as `read` |
 | `max_matches_per_rule` | `10` | Findings shown per rule |
+| `max_file_bytes` | `1048576` | A larger file is skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and guard, where an agent is waiting. `verify` always runs |
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run` |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |

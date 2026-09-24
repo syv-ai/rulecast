@@ -10,6 +10,7 @@ const DEFAULTS = {
   defaultStages: null,
   context: { mode: "inject", maxBytes: 32768 },
   maxMatchesPerRule: 10,
+  maxFileBytes: 1048576,
   timeouts: { editDeadlineMs: 350, verifyMs: 60000 },
   stopGate: { maxBlocks: 1 },
   refuseGate: { maxRefusals: 1 },
@@ -35,6 +36,7 @@ describe("configSchema", () => {
       default_stages: ["edit", "verify"],
       context: { mode: "read", max_bytes: 1000 },
       max_matches_per_rule: 3,
+      max_file_bytes: 2048,
       timeouts: { edit_deadline_ms: 200, verify_ms: 5000 },
       stop_gate: { max_blocks: 2 },
       llm: {
@@ -59,6 +61,7 @@ describe("configSchema", () => {
       defaultStages: ["edit", "verify"],
       context: { mode: "read", maxBytes: 1000 },
       maxMatchesPerRule: 3,
+      maxFileBytes: 2048,
       timeouts: { editDeadlineMs: 200, verifyMs: 5000 },
       stopGate: { maxBlocks: 2 },
       refuseGate: { maxRefusals: 1 },
@@ -74,6 +77,8 @@ describe("configSchema", () => {
   test("repos are required, keys are snake_case only, and unknown keys are rejected", () => {
     expect(configSchema.safeParse({}).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], maxMatchesPerRule: 5 }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], maxFileBytes: 1024 }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], max_file_bytes: 0 }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], timeouts: { editDeadlineMs: 1 } }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [{ repo: "local" }] }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [{ repo: "local", rules: [], hooks: [] }] }).success).toBe(false)

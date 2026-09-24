@@ -217,6 +217,7 @@ default_stages: [edit, verify]
 
 context: { mode: inject, max_bytes: 32768 }
 max_matches_per_rule: 10
+max_file_bytes: 1048576                 # in-process detectors skip larger files on edit and guard
 timeouts: { edit_deadline_ms: 350, verify_ms: 60000 }
 stop_gate: { max_blocks: 1 }
 llm: { provider: claude-code, base_url: null, api_key_env: ANTHROPIC_API_KEY, max_files_per_verify: 10 }
@@ -268,6 +269,7 @@ repos:
 | `context.mode` | `inject` | Default mode for references: `inject` or `read` |
 | `context.max_bytes` | `32768` | Per resolved reference; larger → delivered as `read` |
 | `max_matches_per_rule` | `10` | Agent and terminal rendering only |
+| `max_file_bytes` | `1048576` | Larger files are skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on `edit` and `guard`; `verify` always runs (§13) |
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline for edit events |
 | `timeouts.verify_ms` | `60000` | Detection timeout for verify events |
 | `stop_gate.max_blocks` | `1` | Stop blocks per agent per user prompt |
@@ -544,13 +546,14 @@ The lock is a lock file per session directory, considered stale after 5 s; it is
 
 When the adapter declares `maxContextChars`, commit fills the delivery to a floor first, then to what is left over.
 
-The **floor** is the header, the warnings, and — for every rule that fired, errors before warnings — its first finding together with the doc sections it cites. Each rule is charged as one item, its block measured by the renderer itself (`measureRuleBlock`), so the budget spends the characters the output will actually use. A rule whose item does not fit is **dropped whole**, counted in `omitted.rules`, and any section cited only by dropped rules is dropped with it: a section explaining a finding the agent cannot see explains nothing. A touch rule is never dropped — its reference is the whole delivery, and the session has already recorded the rule as touched.
+The **floor** is the header and — for every rule that fired, errors before warnings — its first finding together with the doc sections it cites. Each rule is charged as one item, its block measured by the renderer itself (`measureRuleBlock`), so the budget spends the characters the output will actually use. A rule whose item does not fit is **dropped whole**, counted in `omitted.rules`, and any section cited only by dropped rules is dropped with it: a section explaining a finding the agent cannot see explains nothing. A touch rule is never dropped — its reference is the whole delivery, and the session has already recorded the rule as touched.
 
 What is left over is filled in this order, which is the reverse of what is worth losing:
 
-1. **Reference contents.** A reference whose content does not fit keeps its line and gets state `read` with reason `budget`, and is not recorded as delivered.
-2. **Pre-existing summaries.** One that does not fit is counted in `omitted.preexisting` and, like a reference, is not recorded — so it is offered again.
-3. **The rules' remaining matches**, one per rule per pass, so a rule that fired forty times cannot crowd out the others, and never past `max_matches_per_rule`. What is left out is counted per rule in `omitted.findings`, which the renderer reports as "…and N more in M files".
+1. **Warnings**, under a ceiling of 15% of the budget, with a trailing "…and N more (run `rulecast validate`)" for the rest. They are charged **after** the floor, so no number of them can cost the agent a finding it could act on: 80 rules that failed to compile measured 13,500 characters against a 9,000 character budget and dropped the one rule that fired. A warning the budget cut is not recorded as warned, so it is offered again. They are also summarised at the source (§14), which is what keeps the count small in the first place.
+2. **Reference contents.** A reference whose content does not fit keeps its line and gets state `read` with reason `budget`, and is not recorded as delivered.
+3. **Pre-existing summaries.** One that does not fit is counted in `omitted.preexisting` and, like a reference, is not recorded — so it is offered again.
+4. **The rules' remaining matches**, one per rule per pass, so a rule that fired forty times cannot crowd out the others, and never past `max_matches_per_rule`. What is left out is counted per rule in `omitted.findings`, which the renderer reports as "…and N more in M files".
 
 Without a limit (`rulecast run`) nothing is trimmed: `json` and `sarif` carry every finding.
 
@@ -733,6 +736,8 @@ Mechanisms:
 
 **Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
 
+**File-size ceiling.** The deadline is a timer, and a timer only fires when the event loop is free. `regex` matches inside a `vm` timeout, which V8 honours; `ast-grep` parses in native code, which `TerminateExecution` does not reach, so nothing preempts it — a 2.6 MB TypeScript file measured 762 ms, linearly, which makes 26 MB 7.6 seconds of an agent blocked on its own write. So on `edit` and `guard`, a file over `max_file_bytes` (default 1 MiB) is not given to a detector that runs in this process: `regex`, `path`, `ast-grep` — the same set as `guards: true` (§6), which by contract reads only through `read`. The guard measures the **proposed** content, not the file on disk, because the write has not happened yet. `verify` has seconds to spend and always runs. Skipping is written to the debug log, not delivered as a warning, and does not mark the run failed: it is the same category as a missed deadline.
+
 **Perf test.** A fixture project with 30 rules across ast-grep, regex, path, `linter` (oxlint — the one linter that can be a workspace devDependency, §15) and command, replaying 50 edit events.
 
 **`pnpm perf`, on real hardware, is the measurement.** It builds, replays the events and prints p50/p95/max against the budget, exiting non-zero when p95 misses it. **CI does not measure performance**: a shared runner spawning one subprocess per external tool per event is several times slower than the hardware the promise is made about, so its numbers answer no question anyone has, and a job that goes red because a runner was busy teaches people to ignore CI. The script asserts that every event produced its expected finding — a measurement of a hook that quietly did nothing would be worse than none.
@@ -752,12 +757,15 @@ Hooks fail open; the CLI fails closed.
 | Detector error for a whole run | All rules in the run disabled for the session; one warning naming them | exit 2 |
 | Declared capture missing from a match | Rule error | exit 2 |
 | Edit deadline passed | Results dropped; debug log; background warm-up | n/a |
+| File over `max_file_bytes` on edit or guard | Not given to an in-process detector; debug log; not a failure (§13) | n/a: `verify` always runs |
 | Verify timeout | Results dropped; warning naming the rules | exit 2 |
 | LLM credentials missing | llm rules disabled for the session; one warning | exit 2 unless `--no-llm` |
 | Malformed LLM output | Error for the rules in that call | exit 2 |
 | Store unreadable or lock not acquired within 2 s | Run without session state for this invocation (every reference `full`, no stop block); warning | n/a |
 | Pinned rule repo not in the cache | Its rules disabled for the session; one warning: `run rulecast install` | Fetched; exit 2 if the fetch fails |
 | Unreadable hook input, unknown adapter, or no `.rulecast-config.yaml` above the agent's directory | No output | n/a |
+
+**Warnings are summarised above three of a kind.** Compile diagnostics collapse to `N rules failed to compile and were skipped — run rulecast validate.` plus one example, and a kind's detector errors to `N <kind> rules were disabled this session — see debug.log.` plus one example. A moved rule-repo rev or a `minimum_rulecast_version` bump invalidates many rules at once, and an agent mid-session cannot act on eighty of them individually; the detail is in `rulecast validate` and the debug log. The summary is keyed on a digest of the rule ids, not a fixed key, so a rule that breaks later in the session is still announced. The other warning kinds are left alone: each is already one line and names a specific lever (`max_files_per_verify`, `timeouts.verify_ms`) that a generic collapse would throw away.
 
 Exit codes: `0` no new error findings, `1` new error findings, `2` rulecast itself failed. Hook adapters never exit non-zero on internal failure. All errors are logged to the project's `debug.log` in the cache (§12).
 

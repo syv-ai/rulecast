@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { applyFileBudget } from "../../../src/core/detection/budget"
+import { applyFileBudget, applySizeCeiling } from "../../../src/core/detection/budget"
 import type { Selection } from "../../../src/core/detection/select"
 import { rule } from "../../helpers/rules"
 
@@ -68,5 +68,69 @@ describe("applyFileBudget", () => {
     const result = applyFileBudget("llm", selections, 1, [])
     expect(shape(result.selections)).toEqual([["r2", ["a.ts"]]])
     expect(result.skipped).toEqual([])
+  })
+})
+
+/**
+ * An in-process detector holds up the event loop for as long as it runs, and `ast-grep` parses in
+ * native code that no timeout interrupts: 2.6 MB measured 762 ms, linearly, so 26 MB is 7.6 s of an
+ * agent waiting on its own write. On edit and guard the file is skipped instead.
+ */
+describe("applySizeCeiling", () => {
+  const bounded = (kind: string) => kind === "regex" || kind === "ast-grep" || kind === "path"
+  const sizes = (table: Record<string, number | null>) => async (file: string) => table[file] ?? null
+
+  test("under the ceiling, nothing changes", async () => {
+    const selections = [selection("r1", "regex", ["a.ts", "b.ts"])]
+    const result = await applySizeCeiling(selections, 1000, bounded, sizes({ "a.ts": 10, "b.ts": 999 }))
+    expect(shape(result.selections)).toEqual([["r1", ["a.ts", "b.ts"]]])
+    expect(result.skipped).toEqual([])
+  })
+
+  test("a file over the ceiling is taken away from every rule that would have parsed it", async () => {
+    const selections = [selection("r1", "regex", ["a.ts", "big.ts"]), selection("r2", "ast-grep", ["big.ts"])]
+    const result = await applySizeCeiling(selections, 1000, bounded, sizes({ "a.ts": 10, "big.ts": 2_000_000 }))
+    // r2 is left with no files at all, so it is dropped rather than run on nothing.
+    expect(shape(result.selections)).toEqual([["r1", ["a.ts"]]])
+    expect(result.skipped).toEqual(["big.ts"])
+  })
+
+  test("a detector that shells out is not bounded by this: its cost is not on our event loop", async () => {
+    const selections = [selection("r1", "llm", ["big.ts"]), selection("r2", "regex", ["big.ts"])]
+    const result = await applySizeCeiling(selections, 1000, bounded, sizes({ "big.ts": 2_000_000 }))
+    expect(shape(result.selections)).toEqual([["r1", ["big.ts"]]])
+    expect(result.skipped).toEqual(["big.ts"])
+  })
+
+  test("a file that cannot be sized is not skipped: a doubt here goes ahead", async () => {
+    const selections = [selection("r1", "regex", ["gone.ts"])]
+    const result = await applySizeCeiling(selections, 1000, bounded, sizes({}))
+    expect(shape(result.selections)).toEqual([["r1", ["gone.ts"]]])
+    expect(result.skipped).toEqual([])
+  })
+
+  test("nothing in process means nothing to stat", async () => {
+    let stats = 0
+    const selections = [selection("r1", "llm", ["a.ts"])]
+    const result = await applySizeCeiling(selections, 1, bounded, async () => {
+      stats++
+      return 2_000_000
+    })
+    expect(stats).toBe(0)
+    expect(shape(result.selections)).toEqual([["r1", ["a.ts"]]])
+  })
+
+  test("one stat per distinct file, however many rules select it", async () => {
+    const statted: string[] = []
+    const selections = [
+      selection("r1", "regex", ["a.ts", "b.ts"]),
+      selection("r2", "regex", ["a.ts"]),
+      selection("r3", "ast-grep", ["a.ts"]),
+    ]
+    await applySizeCeiling(selections, 1000, bounded, async (file) => {
+      statted.push(file)
+      return 10
+    })
+    expect(statted.sort()).toEqual(["a.ts", "b.ts"])
   })
 })

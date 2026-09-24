@@ -175,18 +175,19 @@ describe("decide: stop gate", () => {
     expect(budgeted.work).toEqual([{ t: "stopBlock", agent: "main" }])
   })
 
-  // Warnings are charged before any rule is measured and are never dropped, so enough of them —
-  // one per failed detector, one per compile diagnostic — can empty the floor on their own.
-  test("warnings that fill the budget do not turn a block into an allow", async () => {
+  // Warnings used to be charged before any rule was measured and were never dropped, so enough of
+  // them — one per failed detector, one per compile diagnostic — emptied the floor on their own.
+  // They are charged after it now, so the finding survives; the gate blocked either way.
+  test("warnings that fill the budget cost neither the finding nor the block", async () => {
     const warnings = Array.from({ length: 60 }, (_, i) => ({
       key: `detector:${i}`,
       text: `llm detector failed for rule-${i}: the provider returned 429. Disabled for this session.`,
     }))
     const decision = await decide(input({ stopGate: true, findings: [newError], warnings, maxContextChars: 9000 }))
 
-    // The warnings alone exhaust the budget, so the finding's own block never fits.
-    expect(decision.delivery.omitted.rules).toBe(1)
-    expect(decision.delivery.findings).toEqual([])
+    expect(decision.delivery.omitted.rules).toBe(0)
+    expect(decision.delivery.findings).toHaveLength(1)
+    expect(decision.delivery.warnings.length).toBeLessThan(60)
     expect(decision.delivery.stop).toBe("block")
   })
 

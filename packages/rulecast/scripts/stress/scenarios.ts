@@ -35,6 +35,15 @@ const settings = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
+/**
+ * Lifts `max_file_bytes` for the scenarios whose whole point is a file past it.
+ *
+ * The ceiling (1 MiB by default) keeps large files off the edit and guard paths, which is what
+ * `guard-huge-file` measures. These scenarios measure the work underneath it — what an in-process
+ * detector and the delivery cost on a file that size — and a verify pays it whatever the ceiling is.
+ */
+const NO_CEILING = 64 * 1024 * 1024
+
 /** No agent CLI on it, but the ordinary system tools the pipeline needs are still reachable. */
 const NO_AGENT_PATH = "/usr/bin:/bin"
 
@@ -74,11 +83,33 @@ const hugeFileRegex: Scenario = {
         },
       ],
       { "src/huge.ts": text },
-      settings(),
+      settings({ max_file_bytes: NO_CEILING }),
     )
     const { result, elapsedMs } = await runEvent(root, { kind: "edit", files: ["src/huge.ts"], session: { id: "s" } })
+
+    // The same edit with the default ceiling: an 8 MB file never reaches a detector at all.
+    const guarded = await stressRepo(
+      [
+        {
+          id: "scale/compute",
+          name: "No bare compute",
+          files: "\\.ts$",
+          detect: { regex: { pattern: "compute\\((?<n>\\d+)\\)" } },
+          message: "{{file}}:{{line}} calls compute({{n}})",
+        },
+      ],
+      { "src/huge.ts": text },
+      settings(),
+    )
+    const capped = await runEvent(guarded, { kind: "edit", files: ["src/huge.ts"], session: { id: "c" } })
+
     return {
-      metrics: { fileBytes: text.length, elapsedMs, findings: result.delivery.findings.length },
+      metrics: {
+        fileBytes: text.length,
+        elapsedMs,
+        cappedMs: capped.elapsedMs,
+        findings: result.delivery.findings.length,
+      },
       checks: [
         check(
           "the rule actually fired",
@@ -91,8 +122,16 @@ const hugeFileRegex: Scenario = {
           elapsedMs <= EDIT_DEADLINE_MS * DEADLINE_SLACK || result.deadlineMissed.length > 0,
           `deadlineMissed=[${result.deadlineMissed.join(", ")}]`,
         ),
+        check(
+          "the default max_file_bytes keeps the file off the edit path entirely",
+          capped.result.delivery.findings.length === 0 && !capped.result.failed,
+          `${capped.result.delivery.findings.length} findings in ${capped.elapsedMs.toFixed(0)} ms under the 1 MiB default`,
+        ),
       ],
-      notes: [],
+      notes: [
+        "The first measurement lifts max_file_bytes on purpose: it is the cost the ceiling exists " +
+          "to keep off the edit path, and a verify pays it whatever the ceiling is.",
+      ],
     }
   },
 }
@@ -115,7 +154,8 @@ const manyMatches: Scenario = {
         },
       ],
       { "src/many.ts": text },
-      settings(),
+      // Over the 1 MiB default; the budget, not the ceiling, is what this scenario measures.
+      settings({ max_file_bytes: NO_CEILING }),
     )
     const { result, elapsedMs } = await runEvent(root, { kind: "edit", files: ["src/many.ts"], session: { id: "s" } })
     const delivered = JSON.stringify(result.delivery).length
@@ -349,6 +389,84 @@ const catastrophicGuard: Scenario = {
       metrics: { elapsedMs, deadlineMs: EDIT_DEADLINE_MS },
       checks: [within("the guard cannot be made to hold a write open", elapsedMs, EDIT_DEADLINE_MS * DEADLINE_SLACK)],
       notes: ["A guard that does not return is a write the agent never gets to make."],
+    }
+  },
+}
+
+const guardHugeFile: Scenario = {
+  name: "guard-huge-file",
+  about: "A multi-megabyte proposed write against a refusing ast-grep rule: native parsing ahead of the agent's write.",
+  target: "adversarial",
+  timeoutMs: 60_000,
+  async run() {
+    // Valid TypeScript, so a parse is real work rather than an early error. `ast-grep` is the
+    // detector no timeout reaches: it parses in native code, which V8's TerminateExecution — the
+    // mechanism that bounds `regex` inside a vm — does not interrupt. The guard runs it *before*
+    // the agent's write is allowed, so every millisecond here is the agent blocked on its own tool.
+    const huge = Array.from(
+      { length: 120_000 },
+      (_, index) => `export const value${index} = fetch("/a/${index}")\n`,
+    ).join("")
+    const small = 'export const one = fetch("/a/1")\n'
+    const rule = {
+      id: "evil/no-fetch",
+      name: "No bare fetch",
+      files: "\\.ts$",
+      refuse_write: true,
+      detect: { "ast-grep": { language: "typescript", rule: { pattern: "fetch($$$ARGS)" } } },
+      message: "{{file}}:{{line}} calls fetch directly",
+    }
+    const repo = (extra: Record<string, unknown> = {}) =>
+      stressRepo([rule], { "src/victim.ts": "export const a = 1\n" }, settings(extra))
+    const write = (content: string) => ({
+      kind: "guard" as const,
+      files: ["src/victim.ts"],
+      intent: { content },
+      session: { id: "s" },
+    })
+
+    const capped = await runEvent(await repo(), write(huge))
+    // The same write with the ceiling lifted: the cost it exists to keep off the PreToolUse path.
+    const uncapped = await runEvent(await repo({ max_file_bytes: NO_CEILING }), write(huge))
+    // A proposal under the ceiling, so a fast guard is the ceiling working rather than the rule
+    // being broken — without this the scenario would pass just as well with no rule at all.
+    const ordinary = await runEvent(await repo(), write(small))
+
+    return {
+      metrics: {
+        proposedBytes: huge.length,
+        cappedMs: capped.elapsedMs,
+        uncappedMs: uncapped.elapsedMs,
+        ordinaryMs: ordinary.elapsedMs,
+      },
+      checks: [
+        within(
+          "a guard over max_file_bytes returns at hook speed",
+          capped.elapsedMs,
+          EDIT_DEADLINE_MS * DEADLINE_SLACK,
+        ),
+        check(
+          "nothing is refused on a file nobody parsed, and that is not reported as a failure",
+          capped.result.delivery.findings.length === 0 && !capped.result.failed,
+          `${capped.result.delivery.findings.length} findings, failed=${capped.result.failed}`,
+        ),
+        check(
+          "the rule still refuses an ordinary write, so the ceiling has not simply turned it off",
+          ordinary.result.delivery.findings.length > 0,
+          `${ordinary.result.delivery.findings.length} findings in ${ordinary.elapsedMs.toFixed(0)} ms on a ${small.length} byte proposal`,
+        ),
+        check(
+          "the ceiling is what makes the difference, not the work being cheap anyway",
+          uncapped.elapsedMs > capped.elapsedMs * 2,
+          `${uncapped.elapsedMs.toFixed(0)} ms with the ceiling raised against ${capped.elapsedMs.toFixed(0)} ms under it`,
+        ),
+      ],
+      notes: [
+        "The uncapped number is how long the agent waits on its own tool call without max_file_bytes, " +
+          "and it is *past* the 350 ms deadline — which the guard honours by refusing nothing, so " +
+          "the write goes through late rather than being judged. A worker thread with terminate() " +
+          "would bound it instead, at ~40 ms on every hook.",
+      ],
     }
   },
 }
@@ -884,7 +1002,9 @@ const astGrepHugeFile: Scenario = {
         },
       ],
       { "src/huge.ts": text },
-      settings(),
+      // Lifted so the edit measurement below still reaches the detector: with the 1 MiB default a
+      // 2.6 MB file is skipped, which is what `guard-huge-file` measures instead.
+      settings({ max_file_bytes: NO_CEILING }),
     )
 
     // verify, where the budget is seconds rather than the edit deadline, is where the rule has to
@@ -1035,6 +1155,7 @@ export const SCENARIOS: readonly Scenario[] = [
   llmFileBudget,
   catastrophicEdit,
   catastrophicGuard,
+  guardHugeFile,
   binaryFiles,
   brokenConfigs,
   awkwardPaths,

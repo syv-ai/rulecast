@@ -128,3 +128,81 @@ describe("decide: the context budget", () => {
     expect(renderAgentText(delivery, { maxMatchesPerRule: 10 }).length).toBeLessThanOrEqual(900)
   })
 })
+
+/**
+ * Warnings used to be charged before anything else and were never dropped, so enough of them could
+ * empty the floor: stress testing measured 80 broken rules as 13,500 characters against a 9,000
+ * character budget, with the one rule that fired dropped whole. Summarising them at the source
+ * fixes the case that was measured; this is the invariant that stops it recurring from a warning
+ * kind nobody has thought of yet.
+ */
+describe("decide: warnings are charged after the floor", () => {
+  const noisy = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      key: `detector:${index}`,
+      text: `llm detector failed for rule-${index}: the provider returned 429. Disabled for this session.`,
+    }))
+
+  test("a warning never displaces a finding", async () => {
+    const { delivery } = await decide(
+      input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
+    )
+    expect(delivery.findings).toHaveLength(1)
+    expect(delivery.omitted.rules).toBe(0)
+  })
+
+  test("even a floor that fills the budget leaves the warnings no room to displace it", async () => {
+    const findings = Array.from({ length: 12 }, (_, index) => violation(`rule/number-${index}`, `f${index}.py`, 1))
+    const withWarnings = await decide(input({ maxContextChars: 600, warnings: noisy(80), findings }))
+    const without = await decide(input({ maxContextChars: 600, findings }))
+    expect(withWarnings.delivery.omitted.rules).toBe(without.delivery.omitted.rules)
+  })
+
+  test("the warnings kept stay under their share of the budget, and the rest are counted", async () => {
+    const { delivery } = await decide(
+      input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
+    )
+    expect(delivery.warnings.length).toBeLessThan(80)
+    expect(delivery.warnings.at(-1)).toMatch(/^…and \d+ more \(run rulecast validate\)$/)
+    const chars = delivery.warnings.reduce((sum, text) => sum + text.length, 0)
+    expect(chars).toBeLessThanOrEqual(9000 * 0.15)
+  })
+
+  test("a warning the budget cut is not recorded as warned, so it is announced again", async () => {
+    const { delivery, context } = await decide(
+      input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
+    )
+    const warned = context.flatMap((record) => (record.t === "warned" ? [record.key] : []))
+    // The trailing "…and N more" is not a warning anyone can key on; every other line is.
+    expect(warned).toEqual(
+      noisy(80)
+        .slice(0, delivery.warnings.length - 1)
+        .map((warning) => warning.key),
+    )
+  })
+
+  test("without a limit every warning is delivered", async () => {
+    const { delivery, context } = await decide(input({ warnings: noisy(80) }))
+    expect(delivery.warnings).toHaveLength(80)
+    expect(context.filter((record) => record.t === "warned")).toHaveLength(80)
+  })
+
+  test("the overflow file keeps the warnings the budget cut", async () => {
+    const findings = Array.from({ length: 12 }, (_, index) => violation(`rule/number-${index}`, `f${index}.py`, 1))
+    const { delivery, overflow } = await decide(input({ maxContextChars: 600, warnings: noisy(80), findings }))
+    expect(delivery.warnings.length).toBeLessThan(80)
+    expect(overflow).not.toBeNull()
+    expect(overflow!.warnings).toHaveLength(80)
+  })
+
+  test("what the renderer produces stays inside the limit, warnings included", async () => {
+    const { delivery } = await decide(
+      input({
+        maxContextChars: 900,
+        warnings: noisy(40),
+        findings: manyIn("backend/one", "a.py", 40, [ref("@conventions/backend.md#errors")]),
+      }),
+    )
+    expect(renderAgentText(delivery, { maxMatchesPerRule: 10 }).length).toBeLessThanOrEqual(900)
+  })
+})

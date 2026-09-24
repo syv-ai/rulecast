@@ -1,13 +1,15 @@
+import { createHash } from "node:crypto"
+
 import { computeChanges, isNew } from "./baseline/baseline"
 import { type Snapshot, snapshotOf } from "./baseline/hash"
 import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, startRecord } from "./baseline/store"
-import type { CompiledProject } from "./compile/project"
+import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { writeOverflow } from "./delivery/persist"
 import { createReferenceResolver, resolveRuleContext } from "./delivery/resolve"
-import { applyFileBudget } from "./detection/budget"
+import { applyFileBudget, applySizeCeiling } from "./detection/budget"
 import { detectorCacheDir, diskCache } from "./detection/cache"
-import { readSourceFile } from "./detection/per-rule"
+import { fileBytes, readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
@@ -51,16 +53,100 @@ export interface PipelineResult {
 
 type Warning = { key: string; text: string }
 
+/**
+ * Above this many warnings of one kind, they collapse into one carrying a count and an example.
+ *
+ * An agent mid-session cannot act on eighty individual compile errors, and the detail is in
+ * `rulecast validate` and the debug log either way. Stress testing measured 80 broken rules as
+ * 13,500 characters against a 9,000 character budget, with the one rule that fired dropped whole.
+ */
+const SUMMARY_THRESHOLD = 3
+
+const DEFAULT_HINT = "rulecast validate"
+
+/**
+ * The key a summary is delivered under.
+ *
+ * Warnings are announced once per agent context (`decide.ts`), so a single fixed key would silence
+ * a rule that breaks *later* in the session. Keying on the set of rules means a set that changes
+ * re-announces and a set that does not stays quiet.
+ */
+function summaryKey(prefix: string, ids: readonly string[]): string {
+  const digest = createHash("sha256")
+    .update([...ids].sort().join("\n"))
+    .digest("hex")
+    .slice(0, 16)
+  return `${prefix}:${digest}`
+}
+
+/**
+ * One warning per failed rule, or — above the threshold — one for all of them.
+ *
+ * A rule repo pinned to a rev that has moved, or a `minimum_rulecast_version` bump, invalidates
+ * many rules at once, and that is exactly the moment the rules that still work matter most.
+ */
+function compileWarnings(errors: readonly Diagnostic[]): Warning[] {
+  if (errors.length <= SUMMARY_THRESHOLD) {
+    return errors.map((diagnostic) => ({
+      key: `diagnostic:${diagnostic.source}:${diagnostic.rule ?? ""}:${diagnostic.message}`,
+      text: `${diagnosticText(diagnostic)} (run ${diagnostic.hint ?? DEFAULT_HINT})`,
+    }))
+  }
+  // A missing repo says "rulecast install" and a bad rule says "rulecast validate"; a mixed set has
+  // no one lever, and validate is the command that lists them all.
+  const hints = new Set(errors.map((diagnostic) => diagnostic.hint ?? DEFAULT_HINT))
+  const hint = hints.size === 1 ? [...hints][0] : DEFAULT_HINT
+  return [
+    {
+      key: summaryKey(
+        "diagnostics",
+        errors.map((diagnostic) => diagnostic.rule ?? diagnostic.source),
+      ),
+      text: `${errors.length} rules failed to compile and were skipped — run ${hint}.\nFirst: ${diagnosticText(errors[0]!)}`,
+    },
+  ]
+}
+
+/**
+ * Detector errors, collapsed per kind above the threshold: one detector that fails disables every
+ * rule that uses it, and a dozen copies of the same sentence tell the agent nothing the count does not.
+ */
+function detectorWarnings(errors: readonly { kind: string; rules: string[]; message: string }[]): Warning[] {
+  const text = (error: { kind: string; rules: string[]; message: string }) =>
+    `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. Disabled for this session.`
+  const byKind = new Map<string, { kind: string; rules: string[]; message: string }[]>()
+  for (const error of errors) {
+    const group = byKind.get(error.kind)
+    if (group === undefined) byKind.set(error.kind, [error])
+    else group.push(error)
+  }
+  const summarised: Warning[] = []
+  for (const [kind, group] of byKind) {
+    if (group.length <= SUMMARY_THRESHOLD) {
+      summarised.push(
+        ...group.map((error) => ({
+          key: `detector:${kind}:${error.rules.join(",")}:${error.message}`,
+          text: text(error),
+        })),
+      )
+      continue
+    }
+    const ids = group.flatMap((error) => error.rules)
+    summarised.push({
+      key: summaryKey(`detector:${kind}`, ids),
+      text: `${ids.length} ${kind} rules were disabled this session — see debug.log.\nFirst: ${text(group[0]!)}`,
+    })
+  }
+  return summarised
+}
+
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
   const { project, stateDir, event, registry } = options
   const { root, config } = project
   const log = options.log ?? (() => {})
   // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
   const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
-  const warnings: Warning[] = errors.map((diagnostic) => ({
-    key: `diagnostic:${diagnostic.source}:${diagnostic.rule ?? ""}:${diagnostic.message}`,
-    text: `${diagnostic.source}${diagnostic.rule ? ` (${diagnostic.rule})` : ""}: ${diagnostic.message} (run ${diagnostic.hint ?? "rulecast validate"})`,
-  }))
+  const warnings: Warning[] = compileWarnings(errors)
   let failed = errors.length > 0
   const deadlineMissed: string[] = []
   let session = event.session
@@ -215,6 +301,22 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       selections = budgeted.selections
       overBudget = budgeted.skipped
     }
+    // Spec §13: an edit has 350 ms and an agent waiting on it, so a file too large for an
+    // in-process detector to finish inside that is not given to one. A verify has seconds.
+    if (event.kind === "edit") {
+      const ceiling = await applySizeCeiling(
+        selections,
+        config.maxFileBytes,
+        (kind) => registry.get(kind)?.guards === true,
+        (file) => fileBytes(root, file),
+      )
+      selections = ceiling.selections
+      // Logged, not warned about: staying inside a ceiling the project set is normal operation,
+      // like a missed edit deadline, and must not change the exit code.
+      if (ceiling.skipped.length > 0) {
+        log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
+      }
+    }
     const output = await runDetection({
       root,
       event: event.kind,
@@ -235,12 +337,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }))
     for (const error of output.errors) {
       failed = true
+      log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
       for (const rule of error.rules) workRecords.push({ t: "disabled", rule, reason: error.message })
-      warnings.push({
-        key: `detector:${error.kind}:${error.rules.join(",")}:${error.message}`,
-        text: `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. Disabled for this session.`,
-      })
     }
+    // Every one of them is in the debug log above, which is where the summary points.
+    warnings.push(...detectorWarnings(output.errors))
     if (overBudget.length > 0) {
       // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
       // failure, so it must not change the exit code.

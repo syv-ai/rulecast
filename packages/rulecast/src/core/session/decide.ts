@@ -54,6 +54,19 @@ const OVERFLOW_NOTICE = 256
 /** A reference's own line, at its longest: "read this before continuing (not included, …)". */
 const REFERENCE_OVERHEAD = 96
 
+/**
+ * The most of the budget warnings may take between them.
+ *
+ * They are charged after the floor, so this only bounds what they take from the doc sections and
+ * the repeats below it — the floor is already safe. It exists because a warning explains why
+ * rulecast is not working, and a finding is the work the agent came for: at eighty broken rules
+ * the warnings took 13,500 characters of a 9,000 character budget and the one finding was dropped.
+ */
+const WARNING_SHARE = 0.15
+
+/** What replaces the warnings the share could not hold. */
+const moreWarnings = (count: number) => `…and ${count} more (run rulecast validate)`
+
 /** Rule repo references have absolute paths; the agent needs that path to read them. */
 function locationOf(spec: ReferenceSpec): { location?: string } {
   return path.isAbsolute(spec.path) ? { location: spec.path } : {}
@@ -157,12 +170,10 @@ export async function decide(input: DecideInput): Promise<Decision> {
   }
   delivery.preexistingSummary = [...summaries.values()]
 
-  // Warnings, once per context.
-  for (const warning of input.warnings) {
-    if (input.context.warned.has(warning.key)) continue
-    delivery.warnings.push(warning.text)
-    context.push({ t: "warned", key: warning.key })
-  }
+  // Warnings, once per context. Which of them are kept — and so which are recorded as warned — is
+  // decided by the budget below, after the floor.
+  const unwarned = input.warnings.filter((warning) => !input.context.warned.has(warning.key))
+  delivery.warnings = unwarned.map((warning) => warning.text)
 
   // Touches.
   delivery.touches = input.touches.map((rule) => rule.id)
@@ -210,6 +221,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
     findings: [...delivery.findings],
     preexistingSummary: [...delivery.preexistingSummary],
     references: [...delivery.references],
+    warnings: [...delivery.warnings],
     omitted: { findings: [], rules: 0, preexisting: 0 },
   }
   // Appended in place. Rebuilding the array per finding is quadratic in one rule's matches, which
@@ -222,7 +234,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
     else group.push(finding)
   }
 
-  let used = HEADER_OVERHEAD + delivery.warnings.reduce((sum, warning) => sum + warning.length + ITEM_OVERHEAD, 0)
+  let used = HEADER_OVERHEAD
   const fits = (size: number) => limit === null || used + size <= limit
   const kept = new Map<string, Finding[]>()
   // A reference costs its line whatever its state: one whose content does not fit is not dropped,
@@ -276,6 +288,38 @@ export async function decide(input: DecideInput): Promise<Decision> {
     for (const ref of floor.refs) charged.add(ref)
     // What is left is cited only by rules that were dropped, and explains nothing the agent can see.
     for (const ref of resolvedRefs) if (!charged.has(ref)) orphaned.add(ref)
+  }
+
+  // Warnings, into what the floor left and no more than their share of it. They come before the doc
+  // sections and the repeats — a rule that is broken is worth saying early — but after every rule
+  // that fired, so no number of them can cost the agent a finding it could act on.
+  const warningCost = (text: string) => text.length + ITEM_OVERHEAD
+  if (limit === null) {
+    for (const warning of unwarned) context.push({ t: "warned", key: warning.key })
+  } else {
+    const ceiling = Math.max(0, Math.min(Math.floor(limit * WARNING_SHARE), limit - used))
+    let spent = 0
+    let held = 0
+    while (held < unwarned.length && spent + warningCost(unwarned[held]!.text) <= ceiling) {
+      spent += warningCost(unwarned[held]!.text)
+      held++
+    }
+    // The line standing in for the rest costs what a warning does, and the warnings it replaces pay
+    // for it: dropping one raises the count it carries, which is why this is a loop.
+    if (held < unwarned.length) {
+      while (held > 0 && spent + warningCost(moreWarnings(unwarned.length - held)) > ceiling) {
+        held--
+        spent -= warningCost(unwarned[held]!.text)
+      }
+    }
+    delivery.warnings = unwarned.slice(0, held).map((warning) => warning.text)
+    for (const warning of unwarned.slice(0, held)) context.push({ t: "warned", key: warning.key })
+    const cut = unwarned.length - held
+    if (cut > 0 && spent + warningCost(moreWarnings(cut)) <= ceiling) {
+      spent += warningCost(moreWarnings(cut))
+      delivery.warnings.push(moreWarnings(cut))
+    }
+    used += spent
   }
 
   for (const { index, resolved } of candidates) {
