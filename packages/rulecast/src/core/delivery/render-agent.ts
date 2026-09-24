@@ -155,8 +155,14 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
   const out: string[] = []
   if (title !== null) out.push(title, "")
 
+  // Appended in place: rebuilding the array per finding is quadratic in one rule's matches, and a
+  // json or sarif delivery is never trimmed, so this sees every match the detector found.
   const byRule = new Map<string, Finding[]>()
-  for (const finding of delivery.findings) byRule.set(finding.rule, [...(byRule.get(finding.rule) ?? []), finding])
+  for (const finding of delivery.findings) {
+    const group = byRule.get(finding.rule)
+    if (group === undefined) byRule.set(finding.rule, [finding])
+    else group.push(finding)
+  }
   for (const [rule, findings] of byRule) {
     out.push(...ruleBlock(rule, findings, delivery.templates[rule], omittedFor(delivery.omitted, rule), options))
     out.push("")

@@ -17,7 +17,11 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   for (const finding of delivery.findings) {
     const count = shown.get(finding.rule) ?? 0
     if (count >= options.maxMatchesPerRule) {
-      hidden.set(finding.rule, [...(hidden.get(finding.rule) ?? []), finding])
+      // Appended in place: `rulecast run --all-files` over a whole repository reaches the scale
+      // where rebuilding this array per finding is quadratic.
+      const rest = hidden.get(finding.rule)
+      if (rest === undefined) hidden.set(finding.rule, [finding])
+      else rest.push(finding)
       continue
     }
     shown.set(finding.rule, count + 1)

@@ -212,8 +212,15 @@ export async function decide(input: DecideInput): Promise<Decision> {
     references: [...delivery.references],
     omitted: { findings: [], rules: 0, preexisting: 0 },
   }
+  // Appended in place. Rebuilding the array per finding is quadratic in one rule's matches, which
+  // an ordinary pattern reaches on a generated or minified file: 62k matches took 5.9 s, and an
+  // 8 MB file never finished. Nothing can preempt it either — the work is synchronous (§13).
   const byRule = new Map<string, Finding[]>()
-  for (const finding of delivery.findings) byRule.set(finding.rule, [...(byRule.get(finding.rule) ?? []), finding])
+  for (const finding of delivery.findings) {
+    const group = byRule.get(finding.rule)
+    if (group === undefined) byRule.set(finding.rule, [finding])
+    else group.push(finding)
+  }
 
   let used = HEADER_OVERHEAD + delivery.warnings.reduce((sum, warning) => sum + warning.length + ITEM_OVERHEAD, 0)
   const fits = (size: number) => limit === null || used + size <= limit
