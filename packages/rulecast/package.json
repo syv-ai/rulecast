@@ -51,6 +51,7 @@
     "perf": "tsx scripts/perf.ts",
     "readme": "tsx scripts/readme.ts",
     "release-notes": "tsx scripts/release-notes.ts",
+    "stress": "tsx scripts/stress.ts",
     "sync-version": "tsx scripts/sync-version.ts",
     "test": "vitest run",
     "test:linux": "tsx scripts/test-linux.ts",

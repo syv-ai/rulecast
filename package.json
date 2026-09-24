@@ -15,6 +15,7 @@
     "readme": "pnpm --filter @syv-ai/rulecast readme",
     "release": "pnpm build && changeset publish --no-git-tag",
     "release-notes": "pnpm --filter @syv-ai/rulecast release-notes",
+    "stress": "pnpm --filter @syv-ai/rulecast stress",
     "sync-version": "pnpm --filter @syv-ai/rulecast sync-version",
     "test": "pnpm -r test",
     "test:linux": "pnpm --filter @syv-ai/rulecast test:linux",

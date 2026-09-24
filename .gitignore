@@ -7,6 +7,9 @@ binaries/
 # Benchmark output, written by `pnpm bench`. The numbers belong to the machine that ran them.
 packages/rulecast/bench/
 
+# Stress output, written by `pnpm stress`. Same reason: one machine's numbers, under load.
+packages/rulecast/stress/
+
 # Personal agent settings and agent worktrees. .claude/settings.json is shared and stays tracked;
 # these were only invisible because of this machine's global gitignore and .git/info/exclude.
 .claude/settings.local.json
