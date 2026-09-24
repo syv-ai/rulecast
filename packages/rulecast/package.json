@@ -65,11 +65,11 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@types/node": "^26.6.2",
     "oxlint": "^1.83.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.13",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }
