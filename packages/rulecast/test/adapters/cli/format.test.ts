@@ -51,8 +51,22 @@ describe("formatDelivery", () => {
     )
   })
 
-  test("json is the delivery", () => {
-    expect(JSON.parse(formatDelivery(delivery, "json", { maxMatchesPerRule: 10 }))).toEqual(delivery)
+  test("json publishes a named shape, not the whole delivery", () => {
+    const parsed = JSON.parse(formatDelivery(delivery, "json", { maxMatchesPerRule: 10 }))
+    expect(Object.keys(parsed).sort()).toEqual([
+      "findings",
+      "preexistingSummary",
+      "references",
+      "stop",
+      "touches",
+      "warnings",
+    ])
+    expect(parsed.findings).toEqual(delivery.findings)
+    expect(parsed.references).toEqual(delivery.references)
+    // The renderer's own bookkeeping stays out of the published output.
+    expect(parsed).not.toHaveProperty("templates")
+    expect(parsed).not.toHaveProperty("omitted")
+    expect(parsed).not.toHaveProperty("overflowPath")
   })
 
   test("sarif lists findings as results", () => {

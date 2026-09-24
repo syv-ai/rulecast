@@ -306,6 +306,11 @@ export async function decide(input: DecideInput): Promise<Decision> {
       added = false
       for (const [rule, findings] of byRule) {
         const shown = kept.get(rule)
+        // The cap here is arithmetic, not formatting. measureRuleBlock renders through ruleBlock,
+        // which slices at maxMatchesPerRule, so a block's measured size stops growing past the cap
+        // — at maxMatchesPerRule 3 the sizes run 99, 184, 269, 293, 294, 294, 294. Past that the
+        // delta is 0, fits() is always true, and without this bound the loop would pull every
+        // finding of every rule into the delivery at no apparent cost.
         if (shown === undefined || shown.length >= Math.min(findings.length, input.maxMatchesPerRule)) continue
         const template = delivery.templates[rule]
         const delta =
@@ -333,17 +338,24 @@ export async function decide(input: DecideInput): Promise<Decision> {
     delivery.findings = delivery.findings.filter((finding) => kept.get(finding.rule)?.includes(finding) === true)
   }
 
-  // Stop gate.
+  // Stop gate. It asks what was *found*, not what survived the budget: a rule the floor could not
+  // hold is still an unresolved error, and reading the trimmed list would let the agent stop
+  // because its findings did not fit — which is the one thing the gate exists to prevent.
   if (input.stopGate) {
-    const newErrors = delivery.findings.some((finding) => finding.severity === "error")
+    const newErrors = fresh.some(({ rule }) => rule.severity === "error")
     const blocks = input.work.stopBlocks.get(input.agent) ?? 0
     if (!newErrors) delivery.stop = "allow"
     else if (blocks < input.maxBlocks) {
       delivery.stop = "block"
       work.push({ t: "stopBlock", agent: input.agent })
     } else delivery.stop = "capReached"
-    // Only a block reaches the agent; anything else must not count as delivered.
-    if (delivery.stop !== "block") return { delivery, overflow: null, work, context: [] }
+    // Only a block reaches the agent as context; anything else must not count as delivered. A
+    // capReached still prints its delivery as a system message, so it keeps the overflow file —
+    // the message says rules did not fit, and the file is where they went.
+    if (delivery.stop === "allow") return { delivery, overflow: null, work, context: [] }
+    if (delivery.stop === "capReached") {
+      return { delivery, overflow: delivery.omitted.rules > 0 ? complete : null, work, context: [] }
+    }
   }
 
   return { delivery, overflow: delivery.omitted.rules > 0 ? complete : null, work, context }

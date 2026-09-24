@@ -1,6 +1,6 @@
 import type { CompiledRule } from "./compile/rule"
 import type { Config } from "./config/schema"
-import type { ReferenceResolver } from "./delivery/resolve"
+import { type ReferenceResolver, resolveRuleContext } from "./delivery/resolve"
 import { detectorCacheDir, diskCache } from "./detection/cache"
 import { readSourceFile } from "./detection/per-rule"
 import { isInserted, propose } from "./detection/proposal"
@@ -9,7 +9,7 @@ import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
 import { decide } from "./session/decide"
 import { emptyContext, refusalKey, type WorkRecord, type WorkState } from "./session/state"
-import { type Delivery, type Event, emptyDelivery, type ResolvedReference } from "./types"
+import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface GuardInput {
   root: string
@@ -62,19 +62,12 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     read: async (name) => (name === file ? proposal.content : readSourceFile(input.root, name)),
     registry: input.registry,
     cacheFor: (kind) => diskCache(detectorCacheDir(input.stateDir, kind)),
-    contextFor: async (rule) => {
-      const references: ResolvedReference[] = []
-      for (const spec of rule.context) {
-        const resolved = await input.resolver.resolve(spec)
-        if (resolved.found) references.push({ ref: spec.ref, content: resolved.content })
-      }
-      return references
-    },
+    contextFor: (rule) => resolveRuleContext(input.resolver, rule.context),
     settings: { llm: input.config.llm },
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
-  const evidence = output.findings.filter(({ rule, match }) => isInserted(proposal, match, rule.detector!.kind))
+  const evidence = output.findings.filter(({ rule, match }) => isInserted(proposal, match, rule.detector.kind))
   if (evidence.length === 0) return emptyDelivery()
 
   // The refuse gate, like the stop gate: a rule that has had its say about a file lets the next

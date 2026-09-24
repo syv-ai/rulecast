@@ -1,4 +1,4 @@
-import type { CompiledRule } from "../compile/rule"
+import type { CompiledRule, DetectorRule } from "../compile/rule"
 import { errorMessage } from "../errors"
 import type {
   Cache,
@@ -27,7 +27,7 @@ export interface DetectionInput {
 }
 
 export interface DetectionOutput {
-  findings: { rule: CompiledRule; match: Match }[]
+  findings: { rule: DetectorRule; match: Match }[]
   errors: { kind: string; rules: string[]; message: string }[]
   timedOut: { kind: string; rules: string[] }[]
 }
@@ -38,7 +38,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
   const output: DetectionOutput = { findings: [], errors: [], timedOut: [] }
   const byKind = new Map<string, Selection[]>()
   for (const selection of input.selections) {
-    const kind = selection.rule.detector!.kind
+    const kind = selection.rule.detector.kind
     byKind.set(kind, [...(byKind.get(kind) ?? []), selection])
   }
 
@@ -61,7 +61,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
         const rules = await Promise.all(
           selections.map(async ({ rule, files }) => ({
             id: rule.id,
-            config: rule.detector!.config,
+            config: rule.detector.config,
             files,
             context: await input.contextFor(rule),
           })),
@@ -112,7 +112,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     for (const error of result.errors) failed.set(error.rule!, error.message)
     for (const finding of result.findings) {
       const rule = rulesById.get(finding.rule)!
-      const missing = rule.detector!.captures.find((name) => typeof finding.match.captures[name] !== "string")
+      const missing = rule.detector.captures.find((name) => typeof finding.match.captures[name] !== "string")
       if (missing && !failed.has(rule.id)) failed.set(rule.id, `match is missing declared capture "${missing}"`)
     }
     for (const [rule, message] of failed) output.errors.push({ kind: outcome.kind, rules: [rule], message })

@@ -1,6 +1,7 @@
 import { ADAPTERS } from "../adapters"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
+import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
@@ -158,7 +159,9 @@ async function dryRun(project: CompiledProject, registry: DetectorRegistry): Pro
 
   const lines: DryRunLine[] = []
   for (const rule of project.rules) {
-    if (rule.detector === null) {
+    // isDetectorRule, not `rule.detector === null`: narrowing the property does not narrow the
+    // rule, and runDetection below takes a rule whose detector is known to be there.
+    if (!isDetectorRule(rule)) {
       lines.push({ rule: rule.id, level: "ok", detail: "context only, nothing to run" })
       continue
     }

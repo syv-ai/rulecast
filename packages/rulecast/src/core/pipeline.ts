@@ -4,7 +4,7 @@ import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, start
 import type { CompiledProject } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { writeOverflow } from "./delivery/persist"
-import { createReferenceResolver } from "./delivery/resolve"
+import { createReferenceResolver, resolveRuleContext } from "./delivery/resolve"
 import { applyFileBudget } from "./detection/budget"
 import { detectorCacheDir, diskCache } from "./detection/cache"
 import { readSourceFile } from "./detection/per-rule"
@@ -17,7 +17,7 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
-import { type Delivery, type Event, emptyDelivery, type ResolvedReference } from "./types"
+import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -177,7 +177,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector!.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
+      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
     )
     // Spec §6: at most llm.max_files_per_verify files per verify, most recently edited first.
     // work.edited is least recently edited first, so it is reversed.
@@ -195,14 +195,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       read: (file) => readSourceFile(root, file),
       registry,
       cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
-      contextFor: async (rule) => {
-        const references: ResolvedReference[] = []
-        for (const spec of rule.context) {
-          const resolved = await resolver.resolve(spec)
-          if (resolved.found) references.push({ ref: spec.ref, content: resolved.content })
-        }
-        return references
-      },
+      contextFor: (rule) => resolveRuleContext(resolver, rule.context),
       settings: { llm: config.llm },
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
     })

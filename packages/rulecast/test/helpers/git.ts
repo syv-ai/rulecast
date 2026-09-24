@@ -1,29 +1,23 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 
+import { withoutInheritedGitEnv } from "../../src/core/git"
 import { createProject } from "./project"
 
 const exec = promisify(execFile)
 
 /**
- * Git exports these to every hook it runs, and they override `cwd`: a fixture's `init`, `commit`,
- * `checkout -b` and `tag` then land in the repository the hook is running for. `pnpm test` from
- * lefthook's pre-push hook did exactly that — it committed to the branch being pushed and left
- * v0.1.0 behind. Clearing them is what makes a fixture repository its own.
+ * Fixtures need the same scrub the production helper does, and for the same reason: git exports
+ * `GIT_DIR` and its siblings to every hook it runs, so a fixture's `init`, `commit`, `checkout -b`
+ * and `tag` land in the repository the hook is running for. `pnpm test` from lefthook's pre-push
+ * hook did exactly that — it committed to the branch being pushed and left v0.1.0 behind.
+ *
+ * The list itself lives in `src/core/git.ts`. Keeping a second copy here is what let four of its
+ * seven entries go untested: `test/core/git.test.ts` and `git-isolation.test.ts` pin `GIT_DIR`,
+ * `GIT_WORK_TREE` and `GIT_INDEX_FILE` on both sides, and nothing pinned the rest.
  */
-const INHERITED = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_COMMON_DIR",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_PREFIX",
-]
-
 export async function git(cwd: string, ...args: string[]): Promise<string> {
-  const env = { ...process.env }
-  for (const name of INHERITED) delete env[name]
+  const env = withoutInheritedGitEnv(process.env)
   const { stdout } = await exec(
     "git",
     [

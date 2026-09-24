@@ -5,6 +5,7 @@ import { errorMessage } from "../errors"
 import { LockTimeoutError, withLock } from "../session/lock"
 import { detectorCacheDir, diskCache } from "./cache"
 import type { DetectorRegistry } from "./registry"
+import { rulesOfKind } from "./select"
 
 export interface WarmOptions {
   root: string
@@ -45,9 +46,7 @@ export async function warmDetectors(options: WarmOptions): Promise<WarmResult> {
   await Promise.all(
     kinds.map(async (kind) => {
       const detector = registry.get(kind)!
-      const rules = project.rules
-        .filter((rule) => rule.detector?.kind === kind)
-        .map((rule) => ({ id: rule.id, config: rule.detector!.config }))
+      const rules = rulesOfKind(project.rules, kind)
       try {
         await withLock(
           path.join(stateDir, "warm", kind),

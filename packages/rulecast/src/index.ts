@@ -1,28 +1,21 @@
+/**
+ * The plugin API (spec §16): what a third-party detector or adapter needs, and nothing else.
+ *
+ * Everything the CLI uses to do its own work — compiling a project, running the pipeline, locating
+ * the cache, fetching rule repos — is in `@syv-ai/rulecast/internal`, which carries no stability
+ * promise. Keeping the two apart is what lets those shapes change without a major version.
+ */
+
 export { claudeCodeAdapter } from "./adapters/claude-code/adapter"
 export { ADAPTERS, adapterByName } from "./adapters/index"
-export {
-  type CompiledProject,
-  type CompileOptions,
-  compile,
-  compileManifest,
-  type Diagnostic,
-} from "./core/compile/project"
-export type { CompiledDetector, CompiledRule } from "./core/compile/rule"
-export { CONFIG_FILE, MANIFEST_FILE } from "./core/config/load"
-export type { Config, RuleEntry, Stage } from "./core/config/schema"
-export { renderAgentText } from "./core/delivery/render-agent"
-export { checkableKinds, checkDetectors, type KindCheckResult } from "./core/detection/check"
+export type { CompiledDetector, CompiledRule, DetectorRule, TouchRule } from "./core/compile/rule"
+export { isDetectorRule } from "./core/compile/rule"
 export { perRule } from "./core/detection/per-rule"
 export { type AnyDetector, createRegistry, type DetectorRegistry } from "./core/detection/registry"
-export { cacheHome, type Env, projectStateDir } from "./core/home"
-export { type PipelineOptions, type PipelineResult, runPipeline } from "./core/pipeline"
-export { type Checkout, cachedRepos, fetchingRepos, fixedRepo, type RepoProvider } from "./core/repos/provider"
 export type * from "./core/types"
 export { emptyDelivery } from "./core/types"
 export { VERSION } from "./core/version"
 export { builtinDetectors } from "./detectors"
-export { MODEL_ALIASES, resolveModel } from "./detectors/llm/models"
-export { providerByName } from "./detectors/llm/providers/index"
 export {
   type LlmFinding,
   type LlmProvider,

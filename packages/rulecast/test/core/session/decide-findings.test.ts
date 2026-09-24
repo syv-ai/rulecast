@@ -157,4 +157,56 @@ describe("decide: stop gate", () => {
     const block = await decide(input({ stopGate: true, findings: [newError], warnings }))
     expect(block.context).toEqual([{ t: "warned", key: "w" }])
   })
+
+  // The gate asks what was found, not what fitted. Before this, the budget filtered
+  // delivery.findings and the gate read that filtered list, so an error whose block did not fit
+  // became an error the gate could not see — and the agent was allowed to stop with it unresolved.
+  test("a budget that drops the rule whole still blocks", async () => {
+    const long = rule({ id: "api/long", message: `{{file}} ${"explanation. ".repeat(60)}` })
+    const findings = [{ rule: long, match: at("a.ts", 1), status: "new" as const }]
+
+    const unbudgeted = await decide(input({ stopGate: true, findings }))
+    const budgeted = await decide(input({ stopGate: true, findings, maxContextChars: 200 }))
+
+    expect(unbudgeted.delivery.stop).toBe("block")
+    expect(budgeted.delivery.omitted.rules).toBe(1)
+    expect(budgeted.delivery.findings).toEqual([])
+    expect(budgeted.delivery.stop).toBe("block")
+    expect(budgeted.work).toEqual([{ t: "stopBlock", agent: "main" }])
+  })
+
+  // Warnings are charged before any rule is measured and are never dropped, so enough of them —
+  // one per failed detector, one per compile diagnostic — can empty the floor on their own.
+  test("warnings that fill the budget do not turn a block into an allow", async () => {
+    const warnings = Array.from({ length: 60 }, (_, i) => ({
+      key: `detector:${i}`,
+      text: `llm detector failed for rule-${i}: the provider returned 429. Disabled for this session.`,
+    }))
+    const decision = await decide(input({ stopGate: true, findings: [newError], warnings, maxContextChars: 9000 }))
+
+    // The warnings alone exhaust the budget, so the finding's own block never fits.
+    expect(decision.delivery.omitted.rules).toBe(1)
+    expect(decision.delivery.findings).toEqual([])
+    expect(decision.delivery.stop).toBe("block")
+  })
+
+  // capReached still reaches the agent, as a system message, so it keeps its overflow file.
+  test("a capReached whose rules did not fit keeps the overflow", async () => {
+    const work = emptyWork()
+    work.stopBlocks.set("main", 3)
+    const long = rule({ id: "api/long", message: `{{file}} ${"explanation. ".repeat(60)}` })
+    const decision = await decide(
+      input({
+        stopGate: true,
+        work,
+        findings: [{ rule: long, match: at("a.ts", 1), status: "new" }],
+        maxContextChars: 200,
+      }),
+    )
+
+    expect(decision.delivery.stop).toBe("capReached")
+    expect(decision.delivery.omitted.rules).toBe(1)
+    expect(decision.overflow).not.toBeNull()
+    expect(decision.overflow!.findings).toHaveLength(1)
+  })
 })

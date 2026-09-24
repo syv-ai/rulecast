@@ -76,6 +76,27 @@ describe("pipeline with a session", () => {
     expect(fixed.findings).toEqual([])
   })
 
+  // The path commands/hook.ts takes for a Stop hook: stopGate with the adapter's maxContextChars.
+  // A budget tight enough to drop the rule must not decide whether the agent may stop.
+  test("stop gate blocks under a budget that drops every rule", async () => {
+    const root = await createFixture()
+    const verify = async (maxContextChars: number | null) => {
+      const result = await pipelineAt(
+        root,
+        { kind: "verify", files: [USERS], cwd: root, session: { id: `s-${maxContextChars}` } },
+        { stopGate: true, maxContextChars },
+      )
+      return result.delivery
+    }
+    await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(500)\n")
+
+    expect((await verify(null)).stop).toBe("block")
+    const budgeted = await verify(120)
+    expect(budgeted.findings).toEqual([])
+    expect(budgeted.omitted.rules).toBeGreaterThan(0)
+    expect(budgeted.stop).toBe("block")
+  })
+
   test("reset clears delivered references; subagents have their own context", async () => {
     const { send, write } = await scenario()
     await send({ kind: "touch", files: [USERS], completeRead: true })

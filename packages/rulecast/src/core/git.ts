@@ -20,10 +20,19 @@ const INHERITED = [
   "GIT_PREFIX",
 ]
 
+/**
+ * A copy of `env` with the inherited git variables removed. Test fixtures need exactly the same
+ * scrub — a fixture's `init` and `commit` land in the surrounding repository without it — so this
+ * is the one place the list lives, rather than one list per side that can drift apart.
+ */
+export function withoutInheritedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const scrubbed = { ...env }
+  for (const name of INHERITED) delete scrubbed[name]
+  return scrubbed
+}
+
 function environment(extra?: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
-  const env = { ...process.env, ...extra }
-  for (const name of INHERITED) delete env[name]
-  return env
+  return withoutInheritedGitEnv({ ...process.env, ...extra })
 }
 
 /** Runs git; a non-zero exit is a result, not an exception. `env` is added to the process environment. */

@@ -2,6 +2,7 @@ import { sectionContains, sectionRange, sectionText } from "../anchors"
 import { fnv1a } from "../baseline/hash"
 import { readSourceFile } from "../detection/per-rule"
 import type { ReferenceSpec } from "../references"
+import type { ResolvedReference } from "../types"
 
 export type ResolvedRef =
   | { spec: ReferenceSpec; found: true; content: string; hash: number; bytes: number }
@@ -13,6 +14,22 @@ export interface ReferenceResolver {
   currentHash(path: string, anchor: string | null): Promise<number | null>
   /** Whether content delivered as `parent` includes `child`. null means the whole file. */
   contains(path: string, parent: string | null, child: string | null): Promise<boolean>
+}
+
+/**
+ * A rule's `context` specs, resolved to the references a detector run is given. Missing ones are
+ * left out: a detector is handed what exists, and compile has already reported what does not.
+ */
+export async function resolveRuleContext(
+  resolver: ReferenceResolver,
+  context: readonly ReferenceSpec[],
+): Promise<ResolvedReference[]> {
+  const references: ResolvedReference[] = []
+  for (const spec of context) {
+    const resolved = await resolver.resolve(spec)
+    if (resolved.found) references.push({ ref: spec.ref, content: resolved.content })
+  }
+  return references
 }
 
 /** Reads each file at most once; create one per event. */

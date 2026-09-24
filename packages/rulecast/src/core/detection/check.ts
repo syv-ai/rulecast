@@ -2,6 +2,7 @@ import type { CompiledProject } from "../compile/project"
 import { errorMessage } from "../errors"
 import type { CheckResult, DetectorSettings } from "../types"
 import type { DetectorRegistry } from "./registry"
+import { rulesOfKind } from "./select"
 
 export interface CheckOptions {
   project: CompiledProject
@@ -36,9 +37,7 @@ export async function checkDetectors(options: CheckOptions): Promise<KindCheckRe
   const perKind = await Promise.all(
     kinds.map(async (kind): Promise<KindCheckResult[]> => {
       const detector = registry.get(kind)!
-      const rules = project.rules
-        .filter((rule) => rule.detector?.kind === kind)
-        .map((rule) => ({ id: rule.id, config: rule.detector!.config }))
+      const rules = rulesOfKind(project.rules, kind)
       try {
         const results = await detector.check!({
           rules,

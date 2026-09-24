@@ -49,6 +49,27 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   return out.join("\n")
 }
 
+/**
+ * What `--format json` publishes. Named rather than serialising the whole `Delivery`, which also
+ * carries the renderer's bookkeeping — `templates` restates each rule's message, and `omitted` and
+ * `overflowPath` are artefacts of the hook path's character budget that are always empty here,
+ * because the CLI runs unbudgeted. Adding a field to `Delivery` should not change this output.
+ */
+function json(delivery: Delivery): string {
+  return JSON.stringify(
+    {
+      findings: delivery.findings,
+      preexistingSummary: delivery.preexistingSummary,
+      references: delivery.references,
+      touches: delivery.touches,
+      warnings: delivery.warnings,
+      stop: delivery.stop,
+    },
+    null,
+    2,
+  )
+}
+
 function sarif(delivery: Delivery): string {
   const rules = [...new Set(delivery.findings.map((finding) => finding.rule))].map((id) => ({ id }))
   return JSON.stringify(
@@ -86,7 +107,7 @@ export function formatDelivery(delivery: Delivery, format: CliFormat, options: F
     case "agent":
       return renderAgentText(delivery, options)
     case "json":
-      return JSON.stringify(delivery, null, 2)
+      return json(delivery)
     case "sarif":
       return sarif(delivery)
   }

@@ -33,6 +33,21 @@ export interface CompiledRule {
   context: ReferenceSpec[]
 }
 
+/**
+ * A rule that runs a detector. compileRule enforces the split — a rule with `detect` must also
+ * have a `message` and an edit or verify stage; one without must have neither and must have
+ * `context` — so selection can narrow to this and consumers stop asserting what it already knows.
+ */
+export type DetectorRule = CompiledRule & { detector: CompiledDetector; message: string }
+
+/** A rule with no detector: it delivers its `context` when a matching file is touched. */
+export type TouchRule = CompiledRule & { detector: null }
+
+/** Whether this rule runs a detector, as a type guard so the narrowing survives a filter. */
+export function isDetectorRule(rule: CompiledRule): rule is DetectorRule {
+  return rule.detector !== null
+}
+
 export interface RuleInput {
   /** A local rule, or a manifest rule with the config's override merged over it. */
   data: RuleEntry & { name: string }
