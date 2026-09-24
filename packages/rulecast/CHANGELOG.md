@@ -1,5 +1,54 @@
 # @syv-ai/rulecast
 
+## 0.2.0
+
+### Minor Changes
+
+- 8578864: Warnings can no longer crowd findings out of a delivery, and a very large file can no longer hold
+  up a write.
+  
+  Eighty rules that fail to compile used to produce eighty warnings — 13,500 characters against a
+  9,000 character budget — and the one rule that still worked was dropped whole, so the agent was
+  told eighty times that rulecast was broken and nothing about its own code. A rule repo pinned to a
+  rev that has moved does exactly this, and that is the moment the working rules matter most.
+  
+  Two changes. Compile diagnostics and detector errors now collapse above three of a kind into one
+  line with a count and an example — "80 rules failed to compile and were skipped — run rulecast
+  validate" — keyed so that a rule breaking later in the session is still announced. And warnings are
+  charged against the context budget *after* the findings rather than before them, capped at a share
+  of it, so no number of warnings of any kind can cost the agent a finding it could act on. The other
+  warnings are untouched: each already names a specific setting to change.
+  
+  New config key **`max_file_bytes`** (default 1 MiB). `ast-grep` parses in native code, which the
+  timeout that bounds `regex` cannot interrupt, and the pre-write guard runs it before the agent's
+  write is allowed: a 5 MB proposed write measured 942 ms of a blocked agent. Files over the ceiling
+  are now skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and on guard, and
+  the same write returns in 1 ms. `verify`, which has seconds to spend, always runs. A skipped file is
+  written to the debug log, not delivered as a warning, and does not mark the run failed.
+- 2533d3b: The stop gate reads what was found, not what fitted the context budget.
+  
+  A rule the budget dropped was filtered out of the delivery before the stop gate read it, so the agent could stop with an unresolved error and nothing reached it.
+  
+  Breaking: the package entry point is now the plugin API. `compile`, `runPipeline`, `cacheHome` and the rest of rulecast's own machinery moved to `@syv-ai/rulecast/internal`, and `rulecast run --format json` no longer carries `templates`, `omitted` or `overflowPath`.
+- a55c674: Three ways rulecast could stop responding, found by stress testing and fixed.
+  
+  A rule that fired tens of thousands of times in one file — which an ordinary pattern does to a
+  generated or minified file — made the delivery take time proportional to the square of its matches:
+  62,000 matches took 5.9 seconds, and an 8 megabyte file never finished at all. Findings are now
+  grouped in place, and that file completes in a second.
+  
+  A regex that backtracks exponentially could hold the edit hook, and the pre-write guard, open
+  indefinitely. The deadline could not stop it — the matching is synchronous, so the timer that would
+  fire the deadline never got to run — and the hook then reported the run as having finished on time.
+  Matching is now bounded by a timeout V8 can actually enforce, and a missed deadline is recorded as
+  one.
+  
+  A session store with a half-written record in the middle of it threw out of the hook. It now runs
+  without session memory and says so, which is what the failure policy always specified.
+  
+  Detectors now receive `deadlineAt` on `DetectorRun`: the wall-clock time after which their results
+  are discarded. A detector whose work is synchronous needs it, because `signal` cannot reach it.
+
 ## 0.1.1
 
 ### Patch Changes
