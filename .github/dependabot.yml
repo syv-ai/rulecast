@@ -9,6 +9,12 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Grouped by risk rather than by dev-vs-production, because that is the axis that decides
+  # whether a PR can be merged on sight. Splitting on dependency-type put majors in with patches,
+  # so one upgrade nobody can take yet held every safe update behind it: typescript 7 broke
+  # `tsup --dts` and stranded three harmless bumps with it, and zod 4 — a real migration in
+  # config/schema.ts — stranded `diff`. Dependabot already folds both directories into one PR
+  # when an update applies to both.
   - package-ecosystem: npm
     directories:
       - /
@@ -16,7 +22,12 @@ updates:
     schedule:
       interval: weekly
     groups:
-      dev-dependencies:
-        dependency-type: development
-      production-dependencies:
-        dependency-type: production
+      # One PR a week for everything routine, expected to be green and merged unread.
+      routine:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      # Majors still arrive grouped, but in their own PR, where a red build is information
+      # about that upgrade rather than noise blocking the others.
+      majors:
+        patterns: ["*"]
+        update-types: [major]
