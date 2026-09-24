@@ -29,7 +29,12 @@ const rule = (id: string, files: string[], model = "haiku", context: { ref: stri
 function run(
   cwd: string,
   rules: DetectorRuleInput<LlmConfig>[],
-  options: { changes?: Map<string, ChangeSet>; llm?: Partial<LlmSettings>; signal?: AbortSignal } = {},
+  options: {
+    changes?: Map<string, ChangeSet>
+    llm?: Partial<LlmSettings>
+    signal?: AbortSignal
+    deadlineAt?: number
+  } = {},
 ) {
   const settings = defaultDetectorSettings()
   return llmDetector.run({
@@ -41,6 +46,7 @@ function run(
     settings: { llm: { ...settings.llm, ...options.llm } },
     cwd,
     signal: options.signal ?? new AbortController().signal,
+    deadlineAt: options.deadlineAt ?? Date.now() + 60_000,
   })
 }
 
@@ -227,6 +233,7 @@ describe("llm detector", () => {
         settings: defaultDetectorSettings(),
         cwd: root,
         signal: new AbortController().signal,
+        deadlineAt: Date.now() + 60_000,
       })
 
     const first = await twice()

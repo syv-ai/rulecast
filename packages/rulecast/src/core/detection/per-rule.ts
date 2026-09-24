@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
-import { errorMessage, isNotFound } from "../errors"
+import { DeadlineError, errorMessage, isNotFound } from "../errors"
 import type { Detector, DetectorResult, DetectorRuleInput, DetectorRun, Match } from "../types"
 
 /** Turns a per-rule function into a detector run; an error in one rule does not affect the others. */
@@ -15,7 +15,11 @@ export function perRule<Config>(
         try {
           for (const match of await detect(rule, input)) result.findings.push({ rule: rule.id, match })
         } catch (error) {
-          if (input.signal.aborted) throw error
+          // The clock, not the rule: rethrowing lets the core record a timeout, which is logged
+          // and tried again at the next verify, rather than a rule error, which would disable the
+          // rule for the whole session (§14). The signal alone cannot tell the two apart —
+          // synchronous work keeps its own abort timer from ever firing.
+          if (error instanceof DeadlineError || input.signal.aborted || Date.now() > input.deadlineAt) throw error
           result.errors.push({ rule: rule.id, message: errorMessage(error) })
         }
       }),

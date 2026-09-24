@@ -102,6 +102,12 @@ export interface DetectorRun<Config> {
   settings: DetectorSettings
   cwd: string
   signal: AbortSignal
+  /**
+   * `Date.now()` after which this run's results are discarded (§13). A detector whose work is
+   * synchronous must bound itself against this: `signal` cannot help it, because the timer that
+   * fires it only runs when the event loop is free, and synchronous work is what keeps it busy.
+   */
+  deadlineAt: number
 }
 
 export interface DetectorResult {

@@ -13,6 +13,7 @@ function run(rules: string[]): DetectorRun<null> {
     settings: defaultDetectorSettings(),
     cwd: "/tmp",
     signal: new AbortController().signal,
+    deadlineAt: Date.now() + 60_000,
   }
 }
 

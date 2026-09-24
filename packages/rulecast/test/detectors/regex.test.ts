@@ -37,6 +37,7 @@ describe("regex detector", () => {
       settings: defaultDetectorSettings(),
       cwd,
       signal: new AbortController().signal,
+      deadlineAt: Date.now() + 60_000,
     })
     expect(result.errors).toEqual([])
     expect(result.findings).toEqual([

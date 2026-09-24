@@ -1,5 +1,5 @@
 import type { CompiledRule, DetectorRule } from "../compile/rule"
-import { errorMessage } from "../errors"
+import { DeadlineError, errorMessage } from "../errors"
 import type {
   Cache,
   ChangeSet,
@@ -39,7 +39,9 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
   const byKind = new Map<string, Selection[]>()
   for (const selection of input.selections) {
     const kind = selection.rule.detector.kind
-    byKind.set(kind, [...(byKind.get(kind) ?? []), selection])
+    const group = byKind.get(kind)
+    if (group === undefined) byKind.set(kind, [selection])
+    else group.push(selection)
   }
 
   const controller = new AbortController()
@@ -47,6 +49,11 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     controller.signal.addEventListener("abort", () => resolve(TIMED_OUT), { once: true })
   })
   const timer = setTimeout(() => controller.abort(), input.timeoutMs)
+  // The wall clock, not the signal, is what says the deadline passed. A detector that blocked the
+  // event loop resolves its own promise in a microtask, which runs ahead of the queued abort timer,
+  // so it would win the race and be recorded as a clean on-time run at any multiple of its budget.
+  const deadlineAt = Date.now() + input.timeoutMs
+  const late = () => Date.now() > deadlineAt
 
   type Outcome =
     | { status: "ok"; kind: string; selections: Selection[]; result: DetectorResult }
@@ -76,13 +83,16 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
             settings: input.settings,
             cwd: input.root,
             signal: controller.signal,
+            deadlineAt,
           }),
           deadline,
         ])
-        if (result === TIMED_OUT) return { status: "timedOut", kind, selections }
+        if (result === TIMED_OUT || late()) return { status: "timedOut", kind, selections }
         return { status: "ok", kind, selections, result }
       } catch (error) {
-        if (controller.signal.aborted) return { status: "timedOut", kind, selections }
+        if (error instanceof DeadlineError || controller.signal.aborted || late()) {
+          return { status: "timedOut", kind, selections }
+        }
         return { status: "error", kind, selections, message: errorMessage(error) }
       }
     }),

@@ -21,6 +21,7 @@ const run = async (cwd: string, rules: DetectorRuleInput<AstGrepConfig>[], signa
     settings: defaultDetectorSettings(),
     cwd,
     signal,
+    deadlineAt: Date.now() + 60_000,
   })
 
 const PY =

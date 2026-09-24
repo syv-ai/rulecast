@@ -26,6 +26,7 @@ const run = (cwd: string, rules: DetectorRuleInput<LinterConfig>[], event: "edit
     settings: defaultDetectorSettings(),
     cwd,
     signal: new AbortController().signal,
+    deadlineAt: Date.now() + 60_000,
   })
 
 const JS = 'console.log("hi")\nconst unused = 1\ndebugger\n'

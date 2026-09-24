@@ -34,6 +34,7 @@ const run = (cwd: string, rules: DetectorRuleInput<CommandConfig>[]) =>
     settings: defaultDetectorSettings(),
     cwd,
     signal: new AbortController().signal,
+    deadlineAt: Date.now() + 60_000,
   })
 
 describe("argvFor", () => {

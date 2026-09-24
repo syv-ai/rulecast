@@ -41,6 +41,8 @@ function run(detector: AnyDetector, rules: unknown[], cwd: string, signal: Abort
     settings: defaultDetectorSettings(),
     cwd,
     signal,
+    // The contract suite is not measuring the clock; a deadline far ahead keeps it out of the way.
+    deadlineAt: Date.now() + 60_000,
   })
 }
 
