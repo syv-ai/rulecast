@@ -13,6 +13,7 @@ import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
+import { CorruptStoreError } from "./jsonl"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -62,9 +63,30 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }))
   let failed = errors.length > 0
   const deadlineMissed: string[] = []
-  const session = event.session
+  let session = event.session
     ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
     : null
+
+  /**
+   * Spec §14: a store that cannot be read runs this invocation without session state and warns —
+   * the same row as a lock that could not be taken, and for the same reason. A half-written record
+   * anywhere but the last line is a `CorruptStoreError`, and it used to be thrown straight out of
+   * the hook. Dropping the session also stops anything more being appended to a store whose shape
+   * is no longer understood.
+   */
+  const STORE_UNREADABLE = "session state could not be read; delivered without session memory"
+
+  async function readingStore<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await read()
+    } catch (error) {
+      if (!(error instanceof CorruptStoreError)) throw error
+      log(`session store unreadable: ${error.message}`)
+      session = null
+      warnings.push({ key: "store", text: STORE_UNREADABLE })
+      return fallback
+    }
+  }
 
   const restoredFiles = options.restoredFiles ?? 0
   if (event.kind === "prompt") {
@@ -81,17 +103,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
   // takes snapshots, and neither starts the session.
   if (session && event.kind !== "reset" && event.kind !== "guard") {
-    baseline = await readBaseline(session.dir)
-    if (!baseline.started) {
-      await appendBaseline(session.dir, [startRecord(await headCommit(root))])
+    const dir = session.dir
+    baseline = await readingStore(() => readBaseline(dir), baseline)
+    if (session && !baseline.started) {
+      await appendBaseline(dir, [startRecord(await headCommit(root))])
       // Re-read: with concurrent first events, the first start record wins.
-      baseline = await readBaseline(session.dir)
+      baseline = await readingStore(() => readBaseline(dir), baseline)
     }
   }
 
+  const empty = (): SessionView => ({ work: emptyWork(), context: emptyContext() })
   const view: SessionView = session
-    ? await openSession(session.dir, session.agent)
-    : { work: emptyWork(), context: emptyContext() }
+    ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
+    : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   const workRecords: WorkRecord[] = []
@@ -99,6 +123,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
   if (event.kind === "guard") {
+    // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
+    // that reads it later would not have the value this branch checked.
+    const open = session
     const delivery = await guardWrite({
       root,
       config,
@@ -111,7 +138,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       resolver,
       maxContextChars: options.maxContextChars,
       log,
-      record: session ? (records) => appendWork(session.dir, records) : async () => {},
+      record: open ? (records) => appendWork(open.dir, records) : async () => {},
     })
     return { delivery, failed, deadlineMissed }
   }
@@ -122,11 +149,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
-    if (session) {
+    const open = session
+    if (open) {
       // Every file counts, not only files rules match: the agent's harness picks re-attached files from all of them.
       await appendWork(
-        session.dir,
-        event.files.map((file) => ({ t: "accessed" as const, agent: session.agent, file })),
+        open.dir,
+        event.files.map((file) => ({ t: "accessed" as const, agent: open.agent, file })),
       )
     }
   }
@@ -270,8 +298,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
     return { delivery: persisted(decision), failed, deadlineMissed }
   } catch (error) {
-    if (!(error instanceof LockTimeoutError)) throw error
-    warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
+    // §14's two "run without session state" rows: a lock nobody released, and a store nobody can
+    // read. The commit reads the stores inside the lock, so both surface here as well.
+    if (error instanceof CorruptStoreError) {
+      log(`session store unreadable: ${error.message}`)
+      warnings.push({ key: "store", text: STORE_UNREADABLE })
+    } else if (error instanceof LockTimeoutError) {
+      warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
+    } else throw error
     const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
     return { delivery: persisted(decision), failed, deadlineMissed }
   }
