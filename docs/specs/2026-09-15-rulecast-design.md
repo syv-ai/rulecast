@@ -455,6 +455,7 @@ detect:
 - **Budget.** At most `llm.max_files_per_verify` files per verify, most recently edited first; skipped files are named in a warning.
 - **Captures.** `reason`.
 - **Consent.** `rulecast init` never preselects llm rules. Documentation states that file contents are sent to the configured provider.
+- **No prefilter.** A cheap local model deciding *which* files are worth a call — narrowing **Budget** by prediction rather than by recency — is deliberately not part of this design. A System One decision model (Laya, 421M, local, ~65 ms per question) was measured as a candidate and reached recall 1.000 at precision 0.641 on one rule. Recall is the only figure that matters for a router, since a dropped file costs a finding, and that direction is the promising one. It is still declined: one rule on one codebase does not establish recall, and a prefilter trades a **visible** cost for an **invisible** miss. §14 is built on the opposite principle — every cost the budget cuts today is named in a warning, whereas a file rulecast predicted was not worth judging would be a finding nobody is told about. Revisit only with a design that keeps the skip visible. Measurements: `docs/dogfooding/2026-09-25-system-one-models.md`.
 
 ## 7. Events
 
