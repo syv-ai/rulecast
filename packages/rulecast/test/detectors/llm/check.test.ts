@@ -119,7 +119,7 @@ describe("llm detector check", () => {
 
   describe("every rule's model resolves", () => {
     test("an alias that resolves to itself is still named as an alias", async () => {
-      // Found on a real project: haiku is `haiku` for the claude-code provider, and reporting that as
+      // Found by dogfooding: haiku is `haiku` for the claude-code provider, and reporting that as
       // "passed through" reads as "rulecast does not know this model".
       const root = await createProject({})
       await stubAgentCli(root, "claude")

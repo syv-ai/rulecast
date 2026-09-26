@@ -32,7 +32,7 @@ Same as 7a and 7b. Two that matter more here:
 |---|---|
 | `.gitignore` | Gains `.claude/settings.local.json`, `.claude/worktrees/`, `.dash/`, and the compiled binaries |
 | `packages/rulecast/test/agents-docs.test.ts` | Gains a check that no agent-doc URL points at a path outside the repository *and* that the ref used is a tag form, not `main` |
-| `docs/evidence/2026-09-22-private-platform.md` | The dogfood record: the drafted rules, what ran, what was found, what it cost |
+| `docs/dogfooding/2026-09-22-private-platform.md` | The dogfood record: the drafted rules, what ran, what was found, what it cost |
 | `docs/specs/2026-09-15-rulecast-design.md` | §15's dogfooding line gains the result; §17's 0.1 row is ticked and 0.2 gains whatever was deferred |
 | `docs/plans/2026-09-15-rulecast-00-index.md` | Row 7 marked done |
 | `HANDOVER.md` *(temporary, not committed)* | The commands the user runs: `gh repo edit`, the `NPM_TOKEN` secret, merging the version PR |
@@ -111,7 +111,7 @@ Two concrete hazards found:
 
   3. **npm** — `npm whoami` fails on this machine with `ENEEDAUTH` although `npm access list packages @syv-ai` answers, so the publishing identity was never confirmed here. The user needs to: confirm publish rights on the `@syv-ai` scope, create an automation token, and add it as the `NPM_TOKEN` repository secret (`gh secret set NPM_TOKEN`). Without it `release.yml` opens version PRs and fails at publish.
   4. **Cut 0.1.0** — merge the open `release: version packages` PR; `release.yml` publishes to npm, tags, and cuts the GitHub Release; `binaries.yml` then attaches four binaries and their checksums. What to check on each.
-  5. **What the dogfood found** — a pointer to `docs/evidence/2026-09-22-private-platform.md` and the one-paragraph verdict.
+  5. **What the dogfood found** — a pointer to `docs/dogfooding/2026-09-22-private-platform.md` and the one-paragraph verdict.
 
 - [ ] Do **not** run any command in it.
 
@@ -142,11 +142,11 @@ The target, at `8759f51ab` (2026-09-17, `chore(release): v1.98.0`): 1,945 tracke
   Record: what it detected (stack tags, docs, agents), which catalog rules it preselected, what it wrote, and what the drafting prompt said. The catalog fetch reaches `https://github.com/syv-ai/rulecast` and needs the repository to be **public or reachable over SSH** — if it fails, `init` warns and skips the step, which is itself a result worth recording. If it does fail, re-run with `RULECAST_CATALOG=~/repos/agentic-linting` pointing at the local checkout, so the rest of the path is still exercised.
 - [ ] Run `doctor` again, now on a configured project, and read every line of it critically. This is the first time it has met a project it was not written against: 854 Python files, `uv`, no `node_modules` at the root, `ruff` configured in `backend/pyproject.toml`, `oxlint` absent. Every line that is wrong, confusing or missing is a defect for Task 6.
 - [ ] Run `node …/cli.js run --all-files --format terminal` and time it. Record the wall time, the number of findings, and how readable the output is at that volume — `--all-files` over 1,945 files with the catalog's rules is the largest run rulecast has ever done.
-- [ ] Write everything so far into `docs/evidence/2026-09-22-private-platform.md` as it happens, not from memory afterwards.
+- [ ] Write everything so far into `docs/dogfooding/2026-09-22-private-platform.md` as it happens, not from memory afterwards.
 
 ## Task 5: dogfood — drafting the project's own rules
 
-**Files:** `docs/evidence/2026-09-22-private-platform.md`
+**Files:** `docs/dogfooding/2026-09-22-private-platform.md`
 
 **Behaviour:** The four conventions spec §15 names are drafted as rules by following `agents/DRAFT-RULES.md` exactly, as the developer's own agent would, and each is measured against the real codebase.
 
@@ -169,14 +169,14 @@ The last one is the point of the exercise: it is exactly the case the `llm` dete
 
 ## Task 6: fix what the dogfood found
 
-**Files:** whatever Tasks 4 and 5 turn up · `docs/evidence/2026-09-22-private-platform.md` · `docs/specs/2026-09-15-rulecast-design.md` §15, §17 · `docs/plans/2026-09-15-rulecast-00-index.md`
+**Files:** whatever Tasks 4 and 5 turn up · `docs/dogfooding/2026-09-22-private-platform.md` · `docs/specs/2026-09-15-rulecast-design.md` §15, §17 · `docs/plans/2026-09-15-rulecast-00-index.md`
 
 **Behaviour:** Every defect the dogfood exposed is either fixed with a test that would have caught it, or deferred on the record with a reason.
 
 - [ ] Triage the findings into: **fix now** (anything a developer would call a bug — wrong output, a misleading message, a crash, a detector that misses the obvious case), **fix in a doc** (`agents/DRAFT-RULES.md` and `agents/SETUP.md` are the two documents the dogfood road-tested), and **defer** (a feature that is genuinely 0.2).
 - [ ] Fix the first group, test-first, one commit per fix. Use the systematic-debugging skill on anything whose cause is not obvious — plans 5 and 6 both found that a "small" dogfood-style defect was a real one underneath.
-- [ ] Finish `docs/evidence/2026-09-22-private-platform.md`: what was set up, what was drafted, what was found, what was fixed, what was deferred, and a straight answer to the question the exercise exists to ask — **would a developer on this project keep these rules on?**
-- [ ] Spec §15: the dogfooding line gains "Done 2026-09-22; see `docs/evidence/2026-09-22-private-platform.md`" and names the four conventions actually drafted, if they differ from the four it names now.
+- [ ] Finish `docs/dogfooding/2026-09-22-private-platform.md`: what was set up, what was drafted, what was found, what was fixed, what was deferred, and a straight answer to the question the exercise exists to ask — **would a developer on this project keep these rules on?**
+- [ ] Spec §15: the dogfooding line gains "Done 2026-09-22; see `docs/dogfooding/2026-09-22-private-platform.md`" and names the four conventions actually drafted, if they differ from the four it names now.
 - [ ] Spec §17: anything deferred joins the 0.2 row with its reason.
 - [ ] Plan index: row 7's `Status` becomes `Done (2026-09-22), in three parts executed in order: 2026-09-22-rulecast-07a-doctor.md, 07b-ci-release.md, 07c-public-dogfood.md`, with the edit-hook p50/p95 recorded as every other row does.
 - [ ] Remove the clone: `rm -rf "$(dirname "$DOG")"`. Confirm `git -C $DOGFOOD_TARGET status --short` is byte-identical to Task 4's recording.
@@ -200,6 +200,6 @@ The last one is the point of the exercise: it is exactly the case the `llm` dete
 1. `git status --short` in this repository: clean. `git check-ignore -v .dash .claude/settings.local.json` names `.gitignore`.
 2. `git -C $DOGFOOD_TARGET status --short` is identical to what it was before Task 4, and `git -C $DOGFOOD_TARGET worktree list` shows only their own worktrees.
 3. `gh repo view syv-ai/rulecast --json visibility` still says `PRIVATE` — this plan did not flip it.
-4. `docs/evidence/2026-09-22-private-platform.md` exists and answers whether a developer on that project would keep the rules on.
+4. `docs/dogfooding/2026-09-22-private-platform.md` exists and answers whether a developer on that project would keep the rules on.
 5. The plan index's row 7 says Done, and every row in spec §17's 0.1 list is true or has been moved to 0.2 with a reason.
 6. The user has `HANDOVER.md`'s contents and can, in four commands, make the repository public, set the npm secret, merge the version PR and watch 0.1.0 publish.
