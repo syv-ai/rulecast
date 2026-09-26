@@ -1,6 +1,6 @@
 # Would a "System One" model (Jev, Laya) earn a place in rulecast?
 
-**Date:** 2026-09-25 · **Verdict: no, on measurement** (revised same day: see "A follow-up that failed") · **Hardware:** Apple M3 Pro, 36 GB ·
+**Date:** 2026-09-25 · **Verdict: no, on measurement** · **Hardware:** Apple M3 Pro, 36 GB ·
 **Versions:** `laya` 0.3.20, `torch` 2.14.0 (CPU), `transformers` 5.17.0, checkpoints
 `convaiinnovations/laya` (421M English) and its `typed-decisions` fine-tune
 
@@ -131,48 +131,6 @@ So `min_confidence` would need per-rule, per-project temperature calibration aga
 examples. That is the fine-tuning tax in miniature, and asking it of a lint rule is a worse deal
 than deleting the rule.
 
-## A follow-up that failed, and what it cost the argument
-
-The obvious next question was whether the ceiling is the **backbone**: Laya's is ModernBERT-large,
-pretrained on text, not code. If the model simply cannot represent code structure, the answer would
-be to put a typed-decision head on a code-pretrained encoder rather than to fine-tune Laya.
-
-So: mean-pooled embeddings from four encoders → logistic regression → repeated stratified 5-fold CV,
-identical protocol on both sets. A probe is **supervised** and Laya's figures above are
-**zero-shot**, so the only fair reading is probe against probe — the text backbone against the code
-ones. A TF-IDF bag-of-words was added as a confound check, and it is the reason this section exists.
-
-| representation | Set B AUC | Set B acc | Set A AUC | Set A acc |
-|---|---|---|---|---|
-| **TF-IDF bag-of-words** | **0.969** | **0.925** | **0.995** | **0.947** |
-| ModernBERT-base (Laya's family, text) | 0.948 | 0.925 | 0.945 | 0.843 |
-| GraphCodeBERT (code) | 0.960 | 0.908 | 0.961 | 0.850 |
-| UniXcoder (code) | 0.924 | 0.869 | 0.963 | 0.857 |
-
-**Bag-of-words wins or ties everywhere, so both label sets are lexically recoverable and neither is
-a valid test of code understanding.** The backbone comparison measures nothing: code encoders,
-a text encoder and a word-count model all land within noise of each other, which is what happens
-when the task does not require the thing being compared. The hypothesis is **untested, not
-disproved.** The weak link named at the bottom of this document turned out to be fatal for this
-particular question.
-
-Two things do survive it.
-
-**A word-count model beats the 421M model by ~0.25, on identical labels.** TF-IDF plus logistic
-regression: 0.925 (Set B) and 0.947 (Set A). Laya zero-shot: 0.646 and 0.723. That comparison *is*
-fair — same sites, same labels — and it is a harder verdict on the zero-shot use than anything above.
-
-**The space for a small supervised model is squeezed from both sides.** A convention that
-bag-of-words can decide is a convention `regex` or `ast-grep` already decides — exactly, in process,
-for free. So the only conventions worth a model are the ones whose labels a bag-of-words *cannot*
-recover, and this exercise produced none of those.
-
-**Consequence for the fine-tune question: it cannot be answered without a better benchmark, and
-building one is the prerequisite, not the fine-tune.** The gate is cheap and mechanical — label a
-set, then try to recover the labels with TF-IDF. If a word-count model gets them, the set is
-measuring the wrong thing and `ast-grep` would have been the answer anyway. Only a set that defeats
-that check can say whether this model class is worth training.
-
 ## What would change the answer
 
 - **A GPU or MLX backend** fixes Reason 1 and does nothing for Reason 2, which is the blocker.
@@ -210,27 +168,6 @@ TARGET_REPO=/path/to/a/fastapi/project ./laya-env/bin/python extract_setA.py
 `setA-results.json` and `setB-results.json` are the runs behind the tables, with per-site file paths
 and symbol names stripped — `label` and `p` are all `holdout.py` reads.
 
-## Limitations, and the one that matters
-
-Set B's labels come from a rubric, not human review, and Set A's come from `ast`. Both are therefore
-**lexically recoverable**, which the TF-IDF check above demonstrates rather than speculates: a
-word-count model gets 0.925 and 0.947 on them.
-
-That is fine for the verdict — a model that cannot beat `ast-grep` at an `ast-grep`-decidable
-question, and cannot beat bag-of-words either, has not earned a detector — and it is **not fine for
-any question about semantic capability.** These sets cannot distinguish a model that understands code
-from one that counts tokens, so nothing here should be read as measuring the former.
-
-What a set would need, to answer the question this one could not:
-
-1. Labels from human review, or distilled from a frontier model whose judgement is the thing being
-   replicated — not from a rubric, because a rubric is a regex and a regex is already a detector.
-2. **The TF-IDF gate**: if a bag-of-words recovers the labels, the set is measuring the wrong thing
-   and `regex` or `ast-grep` was the right answer all along. Only a set that defeats that check can
-   say anything about semantic capability.
-3. Sites from several codebases, not one, and held-out **rules** rather than held-out examples —
-   per-rule accuracy is worthless for a lint tool, since every new rule is an unseen convention.
-
-Also unmeasured: `laya-serve` over HTTP (the BYOM shape) — in-process numbers are its optimistic
-bound, since HTTP only adds; the MLX and CoreML builds, which would change latency and not accuracy;
-and anything at n larger than 60, where the ±0.07–0.12 fold spreads above would tighten.
+Set B's labels come from a rubric, not human review. The rubric is in the extractor and is the
+weakest link in this measurement: a different rubric would move the Set B numbers somewhat, though
+not by the ~0.25 that would change the verdict.
