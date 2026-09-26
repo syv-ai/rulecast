@@ -38,7 +38,7 @@ test("an edit names the detector kinds whose results were dropped at the deadlin
 
 test("a verify names the timeout, the setting to raise, and the rules whose results were dropped", async () => {
   // Spec §14: verify timeout → results dropped, one warning naming the rules. Found untested by
-  // dogfooding, where a real llm call took 89 s against the 60 s default and the warning said only
+  // the real-project trial, where an llm call took 89 s against the 60 s default and the warning said only
   // "timed out" — true, and no help at all.
   const root = await createRepo({
     ".rulecast-config.yaml": localConfig(

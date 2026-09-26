@@ -358,7 +358,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         failed = true
         warnings.push({
           key: `timeout:${timeout.kind}:${timeout.rules.join(",")}`,
-          // Naming the lever matters: dogfooding measured a single haiku call on a 135-line file
+          // Naming the lever matters: the real-project trial measured a single haiku call on a 135-line file
           // at 89 s against a 60 s default, and "timed out" alone leaves nobody knowing what to do.
           text:
             `${timeout.kind} detector timed out after ${config.timeouts.verifyMs} ms for ${timeout.rules.join(", ")}. ` +

@@ -21,7 +21,7 @@ describe("templates", () => {
 })
 
 test("a multi-line value is collapsed onto one line", () => {
-  // Found by dogfooding on a 1,945-file project: an ast-grep rule matching `style={{ … }}` across
+  // Found on a real 1,945-file project: an ast-grep rule matching `style={{ … }}` across
   // several lines put those newlines straight into the message, and every renderer — terminal,
   // agent, json, sarif — assumes one finding is one line.
   const text = 'style={{\n        animation: "pulse 2s",\n        color: red,\n      }}'

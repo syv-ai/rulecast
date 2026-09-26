@@ -1,8 +1,8 @@
-# Dogfooding rulecast on a private platform
+# rulecast on a private platform: what a real codebase said
 
 **Date:** 2026-09-22 · **Target:** a private FastAPI + React platform, 1,945 tracked files (854 `.py`, 444 `.tsx`, 401 `.ts`), at its `v1.98.0` release commit · **rulecast:** the 0.1 candidate, built from source
 
-Spec §15 lists dogfooding as a test, and it is the only item in 0.1 that could still say the design is wrong. This is what it said.
+Spec §15 lists a real-project trial as a test, and it is the only item in 0.1 that could still say the design is wrong. This is what it said.
 
 **Everything ran on a throwaway `git clone --local` of the target.** Its own checkout was never written to: `git status --short` and `git worktree list` were identical before and after.
 
