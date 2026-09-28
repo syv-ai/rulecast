@@ -11,6 +11,7 @@ import { cacheHome } from "../core/home"
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import type { Adapter, AdapterInstall, InstallScope } from "../core/types"
+import { onPath } from "../core/which"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -49,6 +50,18 @@ function inFile<T>(file: string, transform: () => T): T {
   } catch (error) {
     throw new Error(`${file}: ${errorMessage(error)}`)
   }
+}
+
+/**
+ * Can the command an installed hook runs actually be found?
+ *
+ * The hook command is `rulecast hook <adapter>` unless rulecast is in the project's
+ * `node_modules/.bin`, in which case it is that path. The bare form needs rulecast on the PATH, and
+ * a project where it is on neither has hooks that are installed and silently do nothing — which
+ * `doctor` exists to catch, and did not until a self-install on this repository walked into it.
+ */
+export async function hookCommandResolves(root: string, signal?: AbortSignal): Promise<boolean> {
+  return existsSync(path.join(root, "node_modules", ".bin", "rulecast")) || (await onPath("rulecast", signal))
 }
 
 /**

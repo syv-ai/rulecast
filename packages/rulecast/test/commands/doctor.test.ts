@@ -45,6 +45,7 @@ describe("rulecast doctor", () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a"), RULE("b")]),
       "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
     })
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
@@ -177,10 +178,27 @@ describe("rulecast doctor", () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a")]),
       "src/x.ts": "const x = 1\n",
+      // The hook command resolves from here, which is what makes it ok rather than a warning.
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
     })
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
     expect(result.stdout).toContain("ok       Claude Code — .claude/settings.json")
+  })
+
+  test("hooks installed but pointing at a rulecast nothing can find are a warning", async () => {
+    // How a repository that *is* rulecast looks: no node_modules/.bin/rulecast, nothing on the
+    // PATH, hooks written into settings and silently doing nothing on every event.
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+    })
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    const result = await doctor(root)
+    expect(result.stdout).toContain("warning  Claude Code — .claude/settings.json")
+    expect(result.stdout).toContain("so the hooks do nothing")
+    // A warning, not an error: the installation is wrong, not broken beyond use.
+    expect(result.code).toBe(0)
   })
 
   describe("the dry run", () => {

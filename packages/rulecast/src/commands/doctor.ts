@@ -14,7 +14,7 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { fetchingRepos } from "../core/repos/provider"
-import { hooksInstalled } from "./install"
+import { hookCommandResolves, hooksInstalled } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -100,12 +100,23 @@ export async function doctorCommand(
   }
 
   io.stdout("\nhooks\n")
+  // Asked once, not per adapter: every adapter's hook runs the same rulecast.
+  const resolves = await hookCommandResolves(root)
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
     const file = await hooksInstalled(root, adapter, project.config.timeouts.verifyMs)
-    const level: Level = file === null ? "warning" : "ok"
+    // Installed but unrunnable is the worst of the three: the settings say it is wired up and
+    // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
+    // on the PATH nor in node_modules/.bin, and doctor said ok.
+    const level: Level = file === null || !resolves ? "warning" : "ok"
     count(level)
-    io.stdout(line(level, adapter.label, file ?? "not installed (run rulecast install)"))
+    const detail =
+      file === null
+        ? "not installed (run rulecast install)"
+        : resolves
+          ? file
+          : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
+    io.stdout(line(level, adapter.label, detail))
   }
 
   io.stdout("\ncache\n")

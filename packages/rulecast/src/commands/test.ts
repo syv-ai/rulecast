@@ -50,6 +50,12 @@ const AGAINST_NOTES = [
   "  A rule with almost no violations is usually not worth an agent's context.",
 ]
 
+/** What a zero does not mean. Added only at zero, where the second note above reads as a verdict. */
+const ZERO_NOTES = [
+  "  Nothing to fix today is not the same as nothing to catch: this counts the",
+  "  stock, not how often an edit would break the rule.",
+]
+
 const ratio = (part: number, whole: number) => (whole === 0 ? "   — " : (part / whole).toFixed(2))
 
 function summaryLine(rule: DetectorRule, result: ExampleResult): string {
@@ -138,14 +144,17 @@ async function reportAgainst(
   const worst = [...byFile].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, AGAINST_TOP_FILES)
   const width = Math.max(...worst.map(([file]) => file.length), 0)
 
-  const out = [
-    "",
-    `  ${output.findings.length} violations in ${byFile.size} of ${files.length} matching files`,
-    "",
-    ...worst.map(([file, count]) => `  ${file.padEnd(width + 2)}${count}`),
-  ]
-  if (byFile.size > worst.length) out.push(`  …and ${byFile.size - worst.length} more files`)
-  out.push("", ...AGAINST_NOTES, "")
+  const out = ["", `  ${output.findings.length} violations in ${byFile.size} of ${files.length} matching files`]
+  if (worst.length > 0) {
+    out.push("", ...worst.map(([file, count]) => `  ${file.padEnd(width + 2)}${count}`))
+    if (byFile.size > worst.length) out.push(`  …and ${byFile.size - worst.length} more files`)
+  }
+  out.push("", ...AGAINST_NOTES)
+  // Self-installing rulecast on rulecast produced 0 for all three of its own rules, which is the
+  // expected answer for a repository that already follows them and says nothing about whether an
+  // agent editing it would. The two sentences above are about the stock; this is the gap in them.
+  if (output.findings.length === 0) out.push(...ZERO_NOTES)
+  out.push("")
   io.stdout(out.join("\n"))
   return 0
 }

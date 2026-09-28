@@ -126,11 +126,17 @@ describe("rulecast test --against", () => {
     expect(result.stdout).toContain("A rule with almost no violations")
   })
 
-  test("a rule that fires nowhere still exits 0", async () => {
+  test("a rule that fires nowhere still exits 0, and says what the zero does not mean", async () => {
     const root = await project([httpException()], { "app/services/c.py": "pass\n" })
     const result = await runTest(root, "backend/no-httpexception", "--against", "app")
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("0 violations in 0 of 1 matching files")
+    // Without this the second note reads as a verdict: rulecast's own three rules all measure 0,
+    // and none of them is a rule nobody would break.
+    expect(result.stdout).toContain("counts the")
+    expect(result.stdout).toContain("stock, not how often an edit would break the rule.")
+    // No empty "worst files" block when there are none.
+    expect(result.stdout).not.toMatch(/\n\n\n/)
   })
 
   test("--against without a rule id exits 2", async () => {
