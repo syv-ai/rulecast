@@ -26,6 +26,7 @@ export function rule(overrides: Overrides): CompiledRule {
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
     message: "{{file}}:{{line}}",
     context: [],
+    examples: null,
     matches: (file) => include.test(file),
     ...rest,
   }

@@ -15,6 +15,15 @@ const idSchema = z.string().regex(RULE_ID, "must be lowercase segments separated
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "must be a version like 0.2.0")
 const stagesSchema = z.array(z.enum(STAGES)).nonempty()
 
+/**
+ * One inline example: a file the rule would see, and what is in it.
+ *
+ * `path` is required and has no useful default — `files`, `exclude`, the type tags and `ast-grep`'s
+ * language selection are all functions of it, so an example without one would be testing a
+ * different rule than the one that will run.
+ */
+const exampleSchema = z.object({ path: z.string().min(1), code: z.string() }).strict()
+
 /** Every rule key except id. No defaults: compileRule applies them after overrides are merged. */
 const ruleKeys = {
   alias: idSchema.optional(),
@@ -41,7 +50,15 @@ const ruleKeys = {
     .optional(),
   message: z.string().optional(),
   context: z.array(referenceInputSchema).optional(),
+  /** Code the rule must flag (`bad`) and must not (`good`), run by `rulecast test`. */
+  examples: z
+    .object({ good: z.array(exampleSchema).default([]), bad: z.array(exampleSchema).default([]) })
+    .strict()
+    .optional(),
 }
+
+export type RuleExample = z.infer<typeof exampleSchema>
+export type RuleExamples = { good: RuleExample[]; bad: RuleExample[] }
 
 /** A config entry selecting a rule from a rule repo; every key but id overrides the manifest rule's. */
 export const overrideSchema = z.object({ id: idSchema, ...ruleKeys }).strict()

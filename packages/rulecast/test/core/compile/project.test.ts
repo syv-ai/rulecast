@@ -178,6 +178,26 @@ describe("compile: local rules", () => {
     ])
   })
 
+  test("examples compile, and absent is not the same as declared empty", async () => {
+    const project = await compileConfig(
+      local(
+        detectRule("with", {
+          examples: { good: [{ path: "a.ts", code: "fine\n" }], bad: [{ path: "a.ts", code: "bad\n" }] },
+        }),
+        detectRule("declared-empty", { examples: {} }),
+        detectRule("without"),
+      ),
+    )
+    expect(project.diagnostics).toEqual([])
+    const [withExamples, declaredEmpty, without] = project.rules
+    expect(withExamples?.examples).toEqual({
+      good: [{ path: "a.ts", code: "fine\n" }],
+      bad: [{ path: "a.ts", code: "bad\n" }],
+    })
+    expect(declaredEmpty?.examples).toEqual({ good: [], bad: [] })
+    expect(without?.examples).toBeNull()
+  })
+
   test("an unknown scope is a schema error naming the key", async () => {
     const project = await compileConfig(local(detectRule("sideways", { scope: "sideways" })))
     expect(project.rules).toEqual([])
@@ -198,6 +218,8 @@ describe("compile: local rules", () => {
         detectRule("refuse-verify-only", { detect: { guarding: {} }, refuse_write: true, stages: ["verify"] }),
         touchRule("refuse-without-detect", { refuse_write: true }),
         touchRule("scope-without-detect", { scope: "container" }),
+        touchRule("examples-without-detect", { examples: { bad: [{ path: "a.ts", code: "x" }] } }),
+        detectRule("example-unmatched", { files: "\\.py$", examples: { bad: [{ path: "app/a.ts", code: "x" }] } }),
         detectRule("bad-regex", { files: "(" }),
         detectRule("bad-type", { types: ["cobol"] }),
         touchRule("missing-file", { context: ["@docs/nope.md"] }),
@@ -223,6 +245,8 @@ describe("compile: local rules", () => {
       ["refuse-verify-only", "refuse_write needs edit among the rule's stages"],
       ["refuse-without-detect", "refuse_write needs detect: there is nothing to refuse a write for"],
       ["scope-without-detect", "scope needs detect: there is nothing to classify"],
+      ["examples-without-detect", "examples need detect: there is nothing to run them against"],
+      ["example-unmatched", `example path "app/a.ts" does not match this rule's files`],
       ["bad-regex", expect.stringMatching(/^files: invalid regex: /)],
       ["bad-type", 'unknown file type "cobol"'],
       ["missing-file", "referenced file not found: docs/nope.md"],

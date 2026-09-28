@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { sectionRange } from "../anchors"
-import type { Config, RuleEntry, RuleScope, Stage } from "../config/schema"
+import type { Config, RuleEntry, RuleExamples, RuleScope, Stage } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
@@ -37,6 +37,11 @@ export interface CompiledRule {
   detector: CompiledDetector | null
   message: string | null
   context: ReferenceSpec[]
+  /**
+   * Inline good/bad examples, run by `rulecast test`. `null` when the rule declared none, which
+   * `validate` and `test` report differently from a rule that declared an empty set.
+   */
+  examples: RuleExamples | null
 }
 
 /**
@@ -118,6 +123,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
   } else {
     if (data.refuse_write) return "refuse_write needs detect: there is nothing to refuse a write for"
     if (data.scope) return "scope needs detect: there is nothing to classify"
+    if (data.examples) return "examples need detect: there is nothing to run them against"
     if (stages.some((stage) => stage !== "touch")) return "rules without detect need stages: [touch]"
     if (data.message !== undefined) return "message needs detect"
     if (!data.context?.length) return "rules without detect need context"
@@ -131,6 +137,12 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     excludeTypes: data.exclude_types ?? [],
   })
   if (typeof filter === "string") return filter
+
+  // An example the rule would never be given is an example that passes for the wrong reason. This
+  // checks the rule's own filter, not the project's global one: the example documents the rule.
+  for (const example of [...(data.examples?.good ?? []), ...(data.examples?.bad ?? [])]) {
+    if (!filter(example.path)) return `example path "${example.path}" does not match this rule's files`
+  }
 
   const references: ReferenceSpec[] = []
   for (const reference of data.context ?? []) {
@@ -163,5 +175,6 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     detector,
     message: data.message ?? null,
     context: references,
+    examples: data.examples ?? null,
   }
 }
