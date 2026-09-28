@@ -9,3 +9,13 @@
   message: "{{file}} is generated. Change its source and regenerate it; never edit it by hand."
   context:
     - "@generated-code.md"
+  # A `path` rule has no good example to give: every file it matches is a violation, and a file it
+  # does not match is not the rule's business. `files` is the rule, and the bad cases pin its shape.
+  examples:
+    bad:
+      - path: frontend/src/client/sdk.gen.ts
+        code: |
+          export const listUsers = () => request("/users")
+      - path: src/__generated__/schema.ts
+        code: |
+          export type Query = { users: User[] }

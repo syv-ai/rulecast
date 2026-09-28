@@ -10,6 +10,24 @@
   message: "{{file}}:{{line}} calls the network from a component. Fetch server data through a query or mutation hook."
   context:
     - "@data-fetching.md"
+  examples:
+    good:
+      - path: src/components/UserList.tsx
+        code: |
+          export function UserList() {
+            const { data } = useUsers()
+            return <List items={data} />
+          }
+    bad:
+      - path: src/components/UserList.tsx
+        code: |
+          export function UserList() {
+            const [users, setUsers] = useState([])
+            useEffect(() => {
+              fetch("/api/users").then((r) => r.json()).then(setUsers)
+            }, [])
+            return <List items={users} />
+          }
 - id: data-fetching
   name: Server state lives in the query layer
   description: Delivers the data-fetching conventions the first time an agent works on a component, route or hook.
@@ -32,3 +50,15 @@
   message: "{{file}}:{{line}} styles inline with {{text}}. Use the design system's classes so the value stays themeable."
   context:
     - "@styling.md#inline-styles"
+  # Worth running `rulecast test react/no-inline-style --against <your components>` before enabling
+  # this one: on one codebase it produced 131 findings, all true by definition and none worth
+  # keeping. The examples say what it means; the count says whether you want it.
+  examples:
+    good:
+      - path: src/components/Card.tsx
+        code: |
+          export const Card = () => <div className="p-2">x</div>
+    bad:
+      - path: src/components/Card.tsx
+        code: |
+          export const Card = () => <div style={{ padding: 8 }}>x</div>

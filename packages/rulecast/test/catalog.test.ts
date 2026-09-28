@@ -5,9 +5,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 
 import { generateManifest } from "../scripts/manifest"
 import { compileManifest } from "../src/core/compile/project"
-import type { CompiledRule } from "../src/core/compile/rule"
+import { type CompiledRule, isDetectorRule } from "../src/core/compile/rule"
 import { defaultConfig } from "../src/core/config/schema"
+import { memoryCache } from "../src/core/detection/cache"
+import { runExamples } from "../src/core/examples"
 import { runPipeline } from "../src/core/pipeline"
+import { defaultDetectorSettings } from "../src/core/types"
 import { registry } from "./helpers/fixture"
 import { stateDirFor } from "./helpers/home"
 import { stubAgentCli } from "./helpers/llm"
@@ -172,6 +175,51 @@ describe("the rulecast repository's rule manifest", () => {
     const { rules, diagnostics } = await compileManifest(repoRoot, registry)
     expect(diagnostics).toEqual([])
     expect(rules.map((rule) => rule.id)).toEqual(CATALOG)
+  })
+})
+
+describe("catalog rule examples", () => {
+  let rules: CompiledRule[] = []
+  beforeAll(async () => {
+    rules = (await compileManifest(repoRoot, registry)).rules
+  })
+
+  test("every rule with a detector carries examples, except the llm one", () => {
+    for (const rule of rules.filter(isDetectorRule)) {
+      const expected = rule.detector.kind !== "llm"
+      expect(rule.examples !== null && rule.examples.bad.length > 0, `${rule.id} has bad examples`).toBe(expected)
+    }
+  })
+
+  test.each(
+    // A published rule's examples are the executable half of its documentation: a consumer who
+    // overrides `files` or the pattern needs them to check the override, and this is what stops a
+    // pattern tightened later from silently ceasing to match.
+    CATALOG.filter((id) => id !== "python/thin-routes"),
+  )("%s passes its own examples", async (id) => {
+    const rule = rules.find((one) => one.id === id)
+    expect(rule, id).toBeDefined()
+    if (rule === undefined) return
+    if (!isDetectorRule(rule)) {
+      // A touch rule has nothing to run: `examples` on one is a compile diagnostic, so the check
+      // here is that it does not have any rather than a silent skip.
+      expect(rule.examples, `${id} is a touch rule`).toBeNull()
+      return
+    }
+    const root = await createProject({})
+    const result = await runExamples({
+      root,
+      rule,
+      registry,
+      settings: defaultDetectorSettings(),
+      contextFor: async () => [],
+      cacheFor: () => memoryCache(),
+      timeoutMs: 60_000,
+    })
+    const failures = result.outcomes
+      .filter((outcome) => !outcome.passed)
+      .map((outcome) => `${outcome.kind}[${outcome.index}] ${outcome.error ?? outcome.findings.length} findings`)
+    expect(failures).toEqual([])
   })
 })
 
