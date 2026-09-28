@@ -1,0 +1,90 @@
+# rulecast config: https://github.com/syv-ai/rulecast
+# rulecast run on rulecast. The catalog has nothing for this repository — its rules are Python,
+# React and generated clients — so every rule here is local and drafted from docs/conventions.md.
+repos:
+  - repo: local
+    rules:
+      - id: detectors/no-direct-reads
+        name: Detectors read through run's read, never from disk
+        files: '^packages/rulecast/src/detectors/.*\.ts$'
+        severity: error
+        detect:
+          regex:
+            pattern: '\breadFile(Sync)?\b'
+        message: "{{file}}:{{line}} reads a file directly. A detector reads through the `read` on its DetectorRun: before a write, the content that matters is the one the agent proposed, which is not on disk."
+        context:
+          - "@docs/conventions.md#detectors-never-read-a-file-themselves"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/example/detector.ts
+              code: |
+                const source = await input.read(file)
+          bad:
+            - path: packages/rulecast/src/detectors/example/detector.ts
+              code: |
+                const source = await readFile(path.join(input.cwd, file), "utf8")
+
+      - id: core/no-module-state
+        name: No module-level mutable state
+        description: Every hook is a fresh process, so a module-level cache buys nothing and leaks between rules and tests.
+        files: '^packages/rulecast/src/.*\.ts$'
+        # The one documented exception: a process-global native-module registration (plan 5a).
+        exclude: '^packages/rulecast/src/detectors/ast-grep/load\.ts$'
+        severity: error
+        detect:
+          ast-grep:
+            language: typescript
+            rule:
+              kind: lexical_declaration
+              inside:
+                kind: program
+              regex: '^let\b'
+        message: "{{file}}:{{line}} declares mutable state at module level. Pass it in instead: every hook is a fresh process, so this caches nothing and leaks between rules and tests."
+        context:
+          - "@docs/conventions.md#no-module-level-mutable-state"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const LIMIT = 10
+                export function run(cache: Cache) {
+                  let seen = 0
+                  return seen + LIMIT
+                }
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                let cached: string | null = null
+                export function run() {
+                  return cached
+                }
+
+      - id: tests/no-sockets
+        name: Tests never reach the network
+        files: '^packages/rulecast/test/.*\.ts$'
+        # The helpers own the exceptions: a local http server and a stub agent CLI.
+        exclude: '^packages/rulecast/test/helpers/'
+        severity: error
+        detect:
+          regex:
+            pattern: 'from "node:(http|https|net|tls)"'
+        message: "{{file}}:{{line}} opens a socket. No test in `pnpm test` may reach the network: use test/helpers/llm-server.ts or the stub agent CLI in test/helpers/llm.ts."
+        context:
+          - "@docs/conventions.md#tests-never-reach-the-network"
+        examples:
+          good:
+            - path: packages/rulecast/test/detectors/llm/example.test.ts
+              code: |
+                import { llmServer } from "../../helpers/llm-server"
+          bad:
+            - path: packages/rulecast/test/detectors/llm/example.test.ts
+              code: |
+                import { createServer } from "node:http"
+
+      - id: format/rule-keys
+        name: A rule key is four changes, not one
+        description: Delivers the checklist the first time an agent works on the rule schema or its compiler.
+        files: '^packages/rulecast/src/core/(config/schema|compile/rule)\.ts$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#a-rule-key-is-four-changes-not-one"
