@@ -19,6 +19,9 @@ const GROUP_MIN_LITERAL = 40
 /** Past this the location column is padding more than it is aligning. */
 const MAX_LOCATION_PAD = 40
 
+/** The one line that turns a summary into something the reader can act on. */
+export const BACKLOG_HINT = "  see all of it: rulecast run --all-files --summary"
+
 /** Where a packed list of locations wraps. */
 const WRAP = 96
 
@@ -168,13 +171,18 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
     out.push("")
   }
 
-  for (const summary of delivery.preexistingSummary) {
-    out.push(`pre-existing (not blocking): ${summary.rule} ×${summary.count} in ${summary.file}`)
+  // "pre-existing (not blocking)" read as *ignore this*, and the backlog it names is the thing that
+  // never moves on its own — one codebase held 57–61 violations of one rule while it tripled in
+  // size. Naming it a backlog and naming the command that shows all of it is the whole change; it
+  // still never blocks, and the hook still cannot count the repository inside its deadline (§13).
+  if (delivery.preexistingSummary.length > 0 || delivery.omitted.preexisting > 0) {
+    out.push("backlog in files you touched (not from your edit):")
+    for (const summary of delivery.preexistingSummary) {
+      out.push(`  ${summary.rule} ×${summary.count} in ${summary.file}`)
+    }
+    if (delivery.omitted.preexisting > 0) out.push(`  …and ${delivery.omitted.preexisting} more`)
+    out.push(BACKLOG_HINT, "")
   }
-  if (delivery.omitted.preexisting > 0) {
-    out.push(`…and ${delivery.omitted.preexisting} more pre-existing (not blocking)`)
-  }
-  if (delivery.preexistingSummary.length > 0 || delivery.omitted.preexisting > 0) out.push("")
 
   for (const reference of delivery.references) out.push(...referenceLines(reference))
   if (out.length > 0 && out.at(-1) !== "") out.push("")

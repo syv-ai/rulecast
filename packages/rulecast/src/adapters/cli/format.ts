@@ -50,8 +50,13 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   for (const [rule, rest] of hidden) out.push(`…and ${rest.length} more for ${rule}`)
   if (out.length > 0) out.push("")
 
-  for (const summary of delivery.preexistingSummary) {
-    out.push(`pre-existing (not blocking): ${summary.rule} ×${summary.count} in ${summary.file}`)
+  if (delivery.preexistingSummary.length > 0) {
+    out.push("backlog in the files checked (not from your change):")
+    for (const summary of delivery.preexistingSummary) {
+      out.push(`  ${summary.rule} ×${summary.count} in ${summary.file}`)
+    }
+    // Not when the backlog summary is already about to be printed below it.
+    if (options.backlog !== true) out.push("  see all of it: rulecast run --all-files --summary")
   }
   if (delivery.references.length > 0) {
     out.push(`conventions: ${delivery.references.map((reference) => reference.ref).join(", ")}`)

@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import type { CompiledRule } from "../compile/rule"
-import { measureRuleBlock } from "../delivery/render-agent"
+import { BACKLOG_HINT, measureRuleBlock } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate, templateBindings } from "../template"
@@ -53,6 +53,9 @@ const OVERFLOW_NOTICE = 256
 
 /** A reference's own line, at its longest: "read this before continuing (not included, …)". */
 const REFERENCE_OVERHEAD = 96
+
+/** The pre-existing block's heading, as render-agent prints it. */
+const BACKLOG_HEADING = "backlog in files you touched (not from your edit):"
 
 /**
  * The most of the budget warnings may take between them.
@@ -338,6 +341,10 @@ export async function decide(input: DecideInput): Promise<Decision> {
     context.push({ t: "delivered", path: resolved.spec.path, anchor: resolved.spec.anchor, hash: resolved.hash })
   }
 
+  // The heading and the "see all of it" line print whenever anything in this block does — including
+  // when every summary was cut and only the count remains — so they are charged once, up front. A
+  // renderer's line that nobody charged for is how a delivery at the budget's edge overflows.
+  if (delivery.preexistingSummary.length > 0) used += BACKLOG_HEADING.length + BACKLOG_HINT.length + ITEM_OVERHEAD
   const summariesKept: Delivery["preexistingSummary"] = []
   for (const summary of delivery.preexistingSummary) {
     if (!fits(summary.rule.length + summary.file.length + ITEM_OVERHEAD)) {
