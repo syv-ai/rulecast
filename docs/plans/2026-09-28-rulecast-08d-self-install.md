@@ -28,7 +28,7 @@ It also road-tests `init` on a shape it has never seen. The 2026-09-22 trial was
 
 4. **Expect it to be clean, and say so if it is.** A self-install that reports zero violations is the correct result and is worth writing down: it means compliance is free here. What it cannot tell us is whether enforcement works, and this document must not be read as evidence that it does.
 
-5. **`docs/dogfooding/` is not renamed in this plan.** `docs/evidence/` was agreed and then deliberately reverted, so the rename is undone rather than rejected. **Ask before renaming**, and do it as its own commit if the answer is yes.
+5. **`docs/evidence/` is not renamed in this plan.** `docs/evidence/` was agreed and then deliberately reverted, so the rename is undone rather than rejected. **Ask before renaming**, and do it as its own commit if the answer is yes.
 
 ## Candidate conventions, from the repository's own documents
 
@@ -57,21 +57,21 @@ As plan 8a, with two differences:
 
 ## Task 1: run `init` and record what it does
 
-**Files:** create `.rulecast-config.yaml` (by `init`) · create `docs/dogfooding/2026-09-28-self-install.md`
+**Files:** create `.rulecast-config.yaml` (by `init`) · create `docs/evidence/2026-09-28-self-install.md`
 
 **Behaviour:** `rulecast init` has been run against this repository from a build of the working tree, its full output is recorded, and every question it asked is answered as a first-time user would answer it.
 
 - [x] Build first: `pnpm build`, and run the built CLI, not `npx @syv-ai/rulecast` — this exercises the working tree, which is the point.
 - [ ] Run it interactively, not with `--yes`: the interactive path is the one a person meets and the one `init`'s design document is about. Record the whole transcript. **Not done:** `init` refuses without a TTY and the session had none, so it was run `--yes --agent claude-code`, the path `agents/SETUP.md` gives an agent. The interactive path on a monorepo is still untested and is listed as open in the trial document.
 - [x] Answer as a user would. Where a question is unanswerable without knowing rulecast's internals, that is a finding — write it down verbatim.
-- [x] Start `docs/dogfooding/2026-09-28-self-install.md`: what `init` detected, which catalog rules it selected and why, which it should have selected, and every place the flow needed knowledge the output did not give. Follow the shape of `docs/dogfooding/2026-09-22-private-platform.md`.
+- [x] Start `docs/evidence/2026-09-28-self-install.md`: what `init` detected, which catalog rules it selected and why, which it should have selected, and every place the flow needed knowledge the output did not give. Follow the shape of `docs/evidence/2026-09-22-private-platform.md`.
 - [ ] Do **not** install hooks yet — decline that step if `init` offers it; Task 3 handles it with the user's agreement. **`--yes --agent` writes them with no prompt to decline**, which is documented behaviour and is itself recorded as a finding. They were removed and reinstalled in Task 3 once the user had agreed.
 - [x] Verify: `rulecast validate` → exit 0. `rulecast run --all-files --summary` → a backlog number for the repository (if `08b` has landed; otherwise `rulecast run --all-files`).
 - [x] Commit `.rulecast-config.yaml` and the trial document.
 
 ## Task 2: draft the repository's own rules
 
-**Files:** modify `.rulecast-config.yaml` · create `docs/conventions/*.md` as needed · modify `docs/dogfooding/2026-09-28-self-install.md`
+**Files:** modify `.rulecast-config.yaml` · create `docs/conventions/*.md` as needed · modify `docs/evidence/2026-09-28-self-install.md`
 
 **Behaviour:** The conventions in the table above that survive drafting are rules in `.rulecast-config.yaml`, each with a `context` reference to the document section that states it, and each with examples that pass.
 
@@ -97,14 +97,14 @@ As plan 8a, with two differences:
 
 ## Task 4: write up what it found
 
-**Files:** modify `docs/dogfooding/2026-09-28-self-install.md` · modify `docs/plans/2026-09-15-rulecast-00-index.md` · modify `docs/specs/2026-09-15-rulecast-design.md:772-788`
+**Files:** modify `docs/evidence/2026-09-28-self-install.md` · modify `docs/plans/2026-09-15-rulecast-00-index.md` · modify `docs/specs/2026-09-15-rulecast-design.md:772-788`
 
 **Behaviour:** The trial is written up the way the 2026-09-22 one was: what was tried, what broke, what was fixed, and what it does not show.
 
 - [x] Sections: what `init` did on a TypeScript monorepo; the conventions considered and the ones dropped; the defects found and their commits; the measured hook cost; and an explicit paragraph saying this measures whether compliance is free, not whether enforcement works.
-- [x] Spec §15, Dogfooding: a second entry for this trial, alongside the 2026-09-22 one.
+- [x] Spec §15: a second field-trial entry for this one, alongside the 2026-09-22 one.
 - [x] Plan index: plan 8 row, with its four parts and their status.
-- [x] **Ask the user** whether `docs/dogfooding/` should now become `docs/evidence/`. If yes, do it as its own commit touching nothing else, with the links updated (`README.md`, the spec, the plans).
+- [x] **Ask the user** whether `docs/evidence/` should now become `docs/evidence/`. If yes, do it as its own commit touching nothing else, with the links updated (`README.md`, the spec, the plans).
 - [x] Verify: `pnpm test` → passes, including the link check.
 - [x] Commit.
 
@@ -116,4 +116,4 @@ As plan 8a, with two differences:
 2. `rulecast doctor` → every check green, hooks reported as installed, cache paths printed.
 3. `rulecast run --all-files --summary` → the repository's backlog, expected to be small or zero.
 4. In a Claude Code session in this repository: edit `packages/rulecast/src/core/types.ts` and confirm a delivery arrives inside the edit budget.
-5. `docs/dogfooding/2026-09-28-self-install.md` reads as a record someone else could act on, not a changelog.
+5. `docs/evidence/2026-09-28-self-install.md` reads as a record someone else could act on, not a changelog.

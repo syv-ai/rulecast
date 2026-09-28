@@ -142,5 +142,6 @@ against the 500 ms budget on the same machine.
 
 - The interactive `init` path on a monorepo, by hand, with a TTY.
 - `init`'s "N other docs" line, and what it says when the catalog matches nothing.
-- Renaming `docs/dogfooding/` to `docs/evidence/`. Agreed once, then deliberately reverted, so it is
-  undone rather than rejected — it needs its own commit and the user's word.
+Closed after this trial: `docs/dogfooding/` is now `docs/evidence/`, and the word is gone from the
+spec, the plan index, these documents and the source comments. `docs/plans/2026-09-22-rulecast-07c-public-dogfood.md`
+keeps its filename and its own prose — it is the record of a task that had that name.
