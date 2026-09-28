@@ -82,13 +82,13 @@ export function summarise(delivery: Delivery): BacklogSummary
 export function renderBacklog(summary: BacklogSummary, options: { topFiles: number }): string
 ```
 
-- [ ] Write the failing tests first: two rules across three files with repeats produce the right per-rule and per-file counts; `totalFiles` counts distinct files with at least one violation, not the sum of the per-rule file counts; a delivery with only `preexistingSummary` entries still produces a summary; an empty delivery produces zeroes and renders as `no violations`.
-- [ ] `renderBacklog` prints a rule table, then the worst `topFiles` files, then the two sentences the evidence supports and no more:
+- [x] Write the failing tests first: two rules across three files with repeats produce the right per-rule and per-file counts; `totalFiles` counts distinct files with at least one violation, not the sum of the per-rule file counts; a delivery with only `preexistingSummary` entries still produces a summary; an empty delivery produces zeroes and renders as `no violations`.
+- [x] `renderBacklog` prints a rule table, then the worst `topFiles` files, then the two sentences the evidence supports and no more:
   - `This is the stock, not a rate. Enforcement on edits does not reduce it.`
   - `Remediate a file at a time: a file that already follows a rule rarely breaks it.`
-- [ ] Columns are aligned by padding, single-space separated, in the style of the existing `terminal` finding lines. No box drawing, no colour.
-- [ ] Verify: `pnpm vitest run test/adapters/cli/backlog.test.ts` → passes.
-- [ ] Commit.
+- [x] Columns are aligned by padding, single-space separated, in the style of the existing `terminal` finding lines. No box drawing, no colour.
+- [x] Verify: `pnpm vitest run test/adapters/cli/backlog.test.ts` → passes.
+- [x] Commit.
 
 ## Task 2: `--all-files` prints it, `--summary` isolates it
 
@@ -96,13 +96,13 @@ export function renderBacklog(summary: BacklogSummary, options: { topFiles: numb
 
 **Behaviour:** `rulecast run --all-files` prints the findings and then the backlog summary. `rulecast run --summary` prints the summary alone, with any file selection. `--format json` carries a `backlog` object whichever flags were given. Exit codes are unchanged: `--summary` still exits 1 on a new error finding.
 
-- [ ] `FormatOptions` gains `backlog: boolean` (append the summary) and `findings: boolean` (print the per-finding lines). `terminal` honours both; `agent`, `sarif` ignore both; `json` always includes `backlog`, because a consumer that did not ask for it can ignore a key and one that wanted it cannot conjure it.
-- [ ] `parseRunArgs` gains `summary: boolean` from `--summary`. `--summary` with `--format sarif` is a `UsageError` naming both — SARIF has no place to put it and silently ignoring a flag is how people lose trust in a tool.
-- [ ] `executeRun` passes `{ backlog: run.allFiles || run.summary, findings: !run.summary }`.
-- [ ] `usage.ts`: `--summary   print only the backlog summary` under `run`.
-- [ ] Tests, against the existing fixture repo: `--all-files` output ends with the summary and still lists findings; `--summary` output has no finding lines and the same exit code as the same run without it; `--from-ref` with `--summary` counts pre-existing findings; `--format json --all-files` parses and `backlog.totalViolations` matches the findings; `--summary --format sarif` exits 2 with the usage message.
-- [ ] Verify: `pnpm vitest run test/commands` → passes.
-- [ ] Commit.
+- [x] `FormatOptions` gains `backlog: boolean` (append the summary) and `findings: boolean` (print the per-finding lines). `terminal` honours both; `agent`, `sarif` ignore both; `json` always includes `backlog`, because a consumer that did not ask for it can ignore a key and one that wanted it cannot conjure it.
+- [x] `parseRunArgs` gains `summary: boolean` from `--summary`. `--summary` with `--format sarif` is a `UsageError` naming both — SARIF has no place to put it and silently ignoring a flag is how people lose trust in a tool.
+- [x] `executeRun` passes `{ backlog: run.allFiles || run.summary, findings: !run.summary }`.
+- [x] `usage.ts`: `--summary   print only the backlog summary` under `run`.
+- [x] Tests, against the existing fixture repo: `--all-files` output ends with the summary and still lists findings; `--summary` output has no finding lines and the same exit code as the same run without it; `--from-ref` with `--summary` counts pre-existing findings; `--format json --all-files` parses and `backlog.totalViolations` matches the findings; `--summary --format sarif` exits 2 with the usage message.
+- [x] Verify: `pnpm vitest run test/commands` → passes.
+- [x] Commit.
 
 ## Task 3: stop calling the backlog "not blocking"
 
@@ -110,22 +110,22 @@ export function renderBacklog(summary: BacklogSummary, options: { topFiles: numb
 
 **Behaviour:** The pre-existing block in both renderings is headed as a backlog and names the command that shows all of it. The character cost is bounded — this is inside the §9 budget — so it is one heading line, not a paragraph, and it appears only when there is at least one pre-existing summary.
 
-- [ ] Replace `pre-existing (not blocking): <rule> ×N in <file>` with a heading line `backlog in files you touched (not from your edit):` followed by the existing `<rule> ×N in <file>` lines, and a closing line `see all of it: rulecast run --all-files --summary`.
-- [ ] The heading and the closing line are two items in the same list the budget already measures. Check the §9 accounting in `decide.ts:341-351` still charges for what is printed: if the two new lines are not charged, a delivery at the budget's edge overflows. Charge them with the first summary.
-- [ ] Update the golden `Delivery` renderings in the session scenario tests.
-- [ ] Verify: `pnpm vitest run test/core` → passes; `pnpm test` → passes.
-- [ ] Commit.
+- [x] Replace `pre-existing (not blocking): <rule> ×N in <file>` with a heading line `backlog in files you touched (not from your edit):` followed by the existing `<rule> ×N in <file>` lines, and a closing line `see all of it: rulecast run --all-files --summary`.
+- [x] The heading and the closing line are two items in the same list the budget already measures. Check the §9 accounting in `decide.ts:341-351` still charges for what is printed: if the two new lines are not charged, a delivery at the budget's edge overflows. Charge them with the first summary.
+- [x] Update the golden `Delivery` renderings in the session scenario tests.
+- [x] Verify: `pnpm vitest run test/core` → passes; `pnpm test` → passes.
+- [x] Commit.
 
 ## Task 4: document it
 
 **Files:** modify `docs/specs/2026-09-15-rulecast-design.md:602-628,656-675,829-836` · modify `README.md`
 
-- [ ] §11 Delivery rendering: the pre-existing block's new shape.
-- [ ] §12 CLI: `--summary` in the `run` flags; `backlog` in the `--format json` projection.
-- [ ] §17: `run --all-files` as an adoption backlog in the 0.2 row.
-- [ ] `README.md`: a short adoption section — point a rule at a repository with `rulecast run --all-files --summary`, read the count not the rate, fix a file at a time. Include the 61/80 → 57/194 table; it is the whole argument in four numbers.
-- [ ] Verify: `pnpm test` → passes.
-- [ ] Commit.
+- [x] §11 Delivery rendering: the pre-existing block's new shape.
+- [x] §12 CLI: `--summary` in the `run` flags; `backlog` in the `--format json` projection.
+- [x] §17: `run --all-files` as an adoption backlog in the 0.2 row.
+- [x] `README.md`: a short adoption section — point a rule at a repository with `rulecast run --all-files --summary`, read the count not the rate, fix a file at a time. Include the 61/80 → 57/194 table; it is the whole argument in four numbers.
+- [x] Verify: `pnpm test` → passes.
+- [x] Commit.
 
 ---
 

@@ -61,13 +61,13 @@ As plan 8a, with two differences:
 
 **Behaviour:** `rulecast init` has been run against this repository from a build of the working tree, its full output is recorded, and every question it asked is answered as a first-time user would answer it.
 
-- [ ] Build first: `pnpm build`, and run the built CLI, not `npx @syv-ai/rulecast` — this exercises the working tree, which is the point.
-- [ ] Run it interactively, not with `--yes`: the interactive path is the one a person meets and the one `init`'s design document is about. Record the whole transcript.
-- [ ] Answer as a user would. Where a question is unanswerable without knowing rulecast's internals, that is a finding — write it down verbatim.
-- [ ] Start `docs/dogfooding/2026-09-28-self-install.md`: what `init` detected, which catalog rules it selected and why, which it should have selected, and every place the flow needed knowledge the output did not give. Follow the shape of `docs/dogfooding/2026-09-22-private-platform.md`.
-- [ ] Do **not** install hooks yet — decline that step if `init` offers it; Task 3 handles it with the user's agreement.
-- [ ] Verify: `rulecast validate` → exit 0. `rulecast run --all-files --summary` → a backlog number for the repository (if `08b` has landed; otherwise `rulecast run --all-files`).
-- [ ] Commit `.rulecast-config.yaml` and the trial document.
+- [x] Build first: `pnpm build`, and run the built CLI, not `npx @syv-ai/rulecast` — this exercises the working tree, which is the point.
+- [ ] Run it interactively, not with `--yes`: the interactive path is the one a person meets and the one `init`'s design document is about. Record the whole transcript. **Not done:** `init` refuses without a TTY and the session had none, so it was run `--yes --agent claude-code`, the path `agents/SETUP.md` gives an agent. The interactive path on a monorepo is still untested and is listed as open in the trial document.
+- [x] Answer as a user would. Where a question is unanswerable without knowing rulecast's internals, that is a finding — write it down verbatim.
+- [x] Start `docs/dogfooding/2026-09-28-self-install.md`: what `init` detected, which catalog rules it selected and why, which it should have selected, and every place the flow needed knowledge the output did not give. Follow the shape of `docs/dogfooding/2026-09-22-private-platform.md`.
+- [ ] Do **not** install hooks yet — decline that step if `init` offers it; Task 3 handles it with the user's agreement. **`--yes --agent` writes them with no prompt to decline**, which is documented behaviour and is itself recorded as a finding. They were removed and reinstalled in Task 3 once the user had agreed.
+- [x] Verify: `rulecast validate` → exit 0. `rulecast run --all-files --summary` → a backlog number for the repository (if `08b` has landed; otherwise `rulecast run --all-files`).
+- [x] Commit `.rulecast-config.yaml` and the trial document.
 
 ## Task 2: draft the repository's own rules
 
@@ -75,12 +75,12 @@ As plan 8a, with two differences:
 
 **Behaviour:** The conventions in the table above that survive drafting are rules in `.rulecast-config.yaml`, each with a `context` reference to the document section that states it, and each with examples that pass.
 
-- [ ] Follow `agents/DRAFT-RULES.md` exactly as written, from the drafting prompt `init` printed. Where the document is wrong or incomplete for this repository, fix the document — it is the deliverable that reaches every other project.
-- [ ] Every rule's `context` points at a real anchor. The spec's own sections are the natural targets; a convention stated only in a plan's "Conventions" list needs a home in `docs/` that is not a plan, because a plan is a record of one change and a rule's reference should not be.
-- [ ] If `08c` has landed, every drafted rule carries examples and `rulecast test` passes. If it has not, write the examples anyway as comments and convert them later.
-- [ ] Drop a convention rather than force it: a rule nobody breaks costs an agent context for nothing, and this repository is expected to be clean. Record in the trial document which conventions were dropped and why — that list is the more interesting half of the result.
-- [ ] Verify: `rulecast validate` → exit 0; `rulecast run --all-files` → the findings are real violations, or none.
-- [ ] Commit.
+- [x] Follow `agents/DRAFT-RULES.md` exactly as written, from the drafting prompt `init` printed. Where the document is wrong or incomplete for this repository, fix the document — it is the deliverable that reaches every other project.
+- [x] Every rule's `context` points at a real anchor. The spec's own sections are the natural targets; a convention stated only in a plan's "Conventions" list needs a home in `docs/` that is not a plan, because a plan is a record of one change and a rule's reference should not be.
+- [x] If `08c` has landed, every drafted rule carries examples and `rulecast test` passes. If it has not, write the examples anyway as comments and convert them later.
+- [x] Drop a convention rather than force it: a rule nobody breaks costs an agent context for nothing, and this repository is expected to be clean. Record in the trial document which conventions were dropped and why — that list is the more interesting half of the result.
+- [x] Verify: `rulecast validate` → exit 0; `rulecast run --all-files` → the findings are real violations, or none.
+- [x] Commit.
 
 ## Task 3: install the hooks
 
@@ -88,12 +88,12 @@ As plan 8a, with two differences:
 
 **Behaviour:** Claude Code sessions in this repository receive rulecast's deliveries.
 
-- [ ] **Ask the user first**, showing them the exact hook entries `rulecast install` will add to `.claude/settings.json` and saying that it changes their own sessions in this repository. Do not run it before they answer.
-- [ ] `rulecast install --agent claude-code`. Never edit the settings file by hand.
-- [ ] Confirm the round trip: `rulecast uninstall` restores the file byte-for-byte, then `rulecast install` again. This is `AdapterInstall`'s contract (§15) and the first time it is exercised on a settings file that already had content.
-- [ ] Measure the cost on this repository: `pnpm perf` for the edit hook, and time a `Read` of a large source file now that a `touch` may carry a fingerprint run (`08a`). Record both in the trial document.
-- [ ] Verify: edit a file in a Claude Code session and confirm the delivery arrives; read a file a `touch` rule matches and confirm its context arrives once and not twice.
-- [ ] Commit.
+- [x] **Ask the user first**, showing them the exact hook entries `rulecast install` will add to `.claude/settings.json` and saying that it changes their own sessions in this repository. Do not run it before they answer.
+- [x] `rulecast install --agent claude-code`. Never edit the settings file by hand.
+- [x] Confirm the round trip: `rulecast uninstall` restores the file byte-for-byte, then `rulecast install` again. This is `AdapterInstall`'s contract (§15) and the first time it is exercised on a settings file that already had content.
+- [x] Measure the cost on this repository: `pnpm perf` for the edit hook, and time a `Read` of a large source file now that a `touch` may carry a fingerprint run (`08a`). Record both in the trial document.
+- [x] Verify: edit a file in a Claude Code session and confirm the delivery arrives; read a file a `touch` rule matches and confirm its context arrives once and not twice.
+- [x] Commit.
 
 ## Task 4: write up what it found
 
@@ -101,12 +101,12 @@ As plan 8a, with two differences:
 
 **Behaviour:** The trial is written up the way the 2026-09-22 one was: what was tried, what broke, what was fixed, and what it does not show.
 
-- [ ] Sections: what `init` did on a TypeScript monorepo; the conventions considered and the ones dropped; the defects found and their commits; the measured hook cost; and an explicit paragraph saying this measures whether compliance is free, not whether enforcement works.
-- [ ] Spec §15, Dogfooding: a second entry for this trial, alongside the 2026-09-22 one.
-- [ ] Plan index: plan 8 row, with its four parts and their status.
-- [ ] **Ask the user** whether `docs/dogfooding/` should now become `docs/evidence/`. If yes, do it as its own commit touching nothing else, with the links updated (`README.md`, the spec, the plans).
-- [ ] Verify: `pnpm test` → passes, including the link check.
-- [ ] Commit.
+- [x] Sections: what `init` did on a TypeScript monorepo; the conventions considered and the ones dropped; the defects found and their commits; the measured hook cost; and an explicit paragraph saying this measures whether compliance is free, not whether enforcement works.
+- [x] Spec §15, Dogfooding: a second entry for this trial, alongside the 2026-09-22 one.
+- [x] Plan index: plan 8 row, with its four parts and their status.
+- [x] **Ask the user** whether `docs/dogfooding/` should now become `docs/evidence/`. If yes, do it as its own commit touching nothing else, with the links updated (`README.md`, the spec, the plans).
+- [x] Verify: `pnpm test` → passes, including the link check.
+- [x] Commit.
 
 ---
 

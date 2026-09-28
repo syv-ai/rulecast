@@ -4,7 +4,7 @@
 
 **Goal:** A rule author finds out whether a rule works *before* enabling it on a repository: inline good/bad examples that `rulecast test` runs, and a dry fire over real files that says how many violations the rule would produce and in how many files. The `react/no-inline-style` case — 131 true-by-definition findings nobody would keep, discovered only after adoption — becomes a number the author sees while drafting.
 
-**Approach:** An `examples` rule key holding `good` and `bad` cases, each a path and a body. `rulecast test` materialises them into a temporary directory and runs the rule through the ordinary verify path, so every detector kind works and nothing about detection is special-cased for testing. `rulecast test RULE_ID --against <paths>` runs the same rule over real files and reports the spread. Both are hermetic apart from the detectors the rule itself names.
+**Approach:** An `examples` rule key holding `good` and `bad` cases, each a path and a body. `rulecast test` materialises them into a scratch directory and runs the rule through the ordinary verify path, so every detector kind works and nothing about detection is special-cased for testing. **As built, that directory is inside the project root and detection runs with the project root as its cwd** — from `os.tmpdir()` a `linter`, `command` or `llm` rule would resolve its binary from whatever is on PATH, with none of the project's configuration, which is not the rule the author is testing. `rulecast test RULE_ID --against <paths>` runs the same rule over real files and reports the spread. Both are hermetic apart from the detectors the rule itself names.
 
 **Stack:** Node ≥ 20.12, TypeScript 5, zod 3, vitest.
 
@@ -24,7 +24,7 @@ This is the 0.2 row's *"rule tests (inline good/bad examples run by `rulecast te
 
 ## Decisions this plan implements
 
-1. **Examples run through the real verify path.** `rulecast test` writes each example to a temporary directory, compiles a project containing just that rule, and runs the same pipeline `rulecast run` does. The alternative — handing the content straight to `detector.run` — would work only for the three detectors with `guards: true` and would quietly not test `linter`, `command` or `llm` rules, which are the ones an author is least sure about.
+1. **Examples run through the real verify path.** `rulecast test` writes each example to a scratch directory under the project root and runs it through the same `runDetection` the pipeline does, with the project root as cwd (see **Approach**; the plan first said `os.tmpdir()`, which would have broken tool resolution for the three detector kinds this decision exists to cover). The alternative — handing the content straight to `detector.run` — would work only for the three detectors with `guards: true` and would quietly not test `linter`, `command` or `llm` rules, which are the ones an author is least sure about.
 
 2. **An example declares its path.** `files`, `exclude`, the type tags and `ast-grep`'s language selection are all functions of the path. An example without one would be testing a different rule than the one that will run. `path` is required; there is no default worth guessing.
 
@@ -101,13 +101,13 @@ export interface RuleExamples {
 }
 ```
 
-- [ ] Schema: `examples: z.object({ good: z.array(exampleSchema).default([]), bad: z.array(exampleSchema).default([]) }).strict().optional()`, where an example is `{ path: z.string().min(1), code: z.string() }`. In `ruleKeys`, so an override can replace them.
-- [ ] `CompiledRule.examples: RuleExamples | null`, `null` when the key is absent — distinct from present-and-empty, which `validate` and `test` report differently.
-- [ ] Diagnostic in the no-detector branch: `examples need detect: there is nothing to run them against`.
-- [ ] Diagnostic when an example's `path` does not match the rule's own `files`/`exclude`/type filters: `example path "<path>" does not match this rule's files`. This is the mistake that makes an example silently pass, and `rule.matches(path)` already answers it at compile time.
-- [ ] Tests: examples compile and round-trip; absent is `null`; present-and-empty is not `null`; a touch rule with examples is a diagnostic; a `bad` example whose path the rule excludes is a diagnostic naming the path.
-- [ ] Verify: `pnpm vitest run test/core/compile/rule.test.ts` → passes.
-- [ ] Commit.
+- [x] Schema: `examples: z.object({ good: z.array(exampleSchema).default([]), bad: z.array(exampleSchema).default([]) }).strict().optional()`, where an example is `{ path: z.string().min(1), code: z.string() }`. In `ruleKeys`, so an override can replace them.
+- [x] `CompiledRule.examples: RuleExamples | null`, `null` when the key is absent — distinct from present-and-empty, which `validate` and `test` report differently.
+- [x] Diagnostic in the no-detector branch: `examples need detect: there is nothing to run them against`.
+- [x] Diagnostic when an example's `path` does not match the rule's own `files`/`exclude`/type filters: `example path "<path>" does not match this rule's files`. This is the mistake that makes an example silently pass, and `rule.matches(path)` already answers it at compile time.
+- [x] Tests: examples compile and round-trip; absent is `null`; present-and-empty is not `null`; a touch rule with examples is a diagnostic; a `bad` example whose path the rule excludes is a diagnostic naming the path.
+- [x] Verify: `pnpm vitest run test/core/compile/rule.test.ts` → passes.
+- [x] Commit.
 
 ## Task 2: running examples
 
@@ -147,13 +147,13 @@ export async function runExamples(input: {
 }): Promise<ExampleResult>
 ```
 
-- [ ] Materialise into `fs.mkdtemp` under `os.tmpdir()`, one directory per rule, with a minimal `.rulecast-config.yaml` holding just that rule as a `repo: local` entry. Remove it in a `finally`, including when a detector threw.
-- [ ] Run one example per pipeline invocation, not all of them at once: a `bad` example must be attributable, and batching them into one run would let a finding in example 1 mask a miss in example 3.
-- [ ] Precision and recall are counted over the example set exactly as defined above. With a handful of examples these are crude; they are the numbers the author is trying to move, and `--against` is where volume is measured.
-- [ ] Tests, one per detector kind so the "every detector works" claim is real: a `regex` rule with one good and one bad example; a `path` rule; an `ast-grep` rule; a `command` rule (a stub script in the fixture's `node_modules/.bin`); a `linter` rule using oxlint, which is a real devDependency (§15). No `llm` test calls a model — use the stub agent CLI from `test/helpers/llm.ts`.
-- [ ] Tests for the failure paths: a bad example that produces nothing is `passed: false` with empty findings; a good example that produces a finding is `passed: false` and carries the finding so the report can print the line; a detector that errors surfaces as a failure with its message, not as a thrown exception; the temporary directory is gone afterwards.
-- [ ] Verify: `pnpm vitest run test/core/examples.test.ts` → passes.
-- [ ] Commit.
+- [x] Materialise into `fs.mkdtemp` under `os.tmpdir()`, one directory per rule, with a minimal `.rulecast-config.yaml` holding just that rule as a `repo: local` entry. Remove it in a `finally`, including when a detector threw.
+- [x] Run one example per pipeline invocation, not all of them at once: a `bad` example must be attributable, and batching them into one run would let a finding in example 1 mask a miss in example 3.
+- [x] Precision and recall are counted over the example set exactly as defined above. With a handful of examples these are crude; they are the numbers the author is trying to move, and `--against` is where volume is measured.
+- [x] Tests, one per detector kind so the "every detector works" claim is real: a `regex` rule with one good and one bad example; a `path` rule; an `ast-grep` rule; a `command` rule (a stub script in the fixture's `node_modules/.bin`); a `linter` rule using oxlint, which is a real devDependency (§15). No `llm` test calls a model — use the stub agent CLI from `test/helpers/llm.ts`.
+- [x] Tests for the failure paths: a bad example that produces nothing is `passed: false` with empty findings; a good example that produces a finding is `passed: false` and carries the finding so the report can print the line; a detector that errors surfaces as a failure with its message, not as a thrown exception; the temporary directory is gone afterwards.
+- [x] Verify: `pnpm vitest run test/core/examples.test.ts` → passes.
+- [x] Commit.
 
 ## Task 3: the `test` command
 
@@ -175,13 +175,13 @@ rulecast test
   1 of 3 rules failed
 ```
 
-- [ ] Parse `[RULE_ID]`; an unknown id is a `UsageError` naming `rulecast validate`, matching `run`.
-- [ ] Bare `rulecast test` skips `llm` rules with the `skipped` line; a named `llm` rule runs (Decision 4).
-- [ ] A failing good example prints the example index, the path, the line it fired at and that line's source. A failing bad example prints the index and the path and `no finding`. That is the whole failure report — an author needs the site, not a diff.
-- [ ] `usage.ts` gains a `test` block: `rulecast test [RULE_ID]   run each rule's inline examples`.
-- [ ] Tests, against a fixture project: all-pass exits 0; one failing good example exits 1 and names it; one failing bad example exits 1 and names it; a project with no examples at all exits 0 and lists the rules; a named rule runs only that rule; an unknown rule id exits 2; `llm` skipping and naming.
-- [ ] Verify: `pnpm vitest run test/commands/test.test.ts test/commands/help.test.ts` → passes.
-- [ ] Commit.
+- [x] Parse `[RULE_ID]`; an unknown id is a `UsageError` naming `rulecast validate`, matching `run`.
+- [x] Bare `rulecast test` skips `llm` rules with the `skipped` line; a named `llm` rule runs (Decision 4).
+- [x] A failing good example prints the example index, the path, the line it fired at and that line's source. A failing bad example prints the index and the path and `no finding`. That is the whole failure report — an author needs the site, not a diff.
+- [x] `usage.ts` gains a `test` block: `rulecast test [RULE_ID]   run each rule's inline examples`.
+- [x] Tests, against a fixture project: all-pass exits 0; one failing good example exits 1 and names it; one failing bad example exits 1 and names it; a project with no examples at all exits 0 and lists the rules; a named rule runs only that rule; an unknown rule id exits 2; `llm` skipping and naming.
+- [x] Verify: `pnpm vitest run test/commands/test.test.ts test/commands/help.test.ts` → passes.
+- [x] Commit.
 
 ## Task 4: `--against`, the volume check
 
@@ -202,13 +202,13 @@ rulecast test react/no-inline-style --against frontend/src
   A rule with almost no violations is usually not worth an agent's context.
 ```
 
-- [ ] `--against` takes one or more paths, defaulting to the whole repository when given with no value is not possible — require at least one path, as `--files` does.
-- [ ] Reuse `selectFiles`-style resolution from `src/commands/run.ts`: a directory expands to the files under it that the rule's filters match. Report `matching files` as the denominator, not every file walked — a rule scoped to `routes/` is not diluted by the rest of the repository.
-- [ ] Print the two closing sentences verbatim, both of them, always. They are the two failure modes and an author reading one number needs to know which end they are near. Do not compute a verdict: there is no threshold that is right for every rule (Decision 6).
-- [ ] `--against` requires a `RULE_ID`; without one it is a `UsageError`.
-- [ ] Tests: a fixture with a rule firing in 3 of 10 matching files reports `3` and `10`; a rule firing nowhere reports `0` and still exits 0; `--against` with no rule id exits 2; a path outside the project exits 2 with the message `run` gives.
-- [ ] Verify: `pnpm vitest run test/commands/test.test.ts` → passes.
-- [ ] Commit.
+- [x] `--against` takes one or more paths, defaulting to the whole repository when given with no value is not possible — require at least one path, as `--files` does.
+- [x] Reuse `selectFiles`-style resolution from `src/commands/run.ts`: a directory expands to the files under it that the rule's filters match. Report `matching files` as the denominator, not every file walked — a rule scoped to `routes/` is not diluted by the rest of the repository.
+- [x] Print the two closing sentences verbatim, both of them, always. They are the two failure modes and an author reading one number needs to know which end they are near. Do not compute a verdict: there is no threshold that is right for every rule (Decision 6).
+- [x] `--against` requires a `RULE_ID`; without one it is a `UsageError`.
+- [x] Tests: a fixture with a rule firing in 3 of 10 matching files reports `3` and `10`; a rule firing nowhere reports `0` and still exits 0; `--against` with no rule id exits 2; a path outside the project exits 2 with the message `run` gives.
+- [x] Verify: `pnpm vitest run test/commands/test.test.ts` → passes.
+- [x] Commit.
 
 ## Task 5: examples for the catalog
 
@@ -216,11 +216,11 @@ rulecast test react/no-inline-style --against frontend/src
 
 **Behaviour:** Every catalog rule with a `detect` carries at least one good and one bad example, they pass, and they ship in the generated manifest. This is the first real use of the feature and the first chance for it to find something.
 
-- [ ] `generate-manifest.ts` carries `examples` through. Check the staleness test still passes after regenerating.
-- [ ] Add examples rule by rule. Where an example fails, **the rule is wrong, not the example** — investigate before adjusting either, and record what was found in the commit message. Plans 5 and 6 each turned up real defects this way.
-- [ ] `test/catalog.test.ts` runs `runExamples` over every rule in every `packages/rules-*/rules.yaml` and asserts every outcome passed, and that every rule with a `detect` has at least one of each. This is the regression net: a catalog rule whose pattern is tightened later cannot silently stop matching.
-- [ ] Verify: `pnpm manifest` → `.rulecast-rules.yaml` regenerated, staleness test green; `pnpm vitest run test/catalog.test.ts` → passes; `pnpm test` → passes.
-- [ ] Commit.
+- [x] `generate-manifest.ts` carries `examples` through. Check the staleness test still passes after regenerating.
+- [x] Add examples rule by rule. Where an example fails, **the rule is wrong, not the example** — investigate before adjusting either, and record what was found in the commit message. Plans 5 and 6 each turned up real defects this way.
+- [x] `test/catalog.test.ts` runs `runExamples` over every rule in every `packages/rules-*/rules.yaml` and asserts every outcome passed, and that every rule with a `detect` has at least one of each. This is the regression net: a catalog rule whose pattern is tightened later cannot silently stop matching.
+- [x] Verify: `pnpm manifest` → `.rulecast-rules.yaml` regenerated, staleness test green; `pnpm vitest run test/catalog.test.ts` → passes; `pnpm test` → passes.
+- [x] Commit.
 
 ## Task 6: teach the drafting flow to measure
 
@@ -228,12 +228,12 @@ rulecast test react/no-inline-style --against frontend/src
 
 **Behaviour:** The drafting prompt stops asking an agent to decide a rule's tier up front and starts asking it to try, measure and fall back. This is the finding with the widest reach in this plan: tier membership depends on the wording, so no catalog and no prompt can fix it once.
 
-- [ ] `agents/DRAFT-RULES.md`: replace whatever tells the agent to pick a detector with the loop — draft the convention's wording; write two good and two bad examples from real code in the repository; attempt a `regex` or `ast-grep` pattern; run `rulecast test <id>`; if an example fails, revise the pattern once; if it still fails, move the rule to `llm` and say in the rule's `description` that a pattern was tried. Then `rulecast test <id> --against <the directory it is scoped to>` and report both numbers to the user before writing the rule into the config.
-- [ ] Say why, in one line the agent can act on: the same convention scored P 0.99 under one wording and P 0.70 under a stricter one, so the tier is a property of the sentence, not of the convention.
-- [ ] `agents/reference/rule-format.md`: the `examples` key, with the `path` requirement and the at-least-one-finding semantics.
-- [ ] Spec §4: `examples` in the rule keys. §12: the `test` command in the CLI table. §15: `test/catalog.test.ts` in the testing list, and a line stating that `rulecast test` in `pnpm test` never reaches a model. §17: move *"rule tests (inline good/bad examples run by `rulecast test`)"* from the 0.2 scope row to done, and add the κ measurement as an explicitly deferred piece with the reason (money, not hermetic).
-- [ ] Verify: `pnpm test` → passes, including the agent-doc link check.
-- [ ] Commit.
+- [x] `agents/DRAFT-RULES.md`: replace whatever tells the agent to pick a detector with the loop — draft the convention's wording; write two good and two bad examples from real code in the repository; attempt a `regex` or `ast-grep` pattern; run `rulecast test <id>`; if an example fails, revise the pattern once; if it still fails, move the rule to `llm` and say in the rule's `description` that a pattern was tried. Then `rulecast test <id> --against <the directory it is scoped to>` and report both numbers to the user before writing the rule into the config.
+- [x] Say why, in one line the agent can act on: the same convention scored P 0.99 under one wording and P 0.70 under a stricter one, so the tier is a property of the sentence, not of the convention.
+- [x] `agents/reference/rule-format.md`: the `examples` key, with the `path` requirement and the at-least-one-finding semantics.
+- [x] Spec §4: `examples` in the rule keys. §12: the `test` command in the CLI table. §15: `test/catalog.test.ts` in the testing list, and a line stating that `rulecast test` in `pnpm test` never reaches a model. §17: move *"rule tests (inline good/bad examples run by `rulecast test`)"* from the 0.2 scope row to done, and add the κ measurement as an explicitly deferred piece with the reason (money, not hermetic).
+- [x] Verify: `pnpm test` → passes, including the agent-doc link check.
+- [x] Commit.
 
 ---
 

@@ -91,12 +91,12 @@ Paths under `src/` and `test/` are in `packages/rulecast/`.
 
 **Behaviour:** `scope: instance | container` parses as a rule key and as an override key, reaches `CompiledRule.scope`, and defaults to `"instance"`. `scope` on a rule with no `detect` is the diagnostic `scope needs detect: there is nothing to classify`. Nothing else changes: every existing rule compiles to `scope: "instance"` and behaves as before.
 
-- [ ] Add `scope: z.enum(["instance", "container"]).optional()` to `ruleKeys` in `schema.ts`. It is inside `ruleKeys`, so `overrideSchema` picks it up and a config entry can override a manifest rule's scope.
-- [ ] Add `scope: RuleScope` to `CompiledRule` in `rule.ts`, where `export type RuleScope = "instance" | "container"`. Set it from `data.scope ?? "instance"` in the returned object.
-- [ ] In the `else` branch of `compileRule` (the no-detector branch, `rule.ts:116-122`), return `"scope needs detect: there is nothing to classify"` when `data.scope !== undefined`.
-- [ ] Write the failing tests first: a rule with `scope: container` compiles and carries it; a rule with no `scope` compiles to `instance`; a touch rule with `scope` is a diagnostic; `scope: sideways` is a schema error naming the key.
-- [ ] Verify: `pnpm vitest run test/core/compile/rule.test.ts` → passes; `pnpm typecheck` → clean.
-- [ ] Commit.
+- [x] Add `scope: z.enum(["instance", "container"]).optional()` to `ruleKeys` in `schema.ts`. It is inside `ruleKeys`, so `overrideSchema` picks it up and a config entry can override a manifest rule's scope.
+- [x] Add `scope: RuleScope` to `CompiledRule` in `rule.ts`, where `export type RuleScope = "instance" | "container"`. Set it from `data.scope ?? "instance"` in the returned object.
+- [x] In the `else` branch of `compileRule` (the no-detector branch, `rule.ts:116-122`), return `"scope needs detect: there is nothing to classify"` when `data.scope !== undefined`.
+- [x] Write the failing tests first: a rule with `scope: container` compiles and carries it; a rule with no `scope` compiles to `instance`; a touch rule with `scope` is a diagnostic; `scope: sideways` is a schema error naming the key.
+- [x] Verify: `pnpm vitest run test/core/compile/rule.test.ts` → passes; `pnpm typecheck` → clean.
+- [x] Commit.
 
 ## Task 2: one diff, two products
 
@@ -120,12 +120,12 @@ export interface DiffResult {
 export function diffLines(before: Uint32Array, after: Uint32Array): DiffResult
 ```
 
-- [ ] Rename `changedLines` to `diffLines` and have it return both products from the single `diffArrays` walk it already does. An unchanged part appends a run; an added or removed part advances the relevant cursor only. Keep the existing `mark` behaviour for `changed` exactly as it is, including the deletion case.
-- [ ] Add `mapLine(map: LineMap, line: number): number`: the run containing `line` gives `afterStart + (line - beforeStart)`; a line inside a removed stretch gives the `afterStart` of the next run; a line past every run gives `afterLines + 1`. It never returns null — a deleted container maps to where it used to be, which is what an overlap test wants.
-- [ ] `ChangeSet` gains `map: LineMap`. `computeChanges` sets it from `diffLines`; the `fileHash` equality shortcut builds the identity map (one run covering the whole file).
-- [ ] Tests: insertion at the top shifts every later line; a deletion in the middle pulls later lines up; a replacement of equal length maps identically; an unchanged file maps every line to itself; a line inside a deleted run maps to the line that replaced it; the existing `changedLines` cases still produce the same ranges through `diffLines`.
-- [ ] Verify: `pnpm vitest run test/core/baseline` → passes.
-- [ ] Commit.
+- [x] Rename `changedLines` to `diffLines` and have it return both products from the single `diffArrays` walk it already does. An unchanged part appends a run; an added or removed part advances the relevant cursor only. Keep the existing `mark` behaviour for `changed` exactly as it is, including the deletion case.
+- [x] Add `mapLine(map: LineMap, line: number): number`: the run containing `line` gives `afterStart + (line - beforeStart)`; a line inside a removed stretch gives the `afterStart` of the next run; a line past every run gives `afterLines + 1`. It never returns null — a deleted container maps to where it used to be, which is what an overlap test wants.
+- [x] `ChangeSet` gains `map: LineMap`. `computeChanges` sets it from `diffLines`; the `fileHash` equality shortcut builds the identity map (one run covering the whole file).
+- [x] Tests: insertion at the top shifts every later line; a deletion in the middle pulls later lines up; a replacement of equal length maps identically; an unchanged file maps every line to itself; a line inside a deleted run maps to the line that replaced it; the existing `changedLines` cases still produce the same ranges through `diffLines`.
+- [x] Verify: `pnpm vitest run test/core/baseline` → passes.
+- [x] Commit.
 
 ## Task 3: fingerprint records in the baseline store
 
@@ -148,11 +148,11 @@ export interface BaselineState {
 }
 ```
 
-- [ ] Add the record variant, `fingerprintRecord(file, rule, ranges)`, and the `fingerprints` map to `BaselineState` and `readBaseline`. Ranges are plain JSON: a container rule matches a handful of nodes per file, so the base64 packing snapshots need is not worth the opacity.
-- [ ] First-writer-wins per `(file, rule)`: a second record for the same pair is ignored.
-- [ ] Tests: a round trip through `appendBaseline`/`readBaseline`; an empty `ranges` array survives and is distinguishable from no record; first-writer-wins; a file with fingerprints for two rules; a store containing only `start` and `snapshot` records still reads (old sessions).
-- [ ] Verify: `pnpm vitest run test/core/baseline/store.test.ts` → passes.
-- [ ] Commit.
+- [x] Add the record variant, `fingerprintRecord(file, rule, ranges)`, and the `fingerprints` map to `BaselineState` and `readBaseline`. Ranges are plain JSON: a container rule matches a handful of nodes per file, so the base64 packing snapshots need is not worth the opacity.
+- [x] First-writer-wins per `(file, rule)`: a second record for the same pair is ignored.
+- [x] Tests: a round trip through `appendBaseline`/`readBaseline`; an empty `ranges` array survives and is distinguishable from no record; first-writer-wins; a file with fingerprints for two rules; a store containing only `start` and `snapshot` records still reads (old sessions).
+- [x] Verify: `pnpm vitest run test/core/baseline/store.test.ts` → passes.
+- [x] Commit.
 
 ## Task 4: container classification
 
@@ -170,12 +170,12 @@ export function classify(
 ): "new" | "preexisting"
 ```
 
-- [ ] Move `isNew` into `fingerprint.ts` as the instance path, keeping its current behaviour (no change set for the file → `new`).
-- [ ] `mapRange(map, [start, end])` → the range in after-space, via `mapLine` on both ends.
-- [ ] The container path: `new` unless some mapped baseline range overlaps `[match.line, match.endLine]`. Absent record (`fingerprints.get(file)?.has(rule) !== true`) → the instance path. No change set for the file → `new`, as instance does.
-- [ ] Tests, written first, each as a small table of ranges rather than real files: a route that violated before and still does after an unrelated edit inside it → `preexisting` (this is the case the plan exists for); a route that was clean and now violates → `new`; a *second* violation added to a route that already violated → `preexisting` (the known recall cost, asserted so nobody "fixes" it by accident); an empty record → every match `new`; no record → falls back to overlap; insertions above the container shift the recorded range so it still matches; a container whose baseline range was deleted outright does not swallow an unrelated later match.
-- [ ] Verify: `pnpm vitest run test/core/baseline/fingerprint.test.ts` → passes.
-- [ ] Commit.
+- [x] Move `isNew` into `fingerprint.ts` as the instance path, keeping its current behaviour (no change set for the file → `new`).
+- [x] `mapRange(map, [start, end])` → the range in after-space, via `mapLine` on both ends.
+- [x] The container path: `new` unless some mapped baseline range overlaps `[match.line, match.endLine]`. Absent record (`fingerprints.get(file)?.has(rule) !== true`) → the instance path. No change set for the file → `new`, as instance does.
+- [x] Tests, written first, each as a small table of ranges rather than real files: a route that violated before and still does after an unrelated edit inside it → `preexisting` (this is the case the plan exists for); a route that was clean and now violates → `new`; a *second* violation added to a route that already violated → `preexisting` (the known recall cost, asserted so nobody "fixes" it by accident); an empty record → every match `new`; no record → falls back to overlap; insertions above the container shift the recorded range so it still matches; a container whose baseline range was deleted outright does not swallow an unrelated later match.
+- [x] Verify: `pnpm vitest run test/core/baseline/fingerprint.test.ts` → passes.
+- [x] Commit.
 
 ## Task 5: recording fingerprints at `touch`
 
@@ -199,13 +199,13 @@ export interface RecordInput {
 export async function recordFingerprints(input: RecordInput): Promise<BaselineRecord[]>
 ```
 
-- [ ] `recordFingerprints` selects with `selectDetectorRules(rules, "edit", files, disabled)` filtered to `rule.scope === "container"` and `rule.detector.kind !== "llm"`, applies `applySizeCeiling` the way the edit path does, and calls `runDetection` with `changes` empty and `event: "edit"`. Group the resulting matches by `(file, rule)` and emit a record for every `(file, rule)` pair the run *attempted* — a rule that timed out or was size-skipped emits nothing.
-- [ ] Return early with `[]` when no rule in the project has `scope: "container"`. This is the common case and it must cost one array scan, not a detector run.
-- [ ] In `pipeline.ts`, inside the existing `event.kind === "touch"` block, build the snapshot records as now, then append `recordFingerprints` output in the same `appendBaseline` call. Use `config.timeouts.editDeadlineMs` and `config.maxFileBytes`.
-- [ ] At the classification site (`pipeline.ts:333-337`) call `classify(match, rule.scope, rule.id, changes, baseline.fingerprints)`.
-- [ ] Test end to end through the pipeline, with an `ast-grep` container rule on a fixture file: `touch` a file holding an already-violating container → `edit` it elsewhere inside that container → no new finding, one pre-existing summary; `touch` a clean file → `edit` it so the container now violates → one new finding; the same pair with `scope` omitted → both report new (today's behaviour, unchanged); a project with no container rule takes no fingerprint run (assert on the record count in `baseline.jsonl`).
-- [ ] Verify: `pnpm vitest run test/core/pipeline-container.test.ts` → passes; `pnpm test` → passes; `pnpm perf` → p95 still inside the budget, and note the number in the commit message.
-- [ ] Commit.
+- [x] `recordFingerprints` selects with `selectDetectorRules(rules, "edit", files, disabled)` filtered to `rule.scope === "container"` and `rule.detector.kind !== "llm"`, applies `applySizeCeiling` the way the edit path does, and calls `runDetection` with `changes` empty and `event: "edit"`. Group the resulting matches by `(file, rule)` and emit a record for every `(file, rule)` pair the run *attempted* — a rule that timed out or was size-skipped emits nothing.
+- [x] Return early with `[]` when no rule in the project has `scope: "container"`. This is the common case and it must cost one array scan, not a detector run.
+- [x] In `pipeline.ts`, inside the existing `event.kind === "touch"` block, build the snapshot records as now, then append `recordFingerprints` output in the same `appendBaseline` call. Use `config.timeouts.editDeadlineMs` and `config.maxFileBytes`.
+- [x] At the classification site (`pipeline.ts:333-337`) call `classify(match, rule.scope, rule.id, changes, baseline.fingerprints)`.
+- [x] Test end to end through the pipeline, with an `ast-grep` container rule on a fixture file: `touch` a file holding an already-violating container → `edit` it elsewhere inside that container → no new finding, one pre-existing summary; `touch` a clean file → `edit` it so the container now violates → one new finding; the same pair with `scope` omitted → both report new (today's behaviour, unchanged); a project with no container rule takes no fingerprint run (assert on the record count in `baseline.jsonl`).
+- [x] Verify: `pnpm vitest run test/core/pipeline-container.test.ts` → passes; `pnpm test` → passes; `pnpm perf` → p95 still inside the budget, and note the number in the commit message.
+- [x] Commit.
 
 ## Task 6: `verify` fills in what it is missing
 
@@ -213,12 +213,12 @@ export async function recordFingerprints(input: RecordInput): Promise<BaselineRe
 
 **Behaviour:** On a `verify` event, a file with a baseline but no fingerprint record for a container rule gets one computed from the baseline content — the session-start commit, or `--from-ref`'s merge base — before classification. So `rulecast run --from-ref main` classifies container rules by the flip rather than by overlap. These records are computed in memory; a verify with a session also appends them, so the next event reuses them.
 
-- [ ] Add `fingerprintsFromText(input, texts: Map<file, string>)`, taking the baseline content directly rather than reading from disk — `runDetection`'s `read` is a function, so pass one that serves `texts`.
-- [ ] In `pipeline.ts`, in the `verify` branch after `computeChanges`, collect the files that have a change set, lack a fingerprint for at least one container rule, and whose baseline content is reachable (`fileAtCommit(root, fallbackCommit, file)`), and fill them in. Use `config.timeouts.verifyMs`, not the edit deadline — a verify has seconds (Decision 4).
-- [ ] `computeChanges` already fetches that content for the fallback path; lift it so the file is read from git once per event, not twice.
-- [ ] Tests: `rulecast run --from-ref <ref>` over a fixture where the base commit already violates a container rule and the branch edits inside it → no findings; the same where the branch's edit makes a clean container violate → one finding; an edit event does *not* fill fingerprints in (assert the record count, so the edit path stays one pass).
-- [ ] Verify: `pnpm vitest run test/commands/run.test.ts test/core/pipeline-container.test.ts` → passes; `pnpm perf` → unchanged.
-- [ ] Commit.
+- [x] Add `fingerprintsFromText(input, texts: Map<file, string>)`, taking the baseline content directly rather than reading from disk — `runDetection`'s `read` is a function, so pass one that serves `texts`.
+- [x] In `pipeline.ts`, in the `verify` branch after `computeChanges`, collect the files that have a change set, lack a fingerprint for at least one container rule, and whose baseline content is reachable (`fileAtCommit(root, fallbackCommit, file)`), and fill them in. Use `config.timeouts.verifyMs`, not the edit deadline — a verify has seconds (Decision 4).
+- [x] `computeChanges` already fetches that content for the fallback path; lift it so the file is read from git once per event, not twice.
+- [x] Tests: `rulecast run --from-ref <ref>` over a fixture where the base commit already violates a container rule and the branch edits inside it → no findings; the same where the branch's edit makes a clean container violate → one finding; an edit event does *not* fill fingerprints in (assert the record count, so the edit path stays one pass).
+- [x] Verify: `pnpm vitest run test/commands/run.test.ts test/core/pipeline-container.test.ts` → passes; `pnpm perf` → unchanged.
+- [x] Commit.
 
 ## Task 7: document it
 
@@ -226,14 +226,14 @@ export async function recordFingerprints(input: RecordInput): Promise<BaselineRe
 
 **Behaviour:** The spec describes `scope` as a rule key, replaces §8's `nonLocal` note with what was actually built, and records the `python/thin-routes` recommendation the handoff asked to be written down rather than acted on.
 
-- [ ] §4 Rule keys: a `scope` entry — `instance` (default) classifies a finding by whether it touches a changed line; `container` classifies it by whether the container it matched already violated the rule at the baseline. One sentence on when to reach for it: the convention is a property of the enclosing function or component, not of the token.
-- [ ] §8 Classification: replace the "Known miss … `nonLocal` opt-in with cached fingerprints" paragraph with the fingerprint mechanism, the record format, the four cases that leave no record (no snapshot, deadline, size ceiling, `llm`), and the recall cost of the flip — a second violation added to an already-violating container is pre-existing.
-- [ ] §8 Storage: the `fingerprint` record alongside `start` and `snapshot`. Keep the *"No file content is stored"* sentence: it is still true, and it is the reason this design was chosen over the second-pass one.
-- [ ] §13: one line saying the fingerprint run is on the `touch` path and the edit path still runs each detector once.
-- [ ] §17: in the 0.2 row, `scope: instance | container`. Add a line recording that **`python/thin-routes` measured P 0.99 / R 0.90 as an `ast-grep` pattern under the catalog's wording and P 0.70 / R 0.84 under a stricter one** — evidence for converting it from `llm`, on one codebase, not acted on.
-- [ ] `agents/reference/rule-format.md`: `scope` in the key reference, with the `slim-routes` example.
-- [ ] Verify: `pnpm test` → passes (the docs tests check that agent-doc links resolve).
-- [ ] Commit.
+- [x] §4 Rule keys: a `scope` entry — `instance` (default) classifies a finding by whether it touches a changed line; `container` classifies it by whether the container it matched already violated the rule at the baseline. One sentence on when to reach for it: the convention is a property of the enclosing function or component, not of the token.
+- [x] §8 Classification: replace the "Known miss … `nonLocal` opt-in with cached fingerprints" paragraph with the fingerprint mechanism, the record format, the four cases that leave no record (no snapshot, deadline, size ceiling, `llm`), and the recall cost of the flip — a second violation added to an already-violating container is pre-existing.
+- [x] §8 Storage: the `fingerprint` record alongside `start` and `snapshot`. Keep the *"No file content is stored"* sentence: it is still true, and it is the reason this design was chosen over the second-pass one.
+- [x] §13: one line saying the fingerprint run is on the `touch` path and the edit path still runs each detector once.
+- [x] §17: in the 0.2 row, `scope: instance | container`. Add a line recording that **`python/thin-routes` measured P 0.99 / R 0.90 as an `ast-grep` pattern under the catalog's wording and P 0.70 / R 0.84 under a stricter one** — evidence for converting it from `llm`, on one codebase, not acted on.
+- [x] `agents/reference/rule-format.md`: `scope` in the key reference, with the `slim-routes` example.
+- [x] Verify: `pnpm test` → passes (the docs tests check that agent-doc links resolve).
+- [x] Commit.
 
 ---
 
