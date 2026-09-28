@@ -296,6 +296,7 @@ The only key renamed from pre-commit is `hooks:` → `rules:`.
   - Defaults, in order: the rule's `stages`, the config's `default_stages`, then `[touch]` for rules without `detect` or the detector's `events(config)` for rules with one.
 - **`minimum_rulecast_version`** — per rule, for manifests.
 - **`severity`** — `error` (blocks Stop; CLI exit 1) or `warning` (delivered, never blocks). Default `error`.
+- **`scope`** — `instance` (default) or `container`; needs `detect`. What the convention belongs to. `instance`: the token the detector matched, and a finding is new when the agent's edit touched it. `container`: the node the match spans, and a finding is new when that node was not already violating the rule at the baseline (§8). Reach for `container` when the convention is a property of the enclosing function or component rather than of anything inside it — "this route is too long", "this component has no cleanup" — because an edit anywhere inside such a node touches the whole match and would otherwise report every time.
 - **`detect`** — a single key naming the detector, whose value is that detector's config. Required unless `stages` is `[touch]`; present with `stages: [touch]` is a compile diagnostic.
 - **`message`** — required with `detect`. Logic-free template; `{{name}}` placeholders only.
 - **`context`** — optional ordered list of references.
@@ -487,13 +488,21 @@ A finding is **new** when it touches a line the agent changed. Findings on uncha
 
 ### Classification
 
-A finding is new if its `line`–`endLine` range intersects a changed range of its file, or its file has no baseline. The CLI's `--from-ref <ref>` uses the merge base of `<ref>` and `HEAD` as the baseline commit (§12).
+A rule with `scope: instance` — the default, and every rule before 0.2 — is new if its `line`–`endLine` range intersects a changed range of its file, or its file has no baseline. The CLI's `--from-ref <ref>` uses the merge base of `<ref>` and `HEAD` as the baseline commit (§12).
 
-**Known miss:** a change that causes a finding on an untouched line (e.g. an unused import after deleting its last use) is classified pre-existing. Accepted for 0.1; a detector-declared `nonLocal` opt-in with cached fingerprints can be added later without breaking detectors.
+**`scope: container`** asks a different question: did the node this match spans already violate the rule? An `ast-grep` match's `endLine` is the whole matched node, so a rule whose match is a function overlaps any edit inside it and would otherwise report on every edit. Measured on 1,377 agent-written sites, `slim-routes` scored P 0.62 under overlap and P 0.76 under the container comparison; `routes-never-call-crud`, whose match is a call site, scored P 1.00 under overlap and R 0.27 under the container one. Neither wins everywhere, which is why it is a per-rule choice rather than a change of default.
+
+- **Fingerprints.** When the baseline snapshots a file, rulecast also runs the project's `container` rules over it and records what they matched: `file → rule → ranges`. Classification maps a recorded range into the current file through the same diff that produced the change set, and a match is new unless some mapped range overlaps it.
+- **A range keeps only the lines that survived the edit**, and a range with none left maps to nothing. A container deleted outright, or rewritten line for line, no longer exists and must not stand in for whatever now occupies its lines.
+- **No record means instance classification.** Four cases leave none: no snapshot (the file was changed through another tool), the file was over `max_file_bytes`, the fingerprint run passed the deadline, or the rule is an `llm` rule — a fingerprint run is a second evaluation, and for `llm` that would be a billed model call as a side effect of the agent opening a file, which §6 Consent does not allow. An *empty* record is not a missing one: it means the rule was measured and the file was clean, so every match found later is new.
+- **A `verify` measures what it is missing.** It has seconds where an edit has 350 ms, so for a file whose baseline is a commit it computes the fingerprints on demand from that commit's content, using only detectors that read through `read` (§6 `guards`) — a linter handed a path would measure the file as it stands now. This is what lets `run --from-ref` classify as the hooks do. An `edit` never does this: the edit path runs each detector exactly once.
+- **Known recall cost:** a second violation added inside a container that was already violating is pre-existing (R 0.15 against 0.26 for changed lines only). That is the trade the precision buys, and it is asserted in the tests rather than left to be rediscovered.
+
+**Known miss, unchanged for `instance` rules:** a change that causes a finding on an untouched line (e.g. an unused import after deleting its last use) is classified pre-existing.
 
 ### Storage
 
-`sessions/<session-id>/baseline.jsonl` in the project's cache directory (§12): one `start` record with the session-start commit, one record per snapshot (line hashes base64-encoded). Never cleared by `reset`.
+`sessions/<session-id>/baseline.jsonl` in the project's cache directory (§12): one `start` record with the session-start commit, one record per snapshot (line hashes base64-encoded), and one `fingerprint` record per `(file, container rule)` measured — `{ t, file, rule, ranges }`, plain JSON, because a container rule matches a handful of nodes and a readable store is worth more than the bytes. First-writer-wins per file, and per file and rule. Never cleared by `reset`. **No file content is stored**, which is why fingerprints are measured where the baseline is taken rather than by keeping the before-content and re-running the rule on every edit.
 
 ## 9. Session
 
@@ -732,7 +741,8 @@ Mechanisms:
 - one detector run per kind per event, kinds in parallel (§6);
 - slow tools default to `verify` (`eslint`, `llm`);
 - persistent, content-addressed caches for detectors with expensive setup;
-- no daemon, no in-process caches.
+- no daemon, no in-process caches;
+- `container` fingerprints (§8) are measured on the `touch` path, where the file is being read and snapshotted anyway, so the edit path still runs each detector exactly once. A project with no `container` rule pays one array scan. Measured 2026-09-28 with the change in place: p50 203 ms, p95 231 ms, unchanged.
 
 **Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
 
@@ -831,9 +841,11 @@ Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, 
 | Release | Scope |
 |---|---|
 | **0.1** | Everything in this document: pre-commit-style config, rule repos and the monorepo manifest, compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `install`, `uninstall`, `run`, `autoupdate`, `try-repo`, `validate`, `clean`, `hook`, `warm`, `doctor`; first rule packages; agent docs; perf test; npm package and GitHub Releases binary; public repository; dogfooded on a private FastAPI + React platform |
-| **0.2** | Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — dogfooding measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own. Not urgent for 0.1: no `llm` rule is ever selected for anyone (§6, Consent), so only a project that deliberately turned one on can meet this, and its warning now names the setting to raise |
+| **0.2** | **`scope: instance \| container` with baseline fingerprints (§8), done 2026-09-28** — plan `2026-09-28-rulecast-08a-container-scope.md`; Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — dogfooding measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own. Not urgent for 0.1: no `llm` rule is ever selected for anyone (§6, Consent), so only a project that deliberately turned one on can meet this, and its warning now names the setting to raise |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
 | **Open** | **A compiled rewrite, in Go or Rust, if binary latency becomes the complaint.** §16 is the trigger: a compiled JS executable pays ~260 ms unpacking and `dlopen`ing `@ast-grep/napi` on every run, which the tools in this niche — lefthook, gitleaks, ripgrep — do not, because they are compiled languages distributing a real binary through npm's `optionalDependencies` rather than a JS program impersonating one. The port is smaller than it looks: the config format, the rule semantics, the hook payload contract and the recorded fixtures under `test/payloads/` are language-independent, and they, not the TypeScript, are the specification. What would be rewritten is the detector implementations and the delivery rendering. Not scheduled, and not worth doing while the npm/Node path is the primary distribution |
+
+**Recorded, not scheduled: `python/thin-routes` from `llm` to `ast-grep`.** A pattern for the same convention measured P 0.99 / R 0.90 against the catalog's wording of it, and P 0.70 / R 0.84 against a stricter wording from the codebase's own owner. That is strong evidence the `llm` tier is not needed here — and also the clearest evidence there is that a rule's tier is a property of the sentence rather than of the convention, so no catalog can settle tiers once. It rests on one codebase, and the agent-edit check that would confirm it is paused. **Do not convert it yet:** `rulecast test` (plan 8c) is what would make the conversion checkable rather than argued.
 
 ## 18. Follow-up sub-project: `design-system` detector
 

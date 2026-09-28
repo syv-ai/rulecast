@@ -68,6 +68,7 @@ repos:
 | `exclude_types` | no | The file has none of these |
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
+| `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
 | `refuse_write` | no, default `false` | Refuse the edit itself when this rule fires on what the agent is writing (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
@@ -75,6 +76,44 @@ repos:
 | `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos |
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
+
+### Instance and container rules
+
+rulecast only reports what the agent's own edit caused; everything else is summarised as pre-existing
+and never blocks. `scope` says how it decides.
+
+`instance`, the default, calls a finding new when the agent's edit touched the lines the detector
+matched. That is right when the convention is about a token: a `crud.` call in a route is a violation
+at the line it sits on, and an edit that adds one is an edit that touched it.
+
+`container` calls a finding new when the node the match spans was *not already violating the rule*
+before the agent started. Use it when the convention is a property of the enclosing function or
+component:
+
+```yaml
+- id: python/slim-routes
+  files: '(^|/)routes/.*\.py$'
+  scope: container
+  detect:
+    ast-grep:
+      language: python
+      rule: { kind: function_definition, has: { kind: if_statement, stopBy: end } }
+  message: "{{file}}:{{line}} has branching in a route. Move the decision into a service."
+```
+
+Without `scope: container` this rule would fire on every edit anywhere inside a long route, because
+the match is the whole function and so overlaps every change in it. Measured over 1,377
+agent-written sites, that is precision 0.62; the container comparison is 0.76.
+
+Two things to know before reaching for it:
+
+- **A second violation added to an already-violating container is pre-existing.** The rule is about
+  the container, and the container was already broken. If you want every added occurrence reported,
+  the convention is really about the token — use `instance`.
+- **It needs a baseline to compare against.** Where rulecast has none for a file — the file was
+  changed outside the agent's tools, or is over `max_file_bytes` — a `container` rule falls back to
+  `instance`. An `llm` rule always does: measuring its baseline would mean a second model call every
+  time the agent opens a file.
 
 ### Refusing a write
 
