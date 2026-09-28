@@ -2,7 +2,7 @@
 
 Spec: `docs/specs/2026-09-15-rulecast-design.md`
 
-The spec is split into seven plans. Each produces working, tested software on its own and builds on the previous one. Plans 3 and 4 were added on 2026-09-19 for the pre-commit-style config and the interactive `init` (spec revision of 2026-09-16). The structural detectors, LLM and distribution plans moved from 3–5 to 5–7.
+The spec is split into seven plans. Each produces working, tested software on its own and builds on the previous one. Plans 3 and 4 were added on 2026-09-19 for the pre-commit-style config and the interactive `init` (spec revision of 2026-09-16). The structural detectors, LLM and distribution plans moved from 3–5 to 5–7. Plan 8 was added on 2026-09-28, after 0.1 shipped, from measurements of where rulecast is actually weak rather than from the spec.
 
 | # | Plan | Delivers | Spec sections | Status |
 |---|---|---|---|---|
@@ -13,6 +13,8 @@ The spec is split into seven plans. Each produces working, tested software on it
 | 5 | Structural and external detectors | `ast-grep`, `command`, `linter` (ruff, oxlint, eslint); exported detector and adapter contract suites; structural catalog rules; the standalone-binary check that settles §16's early risk | §6, §13, §15, §16 | Done (2026-09-20), in three parts executed in order: `2026-09-20-rulecast-05a-ast-grep.md` (tasks 1–8), `05b-command-linter.md` (1–8), `05c-contracts-perf.md` (1–6); edit hook p50 207 ms, p95 229–358 ms on an Apple M3 Pro with all five detectors |
 | 6 | LLM detector | `llm` detector; providers `claude-code`, `opencode`, `anthropic`, `openai-compatible`; model aliases; per-call cache; per-verify file budget; catalog llm rule and init consent | §6 (`llm`), §14, §15 | Done (2026-09-22), in three parts executed in order: `2026-09-21-rulecast-06a-providers.md` (tasks 1–8), `06b-detector.md` (1–7), `06c-providers-catalog.md` (1–8); edit hook p50 171 ms, p95 214 ms on an Apple M3 Pro — `llm` is `verify`-only, so it never reaches the edit path |
 | 7 | Distribution | `rulecast doctor` (including the llm pre-flight checks plan 6 defers to it), standalone binary, release pipeline, public repository (needed by the drafting prompt's raw GitHub links), dogfooding on a private client codebase | §5 (doctor), §16, §17 | Done (2026-09-22), in three parts executed in order: `2026-09-22-rulecast-07a-doctor.md` (doctor), `07b-ci-release.md` (README, CI, releases), `07c-public-dogfood.md` (public-repo sweep, the dogfood). Edit hook p50 188 ms, p95 203 ms on an Apple M3 Pro with all six detectors. Making the repository public and cutting 0.1.0 are handed to the user, not done here. |
+
+| 8 | Effectiveness and authoring | `scope: instance \| container` with baseline fingerprints; `run --all-files` as an adoption backlog; `rulecast test` with inline examples and a volume check; rulecast installed on its own repository | §4, §8, §11, §12 (CLI), §13, §15, §17 | Planned (2026-09-28), in four independently shippable parts: `2026-09-28-rulecast-08a-container-scope.md`, `08b-adoption-backlog.md`, `08c-rule-test.md`, `08d-self-install.md`. Each is drawn from a measurement rather than a guess; the evidence is stated at the top of each plan |
 
 The `design-system` detector (§18) gets its own spec after 0.1.
 
