@@ -3,6 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { computeChanges, isNew } from "../../../src/core/baseline/baseline"
+import { mapLine } from "../../../src/core/baseline/changes"
 import { snapshotOf } from "../../../src/core/baseline/hash"
 import { headCommit } from "../../../src/core/git"
 import type { Match } from "../../../src/core/types"
@@ -26,12 +27,15 @@ describe("computeChanges", () => {
       ["same.ts", snapshotOf("x\n")],
     ])
     const changes = await computeChanges(root, ["a.ts", "same.ts"], { snapshots, fallbackCommit: null })
-    expect(changes).toEqual(
+    expect(changes.sets).toEqual(
       new Map([
         ["a.ts", { changedLines: [[2, 2]] }],
         ["same.ts", { changedLines: [] }],
       ]),
     )
+    // Every file with a change set has a line map, including one that did not change.
+    expect([...changes.maps.keys()]).toEqual(["a.ts", "same.ts"])
+    expect(mapLine(changes.maps.get("same.ts")!, 1)).toBe(1)
   })
 
   test("falls back to the commit, and has no baseline for files absent there", async () => {
@@ -40,7 +44,8 @@ describe("computeChanges", () => {
     await writeFile(path.join(root, "a.ts"), "one\ntwo\nthree\n")
     await writeFile(path.join(root, "new.ts"), "fresh\n")
     const changes = await computeChanges(root, ["a.ts", "new.ts"], { snapshots: new Map(), fallbackCommit: commit })
-    expect(changes).toEqual(new Map([["a.ts", { changedLines: [[3, 3]] }]]))
+    expect(changes.sets).toEqual(new Map([["a.ts", { changedLines: [[3, 3]] }]]))
+    expect([...changes.maps.keys()]).toEqual(["a.ts"])
   })
 
   test("skips deleted files and has no baseline without snapshot or commit", async () => {
@@ -50,7 +55,8 @@ describe("computeChanges", () => {
       snapshots: new Map([["gone.ts", snapshotOf("y\n")]]),
       fallbackCommit: null,
     })
-    expect(changes).toEqual(new Map())
+    expect(changes.sets).toEqual(new Map())
+    expect(changes.maps).toEqual(new Map())
   })
 })
 

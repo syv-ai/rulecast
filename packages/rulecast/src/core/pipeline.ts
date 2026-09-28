@@ -283,7 +283,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       if (event.files.length === 0 && session) files = relevant(view.work.edited)
     }
 
-    const changes = await computeChanges(root, files, { snapshots, fallbackCommit })
+    const baselineChanges = await computeChanges(root, files, { snapshots, fallbackCommit })
+    const changes = baselineChanges.sets
     if (event.kind === "verify" && session && !event.baseCommit) {
       // Files edited but back to their snapshot content have nothing new.
       files = files.filter((file) => changes.get(file)?.changedLines.length !== 0)
