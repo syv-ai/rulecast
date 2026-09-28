@@ -7,6 +7,7 @@
  */
 
 export { claudeCodeAdapter } from "./adapters/claude-code/adapter"
+export { type BacklogSummary, renderBacklog, summarise } from "./adapters/cli/backlog"
 export { ADAPTERS, adapterByName } from "./adapters/index"
 export type { CompiledDetector, CompiledRule, DetectorRule, TouchRule } from "./core/compile/rule"
 export { isDetectorRule } from "./core/compile/rule"

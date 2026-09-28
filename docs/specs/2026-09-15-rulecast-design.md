@@ -613,8 +613,8 @@ For each event, the core selects `(rule, files)` pairs before detection:
 Renderers arrange a `Delivery`; they never filter or truncate references.
 
 - **`renderAgentText`** (shared by agent adapters and `run --format agent`) groups findings by rule, caps each group at `max_matches_per_rule` lines plus `…and N more in M files`, then lists references. References from rule repos use their `<owner>/<repo>@<rev>:` label (§4).
-- **CLI terminal** — human layout with the same cap.
-- **JSON** — the `Delivery` as is.
+- **CLI terminal** — human layout with the same cap. With `--all-files` it appends the **adoption backlog** (below); `--summary` prints that and the warnings alone.
+- **JSON** — the `Delivery`'s named fields, plus `backlog`.
 - **SARIF 2.1.0** — findings as results; references omitted.
 
 Agent text example:
@@ -626,7 +626,9 @@ error api/no-client-in-components
   frontend/src/components/DocumentCard.tsx:3 imports DocumentsService from the generated client.
   Components never talk to the API. Use the feature's query hook.
 
-pre-existing (not blocking): backend/no-logic-in-routes ×4 in frontend/src/components/DocumentCard.tsx
+backlog in files you touched (not from your edit):
+  backend/no-logic-in-routes ×4 in frontend/src/components/DocumentCard.tsx
+  see all of it: rulecast run --all-files --summary
 
 --- docs/api-access.md#frontend-data-flow ---
 <section content>
@@ -634,6 +636,10 @@ pre-existing (not blocking): backend/no-logic-in-routes ×4 in frontend/src/comp
 --- docs/state.md: read this before continuing ---
 --- syv-ai/rulecast@v0.2.0:packages/rules-python/errors.md (provided earlier in this session) ---
 ```
+
+**The adoption backlog.** `run --all-files` and `run --summary` print, after the findings, how much of each rule the repository already owes: violations and files per rule, the worst files, and the total. **Counts, never a percentage.** One codebase went from 61 violations in 80 files to 57 in 194 over eight months — the rate fell from 76% to 29% while the count did not move, because new code complied and the old violations were only diluted. A team watching the rate would have believed it was fixing the problem. The output closes with the two sentences the evidence supports and no verdict: the stock does not fall from per-edit enforcement, and remediation is per file, because a file that already follows a rule rarely breaks it (2% of edits against 37% in files that mostly do not — one rule across 19 files, so a correlation rather than a mechanism).
+
+Pre-existing findings in a hook delivery are headed the same way and name the command, because "pre-existing (not blocking)" reads as *ignore this*. They still never block, and the hook never counts the repository: it cannot inside `edit_deadline_ms` (§13).
 
 ## 12. Adapters and CLI
 
@@ -671,7 +677,7 @@ Command names and flags follow pre-commit where it has an equivalent.
 | `rulecast init [--rules id,id \| --no-rules] [--agent <name>]... [--scope shared\|personal] [--yes]` | Interactive setup (below) |
 | `rulecast install [--agent <name>]... [--scope shared\|personal]` | Installs agent hooks (default: every adapter, shared scope), merged without modifying existing entries, and fetches missing rule repos |
 | `rulecast uninstall [--agent <name>]...` | Removes only the hook entries rulecast added |
-| `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A [--to-ref B]] [--format terminal\|agent\|json\|sarif] [--session <id>] [--no-llm]` | Verify event |
+| `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A [--to-ref B]] [--summary] [--format terminal\|agent\|json\|sarif] [--session <id>] [--no-llm]` | Verify event |
 | `rulecast autoupdate [--freeze] [--repo URL]` | Moves each URL repo's `rev` to its latest tag, preserving comments and formatting; `--freeze` writes the commit SHA with a `# frozen: <tag>` comment |
 | `rulecast try-repo <path\|url> [RULE_ID] [--ref REV] [run flags]` | Runs a repo's rules against the project without editing the config (for rule authors): a local directory as it is on disk, a URL at `--ref` (default `HEAD`) |
 | `rulecast validate [file…]` | Validates `.rulecast-config.yaml` as a config and `.rulecast-rules.yaml` as a manifest, by filename; with no arguments, whichever exist at the root. Exit 2 on diagnostics |
@@ -680,7 +686,7 @@ Command names and flags follow pre-commit where it has an equivalent.
 | `rulecast warm [--detector <kind>]...` | Builds detector caches (started detached by hooks; §13) |
 | `rulecast doctor` | Compile, check environment, dry-run every rule; prints cache paths |
 
-**`run` file selection:** explicit `--files`; otherwise `--from-ref A [--to-ref B]`: files changed since the merge base of A and B (B defaults to `HEAD`; without `--to-ref`, changes up to the working tree including untracked files), read from the working tree, with that merge base as the baseline; otherwise `--all-files`: `git ls-files --cached --others --exclude-standard`; otherwise, with `--session`, the session's edited files, as at a Stop; otherwise staged files, as pre-commit does. Without `--from-ref` and `--session` there is no baseline and every finding is new. `RULE_ID` runs that rule only. The CLI adapter maps error findings to exit code 1; it has no stop decision, so a run never counts as a stop block. CI documentation recommends `--from-ref` so llm rules judge only changed files.
+**`run` file selection:** explicit `--files`; otherwise `--from-ref A [--to-ref B]`: files changed since the merge base of A and B (B defaults to `HEAD`; without `--to-ref`, changes up to the working tree including untracked files), read from the working tree, with that merge base as the baseline; otherwise `--all-files`: `git ls-files --cached --others --exclude-standard`; otherwise, with `--session`, the session's edited files, as at a Stop; otherwise staged files, as pre-commit does. Without `--from-ref` and `--session` there is no baseline and every finding is new. `RULE_ID` runs that rule only. The CLI adapter maps error findings to exit code 1; it has no stop decision, so a run never counts as a stop block. CI documentation recommends `--from-ref` so llm rules judge only changed files. **`--summary`** prints the adoption backlog (§11) and the warnings instead of the per-finding lines, with any file selection and the same exit code; it is refused with `--format sarif`, which has nowhere to put it.
 
 ### `rulecast init`
 
@@ -841,7 +847,7 @@ Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, 
 | Release | Scope |
 |---|---|
 | **0.1** | Everything in this document: pre-commit-style config, rule repos and the monorepo manifest, compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `install`, `uninstall`, `run`, `autoupdate`, `try-repo`, `validate`, `clean`, `hook`, `warm`, `doctor`; first rule packages; agent docs; perf test; npm package and GitHub Releases binary; public repository; dogfooded on a private FastAPI + React platform |
-| **0.2** | **`scope: instance \| container` with baseline fingerprints (§8), done 2026-09-28** — plan `2026-09-28-rulecast-08a-container-scope.md`; Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — dogfooding measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own. Not urgent for 0.1: no `llm` rule is ever selected for anyone (§6, Consent), so only a project that deliberately turned one on can meet this, and its warning now names the setting to raise |
+| **0.2** | **`scope: instance \| container` with baseline fingerprints (§8), done 2026-09-28** — plan `2026-09-28-rulecast-08a-container-scope.md`; **`run --all-files` as an adoption backlog (§11), done 2026-09-28** — plan `08b-adoption-backlog.md`; Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; rule tests (inline good/bad examples run by `rulecast test`); an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — dogfooding measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own. Not urgent for 0.1: no `llm` rule is ever selected for anyone (§6, Consent), so only a project that deliberately turned one on can meet this, and its warning now names the setting to raise |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
 | **Open** | **A compiled rewrite, in Go or Rust, if binary latency becomes the complaint.** §16 is the trigger: a compiled JS executable pays ~260 ms unpacking and `dlopen`ing `@ast-grep/napi` on every run, which the tools in this niche — lefthook, gitleaks, ripgrep — do not, because they are compiled languages distributing a real binary through npm's `optionalDependencies` rather than a JS program impersonating one. The port is smaller than it looks: the config format, the rule semantics, the hook payload contract and the recorded fixtures under `test/payloads/` are language-independent, and they, not the TypeScript, are the specification. What would be rewritten is the detector implementations and the delivery rendering. Not scheduled, and not worth doing while the npm/Node path is the primary distribution |
 

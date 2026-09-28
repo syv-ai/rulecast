@@ -100,6 +100,37 @@ A refusal only ever rests on the text the agent is writing, never on a reconstru
 
 `rulecast run` is also how you use rulecast in CI. `--from-ref main` checks only what a branch changed, which matters most for `llm` rules — they judge changed files only.
 
+## Adopting a rule on a codebase that already breaks it
+
+`rulecast run --all-files --summary` tells you how much you already owe:
+
+```text
+backlog: 57 violations in 31 files
+
+  rule                            violations  files
+  python/routes-never-call-crud           57     31
+
+  worst files                     violations
+  app/api/routes/orders.py                12
+  app/api/routes/users.py                  9
+```
+
+Watch the count, not the rate. Here is one real codebase on one rule, on `main`:
+
+| date | violating / total |
+|---|---|
+| 2026-01-15 | 61 / 80 |
+| 2026-06-01 | 58 / 143 |
+| 2026-09-25 | 57 / 194 |
+
+The rate fell from 76% to 29% and the count did not move. New code complied; the old violations were
+never fixed, only diluted. A team watching the percentage would have believed it was winning.
+
+Per-edit enforcement does not touch that stock — it only stops it growing. Fix it a file at a time:
+edits to files that already followed the rule broke it 2% of the time, against 37% in files that
+mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not
+proven.)
+
 If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
 
 ## Agents
