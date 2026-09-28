@@ -134,6 +134,20 @@ against the 500 ms budget on the same machine.
   the hooks run the local build rather than a bare command. **It points at `dist/`**, so a fresh
   clone needs `pnpm install && pnpm build` before the hooks do anything; until then they fail open
   and `doctor` now says why.
+- **A stale `dist/` is worse than a missing one**, and this is the sharp edge of a tool that depends
+  on itself. Pulling this work into a checkout whose `dist/` predated the `examples` key produced a
+  build that rejects the repository's own configuration:
+
+  ```
+  config     .rulecast-config.yaml — 1 rule, 3 errors, 0 warnings
+    error    (detectors/no-direct-reads): (root): Unrecognized key(s) in object: 'examples'
+  ```
+
+  Every rule using a key the built binary does not know about stops compiling, so the hooks run and
+  deliver nothing. `doctor` reported it correctly and `pnpm build` fixed it, but nothing enforces the
+  rebuild: **after any change to the rule format, rebuild before trusting the hooks.** Two honest
+  fixes, neither taken yet — a `prepare`-style build, or `minimum_rulecast_version` on this
+  repository's own rules so the failure names the cause rather than the key.
 - `rulecast uninstall` then `rulecast install` reproduces `.claude/settings.json` byte for byte —
   the `AdapterInstall` round trip (§15), exercised here for the first time on a settings file that
   a person will also edit.
