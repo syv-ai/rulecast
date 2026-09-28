@@ -90,6 +90,7 @@ A refusal only ever rests on the text the agent is writing, never on a reconstru
 | `rulecast init` | Interactive setup |
 | `rulecast install` / `uninstall` | Add or remove the agent hooks |
 | `rulecast run` | Check staged files, changed files, or everything |
+| `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
 | `rulecast validate` | Check the config and print diagnostics |
 | `rulecast doctor` | Compile, check the environment, dry-run every rule |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
@@ -167,7 +168,7 @@ The budget is what shapes the design: one detector run per kind per event, kinds
 
 0.1. Everything above works and is tested. The config format may still change before 1.0 — `minimum_rulecast_version` exists so a rule can say what it needs.
 
-Next: adapters for Codex, Cursor and OpenCode; Biome; rule tests (good and bad examples run by `rulecast test`); an Azure OpenAI provider.
+Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 
 ## License
 

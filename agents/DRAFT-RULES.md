@@ -21,7 +21,9 @@ Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/ruleca
 - **Guidance**: true and useful, but not visible as a pattern. "Keep services small", "test RBAC both ways".
 - **Not about code**: commands, deployment, process. Skip these.
 
-For checkable conventions, prefer `path` (the file itself is the break), then `regex`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
+For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
+
+**Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
 
 ## 3. Draft one rule at a time
 
@@ -50,9 +52,29 @@ For each checkable convention:
    - `files`: a regex searched in the repo-relative path. Anchor it with `^` so it matches the directory you mean.
    - `message`: what is wrong at `{{file}}:{{line}}` and what to do instead, in one or two sentences.
    - `context`: the doc section the rule enforces, as `@<file>#<heading-slug>`. The slug is the heading in lowercase, punctuation dropped, spaces turned into `-`.
-3. Run `rulecast validate` and fix every diagnostic for your rule.
-4. Run `rulecast run <id> --all-files --format json`. Tell the developer how many findings it reports and show up to three as `file:line` with the line's text. Many findings mean the code does not follow the convention today: say so. Existing violations never block an agent; only new ones do.
-5. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 3 and 4. Remove dropped rules from the config.
+3. Give it `examples`: two `good` and two `bad`, taken from real code in this repository rather than invented. Each is a `path` the rule matches and the `code` at it.
+
+   ```yaml
+   examples:
+     good:
+       - path: backend/app/services/users.py
+         code: |
+           log.info("created user %s", user.id)
+     bad:
+       - path: backend/app/services/users.py
+         code: |
+           print("created user", user.id)
+   ```
+
+4. Run `rulecast validate` and fix every diagnostic for your rule.
+5. Run `rulecast test <id>`. Every example must pass.
+   - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
+   - Revise the pattern **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
+6. Run `rulecast test <id> --against <the directory the rule is scoped to>`. Report both numbers to the developer — violations, and how many of the matching files they are in — before asking them to keep it:
+   - Almost none, and the rule costs an agent context for nothing: 8 of 15 conventions measured under 25 violations across ~1,300 sites.
+   - A very large number, and it is probably true by definition rather than a convention: one React rule produced 131 findings that were all correct and none worth keeping.
+   Neither number decides it. The developer does.
+7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
 
@@ -65,11 +87,11 @@ For each guidance convention, add a touch rule. It delivers the section the firs
     - "@AGENTS.md#services"
 ```
 
-Validate it the same way. `rulecast run` reports no findings for touch rules, so skip step 4.
+Validate it the same way. A touch rule has no detector, so it takes no `examples` and `rulecast test` has nothing to run for it: skip steps 3, 5 and 6.
 
 ## 4. Finish
 
-Run `rulecast validate` a last time. Then summarise: the rules kept (id and one line each), the rules dropped, and the conventions you skipped, with the reason.
+Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise: the rules kept (id, one line each, and the `--against` count), the rules dropped, and the conventions you skipped, with the reason.
 
 ## Never
 

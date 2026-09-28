@@ -73,6 +73,7 @@ repos:
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
 | `context` | for touch rules | References delivered with the rule (below) |
+| `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
 | `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos |
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
@@ -145,6 +146,35 @@ writing it. Three things it does not do, all deliberate:
 `refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`.
 `linter`, `command` and `llm` hand a path to another program, which would read the file as it still
 is, so `rulecast validate` rejects them.
+
+### Examples
+
+`examples` holds `good` code the rule must leave alone and `bad` code it must flag. `rulecast test`
+runs them; `rulecast test <id> --against <paths>` fires the rule over real files and says how many
+violations it would produce and in how many of the files it matches.
+
+```yaml
+examples:
+  good:
+    - path: backend/app/services/users.py
+      code: |
+        log.info("created user %s", user.id)
+  bad:
+    - path: backend/app/services/users.py
+      code: |
+        print("created user", user.id)
+```
+
+- **`path` is required** and must match the rule's own `files`, `exclude` and type keys — those, and
+  `ast-grep`'s choice of parser, are all decided by the path, so an example without the right one
+  tests a different rule. A path the rule would never be given is a `rulecast validate` error.
+- **A `bad` example passes on at least one finding**, not an exact count.
+- A `path` rule has no `good` example to give: every file it matches is a violation by definition.
+- An `llm` rule's examples are only run when you name the rule — `rulecast test` on its own skips
+  them, because running one costs a model call.
+
+Write the examples from real code in the repository rather than inventing them, and treat a failing
+example as a wrong rule before a wrong example.
 
 ### Messages
 
