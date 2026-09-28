@@ -185,7 +185,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!session || restoredFiles === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
 
-  let baseline: BaselineState = { started: false, startCommit: null, snapshots: new Map() }
+  let baseline: BaselineState = {
+    started: false,
+    startCommit: null,
+    snapshots: new Map(),
+    fingerprints: new Map(),
+  }
   // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
   // takes snapshots, and neither starts the session.
   if (session && event.kind !== "reset" && event.kind !== "guard") {
