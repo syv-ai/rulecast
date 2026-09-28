@@ -1,8 +1,17 @@
 import { createHash } from "node:crypto"
 
-import { computeChanges, isNew } from "./baseline/baseline"
+import { computeChanges } from "./baseline/baseline"
+import { classify } from "./baseline/fingerprint"
 import { type Snapshot, snapshotOf } from "./baseline/hash"
-import { appendBaseline, type BaselineState, readBaseline, snapshotRecord, startRecord } from "./baseline/store"
+import { recordFingerprints } from "./baseline/record"
+import {
+  appendBaseline,
+  type BaselineRecord,
+  type BaselineState,
+  readBaseline,
+  snapshotRecord,
+  startRecord,
+} from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { writeOverflow } from "./delivery/persist"
@@ -259,11 +268,36 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     if (session) {
-      const records = []
+      const records: BaselineRecord[] = []
+      const snapshotted: string[] = []
       for (const file of relevant(event.files)) {
         if (baseline.snapshots.has(file)) continue
         const text = await readSourceFile(root, file)
-        if (text !== null) records.push(snapshotRecord(file, snapshotOf(text)))
+        if (text === null) continue
+        records.push(snapshotRecord(file, snapshotOf(text)))
+        snapshotted.push(file)
+      }
+      // Spec §8: a `container` rule's baseline is what it matched in the file before the agent
+      // touched it, so it is measured here, where the snapshot is taken and the content on disk
+      // is still the baseline. Only `edit`-stage rules: those are the cheap in-process ones by
+      // construction (§13, slow tools default to verify), and a verify fills in the rest itself.
+      if (snapshotted.length > 0) {
+        records.push(
+          ...(await recordFingerprints({
+            root,
+            files: snapshotted,
+            rules: project.rules,
+            disabled,
+            registry,
+            read: (file) => readSourceFile(root, file),
+            cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
+            contextFor: (rule) => resolveRuleContext(resolver, rule.context),
+            settings: { llm: config.llm },
+            event: "edit",
+            timeoutMs: config.timeouts.editDeadlineMs,
+            ceiling: { maxFileBytes: config.maxFileBytes, sizeOf: (file) => fileBytes(root, file) },
+          })),
+        )
       }
       await appendBaseline(session.dir, records)
     }
@@ -339,7 +373,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     findings = output.findings.map(({ rule, match }) => ({
       rule,
       match,
-      status: isNew(match, changes) ? "new" : "preexisting",
+      status: classify(match, rule.scope, rule.id, baselineChanges, baseline.fingerprints),
     }))
     for (const error of output.errors) {
       failed = true
