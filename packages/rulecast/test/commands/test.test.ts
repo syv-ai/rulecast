@@ -1,0 +1,149 @@
+import { describe, expect, test } from "vitest"
+
+import { runCli } from "../helpers/cli"
+import { localConfig } from "../helpers/config"
+import { createRepo } from "../helpers/git"
+import { stubAgentCli } from "../helpers/llm"
+
+const PY = "app/services/users.py"
+
+const httpException = (extra: Record<string, unknown> = {}) => ({
+  id: "backend/no-httpexception",
+  name: "No HTTPException in services",
+  files: "^app/services/.*\\.py$",
+  detect: { regex: { pattern: "raise HTTPException" } },
+  message: "{{file}}:{{line}} raises HTTPException",
+  examples: {
+    good: [{ path: PY, code: "def get():\n    raise NotFound()\n" }],
+    bad: [{ path: PY, code: "def get():\n    raise HTTPException(404)\n" }],
+  },
+  ...extra,
+})
+
+const project = (rules: Record<string, unknown>[], files: Record<string, string> = {}) =>
+  createRepo({ ".rulecast-config.yaml": localConfig(rules), ...files })
+
+const runTest = (cwd: string, ...argv: string[]) => runCli(cwd, ["test", ...argv])
+
+describe("rulecast test", () => {
+  test("every example passing exits 0 and scores the rule", async () => {
+    const root = await project([httpException()])
+    const result = await runTest(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("backend/no-httpexception")
+    expect(result.stdout).toContain("2/2")
+    expect(result.stdout).toContain("P 1.00")
+    expect(result.stdout).toContain("R 1.00")
+    expect(result.stdout).toContain("1 rule passed")
+  })
+
+  test("a good example the rule fires on exits 1 and shows the line it fired at", async () => {
+    const root = await project([
+      httpException({
+        examples: {
+          good: [{ path: PY, code: "def get():\n    raise HTTPException(404)\n" }],
+          bad: [{ path: PY, code: "def get():\n    raise HTTPException(500)\n" }],
+        },
+      }),
+    ])
+    const result = await runTest(root)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("good[0] app/services/users.py — fired at line 2")
+    expect(result.stdout).toContain("raise HTTPException(404)")
+    expect(result.stdout).toContain("1 of 1 rules failed")
+  })
+
+  test("a bad example the rule misses exits 1 and says so", async () => {
+    const root = await project([
+      httpException({ examples: { good: [], bad: [{ path: PY, code: "def get():\n    pass\n" }] } }),
+    ])
+    const result = await runTest(root)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("bad[0] app/services/users.py — no finding")
+  })
+
+  test("rules with no examples are listed and do not fail the run", async () => {
+    const root = await project([httpException({ examples: undefined })])
+    const result = await runTest(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("no examples: backend/no-httpexception")
+    expect(result.stdout).toContain("nothing to run")
+  })
+
+  test("a rule id runs only that rule", async () => {
+    const root = await project([
+      httpException(),
+      httpException({ id: "backend/other", examples: { good: [], bad: [{ path: PY, code: "pass\n" }] } }),
+    ])
+    const result = await runTest(root, "backend/no-httpexception")
+    expect(result.code).toBe(0)
+    expect(result.stdout).not.toContain("backend/other")
+  })
+
+  test("an unknown rule id exits 2 and points at validate", async () => {
+    const root = await project([httpException()])
+    const result = await runTest(root, "backend/nope")
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain('no rule "backend/nope" (see rulecast validate)')
+  })
+
+  test("bare, llm rules are skipped and say how to run them", async () => {
+    const root = await project([
+      {
+        id: "backend/judgement",
+        name: "Judgement",
+        files: "^app/services/.*\\.py$",
+        detect: { llm: { model: "haiku", question: "Does this need judgement?" } },
+        message: "{{file}}:{{line}} needs judgement",
+        examples: { good: [], bad: [{ path: PY, code: "pass\n" }] },
+      },
+    ])
+    await stubAgentCli(root, "claude")
+    const result = await runTest(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("skipped (llm; name the rule to run it)")
+    // Skipped is not failed and not "no examples": the rule has examples, they were not run.
+    expect(result.stdout).not.toContain("no examples")
+  })
+})
+
+describe("rulecast test --against", () => {
+  const files = {
+    "app/services/a.py": "raise HTTPException(1)\nraise HTTPException(2)\n",
+    "app/services/b.py": "raise HTTPException(3)\n",
+    "app/services/c.py": "pass\n",
+    "app/other/d.py": "raise HTTPException(4)\n",
+  }
+
+  test("reports the violations and the spread, and exits 0 whatever it finds", async () => {
+    const root = await project([httpException()], files)
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app")
+    expect(result.code).toBe(0)
+    // app/other/d.py is under the path but the rule does not match it, so it is not the denominator.
+    expect(result.stdout).toContain("3 violations in 2 of 3 matching files")
+    expect(result.stdout).toContain("app/services/a.py")
+    expect(result.stdout).toContain("A rule this common is usually true by definition")
+    expect(result.stdout).toContain("A rule with almost no violations")
+  })
+
+  test("a rule that fires nowhere still exits 0", async () => {
+    const root = await project([httpException()], { "app/services/c.py": "pass\n" })
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("0 violations in 0 of 1 matching files")
+  })
+
+  test("--against without a rule id exits 2", async () => {
+    const root = await project([httpException()], files)
+    const result = await runTest(root, "--against", "app")
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("--against needs a RULE_ID")
+  })
+
+  test("a path the rule matches nothing under says so rather than printing zeroes", async () => {
+    const root = await project([httpException()], files)
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app/other")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("no files under app/other match backend/no-httpexception")
+  })
+})

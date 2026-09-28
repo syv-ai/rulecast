@@ -10,6 +10,7 @@ const USAGE = `usage:
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast autoupdate [--freeze] [--repo URL]...
   rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]
+  rulecast test [RULE_ID]
   rulecast validate [file...]
   rulecast clean [--project]
   rulecast hook <adapter>

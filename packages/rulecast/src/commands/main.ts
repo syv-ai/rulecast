@@ -11,6 +11,7 @@ import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
 import { findRoot } from "./project"
 import { runCommand } from "./run"
+import { testCommand } from "./test"
 import { tryRepoCommand } from "./try-repo"
 import { UsageError } from "./usage"
 import { validateCommand } from "./validate"
@@ -41,6 +42,7 @@ const USAGE = `usage:
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast autoupdate [--freeze] [--repo URL]...
   rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]
+  rulecast test [RULE_ID]
   rulecast validate [file...]
   rulecast clean [--project]
   rulecast hook <adapter>
@@ -66,6 +68,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await autoupdateCommand(root, args, io)
       case "try-repo":
         return await tryRepoCommand(root, args, registry, io)
+      case "test":
+        return await testCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
       case "clean":
