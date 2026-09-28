@@ -162,6 +162,28 @@ describe("compile: local rules", () => {
     ])
   })
 
+  test("scope defaults to instance and container is carried through", async () => {
+    const project = await compileConfig(
+      local(
+        detectRule("plain"),
+        detectRule("wide", { scope: "container" }),
+        detectRule("narrow", { scope: "instance" }),
+      ),
+    )
+    expect(project.diagnostics).toEqual([])
+    expect(project.rules.map((rule) => [rule.id, rule.scope])).toEqual([
+      ["plain", "instance"],
+      ["wide", "container"],
+      ["narrow", "instance"],
+    ])
+  })
+
+  test("an unknown scope is a schema error naming the key", async () => {
+    const project = await compileConfig(local(detectRule("sideways", { scope: "sideways" })))
+    expect(project.rules).toEqual([])
+    expect(project.diagnostics.map((d) => d.message)).toEqual([expect.stringMatching(/^scope: /)])
+  })
+
   test("reports each rule problem as a diagnostic and excludes the rule", async () => {
     const project = await compileConfig(
       local(
@@ -175,6 +197,7 @@ describe("compile: local rules", () => {
         detectRule("refuse-unguardable", { detect: { fake: {} }, refuse_write: true }),
         detectRule("refuse-verify-only", { detect: { guarding: {} }, refuse_write: true, stages: ["verify"] }),
         touchRule("refuse-without-detect", { refuse_write: true }),
+        touchRule("scope-without-detect", { scope: "container" }),
         detectRule("bad-regex", { files: "(" }),
         detectRule("bad-type", { types: ["cobol"] }),
         touchRule("missing-file", { context: ["@docs/nope.md"] }),
@@ -199,6 +222,7 @@ describe("compile: local rules", () => {
       ["refuse-unguardable", "refuse_write needs a detector that can judge a file before it is written; fake cannot"],
       ["refuse-verify-only", "refuse_write needs edit among the rule's stages"],
       ["refuse-without-detect", "refuse_write needs detect: there is nothing to refuse a write for"],
+      ["scope-without-detect", "scope needs detect: there is nothing to classify"],
       ["bad-regex", expect.stringMatching(/^files: invalid regex: /)],
       ["bad-type", 'unknown file type "cobol"'],
       ["missing-file", "referenced file not found: docs/nope.md"],

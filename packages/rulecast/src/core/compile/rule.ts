@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { sectionRange } from "../anchors"
-import type { Config, RuleEntry, Stage } from "../config/schema"
+import type { Config, RuleEntry, RuleScope, Stage } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
@@ -24,6 +24,12 @@ export interface CompiledRule {
   /** "local", or the rule repo label ("syv-ai/rulecast@v0.2.0"). */
   source: string
   severity: Severity
+  /**
+   * How a finding of this rule is classified against the baseline (spec §8). `instance` — the
+   * default, and every rule before 0.2 — is new when the match touches a changed line. `container`
+   * is new when the node the match spans was not already violating the rule at the baseline.
+   */
+  scope: RuleScope
   /** Refuse the agent's write when this rule fires on what it is writing (spec §9, Guard). */
   refuseWrite: boolean
   stages: Stage[]
@@ -111,6 +117,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     if (unknown) return `unknown template variable "${unknown}"`
   } else {
     if (data.refuse_write) return "refuse_write needs detect: there is nothing to refuse a write for"
+    if (data.scope) return "scope needs detect: there is nothing to classify"
     if (stages.some((stage) => stage !== "touch")) return "rules without detect need stages: [touch]"
     if (data.message !== undefined) return "message needs detect"
     if (!data.context?.length) return "rules without detect need context"
@@ -149,6 +156,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     description: data.description ?? null,
     source: input.source,
     severity: data.severity ?? "error",
+    scope: data.scope ?? "instance",
     refuseWrite: data.refuse_write === true,
     stages,
     matches: (file) => global(file) && filter(file),

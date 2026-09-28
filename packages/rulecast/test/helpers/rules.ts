@@ -20,6 +20,7 @@ export function rule(overrides: Overrides): CompiledRule {
     description: null,
     source: "local",
     severity: "error",
+    scope: "instance",
     refuseWrite: false,
     stages: ["edit", "verify"],
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },

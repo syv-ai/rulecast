@@ -8,6 +8,9 @@ export type Stage = (typeof STAGES)[number]
 
 export const RULE_ID = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/
 
+export const RULE_SCOPES = ["instance", "container"] as const
+export type RuleScope = (typeof RULE_SCOPES)[number]
+
 const idSchema = z.string().regex(RULE_ID, "must be lowercase segments separated by /")
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "must be a version like 0.2.0")
 const stagesSchema = z.array(z.enum(STAGES)).nonempty()
@@ -25,6 +28,12 @@ const ruleKeys = {
   stages: stagesSchema.optional(),
   minimum_rulecast_version: versionSchema.optional(),
   severity: z.enum(["error", "warning"]).optional(),
+  /**
+   * What the convention belongs to (§8). `instance`: the token the detector matched, classified by
+   * whether the agent's edit touched it. `container`: the node the match spans, classified by
+   * whether that node already violated the rule at the baseline.
+   */
+  scope: z.enum(RULE_SCOPES).optional(),
   refuse_write: z.boolean().optional(),
   detect: z
     .record(z.unknown())
