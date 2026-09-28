@@ -20,6 +20,13 @@ export interface FingerprintInput {
   /** Which stage's rules to measure: `edit` on the touch path, `verify` when a verify fills gaps. */
   event: DetectorEvent
   timeoutMs: number
+  /**
+   * Where the baseline content is. `disk`: it is the file, so any detector can measure it. `memory`:
+   * `read` is serving content that is not on disk, so only detectors that read through `read` can —
+   * a linter or a command handed a path would measure the file as it stands now, which is the one
+   * thing this must not do. That is exactly the `guards` contract (§6).
+   */
+  source: "disk" | "memory"
   /** Omitted when the content is already in memory: the ceiling exists to bound reading and parsing. */
   ceiling?: { maxFileBytes: number; sizeOf(file: string): Promise<number | null> }
 }
@@ -43,12 +50,15 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
   // The overwhelmingly common case. Cost is one array scan, not a detector run.
   if (!input.rules.some((rule) => rule.scope === "container")) return []
 
+  const guards = (kind: string) => input.registry.get(kind)?.guards === true
   let selections = selectDetectorRules(input.rules, input.event, input.files, input.disabled).filter(
-    (selection) => selection.rule.scope === "container" && selection.rule.detector.kind !== "llm",
+    (selection) =>
+      selection.rule.scope === "container" &&
+      selection.rule.detector.kind !== "llm" &&
+      (input.source === "disk" || guards(selection.rule.detector.kind)),
   )
   if (input.ceiling) {
-    const bounded = (kind: string) => input.registry.get(kind)?.guards === true
-    const applied = await applySizeCeiling(selections, input.ceiling.maxFileBytes, bounded, input.ceiling.sizeOf)
+    const applied = await applySizeCeiling(selections, input.ceiling.maxFileBytes, guards, input.ceiling.sizeOf)
     selections = applied.selections
   }
   if (selections.length === 0) return []

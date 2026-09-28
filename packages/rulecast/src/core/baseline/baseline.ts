@@ -21,6 +21,15 @@ export interface BaselineSources {
 export interface BaselineChanges {
   sets: Map<string, ChangeSet>
   maps: Map<string, LineMap>
+  /**
+   * Baseline content, for the files whose baseline was read from a commit rather than a snapshot.
+   *
+   * Kept because a verify can afford to measure a `container` rule's fingerprints on demand and
+   * this is the content to measure them against — read once here rather than fetched from git
+   * again. Files with a snapshot are absent: a snapshot is line hashes, and the content it was
+   * taken from is gone.
+   */
+  fromCommit: Map<string, string>
 }
 
 /**
@@ -32,18 +41,21 @@ export async function computeChanges(
   files: readonly string[],
   sources: BaselineSources,
 ): Promise<BaselineChanges> {
-  const changes: BaselineChanges = { sets: new Map(), maps: new Map() }
+  const changes: BaselineChanges = { sets: new Map(), maps: new Map(), fromCommit: new Map() }
   for (const file of files) {
     // Without any baseline source there is nothing to compare; don't read the file.
     if (!sources.snapshots.has(file) && !sources.fallbackCommit) continue
     let before = sources.snapshots.get(file) ?? null
+    let commitText: string | null = null
     if (!before && sources.fallbackCommit) {
-      const text = await fileAtCommit(root, sources.fallbackCommit, file)
-      before = text === null ? null : snapshotOf(text)
+      commitText = await fileAtCommit(root, sources.fallbackCommit, file)
+      before = commitText === null ? null : snapshotOf(commitText)
     }
     if (!before) continue
     const current = await readSourceFile(root, file)
     if (current === null) continue
+    // Only for a file that ends up with a change set: a deleted one has nothing to classify.
+    if (commitText !== null) changes.fromCommit.set(file, commitText)
     const after = snapshotOf(current)
     if (after.fileHash === before.fileHash) {
       changes.sets.set(file, { changedLines: [] })

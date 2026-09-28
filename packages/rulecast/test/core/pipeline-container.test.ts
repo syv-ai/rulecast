@@ -3,6 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { readBaseline } from "../../src/core/baseline/store"
+import { headCommit } from "../../src/core/git"
 import { sessionDir } from "../../src/core/session/session"
 import type { Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
@@ -117,6 +118,30 @@ describe("pipeline: container scope", () => {
     expect((await baseline()).fingerprints).toEqual(new Map())
     const store = await readFile(path.join(sessionDir(stateDirFor(root), "s1"), "baseline.jsonl"), "utf8")
     expect(store).not.toContain("fingerprint")
+  })
+
+  test("a verify against a base commit measures the fingerprints it is missing", async () => {
+    const before = route("list_users", { crud: true, filler: 6 })
+    const { root, send, write } = await scenario([containerRule("container")], before)
+    const base = (await headCommit(root))!
+
+    await write(`${before}\n    log("one more")`)
+    const delivery = await send({ kind: "verify", files: [ROUTES], baseCommit: base })
+
+    // No touch happened, so nothing was recorded at snapshot time; the verify measured it.
+    expect(delivery.findings).toEqual([])
+    expect(delivery.preexistingSummary).toEqual([{ rule: "routes/no-crud", file: ROUTES, count: 1 }])
+  })
+
+  test("a verify against a base commit still reports a route the branch broke", async () => {
+    const before = route("list_users", { crud: false, filler: 6 })
+    const { root, send, write } = await scenario([containerRule("container")], before)
+    const base = (await headCommit(root))!
+
+    await write(before.replace("return service.fetch()", "return crud.fetch_users()"))
+    const delivery = await send({ kind: "verify", files: [ROUTES], baseCommit: base })
+
+    expect(delivery.findings.map((finding) => finding.line)).toEqual([1])
   })
 
   test("an edit with no snapshot falls back to instance classification", async () => {

@@ -294,6 +294,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
             contextFor: (rule) => resolveRuleContext(resolver, rule.context),
             settings: { llm: config.llm },
             event: "edit",
+            source: "disk",
             timeoutMs: config.timeouts.editDeadlineMs,
             ceiling: { maxFileBytes: config.maxFileBytes, sizeOf: (file) => fileBytes(root, file) },
           })),
@@ -327,6 +328,41 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (event.kind === "verify" && session && !event.baseCommit) {
       // Files edited but back to their snapshot content have nothing new.
       files = files.filter((file) => changes.get(file)?.changedLines.length !== 0)
+    }
+
+    // A verify has seconds where an edit has 350 ms, so it can measure a container rule's baseline
+    // itself instead of falling back to line overlap. This is what lets a pull-request gate see the
+    // same classification the hooks do. Only files whose baseline *is* the commit: where a snapshot
+    // exists, the commit may not be what the agent started from, and a fingerprint measured against
+    // the wrong baseline is worse than no fingerprint at all.
+    if (event.kind === "verify" && baselineChanges.fromCommit.size > 0) {
+      const texts = baselineChanges.fromCommit
+      const missing = [...texts.keys()].filter((file) => !baseline.fingerprints.has(file))
+      const records =
+        missing.length === 0
+          ? []
+          : await recordFingerprints({
+              root,
+              files: missing,
+              rules: project.rules,
+              disabled,
+              registry,
+              read: async (file) => texts.get(file) ?? null,
+              cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
+              contextFor: (rule) => resolveRuleContext(resolver, rule.context),
+              settings: { llm: config.llm },
+              event: "verify",
+              source: "memory",
+              timeoutMs: config.timeouts.verifyMs,
+            })
+      for (const record of records) {
+        if (record.t !== "fingerprint") continue
+        const byRule = baseline.fingerprints.get(record.file) ?? new Map<string, [number, number][]>()
+        baseline.fingerprints.set(record.file, byRule)
+        byRule.set(record.rule, record.ranges)
+      }
+      // Persisted so the next event in the session reuses them rather than measuring again.
+      if (session && records.length > 0) await appendBaseline(session.dir, records)
     }
 
     const skip = options.skipDetectorKinds ?? new Set<string>()

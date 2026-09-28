@@ -23,12 +23,17 @@ function edit(before: string[], after: string[]): BaselineChanges {
   return {
     sets: new Map([[FILE, { changedLines: diff.changed }]]),
     maps: new Map([[FILE, diff.map]]),
+    fromCommit: new Map(),
   }
 }
 
 /** Nothing about the file changed. */
 function untouched(lines: number): BaselineChanges {
-  return { sets: new Map([[FILE, { changedLines: [] }]]), maps: new Map([[FILE, identityMap(lines)]]) }
+  return {
+    sets: new Map([[FILE, { changedLines: [] }]]),
+    maps: new Map([[FILE, identityMap(lines)]]),
+    fromCommit: new Map(),
+  }
 }
 
 const recorded = (...ranges: [number, number][]): Fingerprints => new Map([[FILE, new Map([["slim-routes", ranges]])]])
@@ -131,7 +136,7 @@ describe("classify: container scope", () => {
   })
 
   test("a file with no baseline at all makes every match new", () => {
-    const empty: BaselineChanges = { sets: new Map(), maps: new Map() }
+    const empty: BaselineChanges = { sets: new Map(), maps: new Map(), fromCommit: new Map() }
     expect(container(at(1, 30), empty, none)).toBe("new")
     expect(container(at(1, 30), empty, recorded([1, 30]))).toBe("new")
   })
