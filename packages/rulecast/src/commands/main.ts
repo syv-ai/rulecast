@@ -38,7 +38,7 @@ const USAGE = `usage:
   rulecast init [--rules id,id | --no-rules] [--agent <name>]... [--scope shared|personal] [--yes]
   rulecast install [--agent <name>]... [--scope shared|personal]
   rulecast uninstall [--agent <name>]...
-  rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
+  rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--no-llm]
   rulecast autoupdate [--freeze] [--repo URL]...
   rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]
   rulecast validate [file...]

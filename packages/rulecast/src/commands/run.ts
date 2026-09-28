@@ -18,6 +18,8 @@ export interface RunArgs {
   /** The paths after --files, as given; null without --files. */
   files: string[] | null
   allFiles: boolean
+  /** Print the backlog summary and nothing else. */
+  summary: boolean
   fromRef: string | null
   toRef: string | null
   format: CliFormat
@@ -36,6 +38,7 @@ export function parseRunArgs(args: string[]): RunArgs {
     options: {
       files: { type: "boolean", default: false },
       "all-files": { type: "boolean", default: false },
+      summary: { type: "boolean", default: false },
       "from-ref": { type: "string" },
       "to-ref": { type: "string" },
       format: { type: "string", default: "terminal" },
@@ -66,6 +69,9 @@ export function parseRunArgs(args: string[]): RunArgs {
   if (values.files && files.length === 0) throw new UsageError("--files needs at least one file")
   if (values.files && values["all-files"]) throw new UsageError("--all-files and --files cannot be combined")
   if (toRef !== null && fromRef === null) throw new UsageError("--to-ref needs --from-ref")
+  // SARIF has nowhere to put a summary, and a flag that is silently ignored is how people stop
+  // trusting a tool's output.
+  if (values.summary && format === "sarif") throw new UsageError("--summary cannot be combined with --format sarif")
   if (fromRef !== null && (values.files || values["all-files"])) {
     throw new UsageError("--from-ref cannot be combined with --all-files or --files")
   }
@@ -73,6 +79,7 @@ export function parseRunArgs(args: string[]): RunArgs {
     leading,
     files: values.files ? files : null,
     allFiles: values["all-files"],
+    summary: values.summary,
     fromRef,
     toRef,
     format,
@@ -139,7 +146,11 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     skipDetectorKinds: run.noLlm ? new Set(["llm"]) : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
   })
-  const text = formatDelivery(result.delivery, run.format, { maxMatchesPerRule: project.config.maxMatchesPerRule })
+  const text = formatDelivery(result.delivery, run.format, {
+    maxMatchesPerRule: project.config.maxMatchesPerRule,
+    findings: !run.summary,
+    backlog: run.allFiles || run.summary,
+  })
   if (text) io.stdout(`${text}\n`)
   return exitCodeFor(result.delivery, result.failed)
 }

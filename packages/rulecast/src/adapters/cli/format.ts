@@ -1,17 +1,34 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
 import type { Delivery, Finding } from "../../core/types"
+import { renderBacklog, summarise } from "./backlog"
 
 export const CLI_FORMATS = ["terminal", "agent", "json", "sarif"] as const
 export type CliFormat = (typeof CLI_FORMATS)[number]
 
 export interface FormatOptions {
   maxMatchesPerRule: number
+  /** Print the per-finding lines. False for `--summary`, where the list is the noise. */
+  findings?: boolean
+  /** Append the adoption backlog. True for `--all-files` and `--summary`. */
+  backlog?: boolean
 }
+
+/** The worst files named before the rest are counted: enough to pick one, not a second listing. */
+const TOP_FILES = 10
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
 function terminal(delivery: Delivery, options: FormatOptions): string {
   const out: string[] = []
+  // --summary: the warnings still matter — a rule that is broken makes the count below wrong — but
+  // the list of sites does not, which is the whole reason for the flag.
+  if (options.findings === false) {
+    if (delivery.warnings.length > 0) {
+      out.push("warnings:", ...delivery.warnings.map((warning) => `  - ${warning}`), "")
+    }
+    if (options.backlog === true) out.push(renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
+    return out.join("\n")
+  }
   const shown = new Map<string, number>()
   const hidden = new Map<string, Finding[]>()
   for (const finding of delivery.findings) {
@@ -50,6 +67,9 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   out.push(
     delivery.findings.length === 0 ? "no findings" : `${plural(errors, "error")}, ${plural(warningsCount, "warning")}`,
   )
+  // Last, so it is what is left on screen: the count is the thing to act on, and the list above it
+  // is a hundred lines of detail nobody reads to the end.
+  if (options.backlog === true) out.push("", renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
   return out.join("\n")
 }
 
@@ -63,6 +83,9 @@ function json(delivery: Delivery): string {
   return JSON.stringify(
     {
       findings: delivery.findings,
+      // Always, whatever flags were given: a consumer that did not ask for it can ignore a key, and
+      // one that wanted it cannot conjure it. This is the number a team tracks over time.
+      backlog: summarise(delivery),
       preexistingSummary: delivery.preexistingSummary,
       references: delivery.references,
       touches: delivery.touches,

@@ -54,6 +54,7 @@ describe("formatDelivery", () => {
   test("json publishes a named shape, not the whole delivery", () => {
     const parsed = JSON.parse(formatDelivery(delivery, "json", { maxMatchesPerRule: 10 }))
     expect(Object.keys(parsed).sort()).toEqual([
+      "backlog",
       "findings",
       "preexistingSummary",
       "references",

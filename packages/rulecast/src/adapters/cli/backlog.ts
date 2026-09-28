@@ -56,9 +56,12 @@ export function summarise(delivery: Delivery): BacklogSummary {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
-function table(rows: [string, string][], gap = 2): string[] {
-  const width = Math.max(...rows.map(([left]) => left.length))
-  return rows.map(([left, right]) => `  ${left.padEnd(width + gap)}${right}`)
+/** First column left, the rest right: the numbers are meant to be compared down the column. */
+function table(header: string[], rows: string[][]): string[] {
+  const widths = header.map((_, column) => Math.max(...[header, ...rows].map((row) => row[column]!.length)))
+  const line = (row: string[]) =>
+    `  ${row.map((cell, column) => (column === 0 ? cell.padEnd(widths[column]!) : cell.padStart(widths[column]!))).join("  ")}`
+  return [line(header), ...rows.map(line)]
 }
 
 export function renderBacklog(summary: BacklogSummary, options: { topFiles: number }): string {
@@ -67,12 +70,21 @@ export function renderBacklog(summary: BacklogSummary, options: { topFiles: numb
   const out: string[] = [
     `backlog: ${plural(summary.totalViolations, "violation")} in ${plural(summary.totalFiles, "file")}`,
     "",
-    ...table(summary.rules.map((entry) => [entry.rule, `${entry.violations}  in ${entry.files}`])),
+    ...table(
+      ["rule", "violations", "files"],
+      summary.rules.map((entry) => [entry.rule, String(entry.violations), String(entry.files)]),
+    ),
   ]
 
   const shown = summary.files.slice(0, options.topFiles)
   if (shown.length > 0) {
-    out.push("", "worst files", ...table(shown.map((entry) => [entry.file, String(entry.violations)])))
+    out.push(
+      "",
+      ...table(
+        ["worst files", "violations"],
+        shown.map((entry) => [entry.file, String(entry.violations)]),
+      ),
+    )
     const rest = summary.files.length - shown.length
     if (rest > 0) out.push(`  …and ${plural(rest, "more file")}`)
   }

@@ -21,7 +21,42 @@ describe("rulecast run: file selection", () => {
     expect(result.code).toBe(1)
     expect(result.stdout).toContain("app/services/users.py:2:5  error    backend/no-httpexception")
     expect(result.stdout).toContain("src/client/api.ts:1:1  warning  frontend/no-generated-edits")
-    expect(result.stdout.trimEnd().endsWith("1 error, 1 warning")).toBe(true)
+    expect(result.stdout).toContain("1 error, 1 warning")
+    // The backlog is what is left on screen: the count is the thing to act on.
+    expect(result.stdout.trimEnd().endsWith("a file that already follows a rule rarely breaks it.")).toBe(true)
+    expect(result.stdout).toContain("backlog: 2 violations in 2 files")
+  })
+
+  test("--summary prints the backlog alone, with the same exit code", async () => {
+    const root = await createFixture()
+    const summary = await run(root, "--all-files", "--summary")
+    expect(summary.code).toBe(1)
+    expect(summary.stdout).toContain("backlog: 2 violations in 2 files")
+    expect(summary.stdout).not.toContain("app/services/users.py:2:5")
+    expect(summary.code).toBe((await run(root, "--all-files")).code)
+  })
+
+  test("--summary works with any file selection and reports nothing when there is nothing", async () => {
+    const root = await createFixture()
+    expect(await run(root, "--summary")).toMatchObject({ code: 0, stdout: "backlog: no violations\n" })
+  })
+
+  test("--summary with --format sarif is a usage error naming both", async () => {
+    const root = await createFixture()
+    const result = await run(root, "--all-files", "--summary", "--format", "sarif")
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("--summary cannot be combined with --format sarif")
+  })
+
+  test("--format json carries the backlog whatever flags were given", async () => {
+    const root = await createFixture()
+    const result = await run(root, "--all-files", "--format", "json")
+    const parsed = JSON.parse(result.stdout)
+    expect(parsed.backlog.totalViolations).toBe(2)
+    expect(parsed.backlog.rules.map((entry: { rule: string }) => entry.rule).sort()).toEqual([
+      "backend/no-httpexception",
+      "frontend/no-generated-edits",
+    ])
   })
 
   test("without flags only staged files are checked", async () => {
