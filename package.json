@@ -20,7 +20,7 @@
     "test": "pnpm -r test",
     "test:linux": "pnpm --filter @syv-ai/rulecast test:linux",
     "typecheck": "pnpm -r typecheck",
-    "version-packages": "changeset version && pnpm sync-version",
+    "version-packages": "changeset version && pnpm sync-version && pnpm readme",
     "vitest": "pnpm --filter @syv-ai/rulecast exec vitest"
   },
   "devDependencies": {
