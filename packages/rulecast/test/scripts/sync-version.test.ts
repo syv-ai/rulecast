@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
-import { generateVersionFile, withVersion } from "../../scripts/sync-version"
+import { generateReadme, generateVersionFile, withReadmeTag, withVersion } from "../../scripts/sync-version"
 import { run } from "../helpers/script"
 
 const packageDir = fileURLToPath(new URL("../../", import.meta.url))
@@ -38,6 +38,29 @@ describe("sync-version", () => {
   test("the committed version.ts already matches package.json", async () => {
     const { target, source } = await generateVersionFile()
     expect(await readFile(target, "utf8"), "src/core/version.ts is stale: run pnpm sync-version").toBe(source)
+  })
+
+  test("the README's agent prompt is pinned to the package's own tag", async () => {
+    const { target, source } = await generateReadme()
+    const committed = await readFile(target, "utf8")
+    expect(committed, "README.md is stale: run pnpm sync-version").toBe(source)
+    // Not a vacuous pass: the README really does carry a tagged URL for sync-version to bump.
+    expect(committed).toMatch(/https:\/\/raw\.githubusercontent\.com\/syv-ai\/rulecast\/v\d+\.\d+\.\d+\//)
+  })
+})
+
+describe("withReadmeTag", () => {
+  const url = (tag: string) => `https://raw.githubusercontent.com/syv-ai/rulecast/${tag}/agents/SETUP.md`
+
+  test("bumps every rulecast raw URL and leaves the prose alone", () => {
+    const source = `Read\n${url("v0.2.0")}\nand ${url("v0.2.0")} — rulecast v0.2.0 is not a URL.\n`
+    const result = withReadmeTag(source, "1.2.3")
+    expect(result).toBe(`Read\n${url("v1.2.3")}\nand ${url("v1.2.3")} — rulecast v0.2.0 is not a URL.\n`)
+  })
+
+  test("a README naming no tag is left exactly as it is", () => {
+    const source = "# rulecast\n\nNothing to pin here.\n"
+    expect(withReadmeTag(source, "1.2.3")).toBe(source)
   })
 })
 

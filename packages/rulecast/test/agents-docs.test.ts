@@ -84,7 +84,14 @@ describe("agent docs", () => {
     // A URL on `main` resolves only as long as main still has that file; a tag resolves forever,
     // and the agent docs are versioned by tag (spec §12). Placeholders are fine — whatever fills
     // them in supplies the tag.
-    const files = [...(await filesUnder("agents", ".md")), ...(await filesUnder("packages/rulecast/src", ".ts"))]
+    // README.md too: it hands developers a prompt to paste into their agent, and that prompt names
+    // agents/SETUP.md by URL. Only the root one — the package copy's relative links are rewritten to
+    // blob/main/ by pnpm readme, which is a different thing and not a doc reference.
+    const files = [
+      path.join(repoRoot, "README.md"),
+      ...(await filesUnder("agents", ".md")),
+      ...(await filesUnder("packages/rulecast/src", ".ts")),
+    ]
     const failures: string[] = []
     let checked = 0
     for (const file of files) {

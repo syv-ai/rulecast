@@ -136,7 +136,22 @@ If something is configured but quiet, `rulecast doctor` says why: it compiles th
 
 ## Agents
 
-rulecast ships docs written for coding agents, not for people:
+rulecast ships docs written for coding agents, not for people. Paste this to yours and it will set
+rulecast up itself:
+
+```text
+Set up rulecast in this project. Read
+https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/SETUP.md
+and follow it. Show me every file it creates or changes before I commit anything.
+```
+
+If your agent cannot fetch a URL, this is the whole of it: run
+`npx @syv-ai/rulecast init --yes --agent <your agent, e.g. claude-code>`, then show me
+`.rulecast-config.yaml` and the other files it listed. Never edit hook settings by hand —
+`rulecast install` and `rulecast uninstall` own them.
+
+Once it is set up, ask the same agent to draft rules for your own conventions; `init` prints the
+prompt to paste.
 
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
