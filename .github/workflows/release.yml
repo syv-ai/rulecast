@@ -43,15 +43,21 @@ jobs:
       - id: changesets
         uses: changesets/action@v2
         with:
-          version: pnpm version-packages
-          publish: pnpm release
-          title: "release: version packages"
-          commit: "release: version packages"
+          # changesets/action v2 renamed every one of these after this file was written, and the
+          # action refuses to start on the old names rather than ignoring them — so every push to
+          # main failed from 2026-09-24 until this was fixed, and no version PR was ever opened.
+          version-script: pnpm version-packages
+          publish-script: pnpm release
+          pr-title: "release: version packages"
+          commit-message: "release: version packages"
           # rulecast tags itself, below. changesets would tag a workspace package
           # `@syv-ai/rulecast@0.1.0`, and this repository is also a rule repo consumed by git tag:
           # latestTag (core/repos/tags.ts) accepts only vX.Y.Z, so that tag would make
           # `rulecast init` report "no version tags" and offer nobody any catalog rules.
-          createGithubReleases: false
+          create-github-releases: false
+          # Defaults to true, and `pnpm release` passes `--no-git-tag`, so the action would invent
+          # its own package-scoped tags for what it published. Tagging is the next step's job.
+          push-git-tags: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NODE_AUTH_TOKEN: setup-node's registry-url writes an .npmrc pointing at it, and an
