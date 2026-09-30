@@ -1,8 +1,22 @@
 name: binaries
 
+# Not `on: release`. The release is created by release.yml with GITHUB_TOKEN, and an event raised
+# by GITHUB_TOKEN does not start a new workflow run — so this never fired for v0.2.0 or v0.3.0 and
+# both shipped with no binaries, silently. release.yml calls it directly instead, and the ordering
+# is explicit rather than event-driven. workflow_dispatch is for backfilling a release that missed.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build and attach to, such as v0.3.0.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and attach to, such as v0.3.0.
+        required: true
+        type: string
 
 jobs:
   attach:
@@ -23,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag }}
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -47,7 +61,7 @@ jobs:
       - name: Attach to the release
         working-directory: packages/rulecast/binaries
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "${{ inputs.tag }}" \
             "rulecast-${{ matrix.target }}" "rulecast-${{ matrix.target }}.sha256" \
             --clobber --repo "${{ github.repository }}"
         env:

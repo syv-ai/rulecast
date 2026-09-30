@@ -11,6 +11,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # The tag this run created, or empty when it created none — which is most runs, since every
+    # push to main comes through here. The binaries job below keys off it.
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     permissions:
       contents: write
       pull-requests: write
@@ -74,6 +78,7 @@ jobs:
       # authority instead: if the version in package.json is on npm and has no tag here, tag it.
       # That is also self-healing, since a later run will finish a release that stopped halfway.
       - name: Tag and release
+        id: tag
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./packages/rulecast/package.json').version")
@@ -99,9 +104,25 @@ jobs:
           git tag "v$VERSION"
           git push origin "v$VERSION"
           gh release create "v$VERSION" --title "v$VERSION" --notes-file /tmp/notes.md
+          # Only on the path that actually released. The two early exits above leave this unset,
+          # which is what keeps the binaries job below off an ordinary push to main.
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # lefthook's pre-push runs the suite. On the version-PR push that is a useful gate, but
           # here npm publish has already happened: a flaky test would leave the package published
           # with no tag, no release, and so no binaries, and an npm version cannot be republished.
           LEFTHOOK: "0"
+
+  # Called, not triggered. `on: release` never fired, because the release above is created with
+  # GITHUB_TOKEN and an event raised by GITHUB_TOKEN starts no workflow run — so v0.2.0 and v0.3.0
+  # both shipped with no binaries and nothing went red. Calling it makes the dependency explicit,
+  # keeps the ordering where it can be read, and needs no extra credential.
+  binaries:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/binaries.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: write
