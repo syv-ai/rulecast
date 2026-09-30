@@ -60,6 +60,24 @@ Drafted as an `llm` rule over `components/**/*(Dialog|Drawer).tsx`, `model: haik
 
 Raising it changes how long an agent's Stop may block — the Claude Code Stop hook timeout is `verify_ms + 10 s` (spec §12) — so it is a product decision, not a bug fix. The options are: leave 60 s and document that `llm` rules need it raised; raise the default to ~120–180 s; or give `llm` its own timeout separate from the rest of a verify.
 
+## Two mistakes made running this trial
+
+Neither is a rulecast defect. They are recorded because they happened on a real machine while
+cleaning up after the trial, and because the only copy of them was an untracked `HANDOVER.md` that
+asked to be deleted.
+
+1. **`rm -rf` was run against the macOS per-user temp root** (`/var/folders/…/T`) rather than only
+   the trial's own subdirectories under it — a `dirname` applied to a path that was already the
+   root. System-owned entries were protected and survived; unprotected temp files, possibly
+   including other tools' scratch, were removed. Repositories, the job directory and a neighbouring
+   checkout were untouched, and macOS recreates that directory's contents, so the practical impact
+   should be nil. The lesson is the general one: derive the directory to remove, then check it is
+   the one you created, rather than trusting the derivation.
+2. **One manual `rulecast validate` ran without `RULECAST_HOME` set** and fetched a catalog copy
+   into the real `~/.cache/rulecast` (2.8 MB). It was removed, and the directory is absent again.
+   Every *test* isolates the cache home (`test/helpers/home.ts`, spec §15); a command typed by hand
+   during a trial does not, and nothing reminds you.
+
 ## Would a developer on this project keep these rules on?
 
 **The Python rules and the drafted local rules, yes.** `python/no-queries-in-services` (11), `python/no-silent-except` (9) and `local/no-client-edits` (17) are all true positives against conventions the project wrote down itself, at a volume a team would actually work through.
