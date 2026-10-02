@@ -92,7 +92,7 @@ As plan 8a, with two differences:
 - [x] `rulecast install --agent claude-code`. Never edit the settings file by hand.
 - [x] Confirm the round trip: `rulecast uninstall` restores the file byte-for-byte, then `rulecast install` again. This is `AdapterInstall`'s contract (§15) and the first time it is exercised on a settings file that already had content.
 - [x] Measure the cost on this repository: `pnpm perf` for the edit hook, and time a `Read` of a large source file now that a `touch` may carry a fingerprint run (`08a`). Record both in the trial document.
-- [x] Verify: edit a file in a Claude Code session and confirm the delivery arrives; read a file a `touch` rule matches and confirm its context arrives once and not twice.
+- [ ] Verify: edit a file in a Claude Code session and confirm the delivery arrives; read a file a `touch` rule matches and confirm its context arrives once and not twice. **Not done — see Open.**
 - [x] Commit.
 
 ## Task 4: write up what it found
@@ -117,3 +117,16 @@ As plan 8a, with two differences:
 3. `rulecast run --all-files --summary` → the repository's backlog, expected to be small or zero.
 4. In a Claude Code session in this repository: edit `packages/rulecast/src/core/types.ts` and confirm a delivery arrives inside the edit budget.
 5. `docs/evidence/2026-09-28-self-install.md` reads as a record someone else could act on, not a changelog.
+
+## Open
+
+**Task 3's last verification, and end-to-end step 4, were never done.** Both ask for a delivery
+observed inside a real Claude Code session. What was actually done is `rulecast hook claude-code`
+driven directly with the recorded payload shapes from `packages/rulecast/test/payloads/claude-code/`,
+confirming the session state it writes and the latency it costs — the whole mechanism except Claude
+Code doing the invoking. That is worth something, and it is not what the box claimed.
+
+The gap is narrow but it is the only part nothing else covers: that Claude Code's hook configuration
+in `.claude/settings.json` actually fires the command, with the payload the fixtures were recorded
+from, in a session nobody instrumented. The fixtures pin the parse; the hooks firing at all is the
+untested half.
