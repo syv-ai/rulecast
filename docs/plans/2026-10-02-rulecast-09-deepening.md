@@ -8,7 +8,7 @@
 
 **Stack:** Node ≥ 20.12, TypeScript 5, zod 3, vitest.
 
-Prerequisite: plan 8 is done. Task 11 is blocked on PR #7 (zod 3→4) and is the one task that may not land in this plan.
+Prerequisite: plan 8 is done. Task 3 was dropped during execution — see it for why. Task 11 is blocked on PR #7 (zod 3→4) and is the one task that may not land in this plan.
 
 ---
 
@@ -48,7 +48,7 @@ Baseline to hold: 930 tests (922 passing, 8 skipped); edit hook p50 192 ms, p95 
 
 9. **The `llm` properties are not all booleans.** `init.ts:202–207` needs a sentence ("llm · haiku · sends file contents to your provider"), which is why the cast into a foreign config type exists. A `metered: boolean` would leave the cast in place. The property that removes it is a detector-supplied description.
 
-10. **`warm` is narrowed on the adapter side only.** Decided by the user: drop `warmup` from `AdapterInput`, so no future adapter implements a flag for a capability nothing has. `Detector.warm`, `rulecast warm`, `warmDetectors` and the deadline re-arm at `hook.ts:52–53` all stay — those are the detector side, and §17 still names a consumer for them.
+10. **`warm` is left alone.** Originally planned as "narrow the seam on the adapter side", on the strength of both `hook.ts` warm branches being unreachable. They are unreachable only for the shipped registry: `test/commands/hook.test.ts:113` injects a detector that implements `warm` and asserts session-start warm-up, and it passes. So `warmup` is a working, tested trigger for any third-party detector with warm-up work, and removing it would remove behaviour rather than dead plumbing. Task 3 records the reversal.
 
 11. **Candidate 08 is split, and only its first half is in scope.** `z.toJSONSchema` is a zod 4 API and the repo is on `3.25.76`, so the schema half waits for PR #7. The golden corpus has no such dependency and Task 10 needs it anyway.
 
@@ -77,9 +77,7 @@ Paths under `src/` and `test/` are in `packages/rulecast/`.
 | `src/detectors/llm/detector.ts` | Uses it at `:180`; `sourceReader` moves out |
 | `src/index.ts` | `Stage`, `ReferenceSpec`, `RuleExample`, `RuleExamples`, `renderAgentText`, `RenderOptions`, the positions helpers |
 | `test/plugin-api.ts` | **new.** The type-level guard: names every field of `CompiledRule` through the public entry point only |
-| `src/core/types.ts` | `AdapterInput.warmup` removed; `Detector` gains the metered/fingerprintable/whole-file properties |
-| `src/adapters/claude-code/parse.ts` | `warmup` removed from both results |
-| `src/commands/hook.ts` | The `parsed.warmup` branch removed |
+| `src/core/types.ts` | `Detector` gains the metered/fingerprintable/whole-file properties |
 | `src/core/detection/context.ts` | **new.** `DetectionContext`, `detectionFor(project, stateDir, resolver)` |
 | `src/core/detection/run.ts` | `DetectionInput` takes the context plus what varies |
 | `src/core/baseline/record.ts` | `FingerprintInput` takes the context; `fingerprintable` replaces the `"llm"` literal |
@@ -145,19 +143,17 @@ export function pastDeadline(error: unknown, input: Pick<DetectorRun<unknown>, "
 
 **A pre-existing test said the opposite, and it was right to.** `test/smoke.test.ts:34-52` asserts that `renderAgentText` is on `./internal` and *not* on the package entry, with a comment saying a move between the two is a deliberate decision and that the test exists to catch a drift. It caught this one. The decision stands, and the reason is stronger than the review's: the context budget is computed **against** this renderer — `decide` measures with `measureRuleBlock` and trims to `adapter.maxContextChars` — so an adapter that renders a `Delivery` its own way receives text trimmed to a budget computed for a different renderer. `renderAgentText` is not a convenience, it is what the budget means, and both in-repo adapters already call it. So `Adapter.format` is expected to wrap it rather than replace it, and the smoke test now asserts that positively instead of forbidding it. The other eleven names in that list are rulecast driving itself and stay internal.
 
-## Task 3: narrow the warm seam to the detector side
+## Task 3: narrow the warm seam to the detector side — **dropped**
 
-**Files:** modify `src/core/types.ts:213-220` · modify `src/adapters/claude-code/parse.ts:55,105-108` · modify `src/commands/hook.ts:4,29,38-41` · test `test/adapters/claude-code/parse.test.ts:29,38,92,98`
+**Dropped on 2026-10-02, after the work was done and reverted.** The decision rested on a premise that was wrong, and the implementation is what proved it.
 
-**Behaviour:** `AdapterInput` no longer carries `warmup`, so a new adapter does not implement a flag for a capability no detector has ever had. `Detector.warm`, `rulecast warm`, `warmDetectors`, `warmableKinds` and the deadline re-arm at `hook.ts:52-53` are untouched: those are the detector side, and §17 still names a consumer for them. A `session-start` payload with source `startup` or `resume` now parses to `event: null` and the hook returns 0, which is what it already did in effect — `warmableKinds()` returns `[]`, so the branch it guarded could never fire.
+The verification reported that both warm branches in `hook.ts` were unreachable. That is true only of the **shipped** registry: no builtin detector implements `warm`, so `warmableKinds()` returns `[]`. But `test/commands/hook.test.ts:113` injects a `slow` detector that does implement `warm` and asserts that a `session-start.startup` payload warms it — and it passes. The branch is reachable for any third-party detector with warm-up work, and it is tested.
 
-- [ ] Remove `warmup: boolean` from `AdapterInput`.
-- [ ] `parse.ts:55`: drop `warmup: false` from the base result. `parse.ts:105-108`: the `startup`/`resume` case returns `result(null)` like the others.
-- [ ] `hook.ts`: `:29` becomes `if (!parsed?.event) return 0`; delete the `:38-41` block and the now-unused `warmableKinds` import.
-- [ ] Update the four `parse.test.ts` assertions. Keep the test that `session-start.startup` and `session-start.resume` parse without an event — that behaviour is unchanged, only the field is gone.
-- [ ] Check `adapterContract` (`src/testing/adapter-contract.ts`) for a `warmup` assertion and remove it if present; a third-party adapter must not be asked for the field.
-- [ ] Verify: `pnpm vitest run test/adapters` → passes; `pnpm test` → passes.
-- [ ] Commit.
+So removing `warmup` from `AdapterInput` does not delete dead plumbing. It deletes a working trigger: a third-party detector implementing `warm` is warmed at session start today and would not be afterwards, leaving only `rulecast warm` run by hand and the deadline re-arm at `hook.ts:52-53`. One test would have been deleted rather than updated, which is the signal that the change was removing behaviour.
+
+**Kept as it stands:** `AdapterInput.warmup`, `hook.ts:38-41`, `hook.ts:52-53`, `Detector.warm`, `warmDetectors`, `warmableKinds`, `rulecast warm`. The cost is one boolean a future adapter sets; the benefit is that a detector with `warm` works without the adapter author doing anything. §13 specifies the machinery and §17 still names its intended first consumer.
+
+The open question is unchanged and is a product question, not a code one: whether §17's persisted project model is still wanted. Nothing in this plan depends on the answer.
 
 ## Task 4: one detection context
 
@@ -353,7 +349,7 @@ export function gate(fresh: ClassifiedFinding[], work: WorkState, agent: string,
 - [ ] §13: the deadline contract is honoured by one predicate, named. State the defect that was fixed — an error raised past the deadline used to disable the rule for the session — because that is the kind of thing that gets reintroduced.
 - [ ] §16: the plugin API is closed and a type-level guard holds it closed. Name `test/plugin-api.ts`.
 - [ ] §17: the recorded-contracts row moves from two of four to three of four. The config schema is the one still outstanding, and it is blocked on zod 4 — say so, with the PR number.
-- [ ] §13 or §17, whichever holds the warm note: `warmup` is off the adapter interface; `Detector.warm` is still unimplemented and still specified.
+- [ ] §13 or §17, whichever holds the warm note: `warmup` stays on the adapter interface, and why — the session-start trigger is tested and works for any detector that implements `warm`, so what is missing is a shipped consumer, not the machinery.
 - [ ] `docs/conventions.md`: a new section on pricing bounded units, pointing at `costOf`. This is the convention most likely to be silently undone, and the repository's own rules can point at it.
 - [ ] Plan index: plan 9's row, with the measurement that motivated it and the perf number after it.
 - [ ] Verify: `pnpm test` → passes (the docs tests check agent-doc links resolve).
