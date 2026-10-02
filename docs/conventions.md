@@ -7,16 +7,25 @@ should outlive it.
 
 ## Detectors never read a file themselves
 
-A detector reads only through the `read` function on its `DetectorRun` (spec §6, Contract). Never
-`readFile`, never `readFileSync`, never anything else that opens the path.
+A detector that declares `guards: true` reads only through the `read` function on its `DetectorRun`
+(spec §6, Contract). Never `readFile`, never `readFileSync`, never `readSourceFile`, never anything
+else that opens the path.
 
-The reason is the guard. Before a write, the content that matters is the one the agent *proposed*,
-which is not on disk and never will be if the write is refused. A detector that reads the path would
-judge the old file and let the write through. It is also what makes `refuse_write` and
-`rulecast test` possible at all: both hand a detector content that no file holds.
+The reason is the guard, and it is also the scope. Before a write, the content that matters is the
+one the agent *proposed*, which is not on disk and never will be if the write is refused. A detector
+that reads the path would judge the old file and let the write through. It is also what makes
+`refuse_write` and `rulecast test` possible at all: both hand a detector content that no file holds.
 
-`access`, `realpathSync` and the like are fine — resolving a path is not reading a file. What a
-detector must not do is get at the *contents* any way but `read`.
+`guards` is the promise to be able to do that, so it is exactly the set this binds. `regex`, `path`
+and `ast-grep` declare it and read only through `read`. `command`, `linter` and `llm` do not declare
+it, precisely because they hand a path to another program — ruff, eslint, a script, a model — which
+would read the file on disk whatever this code did. For them, reading the file themselves is not a
+violation but the honest form of the same limitation: `linter` and `llm` use `readSourceFile` to
+serve `{{text}}` and to build a prompt, and `rulecast test`'s examples work because the example is
+written to a real scratch file first.
+
+`access`, `realpathSync` and the like are fine for anyone — resolving a path is not reading a file.
+What a *guarding* detector must not do is get at the **contents** any way but `read`.
 
 ## No module-level mutable state
 

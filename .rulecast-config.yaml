@@ -5,13 +5,19 @@ repos:
   - repo: local
     rules:
       - id: detectors/no-direct-reads
-        name: Detectors read through run's read, never from disk
+        name: A guarding detector reads through run's read, never from disk
         files: '^packages/rulecast/src/detectors/.*\.ts$'
+        # The convention binds the detectors that declare `guards: true` — that promise is its whole
+        # reason. command, linter and llm hand a path to another program, which reads the file on
+        # disk whatever this code does, so they decline `guards` and read the file honestly instead.
+        exclude: '^packages/rulecast/src/detectors/(command|linter|llm)/'
         severity: error
         detect:
           regex:
-            pattern: '\breadFile(Sync)?\b'
-        message: "{{file}}:{{line}} reads a file directly. A detector reads through the `read` on its DetectorRun: before a write, the content that matters is the one the agent proposed, which is not on disk."
+            # readSourceFile too: it is how a detector actually reaches the disk here, and the
+            # narrower pattern matched neither of the two files this rule was written to catch.
+            pattern: '\b(readFile(Sync)?|readSourceFile)\b'
+        message: "{{file}}:{{line}} reads a file directly. A detector that declares `guards` reads through the `read` on its DetectorRun: before a write, the content that matters is the one the agent proposed, which is not on disk."
         context:
           - "@docs/conventions.md#detectors-never-read-a-file-themselves"
         examples:
@@ -23,6 +29,10 @@ repos:
             - path: packages/rulecast/src/detectors/example/detector.ts
               code: |
                 const source = await readFile(path.join(input.cwd, file), "utf8")
+            # The case the narrower pattern missed: going through the core's helper is still the disk.
+            - path: packages/rulecast/src/detectors/example/detector.ts
+              code: |
+                const source = await readSourceFile(input.cwd, file)
 
       - id: core/no-module-state
         name: No module-level mutable state
