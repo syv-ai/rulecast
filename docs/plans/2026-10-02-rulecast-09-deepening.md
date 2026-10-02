@@ -135,13 +135,15 @@ export function pastDeadline(error: unknown, input: Pick<DetectorRun<unknown>, "
 
 **Behaviour:** Every type named by a field of `CompiledRule` is nameable from `@syv-ai/rulecast`, and so is the renderer every adapter needs for `Adapter.format`. A type-level fixture fails `pnpm typecheck` if that stops being true. §16's promise — internal shapes change without a major — becomes checkable instead of conventional.
 
-- [ ] Promote from `core/config/schema`: `RuleExample`, `RuleExamples`, `Stage`, alongside the `RuleScope` already there. `RuleExample` has to come too — `RuleExamples` is defined in terms of it.
-- [ ] Promote `ReferenceSpec` from `core/references`.
-- [ ] Promote `renderAgentText` and `RenderOptions` from `core/delivery/render-agent`, and `lineStarts`, `positionAt`, `offsetAt` from `core/detection/positions`. Leave the `renderAgentText` export in `internal.ts` as well: `scripts/` imports it from there and `/internal` carries no promise either way.
-- [ ] Create `test/plugin-api.ts`: a type-only module importing *only* from `../src/index`, declaring a `CompiledRule`, and assigning each of its fields to an explicitly named type. No `describe`, no `test` — `tsconfig.json` includes `test`, so `tsc --noEmit` is the assertion and lefthook already runs it pre-commit. Head it with a comment saying what breaks it and why that matters.
-- [ ] Verify: `pnpm typecheck` → clean. Then confirm the guard bites: delete one promoted export, re-run, see `TS2305`, put it back.
-- [ ] Verify the built surface too: `pnpm build`, then check `dist/index.d.ts` names `Stage`, `ReferenceSpec` and `RuleExamples`. They were absent from *both* entry points before this task.
-- [ ] Commit.
+- [x] Promote from `core/config/schema`: `RuleExample`, `RuleExamples`, `Stage`, alongside the `RuleScope` already there. `RuleExample` has to come too — `RuleExamples` is defined in terms of it.
+- [x] Promote `ReferenceSpec` from `core/references`.
+- [x] Promote `renderAgentText` and `RenderOptions` from `core/delivery/render-agent`, and `lineStarts`, `positionAt`, `offsetAt` from `core/detection/positions`. Leave the `renderAgentText` export in `internal.ts` as well: `scripts/` imports it from there and `/internal` carries no promise either way.
+- [x] Create `test/plugin-api.ts`: a type-only module importing *only* from `../src/index`, declaring a `CompiledRule`, and assigning each of its fields to an explicitly named type. No `describe`, no `test` — `tsconfig.json` includes `test`, so `tsc --noEmit` is the assertion and lefthook already runs it pre-commit. Head it with a comment saying what breaks it and why that matters.
+- [x] Verify: `pnpm typecheck` → clean. Then confirm the guard bites: removed `ReferenceSpec` from `src/index.ts`, saw `test/plugin-api.ts(30,3): error TS2305`, put it back.
+- [x] Verify the built surface too: `pnpm build`, then check `dist/index.d.ts` names `Stage`, `ReferenceSpec` and `RuleExamples`. They were absent from *both* entry points before this task; all nine promoted names are now present.
+- [x] Commit.
+
+**A pre-existing test said the opposite, and it was right to.** `test/smoke.test.ts:34-52` asserts that `renderAgentText` is on `./internal` and *not* on the package entry, with a comment saying a move between the two is a deliberate decision and that the test exists to catch a drift. It caught this one. The decision stands, and the reason is stronger than the review's: the context budget is computed **against** this renderer — `decide` measures with `measureRuleBlock` and trims to `adapter.maxContextChars` — so an adapter that renders a `Delivery` its own way receives text trimmed to a budget computed for a different renderer. `renderAgentText` is not a convenience, it is what the budget means, and both in-repo adapters already call it. So `Adapter.format` is expected to wrap it rather than replace it, and the smoke test now asserts that positively instead of forbidding it. The other eleven names in that list are rulecast driving itself and stay internal.
 
 ## Task 3: narrow the warm seam to the detector side
 

@@ -20,6 +20,14 @@ test("package entry exports the plugin API a detector or adapter author needs", 
     rulecast.adapterByName,
     rulecast.emptyDelivery,
     rulecast.isDetectorRule,
+    // Promoted deliberately (plan 9 Task 2): the context budget is computed *against* this
+    // renderer — decide() measures with measureRuleBlock and trims to adapter.maxContextChars — so
+    // an adapter that renders a Delivery its own way gets text trimmed to a budget for a different
+    // renderer. Publishing it says that Adapter.format is expected to wrap it, not replace it.
+    rulecast.renderAgentText,
+    rulecast.lineStarts,
+    rulecast.positionAt,
+    rulecast.offsetAt,
   ]) {
     expect(exported).toBeTypeOf("function")
   }
@@ -42,7 +50,9 @@ test("the CLI's own internals are not on the plugin API", () => {
     "cachedRepos",
     "fetchingRepos",
     "fixedRepo",
-    "renderAgentText",
+    // renderAgentText was here until plan 9 Task 2 and is now on both entry points: the budget is
+    // computed against it, so every adapter needs it, and `scripts/` still reaches it through
+    // ./internal. Everything else in this list is rulecast driving itself and stays internal.
     "checkDetectors",
     "CONFIG_FILE",
     "MANIFEST_FILE",

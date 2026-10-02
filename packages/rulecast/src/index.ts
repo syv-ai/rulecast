@@ -11,9 +11,16 @@ export { type BacklogSummary, renderBacklog, summarise } from "./adapters/cli/ba
 export { ADAPTERS, adapterByName } from "./adapters/index"
 export type { CompiledDetector, CompiledRule, DetectorRule, TouchRule } from "./core/compile/rule"
 export { isDetectorRule } from "./core/compile/rule"
-export type { RuleScope } from "./core/config/schema"
+// Every type a field of `CompiledRule` is declared with, so a third-party detector or adapter can
+// name them all. `test/plugin-api.ts` fails typecheck if one of them goes missing again.
+export type { RuleExample, RuleExamples, RuleScope, Stage } from "./core/config/schema"
+// An adapter cannot implement `Adapter.format` without the renderer, and the positions helpers are
+// what a detector needs to turn an offset into the line and column a `Match` carries.
+export { type RenderOptions, renderAgentText } from "./core/delivery/render-agent"
 export { perRule } from "./core/detection/per-rule"
+export { lineStarts, offsetAt, positionAt } from "./core/detection/positions"
 export { type AnyDetector, createRegistry, type DetectorRegistry } from "./core/detection/registry"
+export type { ReferenceSpec } from "./core/references"
 export type * from "./core/types"
 export { emptyDelivery } from "./core/types"
 export { VERSION } from "./core/version"
