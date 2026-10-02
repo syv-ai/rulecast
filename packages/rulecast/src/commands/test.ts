@@ -1,10 +1,10 @@
 import { parseArgs } from "node:util"
 
 import { compile } from "../core/compile/project"
-import { type CompiledRule, type DetectorRule, isDetectorRule } from "../core/compile/rule"
+import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
-import { createReferenceResolver, resolveRuleContext } from "../core/delivery/resolve"
-import { detectorCacheDir, diskCache } from "../core/detection/cache"
+import { createReferenceResolver } from "../core/delivery/resolve"
+import { type DetectionContext, detectionFor } from "../core/detection/context"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
@@ -12,7 +12,6 @@ import { type ExampleResult, runExamples, skippedResult } from "../core/examples
 import { allFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { fetchingRepos } from "../core/repos/provider"
-import type { Cache, DetectorSettings, ResolvedReference } from "../core/types"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
 import { UsageError } from "./usage"
@@ -89,14 +88,6 @@ function failureLines(rule: DetectorRule, result: ExampleResult): string[] {
   return out
 }
 
-interface Detection {
-  registry: DetectorRegistry
-  settings: DetectorSettings
-  contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
-  cacheFor(kind: string): Cache
-  timeoutMs: number
-}
-
 /** The worst files named, then the rest counted: enough to pick one to look at. */
 const AGAINST_TOP_FILES = 10
 
@@ -111,7 +102,8 @@ async function reportAgainst(
   root: string,
   rule: DetectorRule,
   paths: string[],
-  detection: Detection,
+  detection: DetectionContext,
+  timeoutMs: number,
   io: CliIo,
 ): Promise<number> {
   const prefixes = paths.map((given) => {
@@ -129,12 +121,12 @@ async function reportAgainst(
   }
 
   const output = await runDetection({
-    ...detection,
-    root,
+    detection,
     event: "verify",
     selections: [{ rule, files }],
     changes: new Map(),
     read: (file) => readSourceFile(root, file),
+    timeoutMs,
   })
   const failure = output.errors[0]
   if (failure !== undefined) throw new Error(`${rule.detector.kind} detector failed: ${failure.message}`)
@@ -182,15 +174,10 @@ export async function testCommand(
   const rules = project.rules.filter(isDetectorRule).filter((rule) => ruleId === null || rule.id === ruleId)
   const stateDir = ensureProjectState(cacheHome(io.env), root)
   const resolver = createReferenceResolver(root)
-  const detection = {
-    registry,
-    settings: { llm: project.config.llm },
-    contextFor: (one: CompiledRule) => resolveRuleContext(resolver, one.context),
-    cacheFor: (kind: string) => diskCache(detectorCacheDir(stateDir, kind)),
-    timeoutMs: project.config.timeouts.verifyMs,
-  }
+  const detection = detectionFor(project, registry, stateDir, resolver)
+  const timeoutMs = project.config.timeouts.verifyMs
 
-  if (against.length > 0) return await reportAgainst(root, rules[0]!, against, detection, io)
+  if (against.length > 0) return await reportAgainst(root, rules[0]!, against, detection, timeoutMs, io)
 
   const lines: string[] = [""]
   const noExamples: string[] = []
@@ -201,7 +188,7 @@ export async function testCommand(
     const result =
       ruleId === null && rule.detector.kind === "llm"
         ? skippedResult(rule.id)
-        : await runExamples({ ...detection, root, rule })
+        : await runExamples({ detection, rule, timeoutMs })
     lines.push(summaryLine(rule, result))
     if (result.missing || result.empty) {
       noExamples.push(rule.id)

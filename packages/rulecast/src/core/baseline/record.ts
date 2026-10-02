@@ -1,22 +1,19 @@
 import type { CompiledRule } from "../compile/rule"
 import { applySizeCeiling } from "../detection/budget"
-import type { DetectorRegistry } from "../detection/registry"
+import type { DetectionContext } from "../detection/context"
 import { runDetection } from "../detection/run"
 import { selectDetectorRules } from "../detection/select"
-import type { Cache, DetectorEvent, DetectorSettings, ResolvedReference } from "../types"
+import type { DetectorEvent } from "../types"
 import { type BaselineRecord, fingerprintRecord } from "./store"
 
 export interface FingerprintInput {
-  root: string
+  /** The project's detection context (detection/context.ts). */
+  detection: DetectionContext
   /** The files to measure. `read` must serve each one's *baseline* content, not what is on disk now. */
   files: readonly string[]
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
-  registry: DetectorRegistry
   read(file: string): Promise<string | null>
-  cacheFor(kind: string): Cache
-  contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
-  settings: DetectorSettings
   /** Which stage's rules to measure: `edit` on the touch path, `verify` when a verify fills gaps. */
   event: DetectorEvent
   timeoutMs: number
@@ -50,7 +47,7 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
   // The overwhelmingly common case. Cost is one array scan, not a detector run.
   if (!input.rules.some((rule) => rule.scope === "container")) return []
 
-  const guards = (kind: string) => input.registry.get(kind)?.guards === true
+  const guards = (kind: string) => input.detection.registry.get(kind)?.guards === true
   let selections = selectDetectorRules(input.rules, input.event, input.files, input.disabled).filter(
     (selection) =>
       selection.rule.scope === "container" &&
@@ -64,7 +61,7 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
   if (selections.length === 0) return []
 
   const output = await runDetection({
-    root: input.root,
+    detection: input.detection,
     event: input.event,
     selections,
     // No change set: the baseline content is being measured whole, and there is nothing it is a
@@ -72,10 +69,6 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
     // exactly right here.
     changes: new Map(),
     read: input.read,
-    registry: input.registry,
-    cacheFor: input.cacheFor,
-    contextFor: input.contextFor,
-    settings: input.settings,
     timeoutMs: input.timeoutMs,
   })
 

@@ -15,9 +15,9 @@ import {
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { writeOverflow } from "./delivery/persist"
-import { createReferenceResolver, resolveRuleContext } from "./delivery/resolve"
+import { createReferenceResolver } from "./delivery/resolve"
 import { applyFileBudget, applySizeCeiling } from "./detection/budget"
-import { detectorCacheDir, diskCache } from "./detection/cache"
+import { detectionFor } from "./detection/context"
 import { fileBytes, readSourceFile } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
@@ -218,6 +218,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
+  // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
+  const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
@@ -227,10 +229,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // that reads it later would not have the value this branch checked.
     const open = session
     const delivery = await guardWrite({
-      root,
+      detection,
       config,
-      registry,
-      stateDir,
       event,
       rules: project.rules,
       disabled,
@@ -284,15 +284,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       if (snapshotted.length > 0) {
         records.push(
           ...(await recordFingerprints({
-            root,
+            detection,
             files: snapshotted,
             rules: project.rules,
             disabled,
-            registry,
             read: (file) => readSourceFile(root, file),
-            cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
-            contextFor: (rule) => resolveRuleContext(resolver, rule.context),
-            settings: { llm: config.llm },
             event: "edit",
             source: "disk",
             timeoutMs: config.timeouts.editDeadlineMs,
@@ -342,15 +338,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         missing.length === 0
           ? []
           : await recordFingerprints({
-              root,
+              detection,
               files: missing,
               rules: project.rules,
               disabled,
-              registry,
               read: async (file) => texts.get(file) ?? null,
-              cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
-              contextFor: (rule) => resolveRuleContext(resolver, rule.context),
-              settings: { llm: config.llm },
               event: "verify",
               source: "memory",
               timeoutMs: config.timeouts.verifyMs,
@@ -394,15 +386,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       }
     }
     const output = await runDetection({
-      root,
+      detection,
       event: event.kind,
       selections,
       changes,
       read: (file) => readSourceFile(root, file),
-      registry,
-      cacheFor: (kind) => diskCache(detectorCacheDir(stateDir, kind)),
-      contextFor: (rule) => resolveRuleContext(resolver, rule.context),
-      settings: { llm: config.llm },
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
     })
 

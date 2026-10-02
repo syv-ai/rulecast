@@ -3,8 +3,10 @@ import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
+import { createReferenceResolver } from "../core/delivery/resolve"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
+import { type DetectionContext, detectionFor } from "../core/detection/context"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
@@ -130,7 +132,7 @@ export async function doctorCommand(
     io.stdout(`  repos      ${label} — ${cached ? "cached" : "not fetched (run rulecast install)"}\n`)
   }
   io.stdout("\ndry run\n")
-  const dry = await dryRun(project, registry)
+  const dry = await dryRun(project, detectionFor(project, registry, stateDir, createReferenceResolver(root)))
   if (dry.length === 0) io.stdout("  nothing to run\n")
   for (const result of dry) {
     count(result.level)
@@ -159,7 +161,7 @@ interface DryRunLine {
  * A memory cache, not the project's: a dry run that quietly answered from a stale cache would be
  * the wrong answer to the question being asked.
  */
-async function dryRun(project: CompiledProject, registry: DetectorRegistry): Promise<DryRunLine[]> {
+async function dryRun(project: CompiledProject, detection: DetectionContext): Promise<DryRunLine[]> {
   if (project.rules.length === 0) return []
   let files: string[]
   try {
@@ -190,16 +192,14 @@ async function dryRun(project: CompiledProject, registry: DetectorRegistry): Pro
 
     const timeoutMs = project.config.timeouts.verifyMs
     const output = await runDetection({
-      root: project.root,
+      // Spread over the project's context, so the two deviations read as deviations. The memory
+      // cache is the reason given in this function's own comment; context is unused because only
+      // the llm detector reads it and llm rules never reach here.
+      detection: { ...detection, cacheFor: () => memoryCache(), contextFor: async () => [] },
       event: "verify",
       selections: [{ rule, files: [file] }],
       changes: new Map(),
       read: (name) => readSourceFile(project.root, name),
-      registry,
-      cacheFor: () => memoryCache(),
-      // Only the llm detector reads context, and llm rules never reach here.
-      contextFor: async () => [],
-      settings: { llm: project.config.llm },
       timeoutMs,
     })
     const failure = output.errors[0]

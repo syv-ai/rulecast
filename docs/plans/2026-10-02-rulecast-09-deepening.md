@@ -28,6 +28,8 @@ Every candidate below was re-verified against the source on 2026-10-02 before be
 
 Baseline to hold: 930 tests (922 passing, 8 skipped); edit hook p50 192 ms, p95 236 ms against a 500 ms budget.
 
+**On reading `pnpm perf`:** it is sensitive to machine load and the absolute numbers are not comparable across runs. The same build measured p95 236 ms on an idle machine and p95 600 ms with a `max` of 1,058,163 ms — 17 minutes for one hook — at load average 28. A number worse than the baseline is not evidence of a regression on its own. Measure the parent commit back to back on the same machine, or do not claim anything.
+
 ## Decisions this plan implements
 
 1. **The deadline fix ships alone and first.** It is the only live defect among the nine, it is one condition at four sites, and the shared-plumbing work it was bundled with (Task 6) is a much larger change with none of the urgency. `perRule` already has the correct predicate at `per-rule.ts:22` with a comment explaining it; the three hand-rolled batching detectors are missing it. Extract the predicate rather than copying it a fourth time.
@@ -173,21 +175,26 @@ export interface DetectionContext {
 /** The context a project's detector runs share. `timeoutMs` is not here: it varies per event. */
 export function detectionFor(
   project: CompiledProject,
+  /** Not on CompiledProject: the registry is an input to `compile`, not part of its result. */
+  registry: DetectorRegistry,
   stateDir: string,
   resolver: ReferenceResolver,
 ): DetectionContext
 ```
 
-- [ ] Create `context.ts`. `cacheFor` is `diskCache(detectorCacheDir(stateDir, kind))`; `contextFor` is `resolveRuleContext(resolver, rule.context)`; `settings` is `{ llm: project.config.llm }`; `root` is `project.root`. This is the closure written out six times and the `settings` literal written out seven.
-- [ ] `DetectionInput` becomes `{ detection: DetectionContext; event; selections; changes; read; timeoutMs }`. Update `runDetection` to read the five context fields through it.
-- [ ] `FingerprintInput` likewise: `{ detection; files; rules; disabled; read; event; timeoutMs; source; ceiling? }`. `recordFingerprints` reaches `registry` through `input.detection`.
-- [ ] `ExamplesInput` becomes `{ detection; rule; timeoutMs }` — `root` comes from the context. Check the scratch-directory comment at `examples.ts:46` still reads correctly.
-- [ ] **Delete the local `Detection` interface at `commands/test.ts:92-98`** and the object at `:185-191`; use `detectionFor`. This is the module the review found invented by accident, and it collides by name with `init/detect.ts:25`. Both call sites already spread it, so they need `{ ...detection }` replaced by `detection` and `timeoutMs` passed alongside.
-- [ ] `doctor.ts` spreads its two deliberate overrides over the context: `{ ...detectionFor(project, stateDir, resolver), cacheFor: () => memoryCache(), contextFor: async () => [] }`. Keep both comments — they are the reason the override exists. Note `doctor` has no `resolver` today; build one with `createReferenceResolver(project.root)` or thread the one it has.
-- [ ] `pipeline.ts`: build the context once after `createReferenceResolver` at `:220` and pass it at all three sites (`:286-300`, `:344-357`, `:396-407`). `guard.ts` takes a `DetectionContext` on `GuardInput` instead of `config`, `registry`, `stateDir` and `resolver` — check what else in `guardWrite` still needs `config` (it does, for `maxFileBytes`, `refuseGate`, `context.maxBytes`, `stopGate`, `maxMatchesPerRule`) and keep that.
-- [ ] Test that the context is assembled once and shared: a `detectionFor` unit test asserting `cacheFor("regex")` points inside `detectorCacheDir(stateDir, "regex")` and that `contextFor` resolves a rule's references through the given resolver. The real coverage is the existing suite — nothing behavioural changed.
-- [ ] Verify: `pnpm test` → passes unchanged; `pnpm typecheck` → clean; `pnpm perf` → p95 no worse than 236 ms.
-- [ ] Commit.
+- [x] Create `context.ts`. `cacheFor` is `diskCache(detectorCacheDir(stateDir, kind))`; `contextFor` is `resolveRuleContext(resolver, rule.context)`; `settings` is `{ llm: project.config.llm }`; `root` is `project.root`. This is the closure written out six times and the `settings` literal written out seven.
+- [x] `DetectionInput` becomes `{ detection: DetectionContext; event; selections; changes; read; timeoutMs }`. Update `runDetection` to read the five context fields through it.
+- [x] `FingerprintInput` likewise: `{ detection; files; rules; disabled; read; event; timeoutMs; source; ceiling? }`. `recordFingerprints` reaches `registry` through `input.detection`.
+- [x] `ExamplesInput` becomes `{ detection; rule; timeoutMs }` — `root` comes from the context. Check the scratch-directory comment at `examples.ts:46` still reads correctly.
+- [x] **Delete the local `Detection` interface at `commands/test.ts:92-98`** and the object at `:185-191`; use `detectionFor`. This is the module the review found invented by accident, and it collides by name with `init/detect.ts:25`. Both call sites already spread it, so they need `{ ...detection }` replaced by `detection` and `timeoutMs` passed alongside.
+- [x] `doctor.ts` spreads its two deliberate overrides over the context: `{ ...detectionFor(project, stateDir, resolver), cacheFor: () => memoryCache(), contextFor: async () => [] }`. Keep both comments — they are the reason the override exists. Note `doctor` has no `resolver` today; build one with `createReferenceResolver(project.root)` or thread the one it has.
+- [x] `pipeline.ts`: build the context once after `createReferenceResolver` at `:220` and pass it at all three sites (`:286-300`, `:344-357`, `:396-407`). `guard.ts` takes a `DetectionContext` on `GuardInput` instead of `config`, `registry`, `stateDir` and `resolver` — check what else in `guardWrite` still needs `config` (it does, for `maxFileBytes`, `refuseGate`, `context.maxBytes`, `stopGate`, `maxMatchesPerRule`) and keep that.
+- [x] Test that the context is assembled once and shared: a `detectionFor` unit test asserting `cacheFor("regex")` points inside `detectorCacheDir(stateDir, "regex")` and that `contextFor` resolves a rule's references through the given resolver. The real coverage is the existing suite — nothing behavioural changed.
+- [x] Verify: `pnpm test` → 940 tests, 932 passing; `pnpm typecheck` → clean.
+- [x] Verify perf as an A/B, because the machine was at load average 14–28 and the 236 ms baseline was measured idle. Same machine, back to back: parent commit p50 363 ms / **p95 491 ms**; with this task p50 273 ms / **p95 357 ms**. Faster, which is the expected direction — the context is built once per pipeline instead of allocating fresh closures at each of six call sites.
+- [x] Commit.
+
+**Two things the compiler found that the plan had wrong.** `detectionFor` cannot take `(project, stateDir, resolver)`: the registry is an input to `compile`, not part of `CompiledProject`, so it is a fourth parameter. And `guard.ts` still needs `resolver` of its own — the context exposes only `contextFor`, while the delivery decision resolves references itself, which is a different consumer of the same resolver. `GuardInput` therefore carries both `detection` and `resolver`, and says why.
 
 ## Task 5: the baseline stage
 

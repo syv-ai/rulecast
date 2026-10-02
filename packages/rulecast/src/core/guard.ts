@@ -1,10 +1,9 @@
 import type { CompiledRule } from "./compile/rule"
 import type { Config } from "./config/schema"
-import { type ReferenceResolver, resolveRuleContext } from "./delivery/resolve"
-import { detectorCacheDir, diskCache } from "./detection/cache"
+import type { ReferenceResolver } from "./delivery/resolve"
+import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
 import { isInserted, propose } from "./detection/proposal"
-import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
 import { decide } from "./session/decide"
@@ -12,14 +11,17 @@ import { emptyContext, refusalKey, type WorkRecord, type WorkState } from "./ses
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface GuardInput {
-  root: string
+  /** The project's detection context (detection/context.ts). */
+  detection: DetectionContext
   config: Config
-  registry: DetectorRegistry
-  stateDir: string
   event: Event
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
   work: WorkState
+  /**
+   * Not reachable through `detection`, which exposes only `contextFor`: the delivery decision
+   * resolves references itself, and that is a different consumer of the same resolver.
+   */
   resolver: ReferenceResolver
   maxContextChars: number | null
   log: (line: string) => void
@@ -42,7 +44,7 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const rules = input.rules.filter((rule) => rule.refuseWrite && !input.disabled.has(rule.id) && rule.matches(file))
   if (rules.length === 0) return emptyDelivery()
 
-  const proposal = propose(await readSourceFile(input.root, file), intent)
+  const proposal = propose(await readSourceFile(input.detection.root, file), intent)
   if (proposal === null) {
     input.log(`guard: ${file} could not be reconstructed from the tool call; allowing the write`)
     return emptyDelivery()
@@ -65,16 +67,12 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   if (selections.length === 0) return emptyDelivery()
 
   const output = await runDetection({
-    root: input.root,
+    detection: input.detection,
     event: "edit",
     selections,
     changes: new Map(),
     // The proposed file for the one being written; anything else a detector reaches for is real.
-    read: async (name) => (name === file ? proposal.content : readSourceFile(input.root, name)),
-    registry: input.registry,
-    cacheFor: (kind) => diskCache(detectorCacheDir(input.stateDir, kind)),
-    contextFor: (rule) => resolveRuleContext(input.resolver, rule.context),
-    settings: { llm: input.config.llm },
+    read: async (name) => (name === file ? proposal.content : readSourceFile(input.detection.root, name)),
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 

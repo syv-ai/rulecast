@@ -19,12 +19,14 @@ function detectorRule(overrides: Partial<CompiledRule> & { examples: RuleExample
 
 const run = (root: string, rule: DetectorRule): Promise<ExampleResult> =>
   runExamples({
-    root,
+    detection: {
+      root,
+      registry,
+      settings: defaultDetectorSettings(),
+      cacheFor: () => memoryCache(),
+      contextFor: async () => [],
+    },
     rule,
-    registry,
-    settings: defaultDetectorSettings(),
-    contextFor: async () => [],
-    cacheFor: () => memoryCache(),
     timeoutMs: 60_000,
   })
 

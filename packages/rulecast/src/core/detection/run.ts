@@ -1,28 +1,18 @@
-import type { CompiledRule, DetectorRule } from "../compile/rule"
+import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
-import type {
-  Cache,
-  ChangeSet,
-  DetectorEvent,
-  DetectorResult,
-  DetectorSettings,
-  Match,
-  ResolvedReference,
-} from "../types"
-import type { DetectorRegistry } from "./registry"
+import type { ChangeSet, DetectorEvent, DetectorResult, Match } from "../types"
+import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
 
 export interface DetectionInput {
-  root: string
+  /** The project's detection context: registry, settings, caches, rule context (detection/context.ts). */
+  detection: DetectionContext
   event: DetectorEvent
   selections: Selection[]
   changes: ReadonlyMap<string, ChangeSet>
   /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
   read(file: string): Promise<string | null>
-  registry: DetectorRegistry
-  cacheFor(kind: string): Cache
-  contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
-  settings: DetectorSettings
+  /** Per run, not per project: the edit deadline on edit, verify_ms on verify (§13). */
   timeoutMs: number
 }
 
@@ -62,7 +52,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
 
   const perKind = await Promise.all(
     [...byKind].map(async ([kind, selections]): Promise<Outcome> => {
-      const detector = input.registry.get(kind)
+      const detector = input.detection.registry.get(kind)
       if (!detector) return { status: "error", kind, selections, message: `detector "${kind}" is not registered` }
       try {
         const rules = await Promise.all(
@@ -70,7 +60,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
             id: rule.id,
             config: rule.detector.config,
             files,
-            context: await input.contextFor(rule),
+            context: await input.detection.contextFor(rule),
           })),
         )
         const result = await Promise.race([
@@ -79,9 +69,9 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
             rules,
             read: input.read,
             changes: input.changes,
-            cache: input.cacheFor(kind),
-            settings: input.settings,
-            cwd: input.root,
+            cache: input.detection.cacheFor(kind),
+            settings: input.detection.settings,
+            cwd: input.detection.root,
             signal: controller.signal,
             deadlineAt,
           }),

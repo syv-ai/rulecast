@@ -1,13 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
-import type { CompiledRule, DetectorRule } from "./compile/rule"
+import type { DetectorRule } from "./compile/rule"
 import type { RuleExample } from "./config/schema"
+import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
-import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { renderTemplate } from "./template"
-import type { Cache, DetectorSettings, ResolvedReference } from "./types"
 
 export interface ExampleFinding {
   line: number
@@ -43,13 +42,12 @@ export interface ExampleResult {
 }
 
 export interface ExamplesInput {
-  /** The project root. Examples are written to a scratch directory inside it; see `runExamples`. */
-  root: string
+  /**
+   * The project's detection context (detection/context.ts). Its `root` is where the scratch
+   * directory examples are written to goes; see `runExamples`.
+   */
+  detection: DetectionContext
   rule: DetectorRule
-  registry: DetectorRegistry
-  settings: DetectorSettings
-  contextFor(rule: CompiledRule): Promise<ResolvedReference[]>
-  cacheFor(kind: string): Cache
   timeoutMs: number
 }
 
@@ -104,7 +102,7 @@ export async function runExamples(input: ExamplesInput): Promise<ExampleResult> 
   ]
   if (cases.length === 0) return { ...result, empty: true }
 
-  const scratch = path.basename(await mkdtemp(path.join(input.root, EXAMPLES_DIR)))
+  const scratch = path.basename(await mkdtemp(path.join(input.detection.root, EXAMPLES_DIR)))
   try {
     for (const { kind, index, example } of cases) {
       const outcome = await runOne(input, scratch, example)
@@ -117,7 +115,7 @@ export async function runExamples(input: ExamplesInput): Promise<ExampleResult> 
   } finally {
     // Also on a detector that threw: a scratch directory per rule, left in the repository on every
     // failing run, is how somebody ends up committing one.
-    await rm(path.join(input.root, scratch), { recursive: true, force: true })
+    await rm(path.join(input.detection.root, scratch), { recursive: true, force: true })
   }
 
   const fired = (outcome: ExampleOutcome) => outcome.findings.length > 0
@@ -138,21 +136,17 @@ async function runOne(
   // The example keeps its own path under it, because the extension decides the parser and the
   // directory decides what a linter's configuration says about it.
   const relative = path.join(scratch, example.path)
-  const file = path.join(input.root, relative)
+  const file = path.join(input.detection.root, relative)
   await mkdir(path.dirname(file), { recursive: true })
   await writeFile(file, example.code)
 
   const output = await runDetection({
-    root: input.root,
+    detection: input.detection,
     event: "verify",
     selections: [{ rule: input.rule, files: [relative] }],
     // No baseline: an example is entirely new, which is what an author is asking about.
     changes: new Map(),
-    read: (name) => readSourceFile(input.root, name),
-    registry: input.registry,
-    cacheFor: input.cacheFor,
-    contextFor: input.contextFor,
-    settings: input.settings,
+    read: (name) => readSourceFile(input.detection.root, name),
     timeoutMs: input.timeoutMs,
   })
 

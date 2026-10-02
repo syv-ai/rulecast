@@ -29,16 +29,18 @@ function input(
   timeoutMs = 1000,
 ) {
   return {
-    root: "/project",
+    detection: {
+      root: "/project",
+      registry: createRegistry(detectors),
+      settings: defaultDetectorSettings(),
+      cacheFor: () => memoryCache(),
+      contextFor: async () => [],
+    },
     event: "edit" as const,
     selections,
     changes: new Map(),
     // These detectors are fakes that never read a file.
     read: async () => null,
-    registry: createRegistry(detectors),
-    cacheFor: () => memoryCache(),
-    contextFor: async () => [],
-    settings: defaultDetectorSettings(),
     timeoutMs,
   }
 }
@@ -53,7 +55,8 @@ describe("runDetection", () => {
     const settings = {
       llm: { provider: "opencode" as const, baseUrl: "http://x.test", apiKeyEnv: "KEY", maxFilesPerVerify: 3 },
     }
-    await runDetection({ ...input([{ rule: detectorRule("r1", "a"), files: ["x.ts"] }], [a]), settings })
+    const base = input([{ rule: detectorRule("r1", "a"), files: ["x.ts"] }], [a])
+    await runDetection({ ...base, detection: { ...base.detection, settings } })
     expect(calls[0]!.settings).toEqual(settings)
   })
 

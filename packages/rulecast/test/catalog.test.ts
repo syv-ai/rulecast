@@ -208,12 +208,14 @@ describe("catalog rule examples", () => {
     }
     const root = await createProject({})
     const result = await runExamples({
-      root,
+      detection: {
+        root,
+        registry,
+        settings: defaultDetectorSettings(),
+        cacheFor: () => memoryCache(),
+        contextFor: async () => [],
+      },
       rule,
-      registry,
-      settings: defaultDetectorSettings(),
-      contextFor: async () => [],
-      cacheFor: () => memoryCache(),
       timeoutMs: 60_000,
     })
     const failures = result.outcomes
