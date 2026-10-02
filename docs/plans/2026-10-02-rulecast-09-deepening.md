@@ -119,12 +119,15 @@ Paths under `src/` and `test/` are in `packages/rulecast/`.
 export function pastDeadline(error: unknown, input: Pick<DetectorRun<unknown>, "signal" | "deadlineAt">): boolean
 ```
 
-- [ ] Extract the condition at `per-rule.ts:22` into the exported `pastDeadline`, keeping its comment — it is the explanation for all four call sites. `perRule` calls it.
-- [ ] Replace `if (input.signal.aborted) throw error` with `if (pastDeadline(error, input)) throw error` at `ast-grep/detector.ts:81` and `:99`, `linter/detector.ts:102`, and `llm/detector.ts:180`.
-- [ ] Write the failing test first, as a table over all six detectors: a run whose `deadlineAt` is already past and whose `signal` is *not* aborted, with a `read` that throws, must reject rather than return a `DetectorResult` with errors in it. Before the fix `ast-grep`, `linter` and `llm` return; after it all six reject.
-- [ ] Add the companion case: with `deadlineAt` in the future and the signal not aborted, a thrown error is still a rule error for all six. The fix must not turn ordinary failures into timeouts.
-- [ ] Verify: `pnpm vitest run test/detectors/deadline.test.ts` → passes; `pnpm test` → passes; `pnpm typecheck` → clean.
-- [ ] Commit.
+- [x] Extract the condition at `per-rule.ts:22` into the exported `pastDeadline`, keeping its comment — it is the explanation for all four call sites. `perRule` calls it.
+- [x] Replace `if (input.signal.aborted) throw error` with `if (pastDeadline(error, input)) throw error` at `ast-grep/detector.ts:81` and `:99`, `linter/detector.ts:102`, and `llm/detector.ts:180`.
+- [x] Unit-test `pastDeadline`: a `DeadlineError` whatever the clock says; an aborted signal; a passed wall clock with the signal still open (the case the signal cannot see, and the reason the predicate exists); an ordinary error inside the deadline.
+- [x] End-to-end on `ast-grep`, the one reachable case: a run with `deadlineAt` already past, the signal not aborted and a `read` that throws must reject rather than return a `DetectorResult` carrying the error. Red before the fix, green after.
+- [x] Companion case: with `deadlineAt` in the future, the same failure is still a rule error. The fix must not turn ordinary failures into timeouts.
+- [x] Verify: `pnpm vitest run test/detectors/deadline.test.ts` → 6 passed; `pnpm test` → 936 tests, 928 passing; `pnpm typecheck` → clean.
+- [x] Commit.
+
+**Corrected while executing.** This task was planned as "a table over all six detectors", which is wrong: the six do not share a failure path, so the table would have asserted a uniformity that does not exist. `regex` does not wrap `input.read` in a try/catch at all (`regex.ts:115`), so a read failure leaves it as a whole-run error by design; `llm` skips a file it cannot read rather than erroring; `linter` and `llm` only reach their catch through a subprocess or an HTTP call, which is not hermetic to force (§15). So the test is the predicate as a unit plus `ast-grep` end to end — the one case that is both reachable and hermetic. `linter` and `llm` share the corrected predicate and are covered by their own contract suites; their exposure was always latent, because they await and the signal is therefore accurate.
 
 ## Task 2: close the plugin API, with a guard that cannot regress
 

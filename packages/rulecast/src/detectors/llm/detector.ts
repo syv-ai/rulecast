@@ -1,4 +1,4 @@
-import { readSourceFile } from "../../core/detection/per-rule"
+import { pastDeadline, readSourceFile } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type {
   ChangeSet,
@@ -177,7 +177,7 @@ export const llmDetector: Detector<LlmConfig> = {
         try {
           return { call, findings: await runCall(call, provider, settings, input) }
         } catch (error) {
-          if (input.signal.aborted) throw error
+          if (pastDeadline(error, input)) throw error
           return { call, error }
         }
       }),

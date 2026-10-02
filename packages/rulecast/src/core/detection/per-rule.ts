@@ -4,6 +4,22 @@ import path from "node:path"
 import { DeadlineError, errorMessage, isNotFound } from "../errors"
 import type { Detector, DetectorResult, DetectorRuleInput, DetectorRun, Match } from "../types"
 
+/**
+ * Whether this error is the clock rather than the rule.
+ *
+ * It decides which of two very different things a detector reports. Rethrowing lets the core record
+ * a timeout, which is logged and tried again at the next verify; swallowing it into
+ * `DetectorResult.errors` is a rule error, which disables the rule for the whole session (§14).
+ *
+ * The signal alone cannot tell the two apart. Its abort timer only runs when the event loop is free,
+ * and synchronous work — `ast-grep` parses in native code that no timeout interrupts — is what keeps
+ * it busy. So the wall clock is the authority, and every detector that catches its own errors has to
+ * ask this rather than `signal.aborted`.
+ */
+export function pastDeadline(error: unknown, input: Pick<DetectorRun<unknown>, "signal" | "deadlineAt">): boolean {
+  return error instanceof DeadlineError || input.signal.aborted || Date.now() > input.deadlineAt
+}
+
 /** Turns a per-rule function into a detector run; an error in one rule does not affect the others. */
 export function perRule<Config>(
   detect: (rule: DetectorRuleInput<Config>, input: DetectorRun<Config>) => Promise<Match[]>,
@@ -15,11 +31,7 @@ export function perRule<Config>(
         try {
           for (const match of await detect(rule, input)) result.findings.push({ rule: rule.id, match })
         } catch (error) {
-          // The clock, not the rule: rethrowing lets the core record a timeout, which is logged
-          // and tried again at the next verify, rather than a rule error, which would disable the
-          // rule for the whole session (§14). The signal alone cannot tell the two apart —
-          // synchronous work keeps its own abort timer from ever firing.
-          if (error instanceof DeadlineError || input.signal.aborted || Date.now() > input.deadlineAt) throw error
+          if (pastDeadline(error, input)) throw error
           result.errors.push({ rule: rule.id, message: errorMessage(error) })
         }
       }),

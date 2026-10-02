@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 
-import { readSourceFile } from "../../core/detection/per-rule"
+import { pastDeadline, readSourceFile } from "../../core/detection/per-rule"
 import { lineStarts, offsetAt } from "../../core/detection/positions"
 import { errorMessage, isNotFound } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
@@ -99,7 +99,7 @@ export const linterDetector: Detector<LinterConfig> = {
             }
           }
         } catch (error) {
-          if (input.signal.aborted) throw error
+          if (pastDeadline(error, input)) throw error
           // One error per rule: a whole-run error would disable the other tools too.
           const message = errorMessage(error)
           for (const rule of rules) result.errors.push({ rule: rule.id, message })

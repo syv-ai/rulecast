@@ -1,3 +1,4 @@
+import { pastDeadline } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import type { Language } from "./languages"
@@ -78,7 +79,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
             if (source === null) continue
             root = parser.parse(source).root() as unknown as Node
           } catch (error) {
-            if (input.signal.aborted) throw error
+            if (pastDeadline(error, input)) throw error
             // Reading or parsing is per-language work, so it fails the rules of this language
             // only. Letting it throw would be a whole-run error across every language (spec §14).
             const message = errorMessage(error)
@@ -96,7 +97,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
                 result.findings.push({ rule: rule.id, match: matchOf(file, node, variables.get(rule.id)!) })
               }
             } catch (error) {
-              if (input.signal.aborted) throw error
+              if (pastDeadline(error, input)) throw error
               if (!result.errors.some((existing) => existing.rule === rule.id)) {
                 result.errors.push({ rule: rule.id, message: errorMessage(error) })
               }
