@@ -24,9 +24,9 @@
     "vitest": "pnpm --filter @syv-ai/rulecast exec vitest"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "@changesets/cli": "^3.0.3",
     "@syv-ai/rulecast": "workspace:*",
-    "lefthook": "2.1.14"
+    "lefthook": "2.1.16"
   }
 }
