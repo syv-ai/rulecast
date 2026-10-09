@@ -96,7 +96,8 @@ async function project(): Promise<{ root: string; url: string; label: string; lo
     root,
     url,
     label: repoLabel(url, REV),
-    location: path.join(repoDir(TEST_HOME, url, REV), "docs/python.md"),
+    // A copy inside the project: Claude Code blocks reads under the cache until the user grants them (plan 10, Task 11).
+    location: path.join(".rulecast", path.relative(TEST_HOME, repoDir(TEST_HOME, url, REV)), "docs/python.md"),
   }
 }
 
@@ -152,6 +153,8 @@ describe("rule repos end to end", () => {
     await writeFile(path.join(root, USERS), VIOLATION)
     const edit = await hook(root, "post-tool-use.edit", USERS)
     expectRepoDelivery(additionalContext(edit.stdout), label, location)
+    // The agent can follow the pointer: the copy is inside the project.
+    expect(existsSync(path.join(root, location))).toBe(true)
 
     const stop = JSON.parse((await hook(root, "stop")).stdout)
     expect(stop.decision).toBe("block")

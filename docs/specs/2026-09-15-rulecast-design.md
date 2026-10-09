@@ -778,6 +778,8 @@ projects/<first 16 hex of sha256(realpath(project root))>/
 
 Separate checkouts and worktrees of one repository get separate project directories.
 
+**Files an agent is pointed at live in the project**, in `<root>/.rulecast/`: the untrimmed delivery when a message overflows (`.rulecast/deliveries/`, three per session), and a copy of any rule-repo file a `read`-mode reference names (`.rulecast/repos/…`, mirroring the cache). Measured with Claude Code 2.1.296: in default permission mode a Read under `~/.cache/rulecast` is blocked until the user grants it, so a pointer into the cache is one the agent cannot follow. The directory holds a `.gitignore` of `*`, so it ignores itself and no project ignore file needs editing.
+
 ## 13. Performance
 
 **Requirement:** the `edit` hook completes in under 500 ms at p95, measured from process start to exit, with a 30-rule project and warm caches, excluding llm rules.

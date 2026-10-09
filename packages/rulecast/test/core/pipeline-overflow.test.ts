@@ -5,7 +5,6 @@ import { describe, expect, test } from "vitest"
 import { renderAgentText } from "../../src/core/delivery/render-agent"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
-import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
 
 /** Ten rules, each citing its own section: more floor than a small budget can hold. */
@@ -31,7 +30,8 @@ const files = {
   "app/services/users.py": "def get(x):\n    return x\n",
 }
 
-const deliveriesIn = (root: string) => path.join(stateDirFor(root), "deliveries")
+// Inside the project, where the agent may read it (plan 10, Task 11), and repo-relative in the message.
+const deliveriesIn = (root: string) => path.join(root, ".rulecast", "deliveries")
 
 describe("pipeline: a delivery that does not fit", () => {
   test("writes the whole delivery to a file and points the message at it", async () => {
@@ -47,7 +47,8 @@ describe("pipeline: a delivery that does not fit", () => {
 
     expect(delivery.omitted.rules).toBeGreaterThan(0)
     expect(delivery.overflowPath).not.toBeNull()
-    expect(delivery.overflowPath!.startsWith(deliveriesIn(root))).toBe(true)
+    expect(delivery.overflowPath!.startsWith(".rulecast/deliveries/")).toBe(true)
+    expect(readFileSync(path.join(root, ".rulecast", ".gitignore"), "utf8")).toContain("*")
 
     const message = renderAgentText(delivery, { maxMatchesPerRule: 10 })
     expect(message.length).toBeLessThanOrEqual(900)
@@ -55,7 +56,7 @@ describe("pipeline: a delivery that does not fit", () => {
     expect(message).toContain(delivery.overflowPath!)
 
     // Every rule that fired is in the file, including the ones the message had no room for.
-    const written = readFileSync(delivery.overflowPath!, "utf8")
+    const written = readFileSync(path.join(root, delivery.overflowPath!), "utf8")
     for (const rule of RULES) expect(written).toContain(rule.id)
     expect(readdirSync(deliveriesIn(root))).toHaveLength(1)
   })

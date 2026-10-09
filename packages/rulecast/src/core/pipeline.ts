@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import path from "node:path"
 
 import { classify } from "./baseline/fingerprint"
 import { type BaselineInput, changesFor, touchRecords } from "./baseline/stage"
@@ -6,7 +7,7 @@ import { appendBaseline, type BaselineState, readBaseline, startRecord } from ".
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { contentReader, WORKTREE } from "./content"
-import { writeOverflow } from "./delivery/persist"
+import { agentDir, copyIntoProject, writeOverflow } from "./delivery/persist"
 import { createReferenceResolver } from "./delivery/resolve"
 import { applyFileBudget, applySizeCeiling } from "./detection/budget"
 import { detectionFor } from "./detection/context"
@@ -433,9 +434,22 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.
+  // Files the agent is pointed at live inside the project, where it may read them (delivery/persist.ts).
+  const home = path.dirname(path.dirname(stateDir))
   const persisted = (decision: Decision): Delivery => {
     if (decision.overflow !== null) {
-      decision.delivery.overflowPath = writeOverflow(stateDir, event.session?.id ?? null, decision.overflow)
+      let written: string | null = null
+      try {
+        written = writeOverflow(path.join(agentDir(root), "deliveries"), event.session?.id ?? null, decision.overflow)
+      } catch {
+        written = null
+      }
+      decision.delivery.overflowPath = written === null ? null : path.relative(root, written).split(path.sep).join("/")
+    }
+    for (const reference of decision.delivery.references) {
+      if (reference.location === undefined || !path.isAbsolute(reference.location)) continue
+      const copied = copyIntoProject(root, home, reference.location)
+      if (copied !== null) reference.location = copied
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
