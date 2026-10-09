@@ -11,6 +11,8 @@ export interface FormatOptions {
   findings?: boolean
   /** Append the adoption backlog. True for `--all-files` and `--summary`. */
   backlog?: boolean
+  /** What was checked, so that "no findings" can never mean "nothing was looked at". Absent: not said. */
+  checked?: { files: number; selection: "staged" | "files" | "all" | "range" | "session" }
   /** Rules left out because their detector is metered (a staged run, or --no-llm) and they matched a checked file. */
   skipped?: string[]
 }
@@ -26,14 +28,39 @@ const TOP_FILES = 10
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
+/** The line above the tail: what the run looked at. */
+function checkedLine(checked: NonNullable<FormatOptions["checked"]>): string {
+  switch (checked.selection) {
+    case "staged":
+      return `checked ${plural(checked.files, "staged file")}`
+    case "range":
+      return `checked ${plural(checked.files, "changed file")}`
+    case "all":
+      return `checked all ${plural(checked.files, "file")}`
+    case "files":
+      return `checked ${plural(checked.files, "file")}`
+    case "session":
+      return "checked the session's edited files"
+  }
+}
+
+/** Nothing staged is the first thing a new user runs into, and "no findings" there reads as "clean". */
+export const NOTHING_STAGED = "nothing staged: 0 files checked (rulecast run --all-files checks everything)"
+
+/** The block of rule and detector problems: not findings, and never counted as warnings. */
+function problemsBlock(warnings: readonly string[]): string[] {
+  return warnings.length === 0 ? [] : ["rulecast problems:", ...warnings.map((warning) => `  - ${warning}`), ""]
+}
+
 function terminal(delivery: Delivery, options: FormatOptions): string {
   const out: string[] = []
   // --summary: the warnings still matter — a rule that is broken makes the count below wrong — but
   // the list of sites does not, which is the whole reason for the flag.
+  if (options.checked?.selection === "staged" && options.checked.files === 0 && delivery.warnings.length === 0) {
+    return NOTHING_STAGED
+  }
   if (options.findings === false) {
-    if (delivery.warnings.length > 0) {
-      out.push("warnings:", ...delivery.warnings.map((warning) => `  - ${warning}`), "")
-    }
+    out.push(...problemsBlock(delivery.warnings))
     if (options.backlog === true) out.push(renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
     return out.join("\n")
   }
@@ -71,19 +98,24 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   }
   if (delivery.preexistingSummary.length > 0 || delivery.references.length > 0) out.push("")
 
-  if (delivery.warnings.length > 0) {
-    out.push("warnings:", ...delivery.warnings.map((warning) => `  - ${warning}`), "")
-  }
+  out.push(...problemsBlock(delivery.warnings))
 
   if ((options.skipped ?? []).length > 0) out.push(skippedLine(options.skipped!))
+  if (options.checked !== undefined) out.push(checkedLine(options.checked))
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
   const warningsCount = delivery.findings.length - errors
+  // Findings and rulecast's own problems are counted apart: one word, two meanings, side by side, is
+  // how a reader decides the count above it is wrong.
+  const problems =
+    delivery.warnings.length === 0 ? "" : ` · rulecast: ${plural(delivery.warnings.length, "problem")} (see above)`
   out.push(
-    delivery.findings.length === 0 ? "no findings" : `${plural(errors, "error")}, ${plural(warningsCount, "warning")}`,
+    (delivery.findings.length === 0
+      ? "no findings"
+      : `findings: ${plural(errors, "error")}, ${plural(warningsCount, "warning")}`) + problems,
   )
   // Last, so it is what is left on screen: the count is the thing to act on, and the list above it
   // is a hundred lines of detail nobody reads to the end.
-  if (options.backlog === true) out.push("", renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
+  if (options.backlog === true) out.push("", renderBacklog(summarise(delivery), { topFiles: TOP_FILES, note: false }))
   return out.join("\n")
 }
 
@@ -105,6 +137,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       touches: delivery.touches,
       warnings: delivery.warnings,
       skipped: options.skipped ?? [],
+      checked: options.checked ?? null,
       stop: delivery.stop,
     },
     null,

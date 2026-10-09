@@ -64,7 +64,7 @@ function table(header: string[], rows: string[][]): string[] {
   return [line(header), ...rows.map(line)]
 }
 
-export function renderBacklog(summary: BacklogSummary, options: { topFiles: number }): string {
+export function renderBacklog(summary: BacklogSummary, options: { topFiles: number; note?: boolean }): string {
   if (summary.totalViolations === 0) return "backlog: no violations"
 
   const out: string[] = [
@@ -89,9 +89,11 @@ export function renderBacklog(summary: BacklogSummary, options: { topFiles: numb
     if (rest > 0) out.push(`  …and ${plural(rest, "more file")}`)
   }
 
-  // Both sentences, always, and no verdict. The first is what the eight-month table above shows;
-  // the second is the weaker claim the 2%-against-37% figure supports — a correlation, so it says
-  // "rarely breaks it" rather than promising a mechanism.
+  // Both sentences, and no verdict. The first is what the eight-month table above shows; the
+  // second is the weaker claim the 2%-against-37% figure supports — a correlation, so it says
+  // "rarely breaks it" rather than promising a mechanism. Only where someone asked about adoption
+  // (`--summary`): after a plain `--all-files` listing it is a lecture under every run.
+  if (options.note === false) return out.join("\n")
   out.push(
     "",
     "This is the stock, not a rate. Enforcement on edits does not reduce it.",

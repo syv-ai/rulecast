@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
+import { NOTHING_STAGED } from "../../src/adapters/cli/format"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
@@ -23,10 +24,15 @@ describe("rulecast run: file selection", () => {
     expect(result.code).toBe(1)
     expect(result.stdout).toContain("app/services/users.py:2:5  error    backend/no-httpexception")
     expect(result.stdout).toContain("src/client/api.ts:1:1  warning  frontend/no-generated-edits")
-    expect(result.stdout).toContain("1 error, 1 warning")
-    // The backlog is what is left on screen: the count is the thing to act on.
-    expect(result.stdout.trimEnd().endsWith("a file that already follows a rule rarely breaks it.")).toBe(true)
+    expect(result.stdout).toContain("checked all 4 files\nfindings: 1 error, 1 warning")
+    // The backlog is what is left on screen: the count is the thing to act on. Its note about stock
+    // and rate is for --summary, where someone asked about adoption.
+    expect(result.stdout.trimEnd().split("\n").at(-1)).toMatch(
+      /^\s+(app\/services\/users\.py|src\/client\/api\.ts)\s+1$/,
+    )
     expect(result.stdout).toContain("backlog: 2 violations in 2 files")
+    expect(result.stdout).not.toContain("This is the stock, not a rate.")
+    expect((await run(root, "--all-files", "--summary")).stdout).toContain("This is the stock, not a rate.")
   })
 
   test("--summary prints the backlog alone, with the same exit code", async () => {
@@ -40,7 +46,8 @@ describe("rulecast run: file selection", () => {
 
   test("--summary works with any file selection and reports nothing when there is nothing", async () => {
     const root = await createFixture()
-    expect(await run(root, "--summary")).toMatchObject({ code: 0, stdout: "backlog: no violations\n" })
+    expect(await run(root, "--summary")).toMatchObject({ code: 0, stdout: `${NOTHING_STAGED}\n` })
+    expect(await run(root, "--all-files", "--summary")).toMatchObject({ code: 1 })
   })
 
   test("--summary with --format sarif is a usage error naming both", async () => {
@@ -63,9 +70,9 @@ describe("rulecast run: file selection", () => {
 
   test("without flags only staged files are checked", async () => {
     const root = await createFixture()
-    expect(await run(root)).toMatchObject({ code: 0, stdout: "no findings\n" })
+    expect(await run(root)).toMatchObject({ code: 0, stdout: `${NOTHING_STAGED}\n` })
     await writeFile(path.join(root, USERS), VIOLATION)
-    expect((await run(root)).stdout).toBe("no findings\n")
+    expect((await run(root)).stdout).toBe(`${NOTHING_STAGED}\n`)
     await git(root, "add", USERS)
     const result = await run(root, "--format", "json")
     expect(result.code).toBe(1)
@@ -88,7 +95,7 @@ describe("rulecast run: file selection", () => {
   test("--from-ref checks files changed since the merge base, classified against it", async () => {
     const root = await createFixture()
     await git(root, "checkout", "-q", "-b", "feature")
-    expect((await run(root, "--from-ref", "main")).stdout).toBe("no findings\n")
+    expect((await run(root, "--from-ref", "main")).stdout).toBe("checked 0 changed files\nno findings\n")
 
     await writeFile(path.join(root, USERS), VIOLATION)
     const uncommitted = await run(root, "--from-ref", "main", "--format", "json")
@@ -102,12 +109,14 @@ describe("rulecast run: file selection", () => {
     expect(lines((await run(root, "--from-ref", "main", "--to-ref", "feature", "--format", "json")).stdout)).toEqual([
       3,
     ])
-    expect((await run(root, "--from-ref", "main", "--to-ref", "main")).stdout).toBe("no findings\n")
+    expect((await run(root, "--from-ref", "main", "--to-ref", "main")).stdout).toBe(
+      "checked 0 changed files\nno findings\n",
+    )
   })
 
   test("--session verifies the session's edited files without deciding a stop", async () => {
     const root = await createFixture()
-    expect((await run(root, "--session", "s1")).stdout).toBe("no findings\n")
+    expect((await run(root, "--session", "s1")).stdout).toBe("checked the session's edited files\nno findings\n")
     await writeFile(path.join(root, USERS), VIOLATION)
     await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
 

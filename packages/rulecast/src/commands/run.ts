@@ -193,6 +193,7 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
     skipped,
+    checked: { files: selected.files.length, selection: selected.selection },
   })
   if (text) io.stdout(`${text}\n`)
   return exitCodeFor(result.delivery, result.failed)

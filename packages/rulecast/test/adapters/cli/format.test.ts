@@ -38,13 +38,33 @@ describe("formatDelivery", () => {
         "  see all of it: rulecast run --all-files --summary",
         "conventions: conventions/backend.md#errors, conventions/state.md",
         "",
-        "warnings:",
+        "rulecast problems:",
         "  - something broke",
         "",
-        "1 error, 1 warning",
+        "findings: 1 error, 1 warning · rulecast: 1 problem (see above)",
       ].join("\n"),
     )
     expect(formatDelivery(emptyDelivery(), "terminal", { maxMatchesPerRule: 10 })).toBe("no findings")
+  })
+
+  test("terminal says what it checked, and nothing staged is never 'no findings'", () => {
+    const options = { maxMatchesPerRule: 10 }
+    const empty = emptyDelivery()
+    expect(formatDelivery(empty, "terminal", { ...options, checked: { files: 0, selection: "staged" } })).toBe(
+      "nothing staged: 0 files checked (rulecast run --all-files checks everything)",
+    )
+    expect(formatDelivery(empty, "terminal", { ...options, checked: { files: 3, selection: "staged" } })).toBe(
+      "checked 3 staged files\nno findings",
+    )
+    expect(formatDelivery(empty, "terminal", { ...options, checked: { files: 1, selection: "range" } })).toBe(
+      "checked 1 changed file\nno findings",
+    )
+    expect(formatDelivery(empty, "terminal", { ...options, checked: { files: 194, selection: "all" } })).toBe(
+      "checked all 194 files\nno findings",
+    )
+    expect(formatDelivery(empty, "terminal", { ...options, checked: { files: 2, selection: "files" } })).toBe(
+      "checked 2 files\nno findings",
+    )
   })
 
   test("agent uses the shared agent renderer", () => {
@@ -57,6 +77,7 @@ describe("formatDelivery", () => {
     const parsed = JSON.parse(formatDelivery(delivery, "json", { maxMatchesPerRule: 10 }))
     expect(Object.keys(parsed).sort()).toEqual([
       "backlog",
+      "checked",
       "findings",
       "preexistingSummary",
       "references",
