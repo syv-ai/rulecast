@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises"
+import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import type { Event, WriteIntent } from "../../src/core/types"
@@ -145,5 +147,26 @@ describe("pipeline: guarding a write", () => {
     const after = (await pipelineAt(root, { kind: "edit", files: [SERVICE], cwd: root, session: { id: "s1" } }))
       .delivery
     expect(after.findings).toEqual([])
+  })
+})
+
+/** Plan 10, G4: the model read the refusal, so the section it carried counts as delivered. */
+describe("pipeline: what a refusal delivered", () => {
+  test("the next delivery points back to the section instead of sending it again", async () => {
+    const root = await createRepo(files)
+    const refused = await run(
+      root,
+      guard(root, SERVICE, { edit: { find: "return x", replace: "raise HTTPException(404)", all: false } }),
+    )
+    expect(refused.references.map((reference) => [reference.ref, reference.state])).toEqual([
+      ["conventions/backend.md#errors", "full"],
+    ])
+    // The second attempt goes through (one refusal per file), and the edit hook reports it.
+    await writeFile(path.join(root, SERVICE), "def get(x):\n    raise HTTPException(404)\n")
+    const edit = await run(root, { kind: "edit", files: [SERVICE], cwd: root, session: { id: "s1" } })
+    expect(edit.findings.map((finding) => finding.rule)).toContain("backend/no-httpexception")
+    expect(edit.references.map((reference) => [reference.ref, reference.state])).toEqual([
+      ["conventions/backend.md#errors", "pointer"],
+    ])
   })
 })

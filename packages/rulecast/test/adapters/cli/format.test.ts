@@ -80,6 +80,7 @@ describe("formatDelivery", () => {
       "checked",
       "findings",
       "ignored",
+      "notices",
       "preexistingSummary",
       "references",
       "skipped",

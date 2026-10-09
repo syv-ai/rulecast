@@ -149,3 +149,54 @@ describe("Claude Code adapter: format", () => {
     )
   })
 })
+
+describe("Claude Code adapter: notices are for the user", () => {
+  const NOTICE = "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced."
+
+  test("a block carries the notice as a system message, never in the reason", () => {
+    const output = JSON.parse(
+      format(delivery({ findings: [finding()], stop: "block", notices: [NOTICE] }), "verify").stdout,
+    )
+    expect(output.decision).toBe("block")
+    expect(output.systemMessage).toBe(NOTICE)
+    expect(output.reason).not.toContain("changed during this session")
+  })
+
+  test("an allowed stop with nothing else to say still tells the user", () => {
+    expect(JSON.parse(format(delivery({ stop: "allow", notices: [NOTICE] }), "verify").stdout)).toEqual({
+      systemMessage: NOTICE,
+    })
+  })
+
+  test("a reached cap puts the notice before the unresolved findings", () => {
+    const output = JSON.parse(
+      format(delivery({ findings: [finding()], stop: "capReached", notices: [NOTICE] }), "verify").stdout,
+    )
+    expect(output.systemMessage.startsWith(`${NOTICE}\n\n`)).toBe(true)
+    expect(output.systemMessage).toContain("stop gate limit reached")
+  })
+
+  test("notices never reach the model as additional context", () => {
+    const output = JSON.parse(format(delivery({ findings: [finding()], notices: [NOTICE] }), "edit").stdout)
+    expect(output.hookSpecificOutput.additionalContext).not.toContain("changed during this session")
+  })
+
+  test("rule and detector problems go to the user, not the model", () => {
+    const warning = "regex detector failed for r/x: bad pattern. Disabled for this session."
+    const withFinding = JSON.parse(format(delivery({ findings: [finding()], warnings: [warning] }), "edit").stdout)
+    expect(withFinding.hookSpecificOutput.additionalContext).not.toContain("bad pattern")
+    expect(withFinding.systemMessage).toBe(`rulecast problems:\n  - ${warning}`)
+    // A warning alone still reaches the user.
+    expect(JSON.parse(format(delivery({ warnings: [warning] }), "edit").stdout)).toEqual({
+      systemMessage: `rulecast problems:\n  - ${warning}`,
+    })
+    // --format agent keeps them in the text: there is nobody else to show them to.
+    expect(renderAgentText(delivery({ warnings: [warning] }), options)).toContain("bad pattern")
+  })
+
+  test("--format agent prints them, because an agent without hooks has nobody else to show them to", () => {
+    expect(renderAgentText(delivery({ notices: [NOTICE] }), options)).toBe(
+      `rulecast notices (for the user):\n  - ${NOTICE}`,
+    )
+  })
+})

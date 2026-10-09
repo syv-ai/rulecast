@@ -254,6 +254,11 @@ export interface Delivery {
   omitted: Omitted
   /** Absolute path of the untrimmed delivery, written when even the floor did not fit; null when it did. */
   overflowPath: string | null
+  /**
+   * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
+   * added. Attached after the budget is spent and never part of agent context under a hook adapter.
+   */
+  notices?: string[]
 }
 
 export interface AdapterInput {

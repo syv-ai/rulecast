@@ -108,6 +108,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
 
   out.push(...problemsBlock(delivery.warnings))
 
+  for (const notice of delivery.notices ?? []) out.push(notice, "")
   if ((options.skipped ?? []).length > 0) out.push(skippedLine(options.skipped!))
   if (options.checked !== undefined) out.push(checkedLine(options.checked))
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
@@ -148,6 +149,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       skipped: options.skipped ?? [],
       checked: options.checked ?? null,
       ignored: options.ignored ?? [],
+      notices: delivery.notices ?? [],
       stop: delivery.stop,
     },
     null,

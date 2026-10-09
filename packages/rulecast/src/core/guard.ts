@@ -7,7 +7,7 @@ import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
 import { assemble, trim } from "./session/decide"
-import { refusalKey, type WorkRecord, type WorkState } from "./session/state"
+import { type ContextRecord, refusalKey, type WorkRecord, type WorkState } from "./session/state"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface GuardInput {
@@ -26,6 +26,8 @@ export interface GuardInput {
   maxContextChars: number | null
   log: (line: string) => void
   record: (records: WorkRecord[]) => Promise<void>
+  /** Appends to the agent's context memory: the sections a refusal delivered. */
+  recordContext: (records: ContextRecord[]) => Promise<void>
 }
 
 /**
@@ -94,17 +96,20 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
 
   // Assemble and trim, and no stop gate: a refusal is not a stop. No touches, no warnings and no
   // context of what was delivered earlier, so the sections come with the refusal even if the agent
-  // has seen them: the message has to stand on its own, and nothing here is recorded as delivered
-  // because the write it explains never happened.
+  // has seen them: the message has to stand on its own. The write never happened, but its
+  // explanation did reach the model — the denial reason is what it reads in place of the tool's
+  // result — so the sections it carried are recorded as delivered, and the next delivery points
+  // back to them instead of sending them again.
   const assembled = await assemble({
     findings: refusing.map(({ rule, match }) => ({ rule, match, status: "new" as const })),
     resolver: input.resolver,
     maxBytes: input.config.context.maxBytes,
   })
-  const { delivery } = trim(assembled, {
+  const { delivery, context } = trim(assembled, {
     maxContextChars: input.maxContextChars,
     maxMatchesPerRule: input.config.maxMatchesPerRule,
   })
+  await input.recordContext(context.filter((record) => record.t === "delivered"))
   await input.record(
     [...new Set(refusing.map(({ rule }) => rule.id))].map((rule) => ({ t: "refused" as const, rule, file })),
   )

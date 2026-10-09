@@ -5,6 +5,7 @@ export type WorkRecord =
   | { t: "refused"; rule: string; file: string }
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
+  | { t: "noticed"; key: string }
 
 export type ContextRecord =
   | { t: "reset" }
@@ -22,6 +23,8 @@ export interface WorkState {
   disabled: Map<string, string>
   /** Files each agent read or edited, unique, least recently accessed first (§9 reset). */
   accessed: Map<string, string[]>
+  /** Keys of the user notices already given this session (session/oversight.ts): each is told once. */
+  noticed: Set<string>
 }
 
 export interface ContextState {
@@ -39,7 +42,14 @@ export function preexistingKey(rule: string, file: string): string {
 export const refusalKey = preexistingKey
 
 export function emptyWork(): WorkState {
-  return { edited: [], stopBlocks: new Map(), refusals: new Map(), disabled: new Map(), accessed: new Map() }
+  return {
+    edited: [],
+    stopBlocks: new Map(),
+    refusals: new Map(),
+    disabled: new Map(),
+    accessed: new Map(),
+    noticed: new Set(),
+  }
 }
 
 export function emptyContext(): ContextState {
@@ -71,6 +81,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       case "disabled":
         if (!state.disabled.has(record.rule)) state.disabled.set(record.rule, record.reason)
+        break
+      case "noticed":
+        state.noticed.add(record.key)
         break
     }
   }

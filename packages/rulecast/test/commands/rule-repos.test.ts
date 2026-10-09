@@ -128,7 +128,9 @@ describe("rule repos end to end", () => {
     expect(read.code).toBe(0)
     const text = additionalContext(read.stdout)
     expect(text).toContain("--- AGENTS.md#services ---")
-    expect(text).toContain(`${url}@${REV}: not in the cache (run rulecast install)`)
+    // A missing repo is the human's to fix (plan 10, G4): it goes to the user, not the model.
+    expect(text).not.toContain("not in the cache")
+    expect(JSON.parse(read.stdout).systemMessage).toContain(`${url}@${REV}: not in the cache (run rulecast install)`)
     expect(existsSync(repoDir(TEST_HOME, url, REV))).toBe(false)
 
     await writeFile(path.join(root, USERS), VIOLATION)

@@ -3,6 +3,18 @@ import type { DeliveredReference, Delivery, Finding, Omitted } from "../types"
 
 export interface RenderOptions {
   maxMatchesPerRule: number
+  /**
+   * Print `delivery.notices` (default true). A hook adapter passes false and shows them to the user
+   * itself; `--format agent` serves agents without hooks, where nobody else would see them. Notices
+   * are attached after the budget is spent, so they are never priced: no budgeted delivery has any.
+   */
+  notices?: boolean
+  /**
+   * Print `delivery.warnings` (default true). Rule and detector problems are the human's to fix; a
+   * hook adapter that can reach the user passes false and shows them there. Not printing them only
+   * ever spends less than the budget reserved for them.
+   */
+  warnings?: boolean
 }
 
 /**
@@ -22,9 +34,10 @@ const MAX_LOCATION_PAD = 40
 /** The one line that turns a summary into something the reader can act on. */
 export const BACKLOG_HINT = "  see all of it: rulecast run --all-files --summary"
 
-const BACKLOG_HEADING = "backlog in files you touched (not from your edit):"
+const BACKLOG_HEADING = "backlog in files you touched (not from your edit; leave it unless asked):"
 const WARNINGS_HEADING = "rulecast warnings:"
 const CONVENTIONS_TITLE = "rulecast: conventions for the files you are working on"
+const NOTICES_HEADING = "rulecast notices (for the user):"
 
 const backlogLine = (summary: { rule: string; file: string; count: number }) =>
   `  ${summary.rule} ×${summary.count} in ${summary.file}`
@@ -255,7 +268,9 @@ export const deliveryCost = {
 
 export function renderAgentText(delivery: Delivery, options: RenderOptions): string {
   const title = header(delivery)
-  if (title === null && delivery.warnings.length === 0) return ""
+  const notices = options.notices === false ? [] : (delivery.notices ?? [])
+  const warnings = options.warnings === false ? [] : delivery.warnings
+  if (title === null && warnings.length === 0 && notices.length === 0) return ""
   const out: string[] = []
   if (title !== null) out.push(title, "")
 
@@ -286,13 +301,18 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
   for (const reference of delivery.references) out.push(...referenceLines(reference))
   if (out.length > 0 && out.at(-1) !== "") out.push("")
 
-  if (delivery.warnings.length > 0) {
-    out.push(WARNINGS_HEADING, ...delivery.warnings.map(warningLine))
+  if (warnings.length > 0) {
+    out.push(WARNINGS_HEADING, ...warnings.map(warningLine))
   }
 
   if (delivery.overflowPath !== null) {
     if (out.at(-1) !== "") out.push("")
     out.push(...overflowLines(delivery.omitted.rules, delivery.overflowPath))
+  }
+
+  if (notices.length > 0) {
+    if (out.length > 0 && out.at(-1) !== "") out.push("")
+    out.push(NOTICES_HEADING, ...notices.map(warningLine))
   }
 
   while (out.at(-1) === "") out.pop()

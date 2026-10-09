@@ -51,7 +51,7 @@ describe("renderAgentText", () => {
         "warning style/x",
         "  consider x",
         "",
-        "backlog in files you touched (not from your edit):",
+        "backlog in files you touched (not from your edit; leave it unless asked):",
         "  backend/y ×4 in src/Card.tsx",
         "  see all of it: rulecast run --all-files --summary",
         "",

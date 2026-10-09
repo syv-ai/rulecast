@@ -550,6 +550,10 @@ Consequences:
 
 The lock is a lock file per session directory, considered stale after 5 s; it is held only for step 3. Stores are append-only JSONL. A `reset` appends a reset record; folding ignores context records before the last one. An unparseable final line (crash mid-append) is ignored; any other unparseable line is a store error (§14).
 
+### Oversight
+
+Two things an agent can do to get past the Stop gate without fixing anything — widen `.rulecast-config.yaml`, or add a `rulecast-ignore` comment (§8) — are sometimes right, and `DRAFT-RULES.md` asks agents to edit the config, so neither is refused. Instead the user hears about them. The baseline's `start` record carries the config's sha256 at the session's first event; at a Stop, a config whose hash differs, and every ignored finding on a line changed this session, become `Delivery.notices`. A notice is told once per key (the config hash, or the ignore's rule and site) and recorded as a `noticed` work record, so the same change is not repeated at every later Stop. Notices are attached after the budget is spent and are never agent context: the Claude Code adapter prints them as `systemMessage`, beside a block, before a cap's text, or alone on an allow; the CLI prints them above its tail; `--format agent` prints them under "rulecast notices (for the user):", since an agent without hooks has nobody else to show them to.
+
 ### Decisions in commit
 
 **Findings**
@@ -682,6 +686,10 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 
 - **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview — a preview that is the first 2 KB, not the part worth reading. The adapter declares `maxContextChars` 9,000 so the budget (§9) keeps output under the limit on its own. Anything still longer is cut at a line break, never mid-word, with a line naming the overflow file when there is one and pointing at `rulecast run --format agent` when there is not. Block reasons and system messages get the same cut.
 - **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
+- **Block reason, second sentence.** "If you believe a finding is wrong, say so to the user rather than changing .rulecast-config.yaml; add a "rulecast-ignore: <rule> <reason>" comment only if they agree." A model under a block that believes it is right looks for the lever; this names the honest one. The backlog heading says what to do with backlog: "(not from your edit; leave it unless asked)".
+- **Rule and detector problems go to the user.** Compile and detector warnings are the human's to fix, so the adapter renders agent text without them and prints them, under "rulecast problems:", in `systemMessage` on every event with output. `--format agent` keeps them in its text.
+- **A refusal's sections count as delivered.** The model reads the denial reason in place of the tool's result, so the references it carried are recorded in context memory, and the next delivery points back to them.
+- **Notices** (§9, Oversight) are `systemMessage`, never model context: combined with `decision: "block"`, prepended to a cap's text, or alone when the stop is allowed. Claude Code shows a synchronous hook's `systemMessage` to the user on every event rulecast uses (recorded in the payload README).
 - **Compaction.** `/compact` re-attaches the main agent's 5 most recently read, edited or written files (a partial read comes back whole, an edited file with its current content) without tool calls, so the adapter declares `restoredFiles` 5. `SessionStart` `compact` output has the same 10,000-char limit as `PostToolUse`.
 - Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.
 - `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.

@@ -24,6 +24,7 @@ describe("foldWork", () => {
       refusals: new Map(),
       disabled: new Map([["r1", "boom"]]),
       accessed: new Map(),
+      noticed: new Set(),
     })
   })
 

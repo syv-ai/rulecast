@@ -4,13 +4,15 @@ import { appendRecords, readRecords } from "../jsonl"
 import type { Snapshot } from "./hash"
 
 export type BaselineRecord =
-  | { t: "start"; commit: string | null }
+  | { t: "start"; commit: string | null; configHash?: string | null }
   | { t: "snapshot"; file: string; fileHash: number; lines: string }
   | { t: "fingerprint"; file: string; rule: string; ranges: [number, number][] }
 
 export interface BaselineState {
   started: boolean
   startCommit: string | null
+  /** The config's hash at the session's first event (session/oversight.ts); absent in older stores. */
+  startConfigHash?: string | null
   snapshots: Map<string, Snapshot>
   /**
    * What a `container` rule matched in each file's baseline content (§8): file → rule → ranges.
@@ -38,8 +40,8 @@ function decodeLines(encoded: string): Uint32Array {
   return new Uint32Array(aligned.buffer)
 }
 
-export function startRecord(commit: string | null): BaselineRecord {
-  return { t: "start", commit }
+export function startRecord(commit: string | null, configHash: string | null = null): BaselineRecord {
+  return { t: "start", commit, configHash }
 }
 
 export function snapshotRecord(file: string, snapshot: Snapshot): BaselineRecord {
@@ -87,6 +89,7 @@ export async function readBaseline(sessionDir: string): Promise<BaselineState> {
     if (record.t === "start" && !state.started) {
       state.started = true
       state.startCommit = record.commit
+      state.startConfigHash = record.configHash ?? null
     } else if (record.t === "snapshot" && !state.snapshots.has(record.file)) {
       state.snapshots.set(record.file, { fileHash: record.fileHash, lines: decodeLines(record.lines) })
     }

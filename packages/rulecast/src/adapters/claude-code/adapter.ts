@@ -10,7 +10,8 @@ export const CONTEXT_LIMIT = 10_000
 const CONTEXT_BUDGET = 9_000
 
 const BLOCK_PREAMBLE =
-  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish."
+  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
+  'If you believe a finding is wrong, say so to the user rather than changing .rulecast-config.yaml; add a "rulecast-ignore: <rule> <reason>" comment only if they agree.'
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
@@ -52,8 +53,16 @@ export const claudeCodeAdapter: Adapter = {
   restoredFiles: 5,
   parse: parseClaudeCode,
   format(delivery, event, options) {
-    const text = renderAgentText(delivery, options)
-    if (text === "") return NONE
+    const text = renderAgentText(delivery, { ...options, notices: false, warnings: false })
+    // For the user, never the model: config changes and ignores added this session (spec §9,
+    // Oversight), and rule or detector problems, which only the human can fix (§11).
+    const problems =
+      delivery.warnings.length === 0 ? [] : ["rulecast problems:", ...delivery.warnings.map((w) => `  - ${w}`)]
+    const notices = [...(delivery.notices ?? []), ...problems].join("\n")
+    const userOnly = event.kind === "guard" ? NONE : json({ systemMessage: notices })
+    if (text === "") return notices === "" ? NONE : userOnly
+    const withNotices = (value: Record<string, unknown>) =>
+      notices === "" ? value : { ...value, systemMessage: notices }
     switch (event.kind) {
       case "guard":
         // The write has not happened: permissionDecisionReason is what the model is shown instead
@@ -67,19 +76,30 @@ export const claudeCodeAdapter: Adapter = {
         })
       case "touch":
       case "edit":
-        return json({
-          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, delivery, event) },
-        })
+        return json(
+          withNotices({
+            hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, delivery, event) },
+          }),
+        )
       case "reset":
-        return json({
-          hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: withinLimit(text, delivery, event) },
-        })
+        return json(
+          withNotices({
+            hookSpecificOutput: {
+              hookEventName: "SessionStart",
+              additionalContext: withinLimit(text, delivery, event),
+            },
+          }),
+        )
       case "verify":
         if (delivery.stop === "block")
-          return json({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, delivery, event) })
-        if (delivery.stop === "capReached")
-          return json({ systemMessage: withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event) })
-        return NONE
+          return json(
+            withNotices({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, delivery, event) }),
+          )
+        if (delivery.stop === "capReached") {
+          const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
+          return json({ systemMessage: notices === "" ? cap : `${notices}\n\n${cap}` })
+        }
+        return notices === "" ? NONE : json({ systemMessage: notices })
       default:
         return NONE
     }

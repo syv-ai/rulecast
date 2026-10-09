@@ -146,7 +146,7 @@ describe("renderAgentText: overflow", () => {
       ),
     )
     expect(text).toContain("rulecast: 5 rules violated")
-    expect(text).toContain("backlog in files you touched (not from your edit):")
+    expect(text).toContain("backlog in files you touched (not from your edit; leave it unless asked):")
     expect(text).toContain("…and 2 more")
     expect(text).toContain("…4 rules and the conventions they cite did not fit here.")
     expect(text).toContain("  /cache/projects/ab12/deliveries/s1-2026-09-23.md")

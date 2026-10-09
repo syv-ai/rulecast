@@ -19,6 +19,7 @@ import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
+import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
 import type { IgnoredFinding } from "./suppress"
@@ -206,7 +207,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const dir = session.dir
     baseline = await readingStore(() => readBaseline(dir), baseline)
     if (session && !baseline.started) {
-      await appendBaseline(dir, [startRecord(await headCommit(root))])
+      await appendBaseline(dir, [startRecord(await headCommit(root), await configHash(root))])
       // Re-read: with concurrent first events, the first start record wins.
       baseline = await readingStore(() => readBaseline(dir), baseline)
     }
@@ -239,6 +240,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       maxContextChars: options.maxContextChars,
       log,
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
+      recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
     })
     return { delivery, failed, deadlineMissed }
   }
@@ -246,6 +248,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  let told: Notice[] = []
   let agentRead: string | null = null
 
   if (event.kind === "touch" || event.kind === "edit") {
@@ -366,6 +369,21 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     ignored = output.ignored
+    if (options.stopGate === true && event.kind === "verify" && session !== null) {
+      told = notices({
+        startConfigHash: baseline.startConfigHash ?? null,
+        currentConfigHash: await configHash(root),
+        ignored: ignored.map(({ rule, match, reason }) => ({
+          rule: rule.id,
+          match,
+          reason,
+          status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
+        })),
+        told: view.work.noticed,
+      })
+      // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
+      for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
+    }
     // An ignore without a reason is the author's mistake, said once per site.
     for (const text of output.warnings) warnings.push({ key: `ignore:${text}`, text })
     // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
@@ -419,6 +437,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (decision.overflow !== null) {
       decision.delivery.overflowPath = writeOverflow(stateDir, event.session?.id ?? null, decision.overflow)
     }
+    // After the budget: notices are for the user and never priced into agent context.
+    if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
     return decision.delivery
   }
 
