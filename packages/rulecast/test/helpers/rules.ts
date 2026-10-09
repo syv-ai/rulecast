@@ -24,6 +24,7 @@ export function rule(overrides: Overrides): CompiledRule {
     refuseWrite: false,
     enabled: true,
     stages: ["edit", "verify"],
+    patterns: { files, exclude: "^$" },
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
     message: "{{file}}:{{line}}",
     context: [],

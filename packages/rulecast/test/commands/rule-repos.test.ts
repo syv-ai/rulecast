@@ -171,4 +171,24 @@ describe("rule repos end to end", () => {
     expectRepoDelivery(result.stdout, label, location)
     expect(existsSync(repoDir(TEST_HOME, url, REV))).toBe(true)
   })
+
+  test("list shows what each catalog rule matches and cites, with overrides applied (plan 10, R3)", async () => {
+    const { root, label } = await project()
+    const result = await runCli(root, ["list", "--format", "json"])
+    expect(result.code).toBe(0)
+    const rules = JSON.parse(result.stdout)
+    expect(rules.map((rule: { id: string; source: string }) => [rule.id, rule.source])).toEqual([
+      ["python/no-print", label],
+      ["python/no-todo", label],
+      ["local/services", "local"],
+    ])
+    expect(rules[0]).toMatchObject({ detector: "regex", files: "\\.py$", enabled: true, severity: "error" })
+    expect(rules[0].context).toEqual([`${label}:docs/python.md#errors`, `${label}:docs/python.md#style`])
+    // The override's context, not the published one.
+    expect(rules[1].context).toEqual(["AGENTS.md#todos"])
+    expect(rules[2]).toMatchObject({ detector: null, stages: ["touch"] })
+    const text = (await runCli(root, ["list"])).stdout
+    expect(text).toContain(`python/no-print  regex · edit, verify · error  [${label}]`)
+    expect(text).toContain("3 rules")
+  })
 })

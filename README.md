@@ -90,6 +90,7 @@ A refusal only ever rests on the text the agent is writing, never on a reconstru
 | `rulecast init` | Interactive setup |
 | `rulecast install` / `uninstall` | Add or remove the agent hooks |
 | `rulecast run` | Check staged files, changed files, or everything |
+| `rulecast list` | Show every configured rule, catalog ones included: source, files, detector, docs |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
 | `rulecast validate` | Check the config and print diagnostics |
 | `rulecast doctor` | Compile, check the environment, dry-run every rule |

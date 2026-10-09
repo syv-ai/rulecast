@@ -35,6 +35,8 @@ export interface CompiledRule {
   /** false: switched off with `enabled: false`; never selected for an event (spec §4). */
   enabled: boolean
   stages: Stage[]
+  /** The rule's own `files` and `exclude`, as written, for `rulecast list`; `matches` is what decides. */
+  patterns: { files: string; exclude: string }
   matches(file: string): boolean
   detector: CompiledDetector | null
   message: string | null
@@ -175,6 +177,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     refuseWrite: data.refuse_write === true,
     enabled: data.enabled !== false,
     stages,
+    patterns: { files: data.files ?? "", exclude: data.exclude ?? "^$" },
     matches: (file) => global(file) && filter(file),
     detector,
     message: data.message ?? null,

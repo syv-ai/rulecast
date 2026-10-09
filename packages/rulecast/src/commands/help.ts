@@ -63,6 +63,12 @@ export const COMMANDS: CommandHelp[] = [
     ],
   },
   {
+    name: "list",
+    synopsis: "rulecast list [--format terminal|json]",
+    summary: "Show every configured rule: where it comes from, what it matches, what it cites",
+    flags: [["--format", "terminal or json"]],
+  },
+  {
     name: "test",
     synopsis: "rulecast test [RULE_ID] [--against PATH...]",
     summary: "Run each rule's good/bad examples; --against says how much it would flag",
