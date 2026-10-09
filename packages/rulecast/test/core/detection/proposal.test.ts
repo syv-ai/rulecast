@@ -67,21 +67,21 @@ describe("isInserted", () => {
   const proposal = propose("x = 1\ny = 2\nz = 3\n", { edit: { find: "y = 2", replace: "y = boom()", all: false } })!
 
   test("a match inside the inserted text is the agent's own", () => {
-    expect(isInserted(proposal, at(2, 5, "boom()"), "regex")).toBe(true)
+    expect(isInserted(proposal, at(2, 5, "boom()"), false)).toBe(true)
   })
 
   test("a match elsewhere in the file is not, even though the write produces it", () => {
-    expect(isInserted(proposal, at(3, 1, "z = 3"), "regex")).toBe(false)
+    expect(isInserted(proposal, at(3, 1, "z = 3"), false)).toBe(false)
   })
 
   test("sharing a line with the insert is not enough", () => {
     // The edit adds "boom()" inside line 2; "call(" before it on the same line is not the agent's.
     const midLine = propose("x = 1\ncall(old)\n", { edit: { find: "old", replace: "boom()", all: false } })!
-    expect(isInserted(midLine, at(2, 6, "boom()"), "regex")).toBe(true)
-    expect(isInserted(midLine, at(2, 1, "call("), "regex")).toBe(false)
+    expect(isInserted(midLine, at(2, 6, "boom()"), false)).toBe(true)
+    expect(isInserted(midLine, at(2, 1, "call("), false)).toBe(false)
   })
 
   test("a path match is the file itself, and writing the file is what the rule forbids", () => {
-    expect(isInserted(proposal, at(1, 1, "src/client/api.ts"), "path")).toBe(true)
+    expect(isInserted(proposal, at(1, 1, "src/client/api.ts"), true)).toBe(true)
   })
 })

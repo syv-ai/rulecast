@@ -178,10 +178,14 @@ async function dryRun(project: CompiledProject, detection: DetectionContext): Pr
       lines.push({ rule: rule.id, level: "ok", detail: "context only, nothing to run" })
       continue
     }
-    // Spec §5: llm rules are not dry-run. A model call costs money, and doctor is a command people
-    // type when something is already wrong — their check reports what can be known for free.
-    if (rule.detector.kind === "llm") {
-      lines.push({ rule: rule.id, level: "skipped", detail: "llm rules are not dry-run (a model call costs money)" })
+    // Spec §5: metered rules — llm — are not dry-run. Each run costs money, and doctor is a command
+    // people type when something is already wrong; their check reports what can be known for free.
+    if (detection.registry.get(rule.detector.kind)?.metered === true) {
+      lines.push({
+        rule: rule.id,
+        level: "skipped",
+        detail: `${rule.detector.kind} rules are not dry-run (each run costs money)`,
+      })
       continue
     }
     const file = files.find((candidate) => rule.matches(candidate))

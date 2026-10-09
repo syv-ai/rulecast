@@ -36,9 +36,10 @@ export interface FingerprintInput {
  * that errored, timed out or was skipped by the size ceiling emits nothing, so classification
  * falls back to `instance` rather than pretending the file was clean.
  *
- * `llm` rules are never measured. A fingerprint run is a second evaluation of the rule, and for
- * `llm` that is a billed model call as a side effect of the agent opening a file, which §6's
- * consent rule does not allow. A container `llm` rule classifies as `instance`.
+ * Rules of a `metered` detector — `llm` today — are never measured. A fingerprint run is a second
+ * evaluation of the rule, and for a metered detector that is a billed call as a side effect of the
+ * agent opening a file, which §6's consent rule does not allow. Such a container rule classifies
+ * as `instance`.
  *
  * Never throws: a baseline that cannot be measured is a baseline that is missing, and the caller
  * already handles that.
@@ -51,7 +52,7 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
   let selections = selectDetectorRules(input.rules, input.event, input.files, input.disabled).filter(
     (selection) =>
       selection.rule.scope === "container" &&
-      selection.rule.detector.kind !== "llm" &&
+      input.detection.registry.get(selection.rule.detector.kind)?.metered !== true &&
       (input.source === "disk" || guards(selection.rule.detector.kind)),
   )
   if (input.ceiling) {

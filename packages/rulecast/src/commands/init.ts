@@ -156,7 +156,9 @@ async function chooseRules(
   files: readonly string[],
   flags: Flags,
   ui: Ui,
+  registry: DetectorRegistry,
 ): Promise<CompiledRule[]> {
+  const metered = (rule: CompiledRule) => rule.detector !== null && registry.get(rule.detector.kind)?.metered === true
   const available = catalog.rules.filter((rule) => !installed.has(rule.id))
   if (flags.noRules) return []
   if (flags.rules !== null) {
@@ -165,12 +167,12 @@ async function chooseRules(
     if (unknown !== undefined) throw new UsageError(`"${unknown}" is not a rule in ${catalog.label}`)
     return available.filter((rule) => flags.rules!.includes(rule.id))
   }
-  // Preselected: rules that apply to at least one project file — except llm rules. Spec §6,
+  // Preselected: rules that apply to at least one project file — except metered ones. Spec §6,
   // Consent: an llm rule sends file contents to a third party and costs money per file, so it is
   // never ticked on someone's behalf. It is still offered, and --rules still installs it. This
   // also covers --yes and the no-TTY path, which take `preselected` directly below.
   const preselected = available
-    .filter((rule) => rule.detector?.kind !== "llm" && files.some((file) => rule.matches(file)))
+    .filter((rule) => !metered(rule) && files.some((file) => rule.matches(file)))
     .map((rule) => rule.id)
   if (ui.prompter === null) return available.filter((rule) => preselected.includes(rule.id))
   if (available.length === 0) {
@@ -185,7 +187,7 @@ async function chooseRules(
     choices.push({
       value: rule.id,
       label: group === "general" ? rule.id : rule.id.slice(group.length + 1),
-      hint: done ? "installed" : hintFor(rule),
+      hint: done ? "installed" : hintFor(rule, registry),
       disabled: done,
     })
     groups[group] = choices
@@ -198,12 +200,14 @@ async function chooseRules(
   return available.filter((rule) => chosen.includes(rule.id))
 }
 
-/** An llm rule says what it costs and where the file goes, so ticking it is an informed choice. */
-function hintFor(rule: CompiledRule): string {
+/**
+ * A metered rule says what it costs and where the file goes, so ticking it is an informed choice.
+ * The detector words its own cost: init has no business knowing the shape of an llm rule's config.
+ */
+function hintFor(rule: CompiledRule, registry: DetectorRegistry): string {
   const description = rule.description ?? rule.name
-  if (rule.detector?.kind !== "llm") return description
-  const model = (rule.detector.config as { model?: string }).model ?? "a model"
-  return `llm · ${model} · sends file contents to your provider — ${description}`
+  const cost = rule.detector === null ? undefined : registry.get(rule.detector.kind)?.cost?.(rule.detector.config)
+  return cost === undefined ? description : `${cost} — ${description}`
 }
 
 async function chooseConventions(rules: CompiledRule[], detection: Detection, ui: Ui): Promise<RuleSelection[]> {
@@ -320,7 +324,7 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   const catalog = typeof loaded === "string" ? null : loaded
   if (typeof loaded === "string") ui.say(`${loaded}. Continuing without catalog rules.`, "Catalog unavailable")
   const installed = new Set((configured?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
-  const rules = catalog === null ? [] : await chooseRules(catalog, installed, files, flags, ui)
+  const rules = catalog === null ? [] : await chooseRules(catalog, installed, files, flags, ui, registry)
   const selections = await chooseConventions(rules, detection, ui)
   const agents = await chooseAgents(detection, flags, ui)
 

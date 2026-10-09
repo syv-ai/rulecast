@@ -37,7 +37,7 @@ export interface ExampleResult {
   missing: boolean
   /** It declared one with no cases in it. */
   empty: boolean
-  /** Not run: an `llm` rule, and no rule id was named. */
+  /** Not run: a metered rule (llm), and no rule id was named. */
   skipped: boolean
 }
 

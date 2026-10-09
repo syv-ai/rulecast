@@ -160,6 +160,13 @@ export const llmDetector: Detector<LlmConfig> = {
   // verify only by default (spec §6): a model call is far too slow for an edit hook. A rule opts
   // in with `stages: [edit, verify]`.
   events: () => ["verify"],
+  // Spec §6, Consent: an llm rule sends file contents to a third party and costs money per file.
+  // Everything the core does differently for it follows from these, not from the name "llm".
+  metered: true,
+  cost: (config) => `llm · ${config.model} · sends file contents to your provider`,
+  fileBudget: (settings) => ({ max: settings.llm.maxFilesPerVerify, setting: "llm.max_files_per_verify" }),
+  // A field trial measured a single haiku call on a 135-line file at 89 s against a 60 s default.
+  timeoutHint: "an llm rule on a large file can need 120000 or more",
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     const settings = input.settings.llm

@@ -332,7 +332,10 @@ describe("rulecast doctor", () => {
       })
       await stubAgentCli(root, "claude")
       const result = await doctor(root)
-      expect(result.stdout).toContain("skipped  tone — llm rules are not dry-run (a model call costs money)")
+      // Was "(a model call costs money)" until plan 9 Task 7: doctor now asks the detector whether
+      // it is metered instead of comparing the kind to "llm", so it can no longer say what kind of
+      // call it is skipping.
+      expect(result.stdout).toContain("skipped  tone — llm rules are not dry-run (each run costs money)")
       expect(await readdir(path.join(root, "claude.calls"))).toEqual([])
       expect(result.code).toBe(0)
     })

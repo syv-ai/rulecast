@@ -361,13 +361,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
       (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
     )
-    // Spec §6: at most llm.max_files_per_verify files per verify, most recently edited first.
-    // work.edited is least recently edited first, so it is reversed.
-    let overBudget: string[] = []
+    // Spec §6: a detector that declares a file budget is given at most that many files per verify,
+    // most recently edited first. work.edited is least recently edited first, so it is reversed.
+    const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
     if (event.kind === "verify") {
-      const budgeted = applyFileBudget("llm", selections, config.llm.maxFilesPerVerify, [...view.work.edited].reverse())
-      selections = budgeted.selections
-      overBudget = budgeted.skipped
+      const recent = [...view.work.edited].reverse()
+      for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
+        const budget = registry.get(kind)?.fileBudget?.(detection.settings)
+        if (budget === undefined) continue
+        const budgeted = applyFileBudget(kind, selections, budget.max, recent)
+        selections = budgeted.selections
+        if (budgeted.skipped.length > 0) overBudget.push({ kind, ...budget, skipped: budgeted.skipped })
+      }
     }
     // Spec §13: an edit has 350 ms and an agent waiting on it, so a file too large for an
     // in-process detector to finish inside that is not given to one. A verify has seconds.
@@ -406,13 +411,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors))
-    if (overBudget.length > 0) {
-      // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
-      // failure, so it must not change the exit code.
+    // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
+    // failure, so it must not change the exit code.
+    for (const { kind, max, setting, skipped } of overBudget) {
       warnings.push({
-        key: `llm-budget:${overBudget.join(",")}`,
-        text: `llm rules checked ${config.llm.maxFilesPerVerify} files; ${overBudget.length} were not checked: ${overBudget.join(", ")}. Raise llm.max_files_per_verify, or run rulecast run --files on them.`,
+        key: `${kind}-budget:${skipped.join(",")}`,
+        text: `${kind} rules checked ${max} files; ${skipped.length} were not checked: ${skipped.join(", ")}. Raise ${setting}, or run rulecast run --files on them.`,
       })
+    }
+    const hintFor = (kind: string) => {
+      const hint = registry.get(kind)?.timeoutHint
+      return hint === undefined ? "" : ` (${hint})`
     }
     for (const timeout of output.timedOut) {
       if (event.kind === "edit") {
@@ -426,7 +435,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           // at 89 s against a 60 s default, and "timed out" alone leaves nobody knowing what to do.
           text:
             `${timeout.kind} detector timed out after ${config.timeouts.verifyMs} ms for ${timeout.rules.join(", ")}. ` +
-            `Raise timeouts.verify_ms${timeout.kind === "llm" ? " (an llm rule on a large file can need 120000 or more)" : ""}.`,
+            `Raise timeouts.verify_ms${hintFor(timeout.kind)}.`,
         })
       }
     }

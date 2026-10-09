@@ -44,12 +44,12 @@ export function propose(current: string | null, intent: WriteIntent): Proposal |
 }
 
 /**
- * Whether a match is evidence from the agent's own text. A `path` match is the file itself, and
- * writing the file is what the rule forbids, so it always counts; everything else must overlap
- * what is being inserted, compared by character so a match sharing only a line does not.
+ * Whether a match is evidence from the agent's own text. A whole-file match — `path`'s — is the
+ * file itself, and writing the file is what the rule forbids, so it always counts; everything else
+ * must overlap what is being inserted, compared by character so a match sharing only a line does not.
  */
-export function isInserted(proposal: Proposal, match: Match, detector: string): boolean {
-  if (detector === "path") return true
+export function isInserted(proposal: Proposal, match: Match, wholeFile: boolean): boolean {
+  if (wholeFile) return true
   const starts = lineStarts(proposal.content)
   const lineStart = starts[match.line - 1]
   if (lineStart === undefined) return false

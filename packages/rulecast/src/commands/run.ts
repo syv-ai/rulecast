@@ -143,6 +143,8 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     },
     registry,
     maxContextChars: null,
+    // The one place the core names a detector kind on purpose: --no-llm is a user-facing flag, and
+    // the user typed the name. Everything else asks the registry whether a kind is metered.
     skipDetectorKinds: run.noLlm ? new Set(["llm"]) : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
   })

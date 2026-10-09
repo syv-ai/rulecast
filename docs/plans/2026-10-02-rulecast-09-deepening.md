@@ -263,16 +263,29 @@ export interface Detector<Config> {
 }
 ```
 
-- [ ] Add the four properties. `metered`, `cost` and `maxFilesPerEvent` go on the `llm` detector; `wholeFile: true` goes on `path`. Every other detector declares none, exactly as with `guards`.
-- [ ] `pipeline.ts:376`: the file budget asks the registry which kinds are metered and what each allows, instead of naming `"llm"` and reading `config.llm.maxFilesPerVerify`. `applyFileBudget` already takes a kind — it can now be driven from a list.
-- [ ] `pipeline.ts:441`: the timeout hint's extra sentence comes from the detector, not from `kind === "llm"`. A detector with no hint gets the plain message.
-- [ ] `record.ts:57`: `!metered` replaces `kind !== "llm"`. The comment at `record.ts:42-44` is the reason and should now read as being about metered detectors generally.
-- [ ] `proposal.ts:52`: `isInserted` takes the detector (or a `wholeFile` boolean) rather than a kind string. This is the ninth kind-literal in the core and the review missed it.
-- [ ] `doctor.ts:181`, `test.ts:202`: `metered` replaces the literal. `run.ts:146`: `--no-llm` still names `llm` — it is a user-facing flag, and that is the right place for the name. Leave it, and say so in a comment.
-- [ ] `init.ts:173`: `metered` replaces the literal. `init.ts:202-207`: `hintFor` calls `detector.cost?.(rule.detector.config)` and the cast `(rule.detector.config as { model?: string }).model` is **deleted**. The `llm` detector's own `cost` builds "llm · haiku · sends file contents to your provider".
-- [ ] Tests: a fake metered detector in the registry is never preselected by `init`, never fingerprinted, and is budgeted — all without the string `"llm"` in the test. That is the assertion that proves the seam closed.
-- [ ] Verify: `grep -rn '"llm"' src/ | grep -v '^src/detectors/llm/'` returns only `run.ts:146`; `pnpm test` → passes; `pnpm typecheck` → clean.
-- [ ] Commit.
+- [x] Add the four properties. `metered`, `cost` and `maxFilesPerEvent` go on the `llm` detector; `wholeFile: true` goes on `path`. Every other detector declares none, exactly as with `guards`.
+- [x] `pipeline.ts:376`: the file budget asks the registry which kinds are metered and what each allows, instead of naming `"llm"` and reading `config.llm.maxFilesPerVerify`. `applyFileBudget` already takes a kind — it can now be driven from a list.
+- [x] `pipeline.ts:441`: the timeout hint's extra sentence comes from the detector, not from `kind === "llm"`. A detector with no hint gets the plain message.
+- [x] `record.ts:57`: `!metered` replaces `kind !== "llm"`. The comment at `record.ts:42-44` is the reason and should now read as being about metered detectors generally.
+- [x] `proposal.ts:52`: `isInserted` takes the detector (or a `wholeFile` boolean) rather than a kind string. This is the ninth kind-literal in the core and the review missed it.
+- [x] `doctor.ts:181`, `test.ts:202`: `metered` replaces the literal. `run.ts:146`: `--no-llm` still names `llm` — it is a user-facing flag, and that is the right place for the name. Leave it, and say so in a comment.
+- [x] `init.ts:173`: `metered` replaces the literal. `init.ts:202-207`: `hintFor` calls `detector.cost?.(rule.detector.config)` and the cast `(rule.detector.config as { model?: string }).model` is **deleted**. The `llm` detector's own `cost` builds "llm · haiku · sends file contents to your provider".
+- [x] Tests: a fake metered detector in the registry is never preselected by `init`, never fingerprinted, and is budgeted — all without the string `"llm"` in the test. That is the assertion that proves the seam closed.
+- [x] Verify: `grep -rn '"llm"' src/ | grep -v '^src/detectors/llm/'` returns only `run.ts:146`; `pnpm test` → passes; `pnpm typecheck` → clean.
+- [x] Commit.
+
+**Corrected while executing.** Three departures from the interface sketched above, each forced by a message the core prints:
+
+- `maxFilesPerEvent(settings): number` became **`fileBudget(settings): { max, setting }`**. The over-budget warning ends "Raise llm.max_files_per_verify", and a number alone cannot name the setting that raises it. With the setting declared beside the number, the `llm` warning is byte-identical to before and `pipeline-llm.test.ts` passes unchanged.
+- A fifth property, **`timeoutHint?: string`**, carries the timeout warning's "(an llm rule on a large file can need 120000 or more)". The plan said the sentence should come from the detector without naming where.
+- **`doctor`'s skip line changed wording**, from "llm rules are not dry-run (a model call costs money)" to "llm rules are not dry-run (each run costs money)". Once the core asks `metered` instead of comparing the kind, it can no longer know the run is a *model* call. `doctor.test.ts` was updated with a comment saying why; this is the one user-visible change in the task.
+
+`pipeline-deadline.test.ts` had a test that faked a detector *named* `"llm"` to get the timeout hint — the exact name-keyed behaviour this task removes. It now fakes one called `hinted` that declares a hint, plus a one-line assertion that the real `llm` detector declares the field-trial wording.
+
+`test/core/detection/metered.test.ts` is the proof the seam closed: a detector called `paid` is budgeted, warned about under its own setting, and never fingerprinted, with no kind name in the code. Its fingerprint test was mutated (the `metered` check in `record.ts` replaced by `true`) and failed as it should; a third test shows the same rule *is* fingerprinted without the declaration, so the second is not vacuous.
+
+`grep -rn '"llm"' src/ | grep -v '^src/detectors/llm/'` → only `commands/run.ts:146`, the user-facing `--no-llm` flag, now commented as the one deliberate exception. 974 tests, 966 passing.
+
 
 ## Task 8: the golden corpus
 

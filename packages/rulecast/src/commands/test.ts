@@ -186,7 +186,8 @@ export async function testCommand(
 
   for (const rule of rules) {
     const result =
-      ruleId === null && rule.detector.kind === "llm"
+      // Spec §6: a metered rule runs only when asked for by id — never as part of "test them all".
+      ruleId === null && registry.get(rule.detector.kind)?.metered === true
         ? skippedResult(rule.id)
         : await runExamples({ detection, rule, timeoutMs })
     lines.push(summaryLine(rule, result))

@@ -158,6 +158,30 @@ export interface Detector<Config> {
    * not on disk, so ruff, eslint, ast-grep's CLI or a `command` script would judge the old one.
    */
   guards?: boolean
+  /**
+   * Each file costs money or a third party sees it (§6, Consent). The core never preselects such a
+   * rule in `init`, never runs it as a side effect — no fingerprint run on `touch`, no `doctor` dry
+   * run, no `rulecast test` without a rule id — and budgets the files it is given per event.
+   *
+   * The core asks this rather than a kind name, the way it asks `guards`, so a second metered
+   * detector needs no edit to the core.
+   */
+  metered?: boolean
+  /** For `init`'s consent line: what one rule of this kind costs and where the file goes. */
+  cost?(config: Config): string
+  /**
+   * Most files this detector is given in one verify; the most recently edited are kept (§6).
+   * `setting` names the config key that raises it, because a warning that does not name its lever
+   * leaves nobody knowing what to do.
+   */
+  fileBudget?(settings: DetectorSettings): { max: number; setting: string }
+  /** Added to a verify timeout's warning, when this kind can legitimately need far longer. */
+  timeoutHint?: string
+  /**
+   * A match is the whole file rather than a range in it, so any write to a matching file is
+   * evidence for `refuse_write`, not only a write that inserts the matched text.
+   */
+  wholeFile?: boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>

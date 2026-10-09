@@ -76,7 +76,10 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
-  const evidence = output.findings.filter(({ rule, match }) => isInserted(proposal, match, rule.detector.kind))
+  const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
+  const evidence = output.findings.filter(({ rule, match }) =>
+    isInserted(proposal, match, wholeFile(rule.detector.kind)),
+  )
   if (evidence.length === 0) return emptyDelivery()
 
   // The refuse gate, like the stop gate: a rule that has had its say about a file lets the next
