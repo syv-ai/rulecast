@@ -34,7 +34,18 @@ import type {
   Severity,
   Stage,
 } from "../src/index"
-import { lineStarts, offsetAt, perRule, positionAt, renderAgentText } from "../src/index"
+import {
+  lineStarts,
+  offsetAt,
+  pastDeadline,
+  perRule,
+  positionAt,
+  renderAgentText,
+  repoRelative,
+  repoRelativeTo,
+  runTool,
+  sourceReader,
+} from "../src/index"
 
 declare const rule: CompiledRule
 
@@ -72,3 +83,10 @@ export const offset: number = offsetAt(starts, 1, 1, 3)
 export const built: Detector<{ pattern: string }>["run"] = perRule<{ pattern: string }>(async () => [] as Match[])
 declare const detectorRule: DetectorRule
 export const detectorKind: string = detectorRule.detector.kind
+
+// The helpers a detector that hands paths to another program needs.
+export const relative: string = repoRelative("/repo/a.ts", "/repo")
+export const relativeAll: (file: string) => string = repoRelativeTo("/repo")
+export const reader: (file: string) => Promise<string | null> = sourceReader("/repo")
+export const ran: Promise<string> = runTool("true", [], { cwd: "/repo", signal: run.signal, notFound: "missing" })
+export const clock: boolean = pastDeadline(new Error("x"), run)

@@ -234,14 +234,24 @@ export async function baselineFor(
 
 **Behaviour:** The three helpers four detectors hand-roll exist once, on the plugin API, so a sixth detector starts with plumbing rather than a blank file. `repoRelative` and `sourceReader` were byte-identical copies; the subprocess-tolerating-a-nonzero-exit shape was written three times. No detector's output changes.
 
-- [ ] Create `per-file.ts` with: `repoRelative(file, cwd)` — the `command` version, which is the superset (it handles the `file://` scheme that SARIF emits; a linter never emits one, so the branch is inert there); `sourceReader(cwd)`, lifted verbatim; and `runTool(command, args, options)` carrying the `maxBuffer: 64 * 1024 * 1024` and the nonzero-exit tolerance, with the comment explaining why a nonzero exit is normal.
-- [ ] Delete `repoRelative`/`rootsOf` from `command/results.ts` and `relativeTo`/`rootsOf` from `linter/tools.ts`. `linter` calls `repoRelative(file, root)` where it called `relativeTo(roots, file)`; the roots array it precomputed is now internal to the helper. Keep the comment at `results.ts:27` — reword it, since it no longer points at a second copy.
-- [ ] Delete both `sourceReader` definitions and import the shared one.
-- [ ] Route `linter/detector.ts:45-56`, `command/detector.ts:63`, and `llm/providers/cli.ts` through `runTool`. Check each one's exit-code handling against what `runTool` does before deleting it: these are three similar shapes, not three identical ones.
-- [ ] Export `repoRelative`, `sourceReader` and `runTool` from `src/index.ts`, next to `perRule`, and add them to `test/plugin-api.ts`.
-- [ ] Tests: `repoRelative` over an absolute path under a symlinked root, a `file://` URI, a relative path, and a path outside the root; `sourceReader` reads a file once for two calls and returns null for a missing one; `runTool` returns output for exit 0 and for a tolerated nonzero exit, and throws for a missing binary.
-- [ ] Verify: `pnpm vitest run test/detectors test/core/detection` → passes; `pnpm test` → passes; `pnpm test:linux` → passes; `pnpm perf` → p95 no worse than 236 ms.
-- [ ] Commit.
+- [x] Create `per-file.ts` with: `repoRelative(file, cwd)` — the `command` version, which is the superset (it handles the `file://` scheme that SARIF emits; a linter never emits one, so the branch is inert there); `sourceReader(cwd)`, lifted verbatim; and `runTool(command, args, options)` carrying the `maxBuffer: 64 * 1024 * 1024` and the nonzero-exit tolerance, with the comment explaining why a nonzero exit is normal.
+- [x] Delete `repoRelative`/`rootsOf` from `command/results.ts` and `relativeTo`/`rootsOf` from `linter/tools.ts`. `linter` calls `repoRelative(file, root)` where it called `relativeTo(roots, file)`; the roots array it precomputed is now internal to the helper. Keep the comment at `results.ts:27` — reword it, since it no longer points at a second copy.
+- [x] Delete both `sourceReader` definitions and import the shared one.
+- [x] Route `linter/detector.ts:45-56`, `command/detector.ts:63`, and `llm/providers/cli.ts` through `runTool`. Check each one's exit-code handling against what `runTool` does before deleting it: these are three similar shapes, not three identical ones.
+- [x] Export `repoRelative`, `sourceReader` and `runTool` from `src/index.ts`, next to `perRule`, and add them to `test/plugin-api.ts`.
+- [x] Tests: `repoRelative` over an absolute path under a symlinked root, a `file://` URI, a relative path, and a path outside the root; `sourceReader` reads a file once for two calls and returns null for a missing one; `runTool` returns output for exit 0 and for a tolerated nonzero exit, and throws for a missing binary.
+- [x] Verify: `pnpm vitest run test/detectors test/core/detection` → passes; `pnpm test` → passes; `pnpm test:linux` → passes; `pnpm perf` → p95 no worse than 236 ms.
+- [x] Commit.
+
+**Corrected while executing.** Four departures, each from reading the code rather than the review's summary of it:
+
+- **`llm`'s CLI providers were not folded into `runTool`.** The review said the subprocess-tolerating-a-nonzero-exit shape was "written three times". It is written twice. `command` and `linter` were the same shape, differing only in the not-found message, which is now a parameter. `llm/providers/cli.ts` uses `spawn` with the prompt on stdin, keeps stderr and the exit code, and turns a missing binary into a whole-run `LlmUnavailableError` rather than a rule error. Forcing it into `runTool` would have meant three options to reproduce one caller.
+- **No `per-file.ts` and no batching frame.** The plan's file table named one, but none of this task's steps builds a frame — and three detectors that batch three different ways (by language, by tool, by model call) do not share one. The helpers live beside their nearest relatives instead: `repoRelative` in `detection/paths.ts`, `runTool` in `detection/tool.ts`, `sourceReader` beside `readSourceFile` in `per-rule.ts`.
+- **`repoRelative` became a factory, `repoRelativeTo(cwd)`.** The linter resolved its root's realpath once per parse; a per-path `repoRelative` would have called `realpathSync` once per *finding* on a large linter run. `command` was already doing it per finding, so it gets cheaper. `repoRelative(file, cwd)` remains for a single path.
+- **`pastDeadline` is on the plugin API too**, beside `perRule`: a third-party detector that hand-rolls its own `run` needs it for exactly the reason Task 1 found.
+
+Tests pin the edges the copies were written for — a SARIF `file://` URI with a percent-encoded space, a root reached through a symlink, a path outside the root, a reader that does not re-read, a non-zero exit that is an answer, a missing binary, an abort. Mutating `rootsOf` to drop the realpath fails exactly the symlink test. 986 tests, 978 passing.
+
 
 ## Task 7: what makes a detector special goes on the interface
 

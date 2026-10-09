@@ -1,4 +1,4 @@
-import { pastDeadline, readSourceFile } from "../../core/detection/per-rule"
+import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type {
   ChangeSet,
@@ -23,19 +23,6 @@ interface Call {
   changedLines: [number, number][] | null
   model: string
   rules: DetectorRuleInput<LlmConfig>[]
-}
-
-/** Reads each file of the run once. */
-function sourceReader(cwd: string): (file: string) => Promise<string | null> {
-  const cache = new Map<string, Promise<string | null>>()
-  return (file) => {
-    let source = cache.get(file)
-    if (source === undefined) {
-      source = readSourceFile(cwd, file)
-      cache.set(file, source)
-    }
-    return source
-  }
 }
 
 /**

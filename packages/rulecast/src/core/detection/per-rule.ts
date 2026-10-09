@@ -51,6 +51,26 @@ export async function readSourceFile(cwd: string, file: string): Promise<string 
 }
 
 /**
+ * Reads each file at most once for the life of the returned function, for a detector that hands
+ * paths to another program and reads the files only to quote them (`{{text}}`, a prompt).
+ *
+ * Not for a detector that declares `guards`: those read only through `DetectorRun.read`, which is
+ * what lets them judge content the agent proposed and that is not on disk (docs/conventions.md).
+ * `linter` and `llm` each carried a byte-identical copy of this.
+ */
+export function sourceReader(cwd: string): (file: string) => Promise<string | null> {
+  const cache = new Map<string, Promise<string | null>>()
+  return (file) => {
+    let source = cache.get(file)
+    if (source === undefined) {
+      source = readSourceFile(cwd, file)
+      cache.set(file, source)
+    }
+    return source
+  }
+}
+
+/**
  * How large a file is, without reading it; null when it is not there.
  *
  * A file that cannot be stat'ed at all is null too, and so is never skipped: the size ceiling

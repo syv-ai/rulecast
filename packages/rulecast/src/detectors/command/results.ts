@@ -1,7 +1,4 @@
-import { realpathSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
+import { repoRelativeTo } from "../../core/detection/paths"
 import type { Match } from "../../core/types"
 
 type JsonObject = Record<string, unknown>
@@ -14,35 +11,6 @@ function parseJson(output: string): unknown {
     return JSON.parse(output)
   } catch {
     throw new Error("output is not JSON")
-  }
-}
-
-/**
- * A path from a checker, made repo-relative with forward slashes.
- *
- * Two things a checker does that naive relativisation gets wrong: SARIF requires `uri` to be
- * percent-encoded, and resolving a path (Python's `Path.resolve()`, say) follows symlinks, so a
- * project under a symlinked root — every macOS temp directory — comes back as a realpath that
- * does not sit under `cwd`. Either way the finding would be attributed to a path no rule selected
- * and silently dropped. The linter detector does the same thing for the same reason.
- */
-export function repoRelative(file: string, cwd: string): string {
-  const withoutScheme = file.startsWith("file://") ? fileURLToPath(file) : file
-  if (!path.isAbsolute(withoutScheme)) return withoutScheme.split(path.sep).join("/")
-  for (const root of rootsOf(cwd)) {
-    const relative = path.relative(root, withoutScheme)
-    if (!relative.startsWith("..") && !path.isAbsolute(relative)) return relative.split(path.sep).join("/")
-  }
-  return path.relative(cwd, withoutScheme).split(path.sep).join("/")
-}
-
-/** A root and its realpath, so repoRelative can try both. */
-function rootsOf(root: string): string[] {
-  try {
-    const real = realpathSync(root)
-    return real === root ? [root] : [root, real]
-  } catch {
-    return [root]
   }
 }
 
@@ -62,6 +30,7 @@ function capturesOf(source: JsonObject, names: string[], where: string): Record<
 }
 
 export function matchesFromJson(output: string, captures: string[], cwd: string): Match[] {
+  const relative = repoRelativeTo(cwd)
   const parsed = parseJson(output)
   if (!Array.isArray(parsed)) throw new Error("output is not a JSON array of results")
   return parsed.map((result, index) => {
@@ -70,7 +39,7 @@ export function matchesFromJson(output: string, captures: string[], cwd: string)
     if (typeof result.file !== "string") throw new Error(`${where}: "file" must be a string`)
     if (typeof result.line !== "number") throw new Error(`${where}: "line" must be a number`)
     return {
-      file: repoRelative(result.file, cwd),
+      file: relative(result.file),
       line: result.line,
       endLine: typeof result.endLine === "number" ? result.endLine : result.line,
       column: typeof result.column === "number" ? result.column : 1,
@@ -81,6 +50,7 @@ export function matchesFromJson(output: string, captures: string[], cwd: string)
 }
 
 export function matchesFromSarif(output: string, captures: string[], cwd: string): Match[] {
+  const relative = repoRelativeTo(cwd)
   const parsed = parseJson(output)
   if (!isObject(parsed) || !Array.isArray(parsed.runs)) throw new Error("output is not SARIF 2.1.0")
   const matches: Match[] = []
@@ -102,7 +72,7 @@ export function matchesFromSarif(output: string, captures: string[], cwd: string
       // SARIF 2.1.0 has no place for a tool's own fields on a result except `properties`.
       const source = isObject(result.properties) ? { ...result, ...result.properties } : result
       matches.push({
-        file: repoRelative(artifact.uri, cwd),
+        file: relative(artifact.uri),
         line,
         endLine: typeof region.endLine === "number" ? region.endLine : line,
         column: typeof region.startColumn === "number" ? region.startColumn : 1,

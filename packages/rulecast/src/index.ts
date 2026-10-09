@@ -17,9 +17,13 @@ export type { RuleExample, RuleExamples, RuleScope, Stage } from "./core/config/
 // An adapter cannot implement `Adapter.format` without the renderer, and the positions helpers are
 // what a detector needs to turn an offset into the line and column a `Match` carries.
 export { type RenderOptions, renderAgentText } from "./core/delivery/render-agent"
-export { perRule } from "./core/detection/per-rule"
+// What a detector that hands paths to another program needs, so a third-party one starts with the
+// plumbing rather than a blank file: command and linter each carried their own copies.
+export { repoRelative, repoRelativeTo } from "./core/detection/paths"
+export { pastDeadline, perRule, sourceReader } from "./core/detection/per-rule"
 export { lineStarts, offsetAt, positionAt } from "./core/detection/positions"
 export { type AnyDetector, createRegistry, type DetectorRegistry } from "./core/detection/registry"
+export { runTool } from "./core/detection/tool"
 export type { ReferenceSpec } from "./core/references"
 export type * from "./core/types"
 export { emptyDelivery } from "./core/types"

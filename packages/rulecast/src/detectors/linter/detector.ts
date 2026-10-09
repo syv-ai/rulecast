@@ -1,28 +1,11 @@
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
-
-import { pastDeadline, readSourceFile } from "../../core/detection/per-rule"
+import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
 import { lineStarts, offsetAt } from "../../core/detection/positions"
-import { errorMessage, isNotFound } from "../../core/errors"
+import { runTool } from "../../core/detection/tool"
+import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import { describeTool, resolveTool } from "./resolve"
 import { type LinterConfig, linterSchema, type ToolName } from "./schema"
 import { type LinterFinding, TOOLS } from "./tools"
-
-const exec = promisify(execFile)
-
-/** Reads each file of the union once, for {{text}}. */
-function sourceReader(cwd: string): (file: string) => Promise<string | null> {
-  const cache = new Map<string, Promise<string | null>>()
-  return (file) => {
-    let source = cache.get(file)
-    if (source === undefined) {
-      source = readSourceFile(cwd, file)
-      cache.set(file, source)
-    }
-    return source
-  }
-}
 
 /** The source a finding points at; "" when the file is gone or the range is empty. */
 function excerpt(source: string | null, finding: LinterFinding): string {
@@ -42,21 +25,11 @@ function excerpt(source: string | null, finding: LinterFinding): string {
   return source.slice(from, Math.max(from, to)).replace(/\n$/, "")
 }
 
-async function runTool(tool: ToolName, files: string[], cwd: string, signal: AbortSignal): Promise<LinterFinding[]> {
+async function runLinter(tool: ToolName, files: string[], cwd: string, signal: AbortSignal): Promise<LinterFinding[]> {
   const resolved = await resolveTool(tool, cwd)
   const args = [...resolved.prefix, ...TOOLS[tool].args(files)]
-  let stdout: string
-  try {
-    // Linters exit non-zero when they find something; the output is the answer, not the exit code.
-    const result = await exec(resolved.command, args, { cwd, signal, maxBuffer: 64 * 1024 * 1024 })
-    stdout = result.stdout
-  } catch (error) {
-    if (signal.aborted) throw error
-    if (isNotFound(error)) throw new Error(`${tool} is not installed`)
-    const failure = error as { stdout?: string }
-    if (typeof failure.stdout !== "string") throw error
-    stdout = failure.stdout
-  }
+  // Linters exit non-zero when they find something; the output is the answer, not the exit code.
+  const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed` })
   return TOOLS[tool].parse(stdout, cwd)
 }
 
@@ -82,7 +55,7 @@ export const linterDetector: Detector<LinterConfig> = {
         // {{text}} included: an unreadable file must not escape as a whole-run error and take the
         // other tools down with it (spec §14).
         try {
-          const findings = await runTool(tool, files, input.cwd, input.signal)
+          const findings = await runLinter(tool, files, input.cwd, input.signal)
           for (const finding of findings) {
             const match: Match = {
               file: finding.file,
