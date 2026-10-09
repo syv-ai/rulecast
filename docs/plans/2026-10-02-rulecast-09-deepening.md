@@ -421,15 +421,15 @@ The goldens passed unchanged throughout — the renderer's output did not move. 
 
 **Behaviour:** The spec says what was built, §17's claim about recorded contracts becomes true for three of four rather than two, and the plan index carries plan 9.
 
-- [ ] §6 Contract: the `metered`, `cost`, `maxFilesPerEvent` and `wholeFile` properties alongside `guards`, and one line saying the core branches on declarations rather than on kind names.
-- [ ] §13: the deadline contract is honoured by one predicate, named. State the defect that was fixed — an error raised past the deadline used to disable the rule for the session — because that is the kind of thing that gets reintroduced.
-- [ ] §16: the plugin API is closed and a type-level guard holds it closed. Name `test/plugin-api.ts`.
-- [ ] §17: the recorded-contracts row moves from two of four to three of four. The config schema is the one still outstanding, and it is blocked on zod 4 — say so, with the PR number.
-- [ ] §13 or §17, whichever holds the warm note: `warmup` stays on the adapter interface, and why — the session-start trigger is tested and works for any detector that implements `warm`, so what is missing is a shipped consumer, not the machinery.
-- [ ] `docs/conventions.md`: a new section on pricing bounded units, pointing at `costOf`. This is the convention most likely to be silently undone, and the repository's own rules can point at it.
-- [ ] Plan index: plan 9's row, with the measurement that motivated it and the perf number after it.
-- [ ] Verify: `pnpm test` → passes (the docs tests check agent-doc links resolve).
-- [ ] Commit.
+- [x] §6 Contract: the `metered`, `cost`, `maxFilesPerEvent` and `wholeFile` properties alongside `guards`, and one line saying the core branches on declarations rather than on kind names.
+- [x] §13: the deadline contract is honoured by one predicate, named. State the defect that was fixed — an error raised past the deadline used to disable the rule for the session — because that is the kind of thing that gets reintroduced.
+- [x] §16: the plugin API is closed and a type-level guard holds it closed. Name `test/plugin-api.ts`.
+- [x] §17: the recorded-contracts row moves from two of four to three of four. The config schema is the one still outstanding, and it is blocked on zod 4 — say so, with the PR number.
+- [x] §13 or §17, whichever holds the warm note: `warmup` stays on the adapter interface, and why — the session-start trigger is tested and works for any detector that implements `warm`, so what is missing is a shipped consumer, not the machinery.
+- [x] `docs/conventions.md`: a new section on pricing bounded units, pointing at `costOf`. This is the convention most likely to be silently undone, and the repository's own rules can point at it.
+- [x] Plan index: plan 9's row, with the measurement that motivated it and the perf number after it.
+- [x] Verify: `pnpm test` → passes (the docs tests check agent-doc links resolve).
+- [x] Commit.
 
 ---
 

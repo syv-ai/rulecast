@@ -148,6 +148,14 @@ interface Detector<Config> {
   events(config: Config): DetectorEvent[]         // default detection stages; a rule's `stages` overrides
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   warm?(input: DetectorWarm<Config>): Promise<void>   // optional: build caches ahead of events (§13)
+  check?(input: DetectorCheck<Config>): Promise<CheckResult[]>   // optional: what doctor asks (§5)
+  // Declarations the core asks instead of comparing a kind name (§6, Declarations):
+  guards?: boolean                                // reads only through `read`, so can judge a proposed write
+  metered?: boolean                               // costs money or a third party sees the file
+  cost?(config: Config): string                   // init's consent line for one rule
+  fileBudget?(settings: DetectorSettings): { max: number; setting: string }   // files per verify
+  timeoutHint?: string                            // added to a verify timeout's warning
+  wholeFile?: boolean                             // a match is the file itself
 }
 
 interface Finding {
@@ -202,7 +210,9 @@ interface Adapter {
 }
 ```
 
-`perRule(detect)` is an exported helper that turns a per-rule function `(rule, input) => Promise<Match[]>` into a `run`, catching errors per rule. Simple and third-party detectors use it; detectors that share work across rules implement `run` directly.
+`perRule(detect)` is an exported helper that turns a per-rule function `(rule, input) => Promise<Match[]>` into a `run`, catching errors per rule. Simple and third-party detectors use it; detectors that share work across rules implement `run` directly, and use `pastDeadline(error, input)` wherever they catch an error themselves (§6, Errors).
+
+A detector that hands paths to another program gets the rest of the plumbing from the plugin API too: `runTool` (a non-zero exit is an answer, a missing binary is an error), `repoRelative`/`repoRelativeTo` (a SARIF `file://` URI, a root reached through a symlink), and `sourceReader` (each file read once, for `{{text}}` or a prompt — not for a detector that declares `guards`).
 
 ## 4. Rule format
 
@@ -374,12 +384,13 @@ Consumers:
 
 - **Batching.** For each event, the core calls `run` once per detector kind with every selected rule of that kind. Detectors of different kinds run in parallel.
 - **Attribution.** Every finding names the rule it belongs to. A finding may be reported for several rules when several rules select it.
-- **Errors.** An error with a rule id disables that rule for the session. An error with `rule: null` disables every rule in that run for the session. Either delivers one warning naming the rules.
+- **Errors.** An error with a rule id disables that rule for the session. An error with `rule: null` disables every rule in that run for the session. Either delivers one warning naming the rules. **An error raised once the deadline has passed is not a rule error**: the detector rethrows it, so the core records a timeout — logged, and tried again at the next verify. `signal.aborted` alone cannot tell the two apart, because its timer only fires when the event loop is free and native parsing is exactly what keeps it busy; `pastDeadline` also asks the wall clock. Until plan 9, `ast-grep`, `linter` and `llm` asked only the signal, and an `ast-grep` rule that failed past the deadline was switched off for the rest of the session.
 - **Captures.** Every match carries exactly the names in `captures(config)` for its rule, as strings (possibly empty).
 - **Default stages.** `events(config)` gives the rule's default detection stages, so one detector kind can place slow tools on `verify` only.
 - **Cancellation.** Detectors observe `signal`. Work still running when it fires is discarded (§13).
 - **Cache.** Detectors that persist work use `cache`, keyed by content hashes. No module-level state, except memoising a native module whose own registration is process-global — `ast-grep` does this, and nothing derived from a rule, project or event may live there.
 - **Checks.** A detector may implement `check` to report what its rules need from the environment: binaries, native modules, credentials, a model name a provider can express. `rulecast doctor` runs it for every kind a project uses (§5); nothing else does. It never runs the tool it is asking about.
+- **Declarations.** What the core does differently for a detector follows from what the detector declares, never from its name. `guards` (reads only through `read`) gates `refuse_write` and the size ceiling. `metered` (§6, Consent) means: never preselected by `init`, never run as a side effect — no fingerprint run on `touch`, no `doctor` dry run, no `rulecast test` without a rule id — and given at most `fileBudget` files per verify. `cost` words the consent line `init` shows, `timeoutHint` is added to a verify timeout's warning, and `wholeFile` makes any write to a matching file evidence for a refusal. `llm` declares the first four and `path` the last. The only place the core names a kind is `--no-llm`, a flag the user types.
 
 The contract is exported as a test suite (§15) that third-party detectors run.
 
@@ -556,7 +567,7 @@ The lock is a lock file per session directory, considered stale after 5 s; it is
 
 When the adapter declares `maxContextChars`, commit fills the delivery to a floor first, then to what is left over.
 
-The **floor** is the header and — for every rule that fired, errors before warnings — its first finding together with the doc sections it cites. Each rule is charged as one item, its block measured by the renderer itself (`measureRuleBlock`), so the budget spends the characters the output will actually use. A rule whose item does not fit is **dropped whole**, counted in `omitted.rules`, and any section cited only by dropped rules is dropped with it: a section explaining a finding the agent cannot see explains nothing. A touch rule is never dropped — its reference is the whole delivery, and the session has already recorded the rule as touched.
+The **floor** is the header and — for every rule that fired, errors before warnings — its first finding together with the doc sections it cites. Each rule is charged as one item, its block measured by the renderer itself (`measureRuleBlock`), with the findings it would cut — a cut block prints "…and N more", and can switch to the grouped form. A rule whose item does not fit is **dropped whole**, counted in `omitted.rules`, and any section cited only by dropped rules is dropped with it: a section explaining a finding the agent cannot see explains nothing. A touch rule is never dropped — its reference is the whole delivery, and the session has already recorded the rule as touched.
 
 What is left over is filled in this order, which is the reverse of what is worth losing:
 
@@ -566,6 +577,12 @@ What is left over is filled in this order, which is the reverse of what is worth
 4. **The rules' remaining matches**, one per rule per pass, so a rule that fired forty times cannot crowd out the others, and never past `max_matches_per_rule`. What is left out is counted per rule in `omitted.findings`, which the renderer reports as "…and N more in M files".
 
 Without a limit (`rulecast run`) nothing is trimmed: `json` and `sarif` carry every finding.
+
+**Every price comes from the renderer** (`deliveryCost` in `delivery/render-agent.ts`), built from the same line builders it prints with, so the budget spends exactly what is sent. Where a line's final form is not known when the budget is spent, its longest form is charged: the title naming the longest file, or the conventions title if every rule is dropped; a reference's "not included, too long" line; the backlog's "…and N more". One value is an allowance rather than a measure — the overflow file's path, written after the budget is spent. Prices are bounded units — one line, one block — never a growing section priced from inside its own loop, which on the unbudgeted path measured 14.8 s for 20,000 summaries.
+
+A backlog whose frame does not fit is left out whole rather than printing a heading and a count with nothing under them.
+
+Until plan 9 the budget was five hand-tuned constants. Trimming seeded random deliveries across a sweep of limits, 5,708 of 24,000 rendered over their limit, by up to 500 characters — absorbed by the adapter's slack, so no agent saw a cut. Priced by the renderer, none do (`decide-fits.test.ts`).
 
 **Overflow**
 
@@ -761,7 +778,7 @@ Mechanisms:
 - no daemon, no in-process caches;
 - `container` fingerprints (§8) are measured on the `touch` path, where the file is being read and snapshotted anyway, so the edit path still runs each detector exactly once. A project with no `container` rule pays one array scan. Measured 2026-09-28 with the change in place: p50 203 ms, p95 231 ms, unchanged.
 
-**Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3).
+**Edit deadline.** When `edit_deadline_ms` passes, the core aborts outstanding detector runs and delivers what finished. Rules whose results were dropped are written to the debug log, not delivered as warnings; they still run at the next `verify`. The hook then starts `rulecast warm --detector <kind>` detached (stdio ignored, so the hook's exit is not delayed), guarded by a per-detector lock, so an expensive cache build completes in the background instead of being aborted on every edit. `SessionStart` with `startup` or `resume` starts `rulecast warm` for every detector used by a rule that has a `warm` method (§3). No builtin detector implements `warm` yet, so for the shipped detectors both triggers do nothing. Plan 9 considered removing `AdapterInput.warmup` for that reason and kept it: the trigger is tested with a detector that does implement `warm` (`test/commands/hook.test.ts`), so it works for a third-party one today. What is missing is a shipped consumer, not the machinery.
 
 **File-size ceiling.** The deadline is a timer, and a timer only fires when the event loop is free. `regex` matches inside a `vm` timeout, which V8 honours; `ast-grep` parses in native code, which `TerminateExecution` does not reach, so nothing preempts it — a 2.6 MB TypeScript file measured 762 ms, linearly, which makes 26 MB 7.6 seconds of an agent blocked on its own write. So on `edit` and `guard`, a file over `max_file_bytes` (default 1 MiB) is not given to a detector that runs in this process: `regex`, `path`, `ast-grep` — the same set as `guards: true` (§6), which by contract reads only through `read`. The guard measures the **proposed** content, not the file on disk, because the write has not happened yet. `verify` has seconds to spend and always runs. Skipping is written to the debug log, not delivered as a warning, and does not mark the run failed: it is the same category as a missed deadline.
 
@@ -837,7 +854,8 @@ packages/
       adapters/      claude-code/ cli/
       init/          detect, plan, prompts (@clack/prompts), clipboard, drafting prompt
       commands/      init install uninstall run autoupdate try-repo validate clean hook warm doctor
-      index.ts       exports types, perRule, contract suites
+      index.ts       the plugin API: types, perRule and the detector helpers, renderAgentText, contract suites
+      internal.ts    what the CLI drives itself with; no stability promise
     test/
   rules-python/              rules.yaml and the docs its rules reference
   rules-react/
@@ -846,6 +864,7 @@ agents/                      agent-facing docs (§12)
 ```
 
 - TypeScript, Node ≥ 20.12 (the floor of `@clack/prompts`), published to npm as `@syv-ai/rulecast` with a `rulecast` bin.
+- **The plugin API names nothing it does not export.** `@syv-ai/rulecast` is the supported surface and `@syv-ai/rulecast/internal` carries no promise, which is what lets internal shapes change without a major. That only holds if a type the public entry point exports is declared with types it also exports: until plan 9, `CompiledRule`'s `stages`, `context` and `examples` could not be named from either entry point. `test/plugin-api.ts` names every field of `CompiledRule` and what an adapter and a detector need, through the public entry point only, so `pnpm typecheck` fails if that stops being true.
 - Releases via changesets and GitHub Actions; one tag versions the CLI and the rule packages.
 - **Publishing is npm trusted publishing (OIDC)**, configured on npmjs.com against `syv-ai/rulecast` and `release.yml`, with no environment and direct publish allowed. There is no npm token in this repository: the workflow's `id-token: write` is exchanged for a short-lived credential, and provenance is attested without asking for it. 0.1.0 was published with a bypass-2FA token instead, because trusted publishing is configured on a package's settings page and the package did not exist yet — and that token's publish was *staged* rather than made public until it was approved by hand, which is the behaviour npm is moving all bypass-2FA tokens to (accounts from August 2026, direct publishing from January 2027).
 - Standalone binary via `bun build --compile`, published to GitHub Releases in 0.1. **Built natively on each platform** (linux x64/arm64, darwin arm64/x64): `--target` would embed whatever `@ast-grep/napi` resolved on the *building* machine, so a cross-compiled binary carries the wrong native module and fails at the first ast-grep rule, in a way no test on the build machine can see. It is written to `packages/rulecast/binaries/`, not `dist/`, because `files` is `["dist"]` and a 65 MB binary must never reach the npm tarball.
@@ -862,7 +881,7 @@ Loading the native module costs ~4 ms under Node but ~260 ms inside the binary, 
 | **0.1** | Everything in this document: pre-commit-style config, rule repos and the monorepo manifest, compile, detection with batching and deadline, baseline, session, delivery; detectors `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint), `llm` (anthropic, openai-compatible); adapters `claude-code`, `cli`; commands `init`, `install`, `uninstall`, `run`, `autoupdate`, `try-repo`, `validate`, `clean`, `hook`, `warm`, `doctor`; first rule packages; agent docs; perf test; npm package and GitHub Releases binary; public repository; a field trial on a private FastAPI + React platform |
 | **0.2** | **`scope: instance \| container` with baseline fingerprints (§8), done 2026-09-28** — plan `2026-09-28-rulecast-08a-container-scope.md`; **`run --all-files` as an adoption backlog (§11), done 2026-09-28** — plan `08b-adoption-backlog.md`; **rule examples and `rulecast test`, with `--against` for the volume check, done 2026-09-28** — plan `08c-rule-test.md`; the inter-rater (κ) check is explicitly deferred: it needs model calls, which §15 keeps out of `pnpm test`; Codex, Cursor and OpenCode adapters (after recording their hook payloads); Biome; an `azure-openai` llm provider (§6: its deployment path and `api-key` header do not fit `openai-compatible`); **a timeout `llm` rules can actually meet** — a field trial measured one `haiku` call on a 135-line file at 89 s against the 60 s `verify_ms` default, so either the default rises or `llm` gets a timeout of its own. Not urgent for 0.1: no `llm` rule is ever selected for anyone (§6, Consent), so only a project that deliberately turned one on can meet this, and its warning now names the setting to raise |
 | **0.3** | Evals harness measuring convergence rounds and token cost with and without rulecast; PyPI and Homebrew distribution of the binary |
-| **Open** | **A compiled rewrite, in Go or Rust, if binary latency becomes the complaint.** §16 is the trigger: a compiled JS executable pays ~260 ms unpacking and `dlopen`ing `@ast-grep/napi` on every run, which the tools in this niche — lefthook, gitleaks, ripgrep — do not, because they are compiled languages distributing a real binary through npm's `optionalDependencies` rather than a JS program impersonating one. The port is smaller than it looks: the config format, the rule semantics, the hook payload contract and the recorded fixtures under `test/payloads/` are language-independent, and they, not the TypeScript, are the specification. What would be rewritten is the detector implementations and the delivery rendering. Not scheduled, and not worth doing while the npm/Node path is the primary distribution |
+| **Open** | **A compiled rewrite, in Go or Rust, if binary latency becomes the complaint.** §16 is the trigger: a compiled JS executable pays ~260 ms unpacking and `dlopen`ing `@ast-grep/napi` on every run, which the tools in this niche — lefthook, gitleaks, ripgrep — do not, because they are compiled languages distributing a real binary through npm's `optionalDependencies` rather than a JS program impersonating one. The port is smaller than it looks: the config format, the rule semantics, the hook payload contract and the recorded fixtures under `test/payloads/` are language-independent, and they, not the TypeScript, are the specification. As of plan 9 that is true of three of the four: the payloads, the rule examples, and — in `test/goldens/` — the agent-facing rendering and §8's classification, recorded as data with hand-written expectations. The config schema is the one still expressed only as zod; emitting it as JSON Schema waits on zod 4 (PR #7). What would be rewritten is the detector implementations and the delivery rendering. Not scheduled, and not worth doing while the npm/Node path is the primary distribution |
 
 **Recorded, not scheduled: `python/thin-routes` from `llm` to `ast-grep`.** A pattern for the same convention measured P 0.99 / R 0.90 against the catalog's wording of it, and P 0.70 / R 0.84 against a stricter wording from the codebase's own owner. That is strong evidence the `llm` tier is not needed here — and also the clearest evidence there is that a rule's tier is a property of the sentence rather than of the convention, so no catalog can settle tiers once. It rests on one codebase, and the agent-edit check that would confirm it is paused. **Do not convert it yet:** `rulecast test` (plan 8c) is what would make the conversion checkable rather than argued.
 

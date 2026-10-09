@@ -63,3 +63,20 @@ Adding or changing a key in the rule format touches, together:
 A key that exists in the schema and nowhere else is a key nobody will ever use. If it ships in the
 catalog, `packages/rulecast/scripts/manifest.ts` carries it through and `.rulecast-rules.yaml` is
 regenerated with `pnpm manifest`.
+
+## The renderer prices its own output, a line at a time
+
+The context budget in `src/core/session/decide.ts` spends what `renderAgentText` prints, and asks
+`deliveryCost` and `measureRuleBlock` in `src/core/delivery/render-agent.ts` what each part costs.
+Never put a size estimate in `decide.ts`, and never copy a string the renderer prints into it: a
+change to the renderer then silently breaks the budget. That is what five hand-tuned constants did —
+5,708 of 24,000 random deliveries rendered over their limit until plan 9 replaced them.
+
+Add a line to the renderer, and its price goes in `deliveryCost` beside it, built from the same
+helper. If its final form is not known when the budget is spent, price its longest form.
+
+Price **bounded units**: one line, one rule's block, one section's frame. Never price a growing
+section from inside the loop that grows it. With no budget (`json`, `sarif`) every item is kept, so
+re-rendering the section on each one is quadratic: 20,000 backlog summaries took 14.8 seconds that
+way, against well under one second a line at a time. `test/core/session/decide-scale.test.ts`
+guards it, and `test/core/session/decide-fits.test.ts` checks that a trimmed delivery fits.
