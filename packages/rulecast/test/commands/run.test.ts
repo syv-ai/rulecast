@@ -3,8 +3,9 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
-import { createFixture } from "../helpers/fixture"
-import { git } from "../helpers/git"
+import { localConfig } from "../helpers/config"
+import { createFixture, fixtureFiles } from "../helpers/fixture"
+import { createRepo, git } from "../helpers/git"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
 
@@ -67,8 +68,11 @@ describe("rulecast run: file selection", () => {
     await git(root, "add", USERS)
     const result = await run(root, "--format", "json")
     expect(result.code).toBe(1)
-    // No baseline without --from-ref or --session: every finding is new.
-    expect(lines(result.stdout)).toEqual([2, 3])
+    // Judged against HEAD, as the agent hook judges against its baseline: line 2 was committed.
+    expect(lines(result.stdout)).toEqual([3])
+    expect(JSON.parse(result.stdout).preexistingSummary).toEqual([
+      { rule: "backend/no-httpexception", file: USERS, count: 1 },
+    ])
   })
 
   test("--files resolves paths relative to the current directory", async () => {
@@ -117,6 +121,103 @@ describe("rulecast run: file selection", () => {
       { stopGate: true },
     )
     expect(stop.delivery.stop).toBe("block")
+  })
+})
+
+/**
+ * The DX review's reproductions (plan 10, H1 and H2): a git hook must judge a commit as it will be
+ * committed, against HEAD, and a push as it will be pushed.
+ */
+describe("rulecast run: staged and pushed content", () => {
+  const OLD = "def get():\n    raise HTTPException(404)\n"
+
+  test("a commit that touches a file with an old violation passes; the old line is backlog", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), `"""User service."""\n${OLD}`)
+    await git(root, "add", USERS)
+    const result = await run(root, "--format", "json")
+    expect(result.code).toBe(0)
+    expect(JSON.parse(result.stdout).findings).toEqual([])
+    expect(JSON.parse(result.stdout).preexistingSummary).toEqual([
+      { rule: "backend/no-httpexception", file: USERS, count: 1 },
+    ])
+  })
+
+  test("a violation staged and then fixed only in the working tree still fails the commit", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), `${OLD}    raise HTTPException(500)\n`)
+    await git(root, "add", USERS)
+    await writeFile(path.join(root, USERS), OLD)
+    const result = await run(root, "--format", "json")
+    expect(result.code).toBe(1)
+    expect(lines(result.stdout)).toEqual([3])
+  })
+
+  test("a clean staged file passes whatever the working tree holds", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), `${OLD}# a comment\n`)
+    await git(root, "add", USERS)
+    await writeFile(path.join(root, USERS), `${OLD}    raise HTTPException(500)\n`)
+    expect((await run(root)).code).toBe(0)
+  })
+
+  test("--to-ref judges the commit, not uncommitted edits", async () => {
+    const root = await createFixture()
+    await git(root, "checkout", "-q", "-b", "feature")
+    await writeFile(path.join(root, USERS), `${OLD}# a comment\n`)
+    await git(root, "commit", "-qam", "clean change")
+    await writeFile(path.join(root, USERS), `${OLD}    raise HTTPException(500)\n`)
+    const result = await run(root, "--from-ref", "main", "--to-ref", "HEAD", "--format", "json")
+    expect(result.code).toBe(0)
+    expect(JSON.parse(result.stdout).findings).toEqual([])
+  })
+
+  test("before the first commit there is no baseline: every finding is new", async () => {
+    const root = await createProject(fixtureFiles)
+    await git(root, "init", "-q", "-b", "main")
+    await git(root, "add", "-A")
+    const result = await run(root, "--format", "json")
+    expect(result.code).toBe(1)
+    const users = JSON.parse(result.stdout).findings.filter((finding: { file: string }) => finding.file === USERS)
+    expect(users.map((finding: { line: number; status: string }) => [finding.line, finding.status])).toEqual([
+      [2, "new"],
+    ])
+  })
+
+  test("a command rule is handed the staged content", async () => {
+    const script = [
+      'import { readFileSync } from "node:fs"',
+      "const out = []",
+      "for (const file of process.argv.slice(2)) {",
+      '  readFileSync(file, "utf8").split("\\n").forEach((text, i) => {',
+      '    if (text.includes("BAD")) out.push({ file, line: i + 1, text })',
+      "  })",
+      "}",
+      "console.log(JSON.stringify(out))",
+    ].join("\n")
+    const rules = [
+      {
+        id: "scripts/no-bad",
+        name: "No BAD",
+        files: "^app/.*\\.py$",
+        detect: { command: { run: ["node", "check.mjs", "{{files}}"], output: "json" } },
+        message: "{{file}}:{{line}} says BAD.",
+      },
+    ]
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig(rules),
+      "check.mjs": script,
+      "app/a.py": "ok\n",
+    })
+    await writeFile(path.join(root, "app/a.py"), "ok\nBAD\n")
+    await git(root, "add", "app/a.py")
+    await writeFile(path.join(root, "app/a.py"), "ok\n")
+    const result = await run(root, "--format", "json")
+    expect(result.code).toBe(1)
+    const findings = JSON.parse(result.stdout).findings
+    expect(findings.map((finding: { file: string; line: number }) => [finding.file, finding.line])).toEqual([
+      ["app/a.py", 2],
+    ])
   })
 })
 

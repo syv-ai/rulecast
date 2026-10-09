@@ -3,11 +3,13 @@ import { parseArgs } from "node:util"
 import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
 import { type CompiledProject, compile } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
+import { WORKTREE } from "../core/content"
 import type { DetectorRegistry } from "../core/detection/registry"
-import { allFiles, changedFilesBetween, changedFilesSince, mergeBase, stagedFiles } from "../core/git"
+import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
 import { fetchingRepos } from "../core/repos/provider"
+import type { ContentSource } from "../core/types"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
 import { UsageError } from "./usage"
@@ -93,6 +95,8 @@ interface SelectedFiles {
   files: string[]
   /** Where the baseline is read from; null: no baseline (or the session's). */
   baseCommit: string | null
+  /** Where current content is read from (core/content.ts). */
+  content: ContentSource
 }
 
 /** Spec §12, `run` file selection. */
@@ -101,18 +105,26 @@ async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<Sel
     const files = run.files
       .map((file) => toProjectPath(root, cwd, file))
       .filter((file): file is string => file !== null)
-    return { files, baseCommit: null }
+    return { files, baseCommit: null, content: WORKTREE }
   }
   if (run.fromRef !== null) {
     const base = await mergeBase(root, run.fromRef, run.toRef ?? "HEAD")
-    const files =
-      run.toRef === null ? await changedFilesSince(root, base) : await changedFilesBetween(root, base, run.toRef)
-    return { files, baseCommit: base }
+    // Without --to-ref, uncommitted work is included on purpose, so it is read from the working
+    // tree. With it, a push is judged as it will be pushed: the content at the ref.
+    if (run.toRef === null) return { files: await changedFilesSince(root, base), baseCommit: base, content: WORKTREE }
+    return {
+      files: await changedFilesBetween(root, base, run.toRef),
+      baseCommit: base,
+      content: { kind: "commit", ref: run.toRef },
+    }
   }
-  if (run.allFiles) return { files: await allFiles(root), baseCommit: null }
+  if (run.allFiles) return { files: await allFiles(root), baseCommit: null, content: WORKTREE }
   // With a session and no files, the pipeline verifies the session's edited files, as a Stop does.
-  if (run.session !== null) return { files: [], baseCommit: null }
-  return { files: await stagedFiles(root), baseCommit: null }
+  if (run.session !== null) return { files: [], baseCommit: null, content: WORKTREE }
+  // Staged: a commit is judged as it will be committed — the index, against HEAD — so a line it
+  // did not change is backlog here exactly as it is in an agent hook. Before the first commit there
+  // is no HEAD and so no baseline: every finding is new.
+  return { files: await stagedFiles(root), baseCommit: await headCommit(root), content: { kind: "index" } }
 }
 
 export interface RunInput {
@@ -138,6 +150,7 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
       kind: "verify",
       files: selected.files,
       baseCommit: selected.baseCommit ?? undefined,
+      content: selected.content,
       session: run.session === null ? undefined : { id: run.session },
       cwd: root,
     },
