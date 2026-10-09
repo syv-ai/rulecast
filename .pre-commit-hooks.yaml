@@ -1,0 +1,23 @@
+# The stage names pre-commit/pre-push need pre-commit ≥ 3.2.0; consumers' configs should set
+# minimum_pre_commit_version: "3.2.0", and the README snippet does.
+#
+# language: system, calling the project's own install: the agent hooks already need
+# @syv-ai/rulecast in the project's devDependencies, so the git hook runs the same version.
+- id: rulecast
+  name: rulecast
+  description: Check staged files against the project's rulecast rules.
+  entry: npx --no-install rulecast run
+  language: system
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+- id: rulecast-push
+  name: rulecast (pushed commits)
+  description: Check the commits being pushed.
+  # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
+  # from-ref on a branch's first push, which @{upstream} does not have.
+  entry: sh -c 'exec npx --no-install rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
+  language: system
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

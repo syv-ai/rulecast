@@ -87,20 +87,96 @@ A refusal only ever rests on the text the agent is writing, never on a reconstru
 
 | Command | Does |
 |---|---|
-| `rulecast init` | Interactive setup |
-| `rulecast install` / `uninstall` | Add or remove the agent hooks |
-| `rulecast run` | Check staged files, changed files, or everything |
-| `rulecast list` | Show every configured rule, catalog ones included: source, files, detector, docs |
+| `rulecast init` | Set rulecast up: config, catalog rules, agent hooks |
+| `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
+| `rulecast run` | Check staged files (the default), changed files, or everything |
+| `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
-| `rulecast validate` | Check the config and print diagnostics |
-| `rulecast doctor` | Compile, check the environment, dry-run every rule |
+| `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
+| `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
 | `rulecast clean` | Delete the cache |
 | `rulecast warm` | Build detector caches ahead of time |
-| `rulecast hook <adapter>` | Answer an agent hook on stdin |
+| `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
-`rulecast run` is also how you use rulecast in CI. `--from-ref main` checks only what a branch changed, which matters most for `llm` rules — they judge changed files only.
+`rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.
+
+## Git hooks and CI
+
+The same rule reports the same line the same way in an agent hook, a git hook and CI. What counts as new is a match on a line you changed; a violation that was already there is backlog, shown and never failing.
+
+- **Pre-commit:** `rulecast run` with no file flags checks the staged files, reads their content from the index (what is being committed, not the working tree), and judges it against `HEAD`. `llm` rules are skipped unless you pass `--llm`, and one line says so: a commit should not cost money.
+- **Pre-push and CI:** `rulecast run --from-ref A --to-ref B` checks the files changed between the merge base with `A` and `B`, reading them at `B`. Without `--to-ref` it reads the working tree.
+- `rulecast run --files F...` judges files whole, with no baseline. Use the hook below rather than `--files` from a hook manager.
+
+rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks need it there anyway), and wire it into the one you use.
+
+**pre-commit** (`.pre-commit-config.yaml`):
+
+```yaml
+minimum_pre_commit_version: "3.2.0"
+repos:
+  - repo: https://github.com/syv-ai/rulecast
+    rev: v0.4.0
+    hooks:
+      - id: rulecast
+      - id: rulecast-push
+```
+
+**lefthook** (`lefthook.yml`):
+
+```yaml
+pre-commit:
+  jobs:
+    - name: rulecast
+      run: npx --no-install rulecast run
+pre-push:
+  jobs:
+    - name: rulecast
+      run: npx --no-install rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD
+```
+
+**GitHub Actions:**
+
+```yaml
+on: pull_request
+jobs:
+  rulecast:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # rulecast needs the merge base with the target branch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx rulecast run --from-ref origin/${{ github.base_ref }} --format sarif > rulecast.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() # rulecast exits 1 on findings, which is when the upload matters
+        with:
+          sarif_file: rulecast.sarif
+```
+
+A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
+
+`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies.
+
+## Turning a rule off
+
+- **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the line.
+- **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax. The reason is required; an ignore without one suppresses nothing.
+
+  ```python
+  # rulecast-ignore: python/no-httpexception-in-services legacy endpoint, removed in #412
+  raise HTTPException(404)
+  ```
+
+`rulecast run --all-files --summary` counts the ignores, and an ignore or a config change made during an agent session is reported to you when the agent stops: the agent cannot quietly edit its way past a rule.
 
 ## Adopting a rule on a codebase that already breaks it
 
@@ -182,7 +258,7 @@ The budget is what shapes the design: one detector run per kind per event, kinds
 
 ## Status
 
-0.1. Everything above works and is tested. The config format may still change before 1.0 — `minimum_rulecast_version` exists so a rule can say what it needs.
+0.4. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
 
 Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 
