@@ -1,0 +1,9 @@
+{
+  "about": "container: the route already violated at baseline; a line added inside it is not a new violation. This is the case the scope exists for.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    b()\n    added()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": [[1, 5]],
+  "match": [1, 6],
+  "expected": "preexisting"
+}

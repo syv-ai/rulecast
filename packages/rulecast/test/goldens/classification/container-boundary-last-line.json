@@ -1,0 +1,9 @@
+{
+  "about": "container: a match that starts on the recorded container's last line overlaps it. A boundary case, added after an off-by-one in classify's overlap test went uncaught by every other case here.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    b()\n    c()\n    return x\ndef other():\n    pass\n",
+  "scope": "container",
+  "fingerprints": [[1, 5]],
+  "match": [5, 6],
+  "expected": "preexisting"
+}

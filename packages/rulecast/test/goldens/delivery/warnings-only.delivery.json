@@ -1,0 +1,24 @@
+{
+  "about": "Warnings and nothing else still print.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [
+      "regex detector failed for r/x: bad pattern. Disabled for this session.",
+      "…and 3 more (run rulecast validate)"
+    ],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

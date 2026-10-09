@@ -1,0 +1,9 @@
+{
+  "about": "container: the route was measured clean at baseline (an empty record), so violating now is new.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    b()\n    added()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": [],
+  "match": [1, 6],
+  "expected": "new"
+}

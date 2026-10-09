@@ -1,0 +1,8 @@
+rulecast: 3 rules violated
+
+error kept/rule
+  a.ts:1 bad
+
+…2 rules and the conventions they cite did not fit here.
+Every finding, with the doc sections it cites, is in:
+  /home/u/.cache/rulecast/state/overflow/s1.txt

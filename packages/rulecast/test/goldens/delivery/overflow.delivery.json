@@ -1,0 +1,32 @@
+{
+  "about": "Rules the floor could not hold: the header counts them, and the message says where they went.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "kept/rule",
+        "severity": "error",
+        "status": "new",
+        "file": "a.ts",
+        "line": 1,
+        "column": 1,
+        "message": "a.ts:1 bad",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 2,
+      "preexisting": 0
+    },
+    "overflowPath": "/home/u/.cache/rulecast/state/overflow/s1.txt"
+  }
+}

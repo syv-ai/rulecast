@@ -1,0 +1,9 @@
+{
+  "about": "instance: a file identical to its baseline has nothing new in it.",
+  "baseline": "a\nb\nc\n",
+  "current": "a\nb\nc\n",
+  "scope": "instance",
+  "fingerprints": null,
+  "match": [2, 2],
+  "expected": "preexisting"
+}

@@ -1,0 +1,58 @@
+{
+  "about": "More findings than max_matches_per_rule, plus some the budget dropped: one '…and N more' line counting both.",
+  "options": {
+    "maxMatchesPerRule": 2
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "r/x",
+        "severity": "error",
+        "status": "new",
+        "file": "f1.ts",
+        "line": 1,
+        "column": 1,
+        "message": "f1.ts:1 bad",
+        "count": 1
+      },
+      {
+        "rule": "r/x",
+        "severity": "error",
+        "status": "new",
+        "file": "f2.ts",
+        "line": 2,
+        "column": 1,
+        "message": "f2.ts:2 bad",
+        "count": 1
+      },
+      {
+        "rule": "r/x",
+        "severity": "error",
+        "status": "new",
+        "file": "f3.ts",
+        "line": 3,
+        "column": 1,
+        "message": "f3.ts:3 bad",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [
+        {
+          "rule": "r/x",
+          "count": 5,
+          "files": 2
+        }
+      ],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

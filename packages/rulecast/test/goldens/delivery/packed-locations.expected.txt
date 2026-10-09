@@ -1,0 +1,9 @@
+rulecast: 1 rule violated
+
+error style/no-default-export — 7 in 7 files
+  {file} uses a default export; this codebase uses named exports everywhere so imports stay greppable
+
+  src/components/very/long/path/Component1.tsx, src/components/very/long/path/Component2.tsx
+  src/components/very/long/path/Component3.tsx, src/components/very/long/path/Component4.tsx
+  src/components/very/long/path/Component5.tsx, src/components/very/long/path/Component6.tsx
+  src/components/very/long/path/Component7.tsx

@@ -1,0 +1,32 @@
+{
+  "about": "One finding in one file: the header names the file.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "no-silent-except",
+        "severity": "error",
+        "status": "new",
+        "file": "src/math.ts",
+        "line": 4,
+        "column": 1,
+        "message": "src/math.ts:4 swallows an exception.",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

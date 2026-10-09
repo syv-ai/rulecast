@@ -1,0 +1,4 @@
+rulecast: 1 rule violated in src/math.ts
+
+error no-silent-except
+  src/math.ts:4 swallows an exception.

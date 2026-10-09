@@ -1,0 +1,9 @@
+{
+  "about": "container: a container rewritten line for line no longer exists, and must not stand in for what replaced it.",
+  "baseline": "keep\nold1\nold2\nkeep\n",
+  "current": "keep\nnew1\nnew2\nkeep\n",
+  "scope": "container",
+  "fingerprints": [[2, 3]],
+  "match": [2, 3],
+  "expected": "new"
+}

@@ -1,0 +1,62 @@
+{
+  "about": "Every DeliveredReference state the renderer knows, in order.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "r/x",
+        "severity": "error",
+        "status": "new",
+        "file": "a.ts",
+        "line": 1,
+        "column": 1,
+        "message": "a.ts:1 bad",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [
+      {
+        "ref": "docs/errors.md#handling",
+        "state": "full",
+        "content": "Handle errors at the boundary.\nNever swallow them."
+      },
+      {
+        "ref": "docs/style.md",
+        "state": "pointer"
+      },
+      {
+        "ref": "docs/gone.md",
+        "state": "missing"
+      },
+      {
+        "ref": "docs/big.md",
+        "state": "read",
+        "reason": "mode"
+      },
+      {
+        "ref": "docs/huge.md",
+        "state": "read",
+        "reason": "tooLarge"
+      },
+      {
+        "ref": "syv-ai/rulecast@v0.3.0:docs/api.md",
+        "state": "read",
+        "reason": "budget",
+        "location": "/home/u/.cache/rulecast/repos/api.md"
+      }
+    ],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

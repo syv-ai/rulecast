@@ -1,0 +1,32 @@
+{
+  "about": "A finding whose message repeats in the same file carries a count.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "no-print",
+        "severity": "error",
+        "status": "new",
+        "file": "app/main.py",
+        "line": 3,
+        "column": 1,
+        "message": "app/main.py uses print()",
+        "count": 4
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

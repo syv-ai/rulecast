@@ -1,0 +1,6 @@
+rulecast: 1 rule violated in a.py
+
+error lint/x
+  a.py:1 E501 line too long
+  a.py:2 E501 line too long
+  a.py:3 E501 line too long

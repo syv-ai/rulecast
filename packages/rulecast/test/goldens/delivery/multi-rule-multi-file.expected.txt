@@ -1,0 +1,7 @@
+rulecast: 2 rules violated
+
+error a/rule
+  x.ts:1 first
+
+warning b/rule
+  y.ts:2 second

@@ -1,0 +1,8 @@
+rulecast: 1 rule violated in app/routes/users.py
+
+error routes/no-db — 3 in 1 file
+  {file}:{line} calls the database from a route handler; move it into a service ({call})
+
+  app/routes/users.py:12  db.query
+  app/routes/users.py:40  session.execute(stmt)
+  app/routes/users.py:7   —

@@ -1,0 +1,17 @@
+rulecast: 2 rules violated
+
+error r/x
+  a.ts:1 bad
+
+backlog in files you touched (not from your edit):
+  old/y ×2 in b.ts
+  see all of it: rulecast run --all-files --summary
+
+--- docs/x.md (provided earlier in this session) ---
+
+rulecast warnings:
+  - one rule was skipped
+
+…1 rule and the conventions they cite did not fit here.
+Every finding, with the doc sections it cites, is in:
+  /tmp/overflow.txt

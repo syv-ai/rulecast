@@ -1,0 +1,9 @@
+{
+  "about": "container with no fingerprint record, on a line the edit did not change: instance says pre-existing.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    b()\n    added()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": null,
+  "match": [2, 2],
+  "expected": "preexisting"
+}

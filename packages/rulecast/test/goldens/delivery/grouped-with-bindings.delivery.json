@@ -1,0 +1,63 @@
+{
+  "about": "Three or more findings with a template of 40+ literal characters: skeleton once, sites aligned with their bindings; an empty binding prints as a dash.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "routes/no-db",
+        "severity": "error",
+        "status": "new",
+        "file": "app/routes/users.py",
+        "line": 12,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": {
+          "call": "db.query"
+        }
+      },
+      {
+        "rule": "routes/no-db",
+        "severity": "error",
+        "status": "new",
+        "file": "app/routes/users.py",
+        "line": 40,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": {
+          "call": "session.execute(stmt)"
+        }
+      },
+      {
+        "rule": "routes/no-db",
+        "severity": "error",
+        "status": "new",
+        "file": "app/routes/users.py",
+        "line": 7,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": {
+          "call": ""
+        }
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {
+      "routes/no-db": "{{file}}:{{line}} calls the database from a route handler; move it into a service ({{call}})"
+    },
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

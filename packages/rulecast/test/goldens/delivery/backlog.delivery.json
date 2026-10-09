@@ -1,0 +1,32 @@
+{
+  "about": "Pre-existing summaries, some cut by the budget: the backlog heading, the count, and the hint.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [],
+    "preexistingSummary": [
+      {
+        "rule": "legacy/no-print",
+        "file": "app/old.py",
+        "count": 3
+      },
+      {
+        "rule": "legacy/no-print",
+        "file": "app/older.py",
+        "count": 1
+      }
+    ],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 4
+    },
+    "overflowPath": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "about": "instance: a match on a line the edit did not change is pre-existing.",
+  "baseline": "a\nb\nc\n",
+  "current": "a\nB\nc\n",
+  "scope": "instance",
+  "fingerprints": null,
+  "match": [3, 3],
+  "expected": "preexisting"
+}

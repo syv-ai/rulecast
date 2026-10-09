@@ -1,0 +1,9 @@
+{
+  "about": "container with no fingerprint record (no snapshot, past the deadline, over max_file_bytes, or a metered detector \u2014 classify cannot tell which): falls back to instance, and the changed line is new.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    b()\n    added()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": null,
+  "match": [4, 4],
+  "expected": "new"
+}

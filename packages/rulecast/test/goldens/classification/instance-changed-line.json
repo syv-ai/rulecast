@@ -1,0 +1,9 @@
+{
+  "about": "instance: a match on the line the edit changed is new.",
+  "baseline": "a\nb\nc\n",
+  "current": "a\nB\nc\n",
+  "scope": "instance",
+  "fingerprints": null,
+  "match": [2, 2],
+  "expected": "new"
+}

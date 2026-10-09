@@ -1,0 +1,27 @@
+{
+  "about": "No findings, only a touch rule's reference: the conventions header.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [],
+    "preexistingSummary": [],
+    "references": [
+      {
+        "ref": "docs/routes.md",
+        "state": "full",
+        "content": "Routes stay thin."
+      }
+    ],
+    "touches": ["routes/thin"],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

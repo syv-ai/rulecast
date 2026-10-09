@@ -1,0 +1,42 @@
+{
+  "about": "Two rules across two files: the header counts rules and names no file.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "a/rule",
+        "severity": "error",
+        "status": "new",
+        "file": "x.ts",
+        "line": 1,
+        "column": 1,
+        "message": "x.ts:1 first",
+        "count": 1
+      },
+      {
+        "rule": "b/rule",
+        "severity": "warning",
+        "status": "new",
+        "file": "y.ts",
+        "line": 2,
+        "column": 1,
+        "message": "y.ts:2 second",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

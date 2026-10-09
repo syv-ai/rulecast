@@ -1,0 +1,6 @@
+rulecast: 1 rule violated
+
+error r/x
+  f1.ts:1 bad
+  f2.ts:2 bad
+  …and 6 more in 3 files

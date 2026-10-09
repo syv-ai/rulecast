@@ -1,0 +1,3 @@
+rulecast warnings:
+  - regex detector failed for r/x: bad pattern. Disabled for this session.
+  - …and 3 more (run rulecast validate)

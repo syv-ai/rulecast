@@ -1,0 +1,9 @@
+{
+  "about": "instance: a multi-line match counts as new if any of its lines changed.",
+  "baseline": "a\nb\nc\nd\n",
+  "current": "a\nb\nC\nd\n",
+  "scope": "instance",
+  "fingerprints": null,
+  "match": [1, 4],
+  "expected": "new"
+}

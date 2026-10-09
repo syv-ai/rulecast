@@ -1,0 +1,7 @@
+rulecast: conventions for the files you are working on
+
+backlog in files you touched (not from your edit):
+  legacy/no-print ×3 in app/old.py
+  legacy/no-print ×1 in app/older.py
+  …and 4 more
+  see all of it: rulecast run --all-files --summary

@@ -1,0 +1,9 @@
+{
+  "about": "container: a second violation added inside an already-violating container is pre-existing. The known recall cost of the scope (plan 8a); asserted so nobody 'fixes' it by accident.",
+  "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "def route():\n    a()\n    crud.get()\n    b()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": [[1, 5]],
+  "match": [3, 3],
+  "expected": "preexisting"
+}

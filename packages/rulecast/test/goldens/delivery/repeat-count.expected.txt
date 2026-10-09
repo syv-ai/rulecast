@@ -1,0 +1,4 @@
+rulecast: 1 rule violated in app/main.py
+
+error no-print
+  app/main.py uses print() (×4)

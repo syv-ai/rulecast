@@ -1,0 +1,94 @@
+{
+  "about": "Grouped with no per-site bindings: locations packed several to a line, wrapping at 96.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component1.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component2.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component3.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component4.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component5.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component6.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      },
+      {
+        "rule": "style/no-default-export",
+        "severity": "error",
+        "status": "new",
+        "file": "src/components/very/long/path/Component7.tsx",
+        "line": 1,
+        "column": 1,
+        "message": "x",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {
+      "style/no-default-export": "{{file}} uses a default export; this codebase uses named exports everywhere so imports stay greppable"
+    },
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

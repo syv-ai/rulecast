@@ -280,13 +280,20 @@ export interface Detector<Config> {
 
 **Behaviour:** The renderer's output and §8's classification have recorded expectations as data, not as hand-written TypeScript tables. A reimplementation has something to conform to, and Task 10 gets the safety net it needs before the cost model moves.
 
-- [ ] `test/goldens/delivery/`: one `*.delivery.json` per case with its `*.expected.txt`. Cover at least — an empty delivery; one new error finding; findings of two rules with templates; a delivery at the budget's edge with `omitted.rules > 0` and an `overflowPath`; a backlog block with summaries and `omitted.preexisting`; every `DeliveredReference` state (`full`, `pointer`, `read` with each `reason`, `missing`); warnings with and without the "…and N more" line; a `stop: "block"`.
-- [ ] `test/goldens/classification/`: one JSON per case holding baseline content, current content, the rule's `scope` and the expected `new | preexisting`. Cover the four cases that leave no fingerprint record (no snapshot, deadline, size ceiling, metered) and the known recall cost — a second violation added to an already-violating container is pre-existing.
-- [ ] `goldens.test.ts` walks both directories with `test.each`, so adding a case is adding a file. A mismatch prints a diff, not a boolean.
-- [ ] Write a `README.md` in `test/goldens/` saying what these are for and how to add a case — these outlive the TypeScript, which is the point.
-- [ ] **Generate nothing from the implementation.** Each expectation is written by hand or copied from a run that was read and agreed to. `test/adapters/contract.test.ts:21-23` already explains why self-recorded expectations pin stability rather than correctness; do not add a fifth corpus with that flaw.
-- [ ] Verify: `pnpm vitest run test/core/delivery/goldens.test.ts` → passes. Then break the renderer by one character, confirm a golden fails, revert.
-- [ ] Commit.
+- [x] `test/goldens/delivery/`: one `*.delivery.json` per case with its `*.expected.txt`. Cover at least — an empty delivery; one new error finding; findings of two rules with templates; a delivery at the budget's edge with `omitted.rules > 0` and an `overflowPath`; a backlog block with summaries and `omitted.preexisting`; every `DeliveredReference` state (`full`, `pointer`, `read` with each `reason`, `missing`); warnings with and without the "…and N more" line; a `stop: "block"`.
+- [x] `test/goldens/classification/`: one JSON per case holding baseline content, current content, the rule's `scope` and the expected `new | preexisting`. Cover the four cases that leave no fingerprint record (no snapshot, deadline, size ceiling, metered) and the known recall cost — a second violation added to an already-violating container is pre-existing.
+- [x] `goldens.test.ts` walks both directories with `test.each`, so adding a case is adding a file. A mismatch prints a diff, not a boolean.
+- [x] Write a `README.md` in `test/goldens/` saying what these are for and how to add a case — these outlive the TypeScript, which is the point.
+- [x] **Generate nothing from the implementation.** Each expectation is written by hand or copied from a run that was read and agreed to. `test/adapters/contract.test.ts:21-23` already explains why self-recorded expectations pin stability rather than correctness; do not add a fifth corpus with that flaw.
+- [x] Verify: `pnpm vitest run test/core/delivery/goldens.test.ts` → 30 passed. Then break the renderer by one character, confirm a golden fails, revert: changing the backlog heading's colon to a semicolon failed `backlog` and `one-of-each`.
+- [x] Mutate `classify` too, not only the renderer: flip `<=` to `<` on the overlap test's upper bound and `>=` to `>` on its lower bound, one at a time.
+- [x] Commit.
+
+**What it delivered:** 14 delivery cases and 14 classification cases. 970 tests, 962 passing.
+
+**What it found.** Both `classify` mutations — an off-by-one at either end of the container overlap test — passed the first version of this corpus *and* all 74 existing tests in `test/core/baseline`, `test/core/pipeline-container.test.ts` and `test/commands/run.test.ts`. No test anywhere put a match exactly on a container's boundary line. `container-boundary-first-line` and `container-boundary-last-line` were added for it, and each now catches exactly its own mutation. The classification expectations were written from §8's wording before running anything, and all twelve original ones agreed with the implementation on the first run.
+
+**One planned case was dropped.** The plan asked for a `stop: "block"` delivery. `renderAgentText` never reads `stop` — it is the adapter that turns it into a block (`claude-code/adapter.ts:78`) — so that golden would have been byte-identical to the same delivery without it, asserting nothing. It belongs in the adapter's tests, which already cover it.
 
 ## Task 9: assemble, trim, gate
 

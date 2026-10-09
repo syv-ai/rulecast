@@ -1,0 +1,9 @@
+{
+  "about": "No snapshot and no commit: there is no baseline, so everything is new (spec \u00a78).",
+  "baseline": null,
+  "current": "a\nb\nc\n",
+  "scope": "instance",
+  "fingerprints": null,
+  "match": [2, 2],
+  "expected": "new"
+}

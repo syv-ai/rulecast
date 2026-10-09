@@ -1,0 +1,9 @@
+{
+  "about": "container: a match that ends on the recorded container's first line overlaps it. The other boundary of the same overlap test.",
+  "baseline": "x\ny\ndef route():\n    a()\n    b()\n    c()\n    return x\n",
+  "current": "x\ny\ndef route():\n    a()\n    b()\n    c()\n    return x\n",
+  "scope": "container",
+  "fingerprints": [[3, 7]],
+  "match": [1, 3],
+  "expected": "preexisting"
+}

@@ -1,0 +1,14 @@
+rulecast: 1 rule violated in a.ts
+
+error r/x
+  a.ts:1 bad
+
+--- docs/errors.md#handling ---
+Handle errors at the boundary.
+Never swallow them.
+
+--- docs/style.md (provided earlier in this session) ---
+--- docs/gone.md (missing) ---
+--- docs/big.md: read this before continuing ---
+--- docs/huge.md: read this before continuing (not included, too long for this message) ---
+--- syv-ai/rulecast@v0.3.0:docs/api.md: read /home/u/.cache/rulecast/repos/api.md before continuing (not included, too long for this message) ---

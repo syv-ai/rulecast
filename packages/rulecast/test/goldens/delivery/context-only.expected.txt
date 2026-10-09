@@ -1,0 +1,4 @@
+rulecast: conventions for the files you are working on
+
+--- docs/routes.md ---
+Routes stay thin.

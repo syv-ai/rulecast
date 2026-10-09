@@ -1,0 +1,43 @@
+{
+  "about": "Findings, a backlog, a reference, a warning and an overflow together: the order of the blocks.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "r/x",
+        "severity": "error",
+        "status": "new",
+        "file": "a.ts",
+        "line": 1,
+        "column": 1,
+        "message": "a.ts:1 bad",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [
+      {
+        "rule": "old/y",
+        "file": "b.ts",
+        "count": 2
+      }
+    ],
+    "references": [
+      {
+        "ref": "docs/x.md",
+        "state": "pointer"
+      }
+    ],
+    "touches": [],
+    "stop": null,
+    "warnings": ["one rule was skipped"],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 1,
+      "preexisting": 0
+    },
+    "overflowPath": "/tmp/overflow.txt"
+  }
+}
