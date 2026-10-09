@@ -73,6 +73,7 @@ detect:
 - `output`: `json` is an array of `{ file, line, endLine?, column?, text?, ...captures }`. `file` may be absolute or repo-relative. `sarif` is read as SARIF 2.1.0, taking `runs[].results[]`; a result with no location is skipped, and captures are read from the result's `properties`.
 - `captures`: the names your message uses. Each must be a string on **every** result — a missing one disables the rule, so the mistake is visible rather than silently blank. A capture may not shadow `file`, `line`, `column`, `text` or `rule`.
 - The exit code is ignored: finding something is not failing. Output that cannot be parsed disables the rule and is reported by `rulecast validate`.
+- In a staged run (`rulecast run` with no file flags) or with `--to-ref`, the script is handed a copy of each file under a scratch directory (`.rulecast-staged-XXXX/<path>`), because the content it must judge is the index or a commit, not the file on disk. Findings are mapped back to the real path. A script that decides by path should match the end of the path, not its start.
 - Default stages: `edit`, `verify`.
 
 ## `linter`
@@ -86,6 +87,7 @@ detect:
 - `rules`: the linter's own rule ids to report. Leave it out to take every finding the tool reports.
 - One process per tool per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
 - Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
+- In a staged run or with `--to-ref`, `ruff` and `eslint` are handed each file's staged content on stdin under its real path, one process per file, so path-keyed configuration (`per-file-ignores`, eslint `files:` globs) applies as usual. `oxlint` has no stdin mode and gets a scratch copy, which such configuration does not match.
 - Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**, because it is slow enough to be felt on every edit. Write `stages: [edit, verify]` if you want it anyway.
 
 ## `llm`

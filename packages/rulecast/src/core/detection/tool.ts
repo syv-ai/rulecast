@@ -21,15 +21,18 @@ const exec = promisify(execFile)
 export async function runTool(
   command: string,
   args: readonly string[],
-  options: { cwd: string; signal: AbortSignal; notFound: string },
+  options: { cwd: string; signal: AbortSignal; notFound: string; stdin?: string },
 ): Promise<string> {
   try {
-    const result = await exec(command, [...args], {
+    const running = exec(command, [...args], {
       cwd: options.cwd,
       signal: options.signal,
       // A whole-repository run of a linter on a large project prints megabytes of JSON.
       maxBuffer: 64 * 1024 * 1024,
     })
+    // Always closed: a tool that reads stdin when given nothing would otherwise wait forever.
+    running.child.stdin?.end(options.stdin ?? "")
+    const result = await running
     return result.stdout
   } catch (error) {
     if (options.signal.aborted) throw error

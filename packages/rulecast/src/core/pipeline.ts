@@ -10,9 +10,9 @@ import { writeOverflow } from "./delivery/persist"
 import { createReferenceResolver } from "./delivery/resolve"
 import { applyFileBudget, applySizeCeiling } from "./detection/budget"
 import { detectionFor } from "./detection/context"
+import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
-import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
@@ -332,14 +332,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
-    const output = await runDetection({
-      detection,
-      event: event.kind,
-      selections,
-      changes,
-      read,
-      timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
-    })
+    const output = await runDetectionFrom(
+      {
+        detection,
+        event: event.kind,
+        selections,
+        changes,
+        read,
+        timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
+      },
+      event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
+    )
 
     findings = output.findings.map(({ rule, match }) => ({
       rule,

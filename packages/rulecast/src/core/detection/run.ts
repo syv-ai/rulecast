@@ -12,6 +12,8 @@ export interface DetectionInput {
   changes: ReadonlyMap<string, ChangeSet>
   /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
   read(file: string): Promise<string | null>
+  /** False when `read` is not the working tree; handed to detectors as `DetectorRun.fromDisk`. */
+  fromDisk?: boolean
   /** Per run, not per project: the edit deadline on edit, verify_ms on verify (§13). */
   timeoutMs: number
 }
@@ -68,6 +70,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
             event: input.event,
             rules,
             read: input.read,
+            fromDisk: input.fromDisk ?? true,
             changes: input.changes,
             cache: input.detection.cacheFor(kind),
             settings: input.detection.settings,

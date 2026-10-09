@@ -17,6 +17,11 @@ export interface LinterFinding {
 export interface LinterTool {
   events: DetectorEvent[]
   args(files: string[]): string[]
+  /**
+   * One file's content on stdin, linted as if it were at `file` (repo-relative). Absent: the tool
+   * has no such mode, so content that is not on disk reaches it as a scratch copy.
+   */
+  stdinArgs?(file: string): string[]
   parse(stdout: string, root: string): LinterFinding[]
 }
 
@@ -46,6 +51,7 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   ruff: {
     events: ["edit", "verify"],
     args: (files) => ["check", "--output-format", "json", "--force-exclude", "--", ...files],
+    stdinArgs: (file) => ["check", "--output-format", "json", "--force-exclude", "--stdin-filename", file, "-"],
     parse(stdout, root) {
       const parsed = json("ruff", stdout)
       if (!Array.isArray(parsed)) throw new Error("ruff output is not a JSON array of diagnostics")
@@ -95,6 +101,7 @@ export const TOOLS: Record<ToolName, LinterTool> = {
     // eslint is the slow one: spec §6 keeps it off the edit hook by default.
     events: ["verify"],
     args: (files) => ["--format=json", "--no-error-on-unmatched-pattern", "--", ...files],
+    stdinArgs: (file) => ["--format=json", "--stdin", "--stdin-filename", file],
     parse(stdout, root) {
       const parsed = json("eslint", stdout)
       if (!Array.isArray(parsed)) throw new Error("eslint output is not a JSON array of file results")

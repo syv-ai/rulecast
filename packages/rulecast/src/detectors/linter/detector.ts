@@ -33,19 +33,45 @@ async function runLinter(tool: ToolName, files: string[], cwd: string, signal: A
   return TOOLS[tool].parse(stdout, cwd)
 }
 
+/**
+ * Content that is not on disk (a staged run, `--to-ref`), one file per process on stdin under the
+ * file's real path, so path-keyed configuration — eslint `files:` globs, ruff `per-file-ignores`,
+ * a nested pyproject.toml — applies exactly as it would to the file on disk.
+ */
+async function runLinterOnContent(
+  tool: ToolName,
+  files: string[],
+  read: (file: string) => Promise<string | null>,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<LinterFinding[]> {
+  const resolved = await resolveTool(tool, cwd)
+  const findings: LinterFinding[] = []
+  for (const file of files) {
+    const stdin = await read(file)
+    if (stdin === null) continue
+    const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(file)]
+    const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed`, stdin })
+    findings.push(...TOOLS[tool].parse(stdout, cwd))
+  }
+  return findings
+}
+
 export const linterDetector: Detector<LinterConfig> = {
   kind: "linter",
   schema: linterSchema,
   captures: () => ["message", "ruleId"],
   // A copy: compileRule stores this as the rule's stages, and module-level data must not escape into it.
   events: (config) => [...TOOLS[config.tool].events],
+  takesContent: (config) => TOOLS[config.tool].stdinArgs !== undefined,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     const byTool = new Map<ToolName, DetectorRuleInput<LinterConfig>[]>()
     for (const rule of input.rules) {
       byTool.set(rule.config.tool, [...(byTool.get(rule.config.tool) ?? []), rule])
     }
-    const read = sourceReader(input.cwd)
+    const onDisk = input.fromDisk !== false
+    const read = onDisk ? sourceReader(input.cwd) : input.read
 
     await Promise.all(
       [...byTool].map(async ([tool, rules]) => {
@@ -55,7 +81,9 @@ export const linterDetector: Detector<LinterConfig> = {
         // {{text}} included: an unreadable file must not escape as a whole-run error and take the
         // other tools down with it (spec §14).
         try {
-          const findings = await runLinter(tool, files, input.cwd, input.signal)
+          const findings = onDisk
+            ? await runLinter(tool, files, input.cwd, input.signal)
+            : await runLinterOnContent(tool, files, read, input.cwd, input.signal)
           for (const finding of findings) {
             const match: Match = {
               file: finding.file,

@@ -147,6 +147,8 @@ export const llmDetector: Detector<LlmConfig> = {
   // verify only by default (spec §6): a model call is far too slow for an edit hook. A rule opts
   // in with `stages: [edit, verify]`.
   events: () => ["verify"],
+  // The prompt carries the file's text, so content that is not on disk needs no scratch copy.
+  takesContent: () => true,
   // Spec §6, Consent: an llm rule sends file contents to a third party and costs money per file.
   // Everything the core does differently for it follows from these, not from the name "llm".
   metered: true,
@@ -165,7 +167,9 @@ export const llmDetector: Detector<LlmConfig> = {
       return { findings: [], errors: [{ rule: null, message: errorMessage(error) }] }
     }
 
-    const calls = await groupCalls(input.rules, input.changes, sourceReader(input.cwd))
+    // A model is handed text, never a path: content that is not on disk comes through `read`.
+    const read = input.fromDisk === false ? input.read : sourceReader(input.cwd)
+    const calls = await groupCalls(input.rules, input.changes, read)
     const outcomes = await Promise.all(
       calls.map(async (call) => {
         try {

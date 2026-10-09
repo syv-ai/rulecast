@@ -104,6 +104,12 @@ export interface DetectorRun<Config> {
    * is not on disk and never will be if the write is refused.
    */
   read(file: string): Promise<string | null>
+  /**
+   * False when the files are not as they are on disk — a staged run reads the index, `--to-ref` a
+   * commit — and this detector declared `takesContent`: it must read through `read` and hand the
+   * text to its tool under the file's path, never let the tool open the path. Absent: true.
+   */
+  fromDisk?: boolean
   /** File absent = no baseline, the whole file is new. */
   changes: ReadonlyMap<string, ChangeSet>
   cache: Cache
@@ -191,6 +197,13 @@ export interface Detector<Config> {
    * evidence for `refuse_write`, not only a write that inserts the matched text.
    */
   wholeFile?: boolean
+  /**
+   * This rule's tool can be handed a file's content under its real path (ruff `--stdin-filename`,
+   * a model prompt). When the content is not the working tree, such a rule is run with
+   * `fromDisk: false`; one that cannot is given a scratch copy instead, which configuration keyed
+   * on the file's path no longer matches (spec §12).
+   */
+  takesContent?(config: Config): boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>

@@ -1,11 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import path from "node:path"
-
 import type { DetectorRule } from "./compile/rule"
 import type { RuleExample } from "./config/schema"
 import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
 import { runDetection } from "./detection/run"
+import { withScratchTree } from "./detection/scratch"
 import { renderTemplate } from "./template"
 
 export interface ExampleFinding {
@@ -79,13 +77,9 @@ function emptyResult(rule: string): ExampleResult {
  * program. One run per example, rather than all of them batched, is what makes a failure
  * attributable — a finding in the first example would otherwise mask a miss in the third.
  *
- * **The scratch directory is inside the project root, not in `os.tmpdir()`**, and detection runs
- * with the project root as its cwd. Everything a rule's tool needs is found relative to one of
- * those two: `linter` and `llm` resolve their binaries from `<cwd>/node_modules/.bin`, `command`
- * resolves `run[0]` the same way, and eslint and ruff find their configuration by walking up from
- * the file they are given. From a directory under `/tmp` an example would be checked by whatever
- * happens to be on PATH, with none of the project's configuration — which is not the rule the
- * author is testing. It is removed in a `finally`.
+ * Each example gets its own scratch directory inside the project root (`withScratchTree`, which
+ * says why inside the root), and detection runs with the project root as its cwd. One directory
+ * per example, not one per rule: a rule's good and bad examples usually share a `path`.
  *
  * A `bad` example passes when the rule found *at least one* thing, not an exact count: a pattern
  * that matches a violation twice is not a failure, and pinning the count makes every example
@@ -102,20 +96,18 @@ export async function runExamples(input: ExamplesInput): Promise<ExampleResult> 
   ]
   if (cases.length === 0) return { ...result, empty: true }
 
-  const scratch = path.basename(await mkdtemp(path.join(input.detection.root, EXAMPLES_DIR)))
-  try {
-    for (const { kind, index, example } of cases) {
-      const outcome = await runOne(input, scratch, example)
-      // A `bad` example must produce something and a `good` one must not; a detector error is a
-      // failure either way, never a quiet pass.
-      const fired = outcome.findings.length > 0
-      const passed = outcome.error === undefined && fired === (kind === "bad")
-      result.outcomes.push({ kind, index, path: example.path, ...outcome, passed })
-    }
-  } finally {
-    // Also on a detector that threw: a scratch directory per rule, left in the repository on every
-    // failing run, is how somebody ends up committing one.
-    await rm(path.join(input.detection.root, scratch), { recursive: true, force: true })
+  for (const { kind, index, example } of cases) {
+    const outcome = await withScratchTree(
+      input.detection.root,
+      EXAMPLES_DIR,
+      new Map([[example.path, example.code]]),
+      (scratch) => runOne(input, scratch, example),
+    )
+    // A `bad` example must produce something and a `good` one must not; a detector error is a
+    // failure either way, never a quiet pass.
+    const fired = outcome.findings.length > 0
+    const passed = outcome.error === undefined && fired === (kind === "bad")
+    result.outcomes.push({ kind, index, path: example.path, ...outcome, passed })
   }
 
   const fired = (outcome: ExampleOutcome) => outcome.findings.length > 0
@@ -132,13 +124,9 @@ async function runOne(
   scratch: string,
   example: RuleExample,
 ): Promise<{ findings: ExampleFinding[]; error?: string }> {
-  // Repo-relative, as every path the core passes a detector is: <scratch>/<the example's own path>.
-  // The example keeps its own path under it, because the extension decides the parser and the
-  // directory decides what a linter's configuration says about it.
-  const relative = path.join(scratch, example.path)
-  const file = path.join(input.detection.root, relative)
-  await mkdir(path.dirname(file), { recursive: true })
-  await writeFile(file, example.code)
+  // Repo-relative, as every path the core passes a detector is: <scratch>/<the example's own path>,
+  // written there by withScratchTree.
+  const relative = `${scratch}/${example.path}`
 
   const output = await runDetection({
     detection: input.detection,

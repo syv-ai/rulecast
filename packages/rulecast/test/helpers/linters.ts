@@ -44,6 +44,8 @@ export async function stubTool(root: string, tool: string, options: { exitCode?:
     [
       "#!/bin/sh",
       `printf '%s\\n' "$*" > "${path.join(root, `${tool}.argv`)}"`,
+      // What the detector piped in: empty for a path run, the file's content for a stdin run.
+      `cat > "${path.join(root, `${tool}.stdin`)}"`,
       `cat "${output}"`,
       // A linter that found something exits non-zero; the detector must ignore that.
       `exit ${options.exitCode ?? 1}`,
@@ -56,6 +58,11 @@ export async function stubTool(root: string, tool: string, options: { exitCode?:
 /** The argv a stub was called with, as one space-joined line. */
 export async function stubArgv(root: string, tool: string): Promise<string> {
   return (await readFile(path.join(root, `${tool}.argv`), "utf8")).trim()
+}
+
+/** What the detector wrote to a stub's stdin. */
+export async function stubStdin(root: string, tool: string): Promise<string> {
+  return readFile(path.join(root, `${tool}.stdin`), "utf8")
 }
 
 /** A tool that resolves but produces unusable output, so a rule using it fails on any machine. */
