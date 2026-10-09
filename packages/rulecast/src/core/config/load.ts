@@ -41,9 +41,9 @@ export function parseConfig(data: unknown): Loaded<Config> {
 }
 
 /** A rule repo's manifest: a list of rules, each parsed later on its own. */
-export async function readManifest(dir: string): Promise<Loaded<unknown[]>> {
-  const loaded = await readYamlFile(path.join(dir, MANIFEST_FILE))
+export async function readManifest(dir: string, file = path.join(dir, MANIFEST_FILE)): Promise<Loaded<unknown[]>> {
+  const loaded = await readYamlFile(file)
   if (!loaded.ok) return loaded
-  if (!Array.isArray(loaded.value)) return { ok: false, message: `${MANIFEST_FILE}: must be a list of rules` }
+  if (!Array.isArray(loaded.value)) return { ok: false, message: `${path.basename(file)}: must be a list of rules` }
   return { ok: true, value: loaded.value }
 }

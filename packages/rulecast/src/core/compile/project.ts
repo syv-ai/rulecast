@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import path from "node:path"
 
 import { CONFIG_FILE, MANIFEST_FILE, parseConfig, readConfigData, readManifest } from "../config/load"
 import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../config/schema"
@@ -200,12 +201,14 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
 export async function compileManifest(
   dir: string,
   registry: DetectorRegistry,
+  file = path.join(dir, MANIFEST_FILE),
 ): Promise<{ rules: CompiledRule[]; diagnostics: Diagnostic[] }> {
-  const manifest = await readManifest(dir)
+  const source = path.basename(file)
+  const manifest = await readManifest(dir, file)
   if (!manifest.ok) {
     return {
       rules: [],
-      diagnostics: [{ source: MANIFEST_FILE, rule: null, message: manifest.message, level: "error" }],
+      diagnostics: [{ source, rule: null, message: manifest.message, level: "error" }],
     }
   }
   const diagnostics: Diagnostic[] = []
@@ -215,7 +218,7 @@ export async function compileManifest(
     const rule = ruleSchema.safeParse(raw)
     if (!rule.success) {
       diagnostics.push({
-        source: MANIFEST_FILE,
+        source,
         rule: idOf(raw),
         message: formatZodError(rule.error, { schema: ruleSchema }),
         level: "error",
@@ -225,12 +228,12 @@ export async function compileManifest(
     const result = await compileRule({ data: rule.data, source: "local", contextRoot: { dir, label: null } }, context)
     if (typeof result === "string") {
       diagnostics.push({
-        source: MANIFEST_FILE,
+        source,
         rule: rule.data.alias ?? rule.data.id,
         message: result,
         level: "error",
       })
-    } else compiled.push({ rule: result, source: MANIFEST_FILE })
+    } else compiled.push({ rule: result, source })
   }
   const rules = uniqueRules(compiled, diagnostics, (id) => `rule "${id}" is defined more than once`)
   return { rules, diagnostics }

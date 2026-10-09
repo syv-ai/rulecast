@@ -81,7 +81,7 @@ export const COMMANDS: CommandHelp[] = [
     name: "validate",
     synopsis: "rulecast validate [file...]",
     summary: "Check the config (and a rules manifest) and print diagnostics",
-    flags: [["file...", "A config (repos:) or a manifest (rules:), whatever its name"]],
+    flags: [["file...", "A config (repos:) or a manifest (a list of rules), whatever its name"]],
   },
   {
     name: "doctor",

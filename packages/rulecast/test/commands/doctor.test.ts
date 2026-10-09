@@ -91,7 +91,7 @@ describe("rulecast doctor", () => {
     })
     const result = await doctor(root)
     expect(result.stdout).toContain("looks like a branch")
-    expect(result.stdout).toContain("ok       demo/no-print — app.py, no match")
+    expect(result.stdout).toContain("ok       demo/no-print — tried app.py (1 of 1 matching file): no match")
     expect(result.stdout).toContain("1 rule, 0 errors, 1 warning")
     // The summary, not the config line: the config's warning plus the uninstalled hooks. Asserted
     // on the final line so it cannot be satisfied by the substring inside "0 errors, 1 warning".
@@ -209,7 +209,7 @@ describe("rulecast doctor", () => {
       })
       const result = await doctor(root)
       expect(result.stdout).toContain("dry run\n")
-      expect(result.stdout).toContain("ok       a — src/x.ts, 2 matches")
+      expect(result.stdout).toContain("ok       a — tried src/x.ts (1 of 1 matching file): 2 matches")
       expect(result.code).toBe(0)
     })
 
@@ -218,7 +218,7 @@ describe("rulecast doctor", () => {
         ".rulecast-config.yaml": localConfig([RULE("a")]),
         "src/x.ts": "const y = 1\n",
       })
-      expect((await doctor(root)).stdout).toContain("ok       a — src/x.ts, no match")
+      expect((await doctor(root)).stdout).toContain("ok       a — tried src/x.ts (1 of 1 matching file): no match")
     })
 
     test("one match is singular", async () => {
@@ -226,7 +226,33 @@ describe("rulecast doctor", () => {
         ".rulecast-config.yaml": localConfig([RULE("a")]),
         "src/x.ts": "const forbidden = 1\n",
       })
-      expect((await doctor(root)).stdout).toContain("ok       a — src/x.ts, 1 match")
+      expect((await doctor(root)).stdout).toContain("ok       a — tried src/x.ts (1 of 1 matching file): 1 match")
+    })
+
+    test("says it tried one of the matching files, and how to check them all", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          { id: "a", name: "A", files: "\\.ts$", detect: { regex: { pattern: "print" } }, message: "m" },
+        ]),
+        "src/x.ts": "const x = 1\n",
+        "src/y.ts": "print()\n",
+        "src/z.ts": "print()\n",
+      })
+      const result = await doctor(root)
+      expect(result.stdout).toContain("ok       a — tried src/x.ts (1 of 3 matching files): no match")
+      expect(result.stdout).toContain("the dry run tries one file per rule; rulecast run --all-files checks them all")
+    })
+
+    test("a disabled rule says so and is not run", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          { id: "a", name: "A", files: "\\.ts$", enabled: false, detect: { regex: { pattern: "x" } }, message: "m" },
+        ]),
+        "src/x.ts": "const x = 1\n",
+      })
+      const result = await doctor(root)
+      expect(result.stdout).toContain("skipped  a — disabled")
+      expect(result.stdout).not.toContain("tried")
     })
 
     test("a rule no file in the project matches is a warning, not a failure", async () => {

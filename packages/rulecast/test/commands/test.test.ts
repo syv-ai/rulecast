@@ -80,6 +80,18 @@ describe("rulecast test", () => {
     expect(result.stdout).not.toContain("backend/other")
   })
 
+  test("a touch rule says it has nothing to test", async () => {
+    const root = await project(
+      [{ id: "ctx", name: "Context", files: "\\.py$", stages: ["touch"], context: ["@docs/x.md"] }],
+      { "docs/x.md": "# X\n" },
+    )
+    for (const argv of [["ctx"], ["ctx", "--against", "app"]]) {
+      const result = await runTest(root, ...argv)
+      expect(result.code).toBe(0)
+      expect(result.stdout).toContain("ctx is a touch rule: it delivers context and has nothing to test")
+    }
+  })
+
   test("an unknown rule id exits 2 and points at validate", async () => {
     const root = await project([httpException()])
     const result = await runTest(root, "backend/nope")
@@ -122,8 +134,28 @@ describe("rulecast test --against", () => {
     // app/other/d.py is under the path but the rule does not match it, so it is not the denominator.
     expect(result.stdout).toContain("3 violations in 2 of 3 matching files")
     expect(result.stdout).toContain("app/services/a.py")
-    expect(result.stdout).toContain("A rule this common is usually true by definition")
-    expect(result.stdout).toContain("A rule with almost no violations")
+    // One note, chosen by the count: 2 of 3 matching files is most of them.
+    expect(result.stdout).toContain("Most matching files violate it: check it is a convention")
+    expect(result.stdout).not.toContain("Few violations")
+  })
+
+  test("a few violations in a minority of files says a rule nobody breaks costs context", async () => {
+    const root = await project([httpException()], {
+      ...files,
+      "app/services/b.py": "pass\n",
+      "app/services/e.py": "pass\n",
+      "app/services/f.py": "pass\n",
+    })
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app")
+    expect(result.stdout).toContain("2 violations in 1 of 5 matching files")
+    expect(result.stdout).toContain("Few violations: a rule nobody breaks costs an agent context")
+    expect(result.stdout).not.toContain("Most matching files")
+  })
+
+  test("one violation is singular", async () => {
+    const root = await project([httpException()], { "app/services/a.py": "raise HTTPException(1)\n" })
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app")
+    expect(result.stdout).toContain("1 violation in 1 of 1 matching files")
   })
 
   test("a rule that fires nowhere still exits 0, and says what the zero does not mean", async () => {
@@ -135,6 +167,7 @@ describe("rulecast test --against", () => {
     // and none of them is a rule nobody would break.
     expect(result.stdout).toContain("counts the")
     expect(result.stdout).toContain("stock, not how often an edit would break the rule.")
+    expect(result.stdout).not.toContain("Few violations")
     // No empty "worst files" block when there are none.
     expect(result.stdout).not.toMatch(/\n\n\n/)
   })

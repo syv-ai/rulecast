@@ -35,25 +35,42 @@ export function parseTestArgs(args: string[]): TestArgs {
   return { ruleId, against }
 }
 
-/**
- * The two ways a rule is not worth shipping, both visible in one number.
- *
- * Nobody breaks it: 8 of 15 conventions measured under 25 violations in ~1,300 sites, and a rule
- * that never fires costs an agent context for nothing. Or everybody breaks it: `react/no-inline-style`
- * produced 131 true-by-definition findings that nobody would have kept — discovered only after
- * adoption, which is the gap this closes. No verdict is printed: there is no threshold that is
- * right for every rule, and 131 is a disaster for one rule and a normal Tuesday for a migration.
- */
-const AGAINST_NOTES = [
-  "  A rule this common is usually true by definition rather than a convention.",
-  "  A rule with almost no violations is usually not worth an agent's context.",
-]
+/** Under this many violations a rule is one "nobody breaks" (8 of 15 measured conventions were). */
+const FEW_VIOLATIONS = 25
 
-/** What a zero does not mean. Added only at zero, where the second note above reads as a verdict. */
-const ZERO_NOTES = [
-  "  Nothing to fix today is not the same as nothing to catch: this counts the",
-  "  stock, not how often an edit would break the rule.",
-]
+/**
+ * The note for one count: the two ways a rule is not worth shipping, and what a zero does not mean.
+ *
+ * Everybody breaks it: `react/no-inline-style` produced 131 true-by-definition findings that nobody
+ * would have kept — discovered only after adoption, which is the gap this closes. Nobody breaks it:
+ * a rule that never fires costs an agent context for nothing. A zero is neither: self-installing
+ * rulecast on rulecast produced 0 for all three of its own rules, the expected answer for a
+ * repository that already follows them, and it says nothing about whether an agent editing it
+ * would. No verdict is printed: there is no threshold that is right for every rule, and 131 is a
+ * disaster for one rule and a normal Tuesday for a migration.
+ */
+function againstNote(violations: number, violatingFiles: number, matchingFiles: number): string[] {
+  if (violations === 0) {
+    return [
+      "  Nothing to fix today is not the same as nothing to catch: this counts the",
+      "  stock, not how often an edit would break the rule.",
+    ]
+  }
+  if (violatingFiles * 2 > matchingFiles) {
+    return ["  Most matching files violate it: check it is a convention, not a description of the code."]
+  }
+  if (violations < FEW_VIOLATIONS) {
+    return [
+      "  Few violations: a rule nobody breaks costs an agent context and catches little",
+      `  (8 of 15 measured conventions were under ${FEW_VIOLATIONS}).`,
+    ]
+  }
+  return []
+}
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
+
+const touchRule = (id: string) => `${id} is a touch rule: it delivers context and has nothing to test\n`
 
 const ratio = (part: number, whole: number) => (whole === 0 ? "   — " : (part / whole).toFixed(2))
 
@@ -94,7 +111,7 @@ const AGAINST_TOP_FILES = 10
 /**
  * `--against`: fire the rule over real files and say how much it would produce.
  *
- * It reports and never fails, whatever it finds (see `AGAINST_NOTES`). The denominator is the files
+ * It reports and never fails, whatever it finds (see `againstNote`). The denominator is the files
  * the rule *matches* under the given paths, not every file walked: a rule scoped to `routes/` must
  * not be diluted by the rest of the repository.
  */
@@ -136,16 +153,14 @@ async function reportAgainst(
   const worst = [...byFile].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, AGAINST_TOP_FILES)
   const width = Math.max(...worst.map(([file]) => file.length), 0)
 
-  const out = ["", `  ${output.findings.length} violations in ${byFile.size} of ${files.length} matching files`]
+  const violations = output.findings.length
+  const out = ["", `  ${plural(violations, "violation")} in ${byFile.size} of ${files.length} matching files`]
   if (worst.length > 0) {
     out.push("", ...worst.map(([file, count]) => `  ${file.padEnd(width + 2)}${count}`))
     if (byFile.size > worst.length) out.push(`  …and ${byFile.size - worst.length} more files`)
   }
-  out.push("", ...AGAINST_NOTES)
-  // Self-installing rulecast on rulecast produced 0 for all three of its own rules, which is the
-  // expected answer for a repository that already follows them and says nothing about whether an
-  // agent editing it would. The two sentences above are about the stock; this is the gap in them.
-  if (output.findings.length === 0) out.push(...ZERO_NOTES)
+  const note = againstNote(violations, byFile.size, files.length)
+  if (note.length > 0) out.push("", ...note)
   out.push("")
   io.stdout(out.join("\n"))
   return 0
@@ -172,6 +187,10 @@ export async function testCommand(
   }
 
   const rules = project.rules.filter(isDetectorRule).filter((rule) => ruleId === null || rule.id === ruleId)
+  if (ruleId !== null && rules.length === 0) {
+    io.stdout(touchRule(ruleId))
+    return 0
+  }
   const stateDir = ensureProjectState(cacheHome(io.env), root)
   const resolver = createReferenceResolver(root)
   const detection = detectionFor(project, registry, stateDir, resolver)

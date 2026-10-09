@@ -91,11 +91,41 @@ describe("rulecast validate", () => {
     })
   })
 
-  test("other file names and empty directories are errors", async () => {
+  test("any file name, told apart by what it holds", async () => {
+    const root = await createProject({
+      "scratch/rules.yaml": MANIFEST,
+      "scratch/docs/http.md": HTTP_DOC,
+      "scratch/config.yaml": localConfig([]),
+      "scratch/bad.yaml": MANIFEST + BROKEN_RULE,
+    })
+    expect(await validate(root, "scratch/rules.yaml")).toMatchObject({
+      code: 0,
+      stdout: "scratch/rules.yaml: 1 rule valid\n",
+    })
+    expect(await validate(root, "scratch/config.yaml")).toMatchObject({
+      code: 0,
+      stdout: "scratch/config.yaml: 0 rules valid\n",
+    })
+    expect(await validate(root, "scratch/bad.yaml")).toMatchObject({
+      code: 2,
+      stdout: 'scratch/bad.yaml: bad.yaml (demo/bad): unknown template variable "nope"\n',
+    })
+  })
+
+  test("a file that is neither a config nor a manifest says what each looks like", async () => {
+    const root = await createProject({ "README.md": "# hello\n", "notes.yaml": "title: x\n", "broken.yaml": "a: [\n" })
+    for (const file of ["README.md", "notes.yaml"]) {
+      const result = await validate(root, file)
+      expect(result.code).toBe(2)
+      expect(result.stderr).toContain(`${file}: neither a config (repos:) nor a manifest (a list of rules)`)
+    }
+    const broken = await validate(root, "broken.yaml")
+    expect(broken.code).toBe(2)
+    expect(broken.stdout).toContain("broken.yaml: broken.yaml:")
+  })
+
+  test("empty directories are errors", async () => {
     const root = await createProject({ "README.md": "" })
-    const other = await validate(root, "README.md")
-    expect(other.code).toBe(2)
-    expect(other.stderr).toContain("README.md: not a .rulecast-config.yaml or .rulecast-rules.yaml")
     const empty = await validate(root)
     expect(empty.code).toBe(2)
     expect(empty.stderr).toContain("nothing to validate: no .rulecast-config.yaml or .rulecast-rules.yaml")

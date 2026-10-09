@@ -142,6 +142,8 @@ export async function doctorCommand(
     count(result.level)
     io.stdout(line(result.level, result.rule, result.detail))
   }
+  // A rule with violations in four files and none in the one tried reads "no match" above.
+  if (dry.some((result) => result.tried)) io.stdout(`  ${DRY_RUN_FOOTER}\n`)
 
   io.stdout(
     `\n${errors + warnings === 0 ? "no problems found" : [plural(errors, "error"), plural(warnings, "warning")].join(", ")}\n`,
@@ -153,7 +155,11 @@ interface DryRunLine {
   rule: string
   level: Level
   detail: string
+  /** true: the rule's detector ran over one of its matching files. */
+  tried?: boolean
 }
+
+const DRY_RUN_FOOTER = "the dry run tries one file per rule; rulecast run --all-files checks them all"
 
 /**
  * Every rule, alone, against one file it matches (spec §5).
@@ -176,6 +182,10 @@ async function dryRun(project: CompiledProject, detection: DetectionContext): Pr
 
   const lines: DryRunLine[] = []
   for (const rule of project.rules) {
+    if (!rule.enabled) {
+      lines.push({ rule: rule.id, level: "skipped", detail: "disabled" })
+      continue
+    }
     // isDetectorRule, not `rule.detector === null`: narrowing the property does not narrow the
     // rule, and runDetection below takes a rule whose detector is known to be there.
     if (!isDetectorRule(rule)) {
@@ -192,7 +202,8 @@ async function dryRun(project: CompiledProject, detection: DetectionContext): Pr
       })
       continue
     }
-    const file = files.find((candidate) => rule.matches(candidate))
+    const matching = files.filter((candidate) => rule.matches(candidate))
+    const file = matching[0]
     if (file === undefined) {
       lines.push({ rule: rule.id, level: "warning", detail: "no file in the project matches this rule" })
       continue
@@ -223,7 +234,8 @@ async function dryRun(project: CompiledProject, detection: DetectionContext): Pr
     lines.push({
       rule: rule.id,
       level: "ok",
-      detail: `${file}, ${matches === 0 ? "no match" : matches === 1 ? "1 match" : `${matches} matches`}`,
+      detail: `tried ${file} (1 of ${plural(matching.length, "matching file")}): ${matches === 0 ? "no match" : matches === 1 ? "1 match" : `${matches} matches`}`,
+      tried: true,
     })
   }
   return lines
