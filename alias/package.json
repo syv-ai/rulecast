@@ -1,0 +1,25 @@
+{
+  "name": "rulecast",
+  "version": "0.4.0",
+  "description": "The unscoped name for @syv-ai/rulecast: `npx rulecast` runs it.",
+  "license": "MIT",
+  "homepage": "https://github.com/syv-ai/rulecast#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syv-ai/rulecast.git",
+    "directory": "alias"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "bin": {
+    "rulecast": "bin.js"
+  },
+  "files": [
+    "bin.js"
+  ],
+  "dependencies": {
+    "@syv-ai/rulecast": ">=0.4.0 <1"
+  }
+}
