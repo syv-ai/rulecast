@@ -1,11 +1,12 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
+import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
 
@@ -255,5 +256,60 @@ describe("rulecast run: rules and errors", () => {
     const result = await run(root, "--all-files")
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("no .rulecast-config.yaml in")
+  })
+})
+
+describe("rulecast run: metered rules in a staged run", () => {
+  beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"))
+  afterEach(() => vi.unstubAllEnvs())
+
+  const LLM_RULES = [
+    {
+      id: "py/thin",
+      name: "Thin routes",
+      files: "^app/",
+      detect: { llm: { model: "haiku", question: "Does this do too much?" } },
+      message: "{{file}}:{{line}} does too much. {{reason}}",
+    },
+  ]
+
+  async function staged() {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig(LLM_RULES), "app/a.py": "x = 1\n" })
+    await stubAgentCli(root, "claude")
+    await writeFile(path.join(root, "app/a.py"), "x = 2\n")
+    await git(root, "add", "app/a.py")
+    return root
+  }
+
+  test("a staged run skips them and says which, and how to include them", async () => {
+    const root = await staged()
+    const result = await run(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("skipped 1 metered rule (py/thin): costs money per file. Pass --llm to include it.")
+    expect(await stubStdin(root, "claude")).toEqual([])
+    expect(JSON.parse((await run(root, "--format", "json")).stdout).skipped).toEqual(["py/thin"])
+  })
+
+  test("--llm includes them", async () => {
+    const root = await staged()
+    const result = await run(root, "--llm")
+    expect(result.stdout).not.toContain("skipped")
+    expect(await stubStdin(root, "claude")).toHaveLength(1)
+  })
+
+  test("other selections run them, and --no-llm skips them anywhere", async () => {
+    const root = await staged()
+    await run(root, "--all-files")
+    expect(await stubStdin(root, "claude")).toHaveLength(1)
+    const skipped = await run(root, "--all-files", "--no-llm")
+    expect(skipped.stdout).toContain("skipped 1 metered rule (py/thin)")
+    expect(await stubStdin(root, "claude")).toHaveLength(1)
+  })
+
+  test("--llm with --no-llm is a usage error", async () => {
+    const root = await staged()
+    const result = await run(root, "--llm", "--no-llm")
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("--llm and --no-llm cannot be combined")
   })
 })

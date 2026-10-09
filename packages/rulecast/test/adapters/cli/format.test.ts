@@ -60,6 +60,7 @@ describe("formatDelivery", () => {
       "findings",
       "preexistingSummary",
       "references",
+      "skipped",
       "stop",
       "touches",
       "warnings",

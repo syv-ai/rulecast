@@ -11,6 +11,14 @@ export interface FormatOptions {
   findings?: boolean
   /** Append the adoption backlog. True for `--all-files` and `--summary`. */
   backlog?: boolean
+  /** Rules left out because their detector is metered (a staged run, or --no-llm) and they matched a checked file. */
+  skipped?: string[]
+}
+
+/** Names what a staged run left out and the flag that puts it back. */
+function skippedLine(skipped: readonly string[]): string {
+  const rules = skipped.length === 1 ? "metered rule" : "metered rules"
+  return `skipped ${skipped.length} ${rules} (${skipped.join(", ")}): costs money per file. Pass --llm to include ${skipped.length === 1 ? "it" : "them"}.`
 }
 
 /** The worst files named before the rest are counted: enough to pick one, not a second listing. */
@@ -67,6 +75,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
     out.push("warnings:", ...delivery.warnings.map((warning) => `  - ${warning}`), "")
   }
 
+  if ((options.skipped ?? []).length > 0) out.push(skippedLine(options.skipped!))
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
   const warningsCount = delivery.findings.length - errors
   out.push(
@@ -84,7 +93,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
  * `overflowPath` are artefacts of the hook path's character budget that are always empty here,
  * because the CLI runs unbudgeted. Adding a field to `Delivery` should not change this output.
  */
-function json(delivery: Delivery): string {
+function json(delivery: Delivery, options: FormatOptions): string {
   return JSON.stringify(
     {
       findings: delivery.findings,
@@ -95,6 +104,7 @@ function json(delivery: Delivery): string {
       references: delivery.references,
       touches: delivery.touches,
       warnings: delivery.warnings,
+      skipped: options.skipped ?? [],
       stop: delivery.stop,
     },
     null,
@@ -139,7 +149,7 @@ export function formatDelivery(delivery: Delivery, format: CliFormat, options: F
     case "agent":
       return renderAgentText(delivery, options)
     case "json":
-      return json(delivery)
+      return json(delivery, options)
     case "sarif":
       return sarif(delivery)
   }

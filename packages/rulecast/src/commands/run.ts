@@ -27,6 +27,8 @@ export interface RunArgs {
   format: CliFormat
   session: string | null
   noLlm: boolean
+  /** Include metered detectors in a staged run, which skips them by default. */
+  llm: boolean
   /** --ref: try-repo only. */
   ref: string | null
 }
@@ -46,6 +48,7 @@ export function parseRunArgs(args: string[]): RunArgs {
       format: { type: "string", default: "terminal" },
       session: { type: "string" },
       "no-llm": { type: "boolean", default: false },
+      llm: { type: "boolean", default: false },
       ref: { type: "string" },
     },
   })
@@ -74,6 +77,7 @@ export function parseRunArgs(args: string[]): RunArgs {
   // SARIF has nowhere to put a summary, and a flag that is silently ignored is how people stop
   // trusting a tool's output.
   if (values.summary && format === "sarif") throw new UsageError("--summary cannot be combined with --format sarif")
+  if (values.llm && values["no-llm"]) throw new UsageError("--llm and --no-llm cannot be combined")
   if (fromRef !== null && (values.files || values["all-files"])) {
     throw new UsageError("--from-ref cannot be combined with --all-files or --files")
   }
@@ -87,11 +91,16 @@ export function parseRunArgs(args: string[]): RunArgs {
     format,
     session: values.session ?? null,
     noLlm: values["no-llm"],
+    llm: values.llm,
     ref: values.ref ?? null,
   }
 }
 
+/** Which way the files were chosen: what the terminal output says it checked. */
+export type Selection = "files" | "range" | "all" | "session" | "staged"
+
 interface SelectedFiles {
+  selection: Selection
   files: string[]
   /** Where the baseline is read from; null: no baseline (or the session's). */
   baseCommit: string | null
@@ -105,26 +114,34 @@ async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<Sel
     const files = run.files
       .map((file) => toProjectPath(root, cwd, file))
       .filter((file): file is string => file !== null)
-    return { files, baseCommit: null, content: WORKTREE }
+    return { selection: "files", files, baseCommit: null, content: WORKTREE }
   }
   if (run.fromRef !== null) {
     const base = await mergeBase(root, run.fromRef, run.toRef ?? "HEAD")
     // Without --to-ref, uncommitted work is included on purpose, so it is read from the working
     // tree. With it, a push is judged as it will be pushed: the content at the ref.
-    if (run.toRef === null) return { files: await changedFilesSince(root, base), baseCommit: base, content: WORKTREE }
+    if (run.toRef === null) {
+      return { selection: "range", files: await changedFilesSince(root, base), baseCommit: base, content: WORKTREE }
+    }
     return {
+      selection: "range",
       files: await changedFilesBetween(root, base, run.toRef),
       baseCommit: base,
       content: { kind: "commit", ref: run.toRef },
     }
   }
-  if (run.allFiles) return { files: await allFiles(root), baseCommit: null, content: WORKTREE }
+  if (run.allFiles) return { selection: "all", files: await allFiles(root), baseCommit: null, content: WORKTREE }
   // With a session and no files, the pipeline verifies the session's edited files, as a Stop does.
-  if (run.session !== null) return { files: [], baseCommit: null, content: WORKTREE }
+  if (run.session !== null) return { selection: "session", files: [], baseCommit: null, content: WORKTREE }
   // Staged: a commit is judged as it will be committed — the index, against HEAD — so a line it
   // did not change is backlog here exactly as it is in an agent hook. Before the first commit there
   // is no HEAD and so no baseline: every finding is new.
-  return { files: await stagedFiles(root), baseCommit: await headCommit(root), content: { kind: "index" } }
+  return {
+    selection: "staged",
+    files: await stagedFiles(root),
+    baseCommit: await headCommit(root),
+    content: { kind: "index" },
+  }
 }
 
 export interface RunInput {
@@ -143,6 +160,18 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
   }
   const selected = await selectFiles(root, io.cwd, run)
+  // Spec §6, Consent, applied to a commit: a staged run is a pre-commit hook, which fires on every
+  // commit of every teammate, so a detector that costs money per file is left out unless asked for.
+  // --no-llm leaves it out everywhere. The registry says which kinds are metered; the core names none.
+  const skipMetered = run.noLlm || (selected.selection === "staged" && !run.llm)
+  const meteredKinds = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
+  const skipped = skipMetered
+    ? project.rules
+        .filter((rule) => rule.detector !== null && meteredKinds.has(rule.detector.kind))
+        .filter((rule) => ruleId === null || rule.id === ruleId)
+        .filter((rule) => rule.stages.includes("verify") && selected.files.some((file) => rule.matches(file)))
+        .map((rule) => rule.id)
+    : []
   const result = await runPipeline({
     project,
     stateDir: ensureProjectState(cacheHome(io.env), root),
@@ -156,15 +185,14 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     },
     registry,
     maxContextChars: null,
-    // The one place the core names a detector kind on purpose: --no-llm is a user-facing flag, and
-    // the user typed the name. Everything else asks the registry whether a kind is metered.
-    skipDetectorKinds: run.noLlm ? new Set(["llm"]) : undefined,
+    skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
   })
   const text = formatDelivery(result.delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
+    skipped,
   })
   if (text) io.stdout(`${text}\n`)
   return exitCodeFor(result.delivery, result.failed)

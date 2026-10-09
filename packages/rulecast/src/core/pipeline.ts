@@ -34,7 +34,7 @@ export interface PipelineOptions {
   maxContextChars: number | null
   /** Recently accessed files the agent re-attaches after compaction (adapter.restoredFiles); reset re-delivers their touch context. */
   restoredFiles?: number
-  /** Detector kinds to skip entirely (run --no-llm). */
+  /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
   skipDetectorKinds?: ReadonlySet<string>
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
   onlyRules?: ReadonlySet<string>
