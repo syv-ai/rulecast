@@ -5,11 +5,12 @@ import { type BaselineInput, changesFor, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
+import { contentReader, WORKTREE } from "./content"
 import { writeOverflow } from "./delivery/persist"
 import { createReferenceResolver } from "./delivery/resolve"
 import { applyFileBudget, applySizeCeiling } from "./detection/budget"
 import { detectionFor } from "./detection/context"
-import { fileBytes, readSourceFile } from "./detection/per-rule"
+import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
@@ -284,11 +285,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     if (event.kind === "verify" && event.files.length === 0 && session) requested = relevant(view.work.edited)
 
+    // One reader for the baseline diff and the detectors, so they agree on what "the file" is.
+    const read = contentReader(root, event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE)
     const stage = await changesFor(
       baselineInput,
       { kind: event.kind, baseCommit: event.baseCommit },
       session ? baseline : null,
       requested,
+      read,
     )
     const { files, changes: baselineChanges, fingerprints } = stage
     const changes = baselineChanges.sets
@@ -333,7 +337,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event: event.kind,
       selections,
       changes,
-      read: (file) => readSourceFile(root, file),
+      read,
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
     })
 

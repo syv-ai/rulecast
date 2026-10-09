@@ -1,4 +1,4 @@
-import { readSourceFile } from "../detection/per-rule"
+import { contentReader, WORKTREE } from "../content"
 import { fileAtCommit } from "../git"
 import type { ChangeSet, Match } from "../types"
 import { diffLines, identityMap, type LineMap } from "./changes"
@@ -40,6 +40,8 @@ export async function computeChanges(
   root: string,
   files: readonly string[],
   sources: BaselineSources,
+  /** Current content: the run's content reader (core/content.ts). Default: the working tree. */
+  read: (file: string) => Promise<string | null> = contentReader(root, WORKTREE),
 ): Promise<BaselineChanges> {
   const changes: BaselineChanges = { sets: new Map(), maps: new Map(), fromCommit: new Map() }
   for (const file of files) {
@@ -52,7 +54,7 @@ export async function computeChanges(
       before = commitText === null ? null : snapshotOf(commitText)
     }
     if (!before) continue
-    const current = await readSourceFile(root, file)
+    const current = await read(file)
     if (current === null) continue
     // Only for a file that ends up with a change set: a deleted one has nothing to classify.
     if (commitText !== null) changes.fromCommit.set(file, commitText)

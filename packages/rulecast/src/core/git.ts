@@ -64,6 +64,12 @@ export async function fileAtCommit(cwd: string, commit: string, file: string): P
   return result.ok ? result.stdout : null
 }
 
+/** A repo-relative file's staged content, or null when it is not in the index. */
+export async function fileInIndex(cwd: string, file: string): Promise<string | null> {
+  const result = await git(cwd, ["show", `:./${file}`])
+  return result.ok ? result.stdout : null
+}
+
 export async function mergeBase(cwd: string, ref: string, other = "HEAD"): Promise<string> {
   const result = await git(cwd, ["merge-base", other, ref])
   if (!result.ok) throw new Error(`cannot find merge base with ${ref}: ${result.stderr.trim()}`)

@@ -90,6 +90,8 @@ export async function changesFor(
   event: { kind: "edit" | "verify"; baseCommit?: string },
   state: BaselineState | null,
   files: readonly string[],
+  /** Current content, as the detectors will read it (core/content.ts). Default: the working tree. */
+  read?: (file: string) => Promise<string | null>,
 ): Promise<ChangesResult> {
   let snapshots: ReadonlyMap<string, Snapshot> = state?.snapshots ?? new Map()
   let fallbackCommit = state?.startCommit ?? null
@@ -98,7 +100,7 @@ export async function changesFor(
     snapshots = new Map()
   }
 
-  const changes = await computeChanges(input.root, files, { snapshots, fallbackCommit })
+  const changes = await computeChanges(input.root, files, { snapshots, fallbackCommit }, read)
   // Files edited but back to their snapshot content have nothing new.
   const kept =
     event.kind === "verify" && state !== null && !event.baseCommit

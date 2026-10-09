@@ -17,6 +17,13 @@ export interface WriteIntent {
   edit?: { find: string; replace: string; all: boolean }
 }
 
+/**
+ * Where a run reads the current content of a file from. The working tree for every hook; the index
+ * for `rulecast run` on staged files, so a commit is judged as it will be committed; a commit for
+ * `--to-ref`, so a push is judged as it will be pushed.
+ */
+export type ContentSource = { kind: "worktree" } | { kind: "index" } | { kind: "commit"; ref: string }
+
 export interface Event {
   kind: EventKind
   /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt and reset. */
@@ -27,6 +34,8 @@ export interface Event {
   completeRead?: boolean
   /** verify from the CLI: the commit the baseline is read from (the merge base for --from-ref). */
   baseCommit?: string
+  /** verify from the CLI: where current content is read from. Absent: the working tree. */
+  content?: ContentSource
   session?: { id: string; agentId?: string }
   cwd: string
 }
