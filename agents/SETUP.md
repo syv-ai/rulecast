@@ -20,5 +20,6 @@ Relative links in this file resolve against this file's own URL.
 
 ## Never
 
+- Never add a `rulecast-ignore` comment or set `enabled: false` on a rule without the developer's agreement. Ignores added during a session are reported to the developer when you stop.
 - Never edit agent hook settings (such as `.claude/settings.json`) by hand: `rulecast install` and `rulecast uninstall` manage them.
 - Never commit. The developer reviews and commits the changes.
