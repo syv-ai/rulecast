@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import type { CompiledRule } from "../compile/rule"
-import { BACKLOG_HINT, measureRuleBlock } from "../delivery/render-agent"
+import { deliveryCost, measureRuleBlock } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate, templateBindings } from "../template"
@@ -48,21 +48,6 @@ export interface Decision {
   work: WorkRecord[]
   context: ContextRecord[]
 }
-
-/** Characters a renderer adds around one item; used only for the budget estimate. */
-const ITEM_OVERHEAD = 64
-
-/** The header, the blank lines between blocks, and whatever an adapter wraps the text in. */
-const HEADER_OVERHEAD = 128
-
-/** The three lines naming the file the rest of a cut delivery was written to, path included. */
-const OVERFLOW_NOTICE = 256
-
-/** A reference's own line, at its longest: "read this before continuing (not included, …)". */
-const REFERENCE_OVERHEAD = 96
-
-/** The pre-existing block's heading, as render-agent prints it. */
-const BACKLOG_HEADING = "backlog in files you touched (not from your edit):"
 
 /**
  * The most of the budget warnings may take between them.
@@ -303,14 +288,25 @@ export function trim(
     else group.push(finding)
   }
 
-  let used = HEADER_OVERHEAD
+  // Every price below comes from the renderer (deliveryCost), so the budget spends what it prints.
+  // An adapter's own wrapping is not in it: the adapter keeps slack for that (claude-code: 9,000 of
+  // a 10,000 character limit).
+  const conventions = delivery.references.length > 0 || delivery.preexistingSummary.length > 0
+  let used =
+    deliveryCost.header(byRule.size, new Set(delivery.findings.map((finding) => finding.file)), conventions) +
+    (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0)
   const fits = (size: number) => limit === null || used + size <= limit
   const kept = new Map<string, Finding[]>()
   // A reference costs its line whatever its state: one whose content does not fit is not dropped,
   // it is demoted to "read this", which the renderer still prints. The line is charged with the rule
   // that cites it, because the two are one floor item — a finding without its section explains
   // nothing, and a section for a finding the agent cannot see explains nothing either.
-  const lineCost = (ref: string) => ref.length + REFERENCE_OVERHEAD
+  const specs = new Map<string, ReferenceSpec>()
+  for (const rule of [...rulesById.values(), ...touches]) for (const spec of rule.context) specs.set(spec.ref, spec)
+  const lineCost = (ref: string) => {
+    const spec = specs.get(ref)
+    return deliveryCost.referenceLine(ref, spec === undefined ? undefined : locationOf(spec).location)
+  }
   const resolvedRefs = new Set(delivery.references.map((reference) => reference.ref))
   const charged = new Set<string>()
   const orphaned = new Set<string>()
@@ -325,7 +321,7 @@ export function trim(
       const rule = rulesById.get(id)
       const refs = rule === undefined ? [] : uncharged(rule)
       const size =
-        measureRuleBlock(id, [findings[0]!], delivery.templates[id], render) +
+        measureRuleBlock(id, [findings[0]!], findings, delivery.templates[id], render) +
         refs.reduce((sum, ref) => sum + lineCost(ref), 0)
       if (used + spent.chars + size > cap) {
         spent.dropped++
@@ -350,8 +346,10 @@ export function trim(
     // Twice when the first pass overflows: the lines naming the overflow file are part of the floor
     // too, and only the first pass can say whether there will be any.
     let floor = floorWithin(limit)
-    if (floor.dropped > 0) floor = floorWithin(limit - OVERFLOW_NOTICE)
-    used += floor.chars + (floor.dropped > 0 ? OVERFLOW_NOTICE : 0)
+    // Priced for every rule being cut, the longest the count can be.
+    const notice = deliveryCost.overflowNotice(byRule.size)
+    if (floor.dropped > 0) floor = floorWithin(limit - notice)
+    used += floor.chars + (floor.dropped > 0 ? notice : 0)
     delivery.omitted.rules = floor.dropped
     for (const [id, findings] of floor.kept) kept.set(id, findings)
     for (const ref of floor.refs) charged.add(ref)
@@ -362,12 +360,12 @@ export function trim(
   // Warnings, into what the floor left and no more than their share of it. They come before the doc
   // sections and the repeats — a rule that is broken is worth saying early — but after every rule
   // that fired, so no number of them can cost the agent a finding it could act on.
-  const warningCost = (text: string) => text.length + ITEM_OVERHEAD
+  const warningCost = (text: string) => deliveryCost.warning(text)
   if (limit === null) {
     for (const warning of unwarned) context.push({ t: "warned", key: warning.key })
   } else {
     const ceiling = Math.max(0, Math.min(Math.floor(limit * WARNING_SHARE), limit - used))
-    let spent = 0
+    let spent = unwarned.length > 0 ? deliveryCost.warningsFrame : 0
     let held = 0
     while (held < unwarned.length && spent + warningCost(unwarned[held]!.text) <= ceiling) {
       spent += warningCost(unwarned[held]!.text)
@@ -388,11 +386,13 @@ export function trim(
       spent += warningCost(moreWarnings(cut))
       delivery.warnings.push(moreWarnings(cut))
     }
-    used += spent
+    // Nothing printed, so the heading never prints either.
+    used += delivery.warnings.length > 0 ? spent : 0
   }
 
   for (const { index, resolved } of candidates) {
-    const size = resolved.content.length
+    // Its line is already paid for at the floor; this is what printing it in full adds.
+    const size = deliveryCost.referenceContent(resolved.spec.ref, resolved.content, locationOf(resolved.spec).location)
     if (orphaned.has(resolved.spec.ref)) continue
     if (!fits(size)) {
       delivery.references[index] = {
@@ -410,14 +410,22 @@ export function trim(
   // The heading and the "see all of it" line print whenever anything in this block does — including
   // when every summary was cut and only the count remains — so they are charged once, up front. A
   // renderer's line that nobody charged for is how a delivery at the budget's edge overflows.
-  if (delivery.preexistingSummary.length > 0) used += BACKLOG_HEADING.length + BACKLOG_HINT.length + ITEM_OVERHEAD
+  //
+  // When even that frame does not fit, the block is not printed at all. A heading and "…and 7 more"
+  // with nothing under them cost an agent at the budget's edge over a hundred characters to say
+  // nothing, and these summaries are the lowest priority there is. Nothing is recorded, so they are
+  // offered again on a later event.
+  const frame =
+    delivery.preexistingSummary.length > 0 ? deliveryCost.backlogFrame(delivery.preexistingSummary.length) : 0
+  if (frame > 0 && !fits(frame)) delivery.preexistingSummary = []
+  else used += frame
   const summariesKept: Delivery["preexistingSummary"] = []
   for (const summary of delivery.preexistingSummary) {
-    if (!fits(summary.rule.length + summary.file.length + ITEM_OVERHEAD)) {
+    if (!fits(deliveryCost.backlogSummary(summary))) {
       delivery.omitted.preexisting++
       continue
     }
-    used += summary.rule.length + summary.file.length + ITEM_OVERHEAD
+    used += deliveryCost.backlogSummary(summary)
     summariesKept.push(summary)
     context.push({ t: "preexisting", rule: summary.rule, file: summary.file })
   }
@@ -431,15 +439,15 @@ export function trim(
       for (const [rule, findings] of byRule) {
         const shown = kept.get(rule)
         // The cap here is arithmetic, not formatting. measureRuleBlock renders through ruleBlock,
-        // which slices at maxMatchesPerRule, so a block's measured size stops growing past the cap
-        // — at maxMatchesPerRule 3 the sizes run 99, 184, 269, 293, 294, 294, 294. Past that the
-        // delta is 0, fits() is always true, and without this bound the loop would pull every
-        // finding of every rule into the delivery at no apparent cost.
+        // which slices at maxMatchesPerRule, so a block's measured size stops growing past the cap:
+        // a finding past it only moves from "cut" to "shown but hidden", and the "…and N more" line
+        // counts both. Past that the delta is 0, fits() is always true, and without this bound the
+        // loop would pull every finding of every rule into the delivery at no apparent cost.
         if (shown === undefined || shown.length >= Math.min(findings.length, limits.maxMatchesPerRule)) continue
         const template = delivery.templates[rule]
         const delta =
-          measureRuleBlock(rule, [...shown, findings[shown.length]!], template, render) -
-          measureRuleBlock(rule, shown, template, render)
+          measureRuleBlock(rule, [...shown, findings[shown.length]!], findings, template, render) -
+          measureRuleBlock(rule, shown, findings, template, render)
         if (!fits(delta)) continue
         used += delta
         shown.push(findings[shown.length]!)

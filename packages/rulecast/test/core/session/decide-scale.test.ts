@@ -67,6 +67,30 @@ describe("decide: one rule with very many matches", () => {
     expect(elapsed).toBeLessThan(4_000)
   })
 
+  test("pricing a 20,000-summary backlog stays linear", { timeout: 60_000 }, async () => {
+    // Since plan 9 Task 10 the budget asks the renderer what each part costs. Pricing the backlog
+    // one summary line at a time is linear; pricing the whole growing backlog from inside the
+    // per-summary loop is quadratic — measured at 13,610 ms for 20,000 summaries.
+    //
+    // With no limit, deliberately. Under a budget only the few hundred summaries that fit are ever
+    // kept, so even the wrong placement re-renders a short list and stays fast; a mutation to it ran
+    // in 373 ms against a 9,000 character budget. With no limit — json and sarif — every summary is
+    // kept and the loop still prices each one, which is where the quadratic would bite.
+    const preexisting = Array.from({ length: 20_000 }, (_, index) => ({
+      rule: rule({ id: "scale/legacy", message: "{{file}} is old" }),
+      match: { ...at(1), file: `src/old/file-${index}.ts` },
+      status: "preexisting" as const,
+    }))
+    const started = performance.now()
+    const { delivery } = await decide(
+      input(60_000, { maxContextChars: null, findings: [...input(60_000).findings, ...preexisting] }),
+    )
+    const elapsed = performance.now() - started
+
+    expect(delivery.preexistingSummary).toHaveLength(20_000)
+    expect(elapsed).toBeLessThan(4_000)
+  })
+
   test("rendering 60,000 findings of one rule stays linear", { timeout: 60_000 }, () => {
     const findings = Array.from({ length: 60_000 }, (_, index) => ({
       rule: "scale/compute",

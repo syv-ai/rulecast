@@ -22,6 +22,20 @@ const MAX_LOCATION_PAD = 40
 /** The one line that turns a summary into something the reader can act on. */
 export const BACKLOG_HINT = "  see all of it: rulecast run --all-files --summary"
 
+const BACKLOG_HEADING = "backlog in files you touched (not from your edit):"
+const WARNINGS_HEADING = "rulecast warnings:"
+const CONVENTIONS_TITLE = "rulecast: conventions for the files you are working on"
+
+const backlogLine = (summary: { rule: string; file: string; count: number }) =>
+  `  ${summary.rule} ×${summary.count} in ${summary.file}`
+const backlogMoreLine = (count: number) => `  …and ${count} more`
+const warningLine = (warning: string) => `  - ${warning}`
+const overflowLines = (rules: number, path: string) => [
+  `…${plural(rules, "rule")} and the conventions they cite did not fit here.`,
+  "Every finding, with the doc sections it cites, is in:",
+  `  ${path}`,
+]
+
 /** Where a packed list of locations wraps. */
 const WRAP = 96
 
@@ -35,7 +49,7 @@ function header(delivery: Delivery): string | null {
     return `rulecast: ${plural(rules, "rule")} violated${where}`
   }
   if (delivery.references.length > 0 || delivery.preexistingSummary.length > 0) {
-    return "rulecast: conventions for the files you are working on"
+    return CONVENTIONS_TITLE
   }
   return null
 }
@@ -139,17 +153,104 @@ function ruleBlock(
   return out
 }
 
+/** The characters a run of lines adds to the text, each with the newline that follows it. */
+const linesCost = (lines: readonly string[]) => lines.reduce((sum, line) => sum + line.length + 1, 0)
+
 /**
- * What this rule's block will cost, so the budget in decide() spends the characters the renderer
- * actually uses. Measuring by rendering is the only way the two cannot drift apart.
+ * What this rule's block will cost when `shown` of its findings are delivered and the rest of `all`
+ * are cut, so the budget in decide() spends the characters the renderer actually uses. Measuring by
+ * rendering is the only way the two cannot drift apart.
+ *
+ * The cut ones are part of the measurement, not an afterthought: a block with findings cut prints
+ * "…and 13 more in 2 files", and because grouping is decided by the rule's *total* it can also switch
+ * to the grouped form with its skeleton line. Until plan 9 this measured every block as if nothing
+ * were cut, which under-charged exactly the blocks the budget had cut.
+ *
+ * Linear in `all`, and called at most `maxMatchesPerRule` + 1 times per rule, so the budget stays
+ * linear in a rule's matches (decide-scale.test.ts).
  */
 export function measureRuleBlock(
   rule: string,
-  findings: Finding[],
+  shown: Finding[],
+  all: readonly Finding[],
   template: string | undefined,
   options: RenderOptions,
 ): number {
-  return ruleBlock(rule, findings, template, { count: 0, files: 0 }, options).join("\n").length + 1
+  const shownFiles = new Set(shown.map((finding) => finding.file))
+  const rest = all.slice(shown.length)
+  const cut = { count: rest.length, files: new Set(rest.map((f) => f.file).filter((f) => !shownFiles.has(f))).size }
+  // The block's lines and the blank line the renderer puts after every block. This used to be
+  // `lines.join("\n").length + 1`, which counts the newline after the last line but not the blank
+  // line's own, so every block was charged one character short.
+  return linesCost([...ruleBlock(rule, shown, template, cut, options), ""])
+}
+
+/**
+ * The longest path an overflow file is written to. It is not known when the budget is spent —
+ * `writeOverflow` runs after `decide` — so this is the one allowance here that is not measured:
+ * the cache directory, the project's hash, the session id and the file name, with room to spare.
+ */
+const OVERFLOW_PATH_ALLOWANCE = 192
+
+/**
+ * What each part of `renderAgentText`'s output costs, in characters, so the budget in `decide`
+ * spends exactly what this file prints rather than five hand-tuned constants that had to track it.
+ *
+ * **Every price is a bounded unit**: one line, one block, one section's frame. Never a growing
+ * section priced from inside its own item loop. Measured at 60,000 findings and 20,000 pre-existing
+ * summaries, pricing one summary line at a time cost 8.5 ms over 20,000 calls; pricing the whole
+ * backlog from inside the per-summary loop cost 13,610 ms — the quadratic `decide-scale.test.ts`
+ * exists to catch. `measureRuleBlock` is the same idea: one rule's block, capped at
+ * `maxMatchesPerRule`.
+ *
+ * Where a line's final form is not known when the budget is spent, the price is its longest form.
+ */
+export const deliveryCost = {
+  /**
+   * The title and the blank line under it, at its longest — two things about it are not known yet.
+   * It names a file when every *delivered* finding is in one, and the budget may cut a rule down to
+   * findings in a single file however many files it fired in; so the longest file name is charged.
+   * And if the budget drops every rule that fired, no findings are left and the conventions title
+   * prints instead; so with `conventions` the longer of the two is charged.
+   */
+  header(rules: number, files: ReadonlySet<string>, conventions: boolean): number {
+    const longest = [...files].reduce((most, file) => (file.length > most.length ? file : most), "")
+    const where = longest === "" ? "" : ` in ${longest}`
+    const violated = rules > 0 ? linesCost([`rulecast: ${plural(rules, "rule")} violated${where}`, ""]) : 0
+    return Math.max(violated, conventions ? linesCost([CONVENTIONS_TITLE, ""]) : 0)
+  },
+  /**
+   * One reference's line, at its longest — the "not included, too long" form, naming the file when
+   * it has an absolute location. Every other state prints a shorter line, so this bounds them all.
+   */
+  referenceLine(ref: string, location: string | undefined): number {
+    return linesCost(referenceLines({ ref, state: "read", reason: "budget", location }))
+  },
+  /** What a reference given in full adds over its one-line price: the content and the blank line. */
+  referenceContent(ref: string, content: string, location: string | undefined): number {
+    return linesCost(referenceLines({ ref, state: "full", content })) - deliveryCost.referenceLine(ref, location)
+  },
+  /** The blank line that closes the references, once. */
+  referencesEnd: 1,
+  /** The warnings heading, once. */
+  warningsFrame: linesCost([WARNINGS_HEADING]),
+  warning(text: string): number {
+    return linesCost([warningLine(text)])
+  },
+  /**
+   * The backlog's heading, its hint, the blank line after, and the "…and N more" line at its
+   * longest — printed only when summaries are cut, and charged up front so a cut cannot overflow.
+   */
+  backlogFrame(summaries: number): number {
+    return linesCost([BACKLOG_HEADING, backlogMoreLine(summaries), BACKLOG_HINT, ""])
+  },
+  backlogSummary(summary: { rule: string; file: string; count: number }): number {
+    return linesCost([backlogLine(summary)])
+  },
+  /** The lines naming the overflow file, and the blank line before them. */
+  overflowNotice(rules: number): number {
+    return linesCost(["", ...overflowLines(rules, "x".repeat(OVERFLOW_PATH_ALLOWANCE))])
+  },
 }
 
 export function renderAgentText(delivery: Delivery, options: RenderOptions): string {
@@ -176,11 +277,9 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
   // size. Naming it a backlog and naming the command that shows all of it is the whole change; it
   // still never blocks, and the hook still cannot count the repository inside its deadline (§13).
   if (delivery.preexistingSummary.length > 0 || delivery.omitted.preexisting > 0) {
-    out.push("backlog in files you touched (not from your edit):")
-    for (const summary of delivery.preexistingSummary) {
-      out.push(`  ${summary.rule} ×${summary.count} in ${summary.file}`)
-    }
-    if (delivery.omitted.preexisting > 0) out.push(`  …and ${delivery.omitted.preexisting} more`)
+    out.push(BACKLOG_HEADING)
+    for (const summary of delivery.preexistingSummary) out.push(backlogLine(summary))
+    if (delivery.omitted.preexisting > 0) out.push(backlogMoreLine(delivery.omitted.preexisting))
     out.push(BACKLOG_HINT, "")
   }
 
@@ -188,16 +287,12 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
   if (out.length > 0 && out.at(-1) !== "") out.push("")
 
   if (delivery.warnings.length > 0) {
-    out.push("rulecast warnings:", ...delivery.warnings.map((warning) => `  - ${warning}`))
+    out.push(WARNINGS_HEADING, ...delivery.warnings.map(warningLine))
   }
 
   if (delivery.overflowPath !== null) {
     if (out.at(-1) !== "") out.push("")
-    out.push(
-      `…${plural(delivery.omitted.rules, "rule")} and the conventions they cite did not fit here.`,
-      "Every finding, with the doc sections it cites, is in:",
-      `  ${delivery.overflowPath}`,
-    )
+    out.push(...overflowLines(delivery.omitted.rules, delivery.overflowPath))
   }
 
   while (out.at(-1) === "") out.pop()

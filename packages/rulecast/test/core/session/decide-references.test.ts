@@ -122,17 +122,35 @@ describe("decide: references", () => {
   })
 
   test("references beyond the budget become read and are not recorded", async () => {
+    // big.md, not api.md#errors, since plan 9 Task 10: the budget is priced by the renderer now,
+    // and the whole of this delivery with api.md#errors in full is 153 characters — it never
+    // exceeded this limit. The old hand-tuned constants demoted it anyway.
     const decision = await decide(
       input({
         maxContextChars: 390,
-        findings: [violated("r", [ref("@conventions/state.md"), ref("@conventions/api.md#errors")])],
+        // Past this file's default of 100, so big.md is cut by the budget rather than as too large.
+        maxBytes: 32768,
+        findings: [violated("r", [ref("@conventions/state.md"), ref("@conventions/big.md")])],
       }),
     )
     expect(decision.delivery.references.map((r) => [r.ref, r.state, r.reason])).toEqual([
       ["conventions/state.md", "full", undefined],
-      ["conventions/api.md#errors", "read", "budget"],
+      ["conventions/big.md", "read", "budget"],
     ])
     expect(decision.context.map((record) => record.t === "delivered" && record.path)).toEqual(["conventions/state.md"])
+  })
+
+  test("a section shorter than the line that would replace it is never demoted for the budget", async () => {
+    // Demoting it would print "read this before continuing (not included, too long …)" in its
+    // place, which is longer than the section. Exact pricing sees that; estimates could not.
+    const decision = await decide(
+      input({
+        // Above the floor — below about 200 the rule and both its references are dropped whole.
+        maxContextChars: 300,
+        findings: [violated("r", [ref("@conventions/state.md"), ref("@conventions/api.md#errors")])],
+      }),
+    )
+    expect(decision.delivery.references.map((r) => r.state)).toEqual(["full", "full"])
   })
 
   test("read references from a rule repo carry their absolute location", async () => {

@@ -40,7 +40,7 @@ Baseline to hold: 930 tests (922 passing, 8 skipped); edit hook p50 192 ms, p95 
 
 4. **Stage one of `decide` does not return a `Delivery`.** Three things stop it: `trim` demotes a reference and needs `spec.path`, `spec.anchor` and `resolved.hash`, none of which is on `DeliveredReference`; `trim` filters findings by object identity at `decide.ts:396`; and `trim` produces context records. So assemble returns an `Assembled` carrying the delivery *and* its resolution metadata, and `trim` returns `{ delivery, context, omitted }`. Anything that tries to make the seam `Delivery → Delivery` will fail on the first reference it has to demote.
 
-5. **`costOf` prices bounded units only.** Measured above: pricing a growing section from inside its own item loop costs 13.6 s where pricing a bounded unit costs 8.5 ms. This is the trick `measureRuleBlock` already uses — it renders one rule's block capped at `maxMatchesPerRule`, which is why the fill loop at `decide.ts:363–382` stays linear despite two renders per iteration. A `costOf` that takes a whole section and is called once is also fine; one called per item is not.
+5. **`costOf` prices bounded units only.** Measured above: pricing a growing section from inside its own item loop costs 13.6 s where pricing a bounded unit costs 8.5 ms. This is the trick `measureRuleBlock` already uses — it renders one rule's block capped at `maxMatchesPerRule`, which is why the fill loop at `decide.ts:363–382` stays linear despite two renders per iteration. A `costOf` that takes a whole section and is called once is also fine; one called per item is not. *Corrected in Task 10:* the 13.6 s was a probe with no budget. Under a budget only the summaries that fit are ever kept, so the wrong placement re-renders a short list and stays fast (373 ms, measured). The quadratic is real on the **unbudgeted** path — json and sarif, `maxContextChars: null` — where every summary is kept and still priced; the scale guard is pointed there.
 
 6. **`renderAgentText` cannot be the pricing primitive.** It returns `""` when there is no header and no warnings (`render-agent.ts:157`), so a section cannot be priced through it in isolation. The section builders have to come out first. This makes Task 10 larger than "delete five constants", and it is why Task 9 (goldens) comes before it.
 
@@ -374,13 +374,34 @@ The untrimmed delivery is no longer a copy taken mid-function (`complete`). `ass
 
 **Behaviour:** One module knows what a delivery costs. The five hand-tuned constants and the copied `BACKLOG_HEADING` go away; the trim stage asks the renderer. The invariant — a rendered delivery fits its budget — is enforced by the module that produces the output.
 
-- [ ] Factor the section builders out of `renderAgentText` so each can be called alone: `header`, the rule block (already `ruleBlock`), the backlog block, `referenceLines`, the warnings block, the overflow block. `renderAgentText` composes them and its output must be byte-identical — the Task 8 goldens are what proves it.
-- [ ] Add `costOf`, priced in **bounded units only** (Decision 5): a fixed cost per section that prints at all, and a per-item cost for one item. Never a whole growing section from inside its own loop. Put the measurement in the doc comment — 8.5 ms versus 13,610 ms is the reason the signature is shaped this way, and the next person will otherwise simplify it back.
-- [ ] Delete `ITEM_OVERHEAD`, `HEADER_OVERHEAD`, `OVERFLOW_NOTICE`, `REFERENCE_OVERHEAD` and `BACKLOG_HEADING` from `decide.ts`. `BACKLOG_HINT` is already imported from `render-agent` — the heading beside it was a byte-for-byte copy of `render-agent.ts:179`, which is the whole case for this task.
-- [ ] `trim` charges through `costOf`. Keep the two-pass floor, the warning share and the per-rule fill loop exactly as they are: the loop's `maxMatchesPerRule` bound at `:367-371` is what keeps it linear and its comment explains why.
-- [ ] Tests: `costOf` of each section equals the length of that section rendered alone; a delivery trimmed to a limit renders to at most that limit, asserted over the Task 8 golden corpus at several limits rather than only 900; and keep a scale assertion — 60,000 findings with 20,000 pre-existing summaries stays under 4 s, which is the regression the 13.6 s measurement predicts.
-- [ ] Verify: `pnpm vitest run test/core/delivery test/core/session` → passes; the goldens → pass **unchanged**, which is the proof the renderer's output did not move; `pnpm test` → passes; `pnpm perf` → p95 no worse than 236 ms.
-- [ ] Commit.
+- [x] Factor the section builders out of `renderAgentText` so each can be called alone: `header`, the rule block (already `ruleBlock`), the backlog block, `referenceLines`, the warnings block, the overflow block. `renderAgentText` composes them and its output must be byte-identical — the Task 8 goldens are what proves it.
+- [x] Add `costOf`, priced in **bounded units only** (Decision 5): a fixed cost per section that prints at all, and a per-item cost for one item. Never a whole growing section from inside its own loop. Put the measurement in the doc comment — 8.5 ms versus 13,610 ms is the reason the signature is shaped this way, and the next person will otherwise simplify it back.
+- [x] Delete `ITEM_OVERHEAD`, `HEADER_OVERHEAD`, `OVERFLOW_NOTICE`, `REFERENCE_OVERHEAD` and `BACKLOG_HEADING` from `decide.ts`. `BACKLOG_HINT` is already imported from `render-agent` — the heading beside it was a byte-for-byte copy of `render-agent.ts:179`, which is the whole case for this task.
+- [x] `trim` charges through `costOf`. Keep the two-pass floor, the warning share and the per-rule fill loop exactly as they are: the loop's `maxMatchesPerRule` bound at `:367-371` is what keeps it linear and its comment explains why.
+- [x] Tests: `costOf` of each section equals the length of that section rendered alone; a delivery trimmed to a limit renders to at most that limit, asserted over the Task 8 golden corpus at several limits rather than only 900; and keep a scale assertion — 60,000 findings with 20,000 pre-existing summaries stays under 4 s, which is the regression the 13.6 s measurement predicts.
+- [x] Verify: `pnpm vitest run test/core/delivery test/core/session` → passes; the goldens → pass **unchanged**, which is the proof the renderer's output did not move; `pnpm test` → passes; `pnpm perf` → p95 no worse than 236 ms.
+- [x] Commit.
+
+**What it found.** Pricing by the renderer is not only locality: the budget was not keeping its promise. A property test (`decide-fits.test.ts`) trims seeded random deliveries — several rules and files, references with absolute rule-repo locations, warnings, a backlog — across a sweep of limits, renders them with the longest overflow path, and asserts they fit. Run as a search over 2,000 seeds × 12 limits:
+
+| | Over the limit | Worst overflow | Median unused, when something was cut |
+|---|---|---|---|
+| Before (five constants) | 5,708 of 24,000 — 24% | 500 chars | 249 |
+| After (renderer-priced) | **0** | — | 78 |
+
+In production the old overflows were absorbed by the adapter's slack (claude-code budgets 9,000 of a 10,000 limit, and the worst was 500), so no agent saw a truncation. But three of the four causes predate plan 9:
+
+1. **`measureRuleBlock` priced every block as if nothing were cut.** A block with findings cut prints "…and 13 more in 2 files", and since grouping depends on the rule's *total*, it can switch to the grouped form with its skeleton line too. Now measured with the cut findings it will print.
+2. **`measureRuleBlock` charged every block one character short** — `join("\n").length + 1` counts the newline after the last line but not the blank line's own. Seed 137 had 2 blocks and overflowed by 1; seed 91 had 6 and overflowed by 5.
+3. **An empty backlog still printed.** Its frame was charged with no `fits()` check, so at the budget's edge a heading, "…and 7 more" and a hint printed with no summaries under them. Now the block is left out when its frame does not fit, and its summaries are offered again later.
+4. *(this task's own)* The header price named a file only when every finding was in one file, but the renderer names it when every *delivered* finding is — and when the budget drops every rule, the longer conventions title prints instead. Now the longest form is charged.
+
+**Deliberate behaviour changes, both from exact pricing admitting more:** `decide-references.test.ts` asserted that `api.md#errors` was demoted at a 390-character limit; the whole delivery with it in full is 153 characters, so the old constants were demoting a section that fit with 237 to spare. That test now uses a genuinely long reference, and a new one pins that a section shorter than its "too long" replacement line is never demoted for the budget — doing so would make the delivery longer.
+
+**One allowance remains, documented in place:** the overflow file's path (192 characters) is written after `decide` returns, so it cannot be measured when the budget is spent.
+
+The goldens passed unchanged throughout — the renderer's output did not move. `cost.test.ts` checks each price against the renderer; the scale guard on the unbudgeted path fails at 14.8 s when the backlog is priced the wrong way. perf A/B: p95 223 then 182 ms with the change, 186 ms on the parent — noise. 1,051 tests, 1,043 passing.
+
 
 ## Task 11: JSON Schema from the zod schemas — blocked
 
