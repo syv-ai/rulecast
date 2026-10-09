@@ -155,7 +155,7 @@ describe("rulecast init --yes", () => {
     ]) {
       const result = await runCli(root, ["init", ...args, "--yes"], "", env)
       expect(result.code).toBe(2)
-      expect(result.stderr).toContain("usage:")
+      expect(result.stderr).toContain("rulecast init [--rules")
     }
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
   })

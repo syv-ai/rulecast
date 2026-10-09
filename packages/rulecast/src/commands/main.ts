@@ -1,11 +1,13 @@
 import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
+import { VERSION } from "../core/version"
 import { builtinDetectors } from "../detectors"
 import type { Prompter } from "../init/prompts"
 import { autoupdateCommand } from "./autoupdate"
 import { cleanCommand } from "./clean"
 import { doctorCommand } from "./doctor"
+import { commandHelp, usage } from "./help"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
@@ -35,25 +37,28 @@ export interface CliIo {
   startWarm(root: string, kinds: string[]): void
 }
 
-const USAGE = `usage:
-  rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--scope shared|personal] [--yes]
-  rulecast install [--agent <name>]... [--scope shared|personal]
-  rulecast uninstall [--agent <name>]...
-  rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--llm | --no-llm]
-  rulecast autoupdate [--freeze] [--repo URL]...
-  rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]
-  rulecast test [RULE_ID]
-  rulecast validate [file...]
-  rulecast clean [--project]
-  rulecast hook <adapter>
-  rulecast warm [--detector <kind>]...
-  rulecast doctor
-`
-
 export async function main(argv: string[], io: CliIo): Promise<number> {
   const [command, ...args] = argv
   const registry = createRegistry([...builtinDetectors])
   const root = findRoot(io.cwd)
+  if (command === "--version" || command === "-v" || command === "version") {
+    io.stdout(`${VERSION}\n`)
+    return 0
+  }
+  // Intercepted here, so no command's parser needs to know --help exists.
+  const help =
+    command === "help" && args[0] !== undefined
+      ? args[0]
+      : args.includes("--help") || args.includes("-h")
+        ? command
+        : null
+  if (help !== null && help !== undefined) {
+    const text = commandHelp(help)
+    if (text !== null) {
+      io.stdout(text)
+      return 0
+    }
+  }
   try {
     switch (command) {
       case "init":
@@ -83,7 +88,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case undefined:
       case "help":
       case "--help":
-        io.stdout(USAGE)
+      case "-h":
+        io.stdout(usage())
         return command === undefined ? 2 : 0
       default:
         throw new UsageError(`unknown command "${command}"`)
@@ -91,7 +97,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   } catch (error) {
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
     if (error instanceof UsageError || (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")) {
-      io.stderr(USAGE)
+      // The one command's flags, not every command's: that is the help being asked for.
+      io.stderr(`\n${(command !== undefined && commandHelp(command)) || usage()}`)
     }
     return 2
   }
