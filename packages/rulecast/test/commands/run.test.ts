@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { NOTHING_STAGED } from "../../src/adapters/cli/format"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
-import { createFixture, fixtureFiles } from "../helpers/fixture"
+import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
@@ -265,6 +265,54 @@ describe("rulecast run: rules and errors", () => {
     const result = await run(root, "--all-files")
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("no .rulecast-config.yaml in")
+  })
+})
+
+describe("rulecast run: turning findings and rules off", () => {
+  test("a rulecast-ignore drops the finding, and the backlog counts it", async () => {
+    const root = await createFixture()
+    await writeFile(
+      path.join(root, USERS),
+      "def get():\n    # rulecast-ignore: backend/no-httpexception legacy endpoint\n    raise HTTPException(404)\n",
+    )
+    const result = await run(root, "--all-files")
+    expect(result.stdout).not.toContain("app/services/users.py:3")
+    expect(result.stdout).toContain("ignored: 1 finding by rulecast-ignore comments")
+    const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(json.ignored).toEqual([
+      { rule: "backend/no-httpexception", file: USERS, line: 3, reason: "legacy endpoint" },
+    ])
+  })
+
+  test("an ignore without a reason keeps the finding and says so", async () => {
+    const root = await createFixture()
+    await writeFile(
+      path.join(root, USERS),
+      "def get():\n    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception\n",
+    )
+    const result = await run(root, "--all-files")
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain(`${USERS}:2: rulecast-ignore needs a reason after the rule id`)
+  })
+
+  test("an ignore counts only in the content being judged: an unstaged one does not excuse a commit", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), `${VIOLATION}`)
+    await git(root, "add", USERS)
+    await writeFile(
+      path.join(root, USERS),
+      "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception x\n",
+    )
+    expect((await run(root)).code).toBe(1)
+  })
+
+  test("enabled: false switches a rule off without deleting it", async () => {
+    const rules = fixtureRules.map((entry) =>
+      entry.id === "backend/no-httpexception" ? { ...entry, enabled: false } : entry,
+    )
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(rules) })
+    const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(json.findings.map((finding: { rule: string }) => finding.rule)).toEqual(["frontend/no-generated-edits"])
   })
 })
 

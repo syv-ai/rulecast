@@ -15,7 +15,8 @@ export function selectDetectorRules(
 ): Selection[] {
   return rules
     .filter(
-      (rule): rule is DetectorRule => isDetectorRule(rule) && rule.stages.includes(event) && !disabled.has(rule.id),
+      (rule): rule is DetectorRule =>
+        isDetectorRule(rule) && rule.enabled && rule.stages.includes(event) && !disabled.has(rule.id),
     )
     .map((rule) => ({ rule, files: files.filter((file) => rule.matches(file)) }))
     .filter((selection) => selection.files.length > 0)
@@ -38,6 +39,7 @@ export function selectTouchRules(
 ): CompiledRule[] {
   return rules.filter(
     (rule) =>
+      rule.enabled &&
       rule.stages.includes("touch") &&
       !touched.has(rule.id) &&
       !disabled.has(rule.id) &&

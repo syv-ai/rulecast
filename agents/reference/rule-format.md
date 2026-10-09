@@ -70,6 +70,7 @@ repos:
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
 | `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
 | `refuse_write` | no, default `false` | Refuse the edit itself when this rule fires on what the agent is writing (below) |
+| `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
 | `context` | for touch rules | References delivered with the rule (below) |
@@ -115,6 +116,18 @@ Two things to know before reaching for it:
   changed outside the agent's tools, or is over `max_file_bytes` — a `container` rule falls back to
   `instance`. An `llm` rule always does: measuring its baseline would mean a second model call every
   time the agent opens a file.
+
+### Turning a rule or a finding off
+
+- **A whole rule:** `enabled: false`. Under a URL repo, an entry `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the entry, so re-enabling it is one line.
+- **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax:
+
+  ```python
+  # rulecast-ignore: python/no-httpexception-in-services legacy endpoint, removed in #412
+  raise HTTPException(404)
+  ```
+
+  The id is the one the finding shows. **The reason is required**: an ignore without one suppresses nothing and is reported. Ignores are counted under `rulecast run --all-files --summary` and listed by `--format json`, and one added during an agent session is reported to the developer when the agent stops. An agent adds one only when the developer agrees the finding is wrong.
 
 ### Refusing a write
 

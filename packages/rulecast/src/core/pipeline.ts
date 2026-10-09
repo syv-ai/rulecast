@@ -21,6 +21,7 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
+import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface PipelineOptions {
@@ -50,6 +51,8 @@ export interface PipelineResult {
   failed: boolean
   /** Detector kinds whose results were dropped at the edit deadline (§13). */
   deadlineMissed: string[]
+  /** Findings a `rulecast-ignore` comment dropped (core/suppress.ts); absent when nothing was detected. */
+  ignored?: IgnoredFinding[]
 }
 
 type Warning = { key: string; text: string }
@@ -242,6 +245,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
+  let ignored: IgnoredFinding[] = []
   let agentRead: string | null = null
 
   if (event.kind === "touch" || event.kind === "edit") {
@@ -361,6 +365,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
+    ignored = output.ignored
+    // An ignore without a reason is the author's mistake, said once per site.
+    for (const text of output.warnings) warnings.push({ key: `ignore:${text}`, text })
     // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
     // failure, so it must not change the exit code.
     for (const { kind, max, setting, skipped } of overBudget) {
@@ -415,12 +422,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     return decision.delivery
   }
 
-  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed }
+  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ignored }
 
   await appendWork(session.dir, workRecords)
   try {
     const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery: persisted(decision), failed, deadlineMissed }
+    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
   } catch (error) {
     // §14's two "run without session state" rows: a lock nobody released, and a store nobody can
     // read. The commit reads the stores inside the lock, so both surface here as well.
@@ -431,6 +438,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     } else throw error
     const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
-    return { delivery: persisted(decision), failed, deadlineMissed }
+    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
   }
 }

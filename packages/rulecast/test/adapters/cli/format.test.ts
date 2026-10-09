@@ -79,6 +79,7 @@ describe("formatDelivery", () => {
       "backlog",
       "checked",
       "findings",
+      "ignored",
       "preexistingSummary",
       "references",
       "skipped",

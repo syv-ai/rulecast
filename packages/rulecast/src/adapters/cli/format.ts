@@ -13,8 +13,15 @@ export interface FormatOptions {
   backlog?: boolean
   /** What was checked, so that "no findings" can never mean "nothing was looked at". Absent: not said. */
   checked?: { files: number; selection: "staged" | "files" | "all" | "range" | "session" }
+  /** Findings a `rulecast-ignore` comment dropped: counted under the backlog, listed in json. */
+  ignored?: { rule: string; file: string; line: number; reason: string }[]
   /** Rules left out because their detector is metered (a staged run, or --no-llm) and they matched a checked file. */
   skipped?: string[]
+}
+
+/** The ignores are part of the stock a team owes, so the backlog says how many there are. */
+function ignoredLine(ignored: readonly unknown[]): string {
+  return `ignored: ${plural(ignored.length, "finding")} by rulecast-ignore comments (rulecast run --format json lists them)`
 }
 
 /** Names what a staged run left out and the flag that puts it back. */
@@ -62,6 +69,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   if (options.findings === false) {
     out.push(...problemsBlock(delivery.warnings))
     if (options.backlog === true) out.push(renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
+    if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
     return out.join("\n")
   }
   const shown = new Map<string, number>()
@@ -116,6 +124,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   // Last, so it is what is left on screen: the count is the thing to act on, and the list above it
   // is a hundred lines of detail nobody reads to the end.
   if (options.backlog === true) out.push("", renderBacklog(summarise(delivery), { topFiles: TOP_FILES, note: false }))
+  if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
   return out.join("\n")
 }
 
@@ -138,6 +147,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       warnings: delivery.warnings,
       skipped: options.skipped ?? [],
       checked: options.checked ?? null,
+      ignored: options.ignored ?? [],
       stop: delivery.stop,
     },
     null,

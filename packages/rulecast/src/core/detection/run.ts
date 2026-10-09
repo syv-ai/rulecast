@@ -1,5 +1,6 @@
 import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
+import { type IgnoredFinding, suppress } from "../suppress"
 import type { ChangeSet, DetectorEvent, DetectorResult, Match } from "../types"
 import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
@@ -22,12 +23,16 @@ export interface DetectionOutput {
   findings: { rule: DetectorRule; match: Match }[]
   errors: { kind: string; rules: string[]; message: string }[]
   timedOut: { kind: string; rules: string[] }[]
+  /** Findings dropped by a `rulecast-ignore` comment (core/suppress.ts). */
+  ignored: IgnoredFinding[]
+  /** Ignores written without a reason, which suppressed nothing. */
+  warnings: string[]
 }
 
 const TIMED_OUT = Symbol("timed out")
 
 export async function runDetection(input: DetectionInput): Promise<DetectionOutput> {
-  const output: DetectionOutput = { findings: [], errors: [], timedOut: [] }
+  const output: DetectionOutput = { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
   const byKind = new Map<string, Selection[]>()
   for (const selection of input.selections) {
     const kind = selection.rule.detector.kind
@@ -123,5 +128,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
       if (!failed.has(finding.rule)) output.findings.push({ rule: rulesById.get(finding.rule)!, match: finding.match })
     }
   }
-  return output
+  // Last, so every caller — pipeline, guard, examples, doctor, test --against — honours ignores.
+  const suppressed = await suppress(output.findings, input.read)
+  return { ...output, ...suppressed }
 }

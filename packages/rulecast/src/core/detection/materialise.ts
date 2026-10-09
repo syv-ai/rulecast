@@ -49,7 +49,7 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
     // Absent from the source (deleted in the index): not written, and so not checked.
     if (text !== null) entries.set(file, text)
   }
-  if (entries.size === 0) return { findings: [], errors: [], timedOut: [] }
+  if (entries.size === 0) return { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
   return withScratchTree(input.detection.root, STAGED_DIR, entries, async (dir) => {
     const prefix = `${dir}/`
     const strip = (file: string) => (file.startsWith(prefix) ? file.slice(prefix.length) : file)
@@ -69,6 +69,11 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
       findings: output.findings.map(({ rule, match }) => ({ rule, match: { ...match, file: strip(match.file) } })),
       errors: output.errors.map((error) => ({ ...error, message: error.message.replaceAll(prefix, "") })),
       timedOut: output.timedOut,
+      ignored: output.ignored.map((ignored) => ({
+        ...ignored,
+        match: { ...ignored.match, file: strip(ignored.match.file) },
+      })),
+      warnings: output.warnings.map((warning) => warning.replaceAll(prefix, "")),
     }
   })
 }
@@ -78,5 +83,7 @@ function merge(outputs: DetectionOutput[]): DetectionOutput {
     findings: outputs.flatMap((output) => output.findings),
     errors: outputs.flatMap((output) => output.errors),
     timedOut: outputs.flatMap((output) => output.timedOut),
+    ignored: outputs.flatMap((output) => output.ignored),
+    warnings: outputs.flatMap((output) => output.warnings),
   }
 }

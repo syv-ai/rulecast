@@ -194,6 +194,12 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     backlog: run.allFiles || run.summary,
     skipped,
     checked: { files: selected.files.length, selection: selected.selection },
+    ignored: (result.ignored ?? []).map(({ rule, match, reason }) => ({
+      rule: rule.id,
+      file: match.file,
+      line: match.line,
+      reason,
+    })),
   })
   if (text) io.stdout(`${text}\n`)
   return exitCodeFor(result.delivery, result.failed)

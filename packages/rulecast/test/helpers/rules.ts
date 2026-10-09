@@ -22,6 +22,7 @@ export function rule(overrides: Overrides): CompiledRule {
     severity: "error",
     scope: "instance",
     refuseWrite: false,
+    enabled: true,
     stages: ["edit", "verify"],
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
     message: "{{file}}:{{line}}",

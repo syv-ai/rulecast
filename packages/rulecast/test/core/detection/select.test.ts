@@ -34,3 +34,12 @@ describe("selectTouchRules", () => {
     expect(selectTouchRules([touchOnly], ["src/a.tsx"], new Set(), new Set(["touch-only"]))).toEqual([])
   })
 })
+
+describe("enabled: false", () => {
+  test("a switched-off rule is selected for no event", () => {
+    const off = rule({ id: "off", files: "^src/", stages: ["touch", "edit", "verify"], enabled: false })
+    expect(selectDetectorRules([off], "edit", ["src/a.tsx"], new Set())).toEqual([])
+    expect(selectDetectorRules([off], "verify", ["src/a.tsx"], new Set())).toEqual([])
+    expect(selectTouchRules([off], ["src/a.tsx"], new Set(), new Set())).toEqual([])
+  })
+})

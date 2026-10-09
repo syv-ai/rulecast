@@ -44,6 +44,8 @@ const ruleKeys = {
    */
   scope: z.enum(RULE_SCOPES).optional(),
   refuse_write: z.boolean().optional(),
+  /** false: compiled and listed, selected for nothing. The way to switch a catalog rule off without deleting it. */
+  enabled: z.boolean().optional(),
   detect: z
     .record(z.unknown())
     .refine((value) => Object.keys(value).length === 1, "must name exactly one detector")

@@ -32,6 +32,8 @@ export interface CompiledRule {
   scope: RuleScope
   /** Refuse the agent's write when this rule fires on what it is writing (spec §9, Guard). */
   refuseWrite: boolean
+  /** false: switched off with `enabled: false`; never selected for an event (spec §4). */
+  enabled: boolean
   stages: Stage[]
   matches(file: string): boolean
   detector: CompiledDetector | null
@@ -170,6 +172,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     severity: data.severity ?? "error",
     scope: data.scope ?? "instance",
     refuseWrite: data.refuse_write === true,
+    enabled: data.enabled !== false,
     stages,
     matches: (file) => global(file) && filter(file),
     detector,
