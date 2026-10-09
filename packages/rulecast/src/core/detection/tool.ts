@@ -30,8 +30,14 @@ export async function runTool(
       // A whole-repository run of a linter on a large project prints megabytes of JSON.
       maxBuffer: 64 * 1024 * 1024,
     })
-    // Always closed: a tool that reads stdin when given nothing would otherwise wait forever.
-    running.child.stdin?.end(options.stdin ?? "")
+    // A tool that exits without reading its stdin (a crash, a config error, or simply a path run)
+    // closes the pipe under us. That is not a failure: the tool's output is still the answer, and an
+    // unhandled EPIPE would take the process down.
+    running.child.stdin?.on("error", () => {})
+    // Always closed, empty when there is nothing to send: a tool that reads stdin when given no
+    // input would otherwise wait for an end that never comes.
+    if (options.stdin === undefined) running.child.stdin?.end()
+    else running.child.stdin?.end(options.stdin)
     const result = await running
     return result.stdout
   } catch (error) {
