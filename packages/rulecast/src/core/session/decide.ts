@@ -6,7 +6,14 @@ import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate, templateBindings } from "../template"
 import { type DeliveredReference, type Delivery, emptyDelivery, type Finding, type Match } from "../types"
-import { type ContextRecord, type ContextState, preexistingKey, type WorkRecord, type WorkState } from "./state"
+import {
+  type ContextRecord,
+  type ContextState,
+  emptyContext,
+  preexistingKey,
+  type WorkRecord,
+  type WorkState,
+} from "./state"
 
 export interface ClassifiedFinding {
   rule: CompiledRule
@@ -152,21 +159,57 @@ async function isCovered(
   return false
 }
 
-export async function decide(input: DecideInput): Promise<Decision> {
+/** What `assemble` needs: everything that decides what a delivery *says*, before any budget. */
+export interface AssembleInput {
+  findings: ClassifiedFinding[]
+  /** Touch rules selected for this event (not yet fired). Default: none. */
+  touches?: CompiledRule[]
+  /** Path of a file the agent read completely in this event. Default: none. */
+  agentRead?: string | null
+  /** Default: none. */
+  warnings?: { key: string; text: string }[]
+  /** What this agent context has already been told. Default: nothing, so everything is sent. */
+  context?: ContextState
+  resolver: ReferenceResolver
+  maxBytes: number
+}
+
+/**
+ * The whole delivery, and what the budget needs to cut it that the delivery cannot carry.
+ *
+ * `trim` cannot work from a `Delivery` alone: demoting a reference needs its spec's path, and
+ * recording one as delivered needs the hash it was resolved at, and neither is on
+ * `DeliveredReference`. `fresh` is here for the stop gate, which must read what was *found*.
+ */
+export interface Assembled {
+  /** Untrimmed, and never changed afterwards: it is also what an overflow file is written from. */
+  delivery: Delivery
+  /** References given full content, by their index in `delivery.references`. */
+  candidates: { index: number; resolved: Extract<ResolvedRef, { found: true }> }[]
+  /** Findings with status "new", in input order. */
+  fresh: ClassifiedFinding[]
+  /** Warnings not yet given in this context; `delivery.warnings` holds their texts. */
+  unwarned: { key: string; text: string }[]
+  touches: CompiledRule[]
+  /** What assembling decided to record: touched rules, and a complete read as delivered. */
+  context: ContextRecord[]
+}
+
+export async function assemble(input: AssembleInput): Promise<Assembled> {
   const delivery = emptyDelivery()
-  const work: WorkRecord[] = []
   const context: ContextRecord[] = []
+  const touches = input.touches ?? []
+  const state = input.context ?? emptyContext()
 
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
   delivery.findings = renderFindings(fresh)
-  const rulesById = new Map(fresh.map(({ rule }) => [rule.id, rule]))
   for (const { rule } of fresh) if (rule.message !== null) delivery.templates[rule.id] = rule.message
   const summaries = new Map<string, { rule: string; file: string; count: number }>()
   for (const { rule, match, status } of input.findings) {
     if (status !== "preexisting") continue
     const key = preexistingKey(rule.id, match.file)
-    if (input.context.preexisting.has(key)) continue
+    if (state.preexisting.has(key)) continue
     const summary = summaries.get(key) ?? { rule: rule.id, file: match.file, count: 0 }
     summary.count++
     summaries.set(key, summary)
@@ -174,27 +217,28 @@ export async function decide(input: DecideInput): Promise<Decision> {
   delivery.preexistingSummary = [...summaries.values()]
 
   // Warnings, once per context. Which of them are kept — and so which are recorded as warned — is
-  // decided by the budget below, after the floor.
-  const unwarned = input.warnings.filter((warning) => !input.context.warned.has(warning.key))
+  // decided by the budget, after the floor.
+  const unwarned = (input.warnings ?? []).filter((warning) => !state.warned.has(warning.key))
   delivery.warnings = unwarned.map((warning) => warning.text)
 
   // Touches.
-  delivery.touches = input.touches.map((rule) => rule.id)
-  for (const rule of input.touches) context.push({ t: "touched", rule: rule.id })
+  delivery.touches = touches.map((rule) => rule.id)
+  for (const rule of touches) context.push({ t: "touched", rule: rule.id })
 
   // A complete read by the agent counts as delivered.
-  const delivered = [...input.context.delivered]
-  if (input.agentRead !== null) {
-    const hash = await input.resolver.currentHash(input.agentRead, null)
+  const delivered = [...state.delivered]
+  const agentRead = input.agentRead ?? null
+  if (agentRead !== null) {
+    const hash = await input.resolver.currentHash(agentRead, null)
     if (hash !== null) {
-      delivered.push({ path: input.agentRead, anchor: null, hash })
-      context.push({ t: "delivered", path: input.agentRead, anchor: null, hash })
+      delivered.push({ path: agentRead, anchor: null, hash })
+      context.push({ t: "delivered", path: agentRead, anchor: null, hash })
     }
   }
 
   // References.
-  const ruleOrder = [...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(), ...input.touches]
-  const candidates: { index: number; resolved: Extract<ResolvedRef, { found: true }> }[] = []
+  const ruleOrder = [...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(), ...touches]
+  const candidates: Assembled["candidates"] = []
   for (const spec of referencesInOrder(ruleOrder)) {
     const resolved = await input.resolver.resolve(spec)
     if (!resolved.found) {
@@ -211,22 +255,44 @@ export async function decide(input: DecideInput): Promise<Decision> {
     }
   }
 
-  // Budget (spec §9). The floor is the header, the warnings, and one finding for every rule that
-  // fired. What is left goes to the doc sections first, then the pre-existing summaries, then the
-  // rules' remaining matches — the reverse of what is worth losing. A repeat the agent does not see
-  // it can still find in the file; the section that explains the rule is the part it cannot.
-  const limit = input.maxContextChars
-  const render = { maxMatchesPerRule: input.maxMatchesPerRule }
-  // Taken before anything is cut: what the overflow file is written from. The arrays are copied
-  // because the budget replaces entries in the delivery's own.
-  const complete: Delivery = {
-    ...delivery,
-    findings: [...delivery.findings],
-    preexistingSummary: [...delivery.preexistingSummary],
-    references: [...delivery.references],
-    warnings: [...delivery.warnings],
+  return { delivery, candidates, fresh, unwarned, touches, context }
+}
+
+export interface Trimmed {
+  delivery: Delivery
+  /** The untrimmed delivery, when the budget had to cut whole rules out; null when it cut none. */
+  overflow: Delivery | null
+  /** What trimming decided to record: warnings given, sections delivered, backlog announced. */
+  context: ContextRecord[]
+}
+
+/**
+ * Spec §9: cuts an assembled delivery to what fits. Never changes `assembled`.
+ *
+ * The floor is the header, the warnings, and one finding for every rule that fired. What is left
+ * goes to the doc sections first, then the pre-existing summaries, then the rules' remaining
+ * matches — the reverse of what is worth losing. A repeat the agent does not see it can still find
+ * in the file; the section that explains the rule is the part it cannot.
+ */
+export function trim(
+  assembled: Assembled,
+  limits: { maxContextChars: number | null; maxMatchesPerRule: number },
+): Trimmed {
+  const { candidates, unwarned, touches } = assembled
+  // A copy whose arrays the budget may cut. The Finding objects inside are shared, not cloned:
+  // nothing here changes one, and the filter at the end of the fill keeps findings by identity.
+  const delivery: Delivery = {
+    ...assembled.delivery,
+    findings: [...assembled.delivery.findings],
+    preexistingSummary: [...assembled.delivery.preexistingSummary],
+    references: [...assembled.delivery.references],
+    warnings: [...assembled.delivery.warnings],
     omitted: { findings: [], rules: 0, preexisting: 0 },
   }
+  const context: ContextRecord[] = []
+  const rulesById = new Map(assembled.fresh.map(({ rule }) => [rule.id, rule]))
+  const limit = limits.maxContextChars
+  const render = { maxMatchesPerRule: limits.maxMatchesPerRule }
   // Appended in place. Rebuilding the array per finding is quadratic in one rule's matches, which
   // an ordinary pattern reaches on a generated or minified file: 62k matches took 5.9 s, and an
   // 8 MB file never finished. Nothing can preempt it either — the work is synchronous (§13).
@@ -271,7 +337,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
     }
     // Touch rules are never dropped: their reference is the whole delivery, and the session has
     // already recorded the rule as touched, so a dropped one would never be delivered again.
-    for (const touch of input.touches) {
+    for (const touch of touches) {
       for (const ref of uncharged(touch)) {
         spent.chars += lineCost(ref)
         spent.refs.add(ref)
@@ -369,7 +435,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
         // — at maxMatchesPerRule 3 the sizes run 99, 184, 269, 293, 294, 294, 294. Past that the
         // delta is 0, fits() is always true, and without this bound the loop would pull every
         // finding of every rule into the delivery at no apparent cost.
-        if (shown === undefined || shown.length >= Math.min(findings.length, input.maxMatchesPerRule)) continue
+        if (shown === undefined || shown.length >= Math.min(findings.length, limits.maxMatchesPerRule)) continue
         const template = delivery.templates[rule]
         const delta =
           measureRuleBlock(rule, [...shown, findings[shown.length]!], template, render) -
@@ -396,25 +462,44 @@ export async function decide(input: DecideInput): Promise<Decision> {
     delivery.findings = delivery.findings.filter((finding) => kept.get(finding.rule)?.includes(finding) === true)
   }
 
-  // Stop gate. It asks what was *found*, not what survived the budget: a rule the floor could not
-  // hold is still an unresolved error, and reading the trimmed list would let the agent stop
-  // because its findings did not fit — which is the one thing the gate exists to prevent.
-  if (input.stopGate) {
-    const newErrors = fresh.some(({ rule }) => rule.severity === "error")
-    const blocks = input.work.stopBlocks.get(input.agent) ?? 0
-    if (!newErrors) delivery.stop = "allow"
-    else if (blocks < input.maxBlocks) {
-      delivery.stop = "block"
-      work.push({ t: "stopBlock", agent: input.agent })
-    } else delivery.stop = "capReached"
-    // Only a block reaches the agent as context; anything else must not count as delivered. A
-    // capReached still prints its delivery as a system message, so it keeps the overflow file —
-    // the message says rules did not fit, and the file is where they went.
-    if (delivery.stop === "allow") return { delivery, overflow: null, work, context: [] }
-    if (delivery.stop === "capReached") {
-      return { delivery, overflow: delivery.omitted.rules > 0 ? complete : null, work, context: [] }
-    }
-  }
+  return { delivery, overflow: delivery.omitted.rules > 0 ? assembled.delivery : null, context }
+}
 
-  return { delivery, overflow: delivery.omitted.rules > 0 ? complete : null, work, context }
+/**
+ * The stop gate: block / allow / capReached.
+ *
+ * It takes what was *found*, and nothing that could carry what survived the budget: a rule the
+ * floor could not hold is still an unresolved error, and reading the trimmed list would let the
+ * agent stop because its findings did not fit — which is the one thing the gate exists to prevent.
+ * That used to be a comment; it is now the signature.
+ */
+export function gate(
+  fresh: readonly ClassifiedFinding[],
+  work: WorkState,
+  agent: string,
+  maxBlocks: number,
+): { stop: Exclude<Delivery["stop"], null>; work: WorkRecord[] } {
+  if (!fresh.some(({ rule }) => rule.severity === "error")) return { stop: "allow", work: [] }
+  if ((work.stopBlocks.get(agent) ?? 0) < maxBlocks) return { stop: "block", work: [{ t: "stopBlock", agent }] }
+  return { stop: "capReached", work: [] }
+}
+
+/** Assemble, trim, and — on a stop — gate. */
+export async function decide(input: DecideInput): Promise<Decision> {
+  const assembled = await assemble(input)
+  const trimmed = trim(assembled, {
+    maxContextChars: input.maxContextChars,
+    maxMatchesPerRule: input.maxMatchesPerRule,
+  })
+  const context = [...assembled.context, ...trimmed.context]
+  if (!input.stopGate) return { delivery: trimmed.delivery, overflow: trimmed.overflow, work: [], context }
+
+  const gated = gate(assembled.fresh, input.work, input.agent, input.maxBlocks)
+  const delivery = { ...trimmed.delivery, stop: gated.stop }
+  // Only a block reaches the agent as context; anything else must not count as delivered. A
+  // capReached still prints its delivery as a system message, so it keeps the overflow file — the
+  // message says rules did not fit, and the file is where they went.
+  if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: [] }
+  if (gated.stop === "capReached") return { delivery, overflow: trimmed.overflow, work: gated.work, context: [] }
+  return { delivery, overflow: trimmed.overflow, work: gated.work, context }
 }

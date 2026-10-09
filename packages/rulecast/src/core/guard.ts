@@ -6,8 +6,8 @@ import { readSourceFile } from "./detection/per-rule"
 import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
-import { decide } from "./session/decide"
-import { emptyContext, refusalKey, type WorkRecord, type WorkState } from "./session/state"
+import { assemble, trim } from "./session/decide"
+import { refusalKey, type WorkRecord, type WorkState } from "./session/state"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface GuardInput {
@@ -92,23 +92,18 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     return emptyDelivery()
   }
 
-  const { delivery } = await decide({
-    agent: "main",
+  // Assemble and trim, and no stop gate: a refusal is not a stop. No touches, no warnings and no
+  // context of what was delivered earlier, so the sections come with the refusal even if the agent
+  // has seen them: the message has to stand on its own, and nothing here is recorded as delivered
+  // because the write it explains never happened.
+  const assembled = await assemble({
     findings: refusing.map(({ rule, match }) => ({ rule, match, status: "new" as const })),
-    touches: [],
-    agentRead: null,
-    warnings: [],
-    work: input.work,
-    // An empty context, so the sections come with the refusal even if they were delivered earlier:
-    // the message has to stand on its own, and nothing here is recorded as delivered because the
-    // write it explains never happened.
-    context: emptyContext(),
     resolver: input.resolver,
     maxBytes: input.config.context.maxBytes,
-    maxBlocks: input.config.stopGate.maxBlocks,
+  })
+  const { delivery } = trim(assembled, {
     maxContextChars: input.maxContextChars,
     maxMatchesPerRule: input.config.maxMatchesPerRule,
-    stopGate: false,
   })
   await input.record(
     [...new Set(refusing.map(({ rule }) => rule.id))].map((rule) => ({ t: "refused" as const, rule, file })),

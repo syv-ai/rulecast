@@ -350,14 +350,23 @@ export function trim(assembled: Assembled, limits: TrimLimits): { delivery: Deli
 export function gate(fresh: ClassifiedFinding[], work: WorkState, agent: string, maxBlocks: number): { stop: Delivery["stop"]; work: WorkRecord[] }
 ```
 
-- [ ] Split at the existing seams: `assemble` is `:156-212`, `trim` is `:214-397`, `gate` is `:399-417`. The untrimmed delivery already exists as `complete` at `:222` — it becomes part of what `assemble` hands over.
-- [ ] `trim` returns new values rather than mutating. Two things have to change to make that work, both named in Decision 4: it needs `candidates` for `locationOf(spec)` and for the `{t:"delivered"}` records, and the identity filter at `:396` (`kept.get(rule)?.includes(finding)`) must become index-based.
-- [ ] Keep `decide(input)` as a thin composition of the three, so nothing outside has to change in this task. `pipeline.ts` keeps calling it.
-- [ ] `guard.ts:94-111` calls `assemble` then `trim` and passes neither `touches`, `agentRead`, `warnings`, `context` nor `stopGate`. Keep the comment at `:101-103` — it explains the empty context, which is now expressed by not having the parameter.
-- [ ] Preserve the gate's two early returns (`:413`, `:415`): a `"allow"` discards the context records trim produced, and a `"capReached"` keeps the overflow. That ordering is load-bearing — the gate decides whether trim's records count.
-- [ ] Tests: `gate` cannot be given a trimmed delivery (a type-level assertion in `test/plugin-api.ts` style, or simply no parameter that could carry one); `trim` called twice on the same `Assembled` returns equal results, which proves it no longer mutates its input; the guard's call passes four arguments, not thirteen.
-- [ ] Verify: `pnpm vitest run test/core/session` → passes; the goldens from Task 8 → pass unchanged; `pnpm test` → passes.
-- [ ] Commit.
+- [x] Split at the existing seams: `assemble` is `:156-212`, `trim` is `:214-397`, `gate` is `:399-417`. The untrimmed delivery already exists as `complete` at `:222` — it becomes part of what `assemble` hands over.
+- [x] `trim` returns new values rather than mutating. Two things have to change to make that work, both named in Decision 4: it needs `candidates` for `locationOf(spec)` and for the `{t:"delivered"}` records, and the identity filter at `:396` (`kept.get(rule)?.includes(finding)`) must become index-based.
+- [x] Keep `decide(input)` as a thin composition of the three, so nothing outside has to change in this task. `pipeline.ts` keeps calling it.
+- [x] `guard.ts:94-111` calls `assemble` then `trim` and passes neither `touches`, `agentRead`, `warnings`, `context` nor `stopGate`. Keep the comment at `:101-103` — it explains the empty context, which is now expressed by not having the parameter.
+- [x] Preserve the gate's two early returns (`:413`, `:415`): a `"allow"` discards the context records trim produced, and a `"capReached"` keeps the overflow. That ordering is load-bearing — the gate decides whether trim's records count.
+- [x] Tests: `gate` cannot be given a trimmed delivery (a type-level assertion in `test/plugin-api.ts` style, or simply no parameter that could carry one); `trim` called twice on the same `Assembled` returns equal results, which proves it no longer mutates its input; the guard's call passes four arguments, not thirteen.
+- [x] Verify: `pnpm vitest run test/core/session` → passes; the goldens from Task 8 → pass unchanged; `pnpm test` → passes.
+- [x] Commit.
+
+**Corrected while executing.** Decision 4 said the identity filter at the end of the fill (`kept.get(rule)?.includes(finding)`) "must become index-based". It did not need to. That is only true if `trim` clones `Finding` objects, and nothing in the budget changes one — checked before writing: it rearranges arrays only. So `trim` copies the delivery's *arrays*, leaves the objects shared, and the filter stays as it was. The rest of Decision 4 held exactly: `assemble` returns an `Assembled` carrying `candidates`, `fresh`, `unwarned` and `touches` beside the delivery, because demoting a reference needs data `DeliveredReference` does not have.
+
+The untrimmed delivery is no longer a copy taken mid-function (`complete`). `assemble`'s delivery is never changed afterwards, so it *is* the overflow, and `trim` returns it by reference.
+
+`gate` takes `fresh` and nothing else that describes findings, so it cannot be handed the trimmed list — the comment that used to guard that is now its signature. The guard calls `assemble` with three fields and `trim` with two limits, where it used to pass `decide` thirteen.
+
+`decide` is their composition and the pipeline is unchanged. Its four suites and the Task 8 delivery goldens pass without a change. New tests pin the two properties that were comments: `trim` never changes what it was given (removing its copy fails two tests), and the gate blocks on an error the floor could not hold. 1,002 tests, 994 passing.
+
 
 ## Task 10: the renderer prices its own output
 
