@@ -13,7 +13,7 @@ Relative links in this file resolve against this file's own URL.
    npx @syv-ai/rulecast init --yes --agent claude-code
    ```
 
-   `--agent` installs your hooks even when nothing in the project marks you yet (for Claude Code, a `.claude/` directory or a `CLAUDE.md`); without it, `--yes` installs hooks only for the agents it detects. `init` detects the project, selects the catalog rules that apply to its files, writes `.rulecast-config.yaml`, installs your hooks in your shared settings file, validates the result, and prints every file it created or changed, followed by a drafting prompt.
+   `--agent` installs your hooks and only yours; without it, `--yes` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet. `init` detects the project, selects the catalog rules that apply to its files, writes `.rulecast-config.yaml`, installs your hooks in your shared settings file, validates the result, and prints every file it created or changed, followed by a drafting prompt.
 3. If it fails with `unknown agent`, rulecast has no adapter for you yet (the message lists the ones it has). Run `npx @syv-ai/rulecast init --yes` without `--agent`, and tell the developer that rulecast cannot deliver rules to you yet. If it exits non-zero for any other reason, show the developer its output and stop.
 4. Show the developer `.rulecast-config.yaml` and the other files `init` listed. Name the selected rules and say that any of them can be removed from the config.
 5. Ask whether to draft rules for the project's own conventions. If yes, follow [DRAFT-RULES.md](DRAFT-RULES.md), using the doc named in the drafting prompt `init` printed.

@@ -4,7 +4,7 @@ import { runCli } from "../helpers/cli"
 import { createProject } from "../helpers/project"
 
 const USAGE = `usage:
-  rulecast init [--rules id,id | --no-rules] [--agent <name>]... [--scope shared|personal] [--yes]
+  rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--scope shared|personal] [--yes]
   rulecast install [--agent <name>]... [--scope shared|personal]
   rulecast uninstall [--agent <name>]...
   rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--llm | --no-llm]

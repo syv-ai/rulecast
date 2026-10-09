@@ -22,7 +22,7 @@ import { latestTag, remoteTags } from "../core/repos/tags"
 import type { Adapter, InstallScope } from "../core/types"
 import { VERSION } from "../core/version"
 import type { CatalogRef, RuleSelection } from "../init/config-text"
-import { type Detection, detectionSummary, detectProject, docChoices, markerExists } from "../init/detect"
+import { type Detection, detectionSummary, detectProject, docChoices, markerExists, matchHeading } from "../init/detect"
 import { draftPrompt } from "../init/draft-prompt"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { Cancelled, type Choice, type Prompter } from "../init/prompts"
@@ -40,6 +40,8 @@ interface Flags {
   rules: string[] | null
   noRules: boolean
   agents: Adapter[]
+  /** --no-agents: install no hooks, whatever is detected. */
+  noAgents: boolean
   scope: InstallScope | null
   yes: boolean
 }
@@ -65,11 +67,13 @@ function parseFlags(args: string[]): Flags {
       rules: { type: "string" },
       "no-rules": { type: "boolean", default: false },
       agent: { type: "string", multiple: true },
+      "no-agents": { type: "boolean", default: false },
       scope: { type: "string" },
       yes: { type: "boolean", default: false },
     },
   })
   if (values.rules !== undefined && values["no-rules"]) throw new UsageError("use --rules or --no-rules, not both")
+  if (values.agent !== undefined && values["no-agents"]) throw new UsageError("use --agent or --no-agents, not both")
   const scope = values.scope ?? null
   if (scope !== null && !SCOPES.includes(scope as InstallScope)) {
     throw new UsageError(`unknown scope "${scope}" (use shared or personal)`)
@@ -89,7 +93,14 @@ function parseFlags(args: string[]): Flags {
           .split(",")
           .map((id) => id.trim())
           .filter(Boolean)
-  return { rules, noRules: values["no-rules"], agents, scope: scope as InstallScope | null, yes: values.yes }
+  return {
+    rules,
+    noRules: values["no-rules"],
+    agents,
+    noAgents: values["no-agents"],
+    scope: scope as InstallScope | null,
+    yes: values.yes,
+  }
 }
 
 /** The configured project, else the enclosing git repository, else the current directory. */
@@ -223,21 +234,35 @@ async function chooseConventions(rules: CompiledRule[], detection: Detection, ui
       label: "keep the package's doc",
       hint: rule.context.map((spec) => spec.ref).join(", "),
     }
+    // The project's own words by default, when one of its headings plainly matches the package doc.
+    const matched = rule.context.map((spec) => matchHeading(spec, detection.docs)).find((value) => value !== null)
     const answer = await ui.prompter.select({
       message: `Conventions for ${rule.id}`,
       choices: [keep, ...choices],
-      initialValue: "",
+      initialValue: matched !== undefined && choices.some((choice) => choice.value === matched) ? matched : "",
     })
     selections.push({ id: rule.id, context: answer === "" ? null : [answer] })
   }
   return selections
 }
 
+/**
+ * The agents `init` installs hooks for unless told otherwise: the detected ones, or — when nothing
+ * marks any agent yet — every adapter rulecast has. A project with only an AGENTS.md is the common
+ * case, and installing nothing there is the one default that makes rulecast do nothing at all.
+ */
+export function defaultAgents(detected: readonly string[], adapters: readonly Adapter[]): Adapter[] {
+  const found = adapters.filter((adapter) => detected.includes(adapter.name))
+  return found.length > 0 ? found : [...adapters]
+}
+
 async function chooseAgents(detection: Detection, flags: Flags, ui: Ui): Promise<AgentChoice[]> {
   const detected = detection.agents.filter((agent) => agent.adapter !== null).map((agent) => agent.name)
+  const defaults = defaultAgents(detected, installable())
   let chosen: Adapter[]
-  if (flags.agents.length > 0) chosen = flags.agents
-  else if (ui.prompter === null) chosen = installable().filter((adapter) => detected.includes(adapter.name))
+  if (flags.noAgents) chosen = []
+  else if (flags.agents.length > 0) chosen = flags.agents
+  else if (ui.prompter === null) chosen = defaults
   else {
     const choices: Choice[] = installable().map((adapter) => ({
       value: adapter.name,
@@ -254,11 +279,18 @@ async function chooseAgents(detection: Detection, flags: Flags, ui: Ui): Promise
         })
       }
     }
-    const names = await ui.prompter.multiselect({ message: "Install hooks for", choices, initialValues: detected })
+    const names = await ui.prompter.multiselect({
+      message: "Install hooks for",
+      choices,
+      initialValues: defaults.map((adapter) => adapter.name),
+    })
     chosen = installable().filter((adapter) => names.includes(adapter.name))
   }
   if (chosen.length === 0) {
-    ui.say("No agent hooks will be installed. Add them later with rulecast install --agent <name>.", "Agents")
+    ui.say(
+      "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>.",
+      "Agents",
+    )
   }
 
   const agents: AgentChoice[] = []

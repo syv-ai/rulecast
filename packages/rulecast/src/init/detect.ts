@@ -184,6 +184,45 @@ export function detectionSummary(detection: Detection): string {
   return parts.length === 0 ? "nothing yet" : parts.join(" · ")
 }
 
+const STOPWORDS = new Set(["the", "a", "an", "in", "of", "and", "or", "to", "for", "md", "mdx", "readme"])
+
+const words = (text: string) =>
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w !== "" && !STOPWORDS.has(w)),
+  )
+
+/**
+ * The detected heading that best matches a package doc reference, as a `context` value
+ * (`@AGENTS.md#errors`), or null when nothing shares a word with it.
+ *
+ * `init` preselects it so that accepting the defaults gives the agent the project's own words: a
+ * catalog rule citing `errors.md#services-raise-domain-exceptions` is mapped to an `Errors` heading.
+ * Words come from the package doc's file name and section anchor, and are compared with the
+ * heading's own text, not its parents'. Ties go to the shallower heading, then the first.
+ */
+export function matchHeading(
+  spec: { path: string; anchor: string | null },
+  docs: readonly DetectedDoc[],
+): string | null {
+  const stem = path.basename(spec.path).replace(/\.[^.]+$/, "")
+  const wanted = words(`${stem} ${spec.anchor ?? ""}`)
+  let best: { value: string; score: number; level: number } | null = null
+  for (const doc of docs) {
+    for (const heading of doc.headings) {
+      if (heading.slug === "") continue
+      const score = [...words(heading.text)].filter((word) => wanted.has(word)).length
+      if (score === 0) continue
+      if (best === null || score > best.score || (score === best.score && heading.level < best.level)) {
+        best = { value: `@${doc.file}#${heading.slug}`, score, level: heading.level }
+      }
+    }
+  }
+  return best?.value ?? null
+}
+
 /** Reference choices for a doc: the whole file, then every heading as "file › heading › subheading". */
 export function docChoices(doc: DetectedDoc): { value: string; label: string }[] {
   const choices = [{ value: `@${doc.file}`, label: doc.file }]

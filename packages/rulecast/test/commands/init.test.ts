@@ -115,13 +115,24 @@ describe("rulecast init --yes", () => {
     expect(result.stdout).toContain("from the project's docs.")
   })
 
-  test("--no-rules writes only the local repo; no detected agent installs no hooks", async () => {
+  test("--no-rules writes only the local repo; with no agent detected, every adapter's hooks are installed", async () => {
+    // Plan 10, A1: a project with only an AGENTS.md is the common case, and installing nothing
+    // there was the one default that made rulecast do nothing at all.
     const root = await createRepo({ "app/services/users.py": "x = 1\n" })
     const result = await runCli(root, ["init", "--no-rules", "--yes"], "", env)
     expect(result.code).toBe(0)
     expect(parse(await read(root, CONFIG_FILE))).toEqual({ repos: [{ repo: "local", rules: [] }] })
+    expect(existsSync(path.join(root, ".claude", "settings.json"))).toBe(true)
+  })
+
+  test("--no-agents installs no hooks, and says what that means", async () => {
+    const root = await createRepo({ "app/services/users.py": "x = 1\n" })
+    const result = await runCli(root, ["init", "--no-rules", "--no-agents", "--yes"], "", env)
+    expect(result.code).toBe(0)
     expect(existsSync(path.join(root, ".claude"))).toBe(false)
-    expect(result.stdout).toContain("No agent hooks will be installed.")
+    expect(result.stdout).toContain(
+      "No agent hooks: rulecast will not run in your agent until you run rulecast install",
+    )
   })
 
   test("an unreachable catalog is skipped with a warning", async () => {
@@ -228,5 +239,22 @@ describe("rulecast init in a terminal", () => {
     expect(result.code).toBe(0)
     expect(script.shown.at(-1)).toBe("Nothing written.")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
+  })
+})
+
+describe("rulecast init defaults (plan 10, A1 and G6)", () => {
+  test("with no agent marker, accepting every default installs hooks and maps the rule to the project's heading", async () => {
+    const { "CLAUDE.md": _claude, ...noMarker } = PROJECT
+    const root = await createRepo(noMarker)
+    const script = scriptedPrompter([["python/no-httpexception-in-services"], ACCEPT, ACCEPT, ACCEPT, true, true])
+    const result = await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
+    expect(result.code).toBe(0)
+    const [, conventions, agents] = script.asked
+    expect(conventions!.initial).toBe("@AGENTS.md#errors")
+    expect(agents!.initial).toEqual(["claude-code"])
+    expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
+      { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
+    ])
+    expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(true)
   })
 })

@@ -2,7 +2,15 @@ import { describe, expect, test } from "vitest"
 
 import { ADAPTERS } from "../../src/adapters"
 import { readSourceFile } from "../../src/core/detection/per-rule"
-import { type Detection, detectionSummary, detectProject, docChoices, markerExists } from "../../src/init/detect"
+import {
+  type DetectedDoc,
+  type Detection,
+  detectionSummary,
+  detectProject,
+  docChoices,
+  markerExists,
+  matchHeading,
+} from "../../src/init/detect"
 import { createProject } from "../helpers/project"
 
 /** Detects a project written from `files`; `dirs` (with a trailing "/") are created empty. */
@@ -116,5 +124,49 @@ describe("detectionSummary and docChoices", () => {
       { value: "@AGENTS.md#http", label: "AGENTS.md › Backend › Errors › HTTP" },
       { value: "@AGENTS.md#services", label: "AGENTS.md › Backend › Services" },
     ])
+  })
+})
+
+/** Plan 10, G6: accepting init's defaults should give the agent the project's own words. */
+describe("matchHeading", () => {
+  const doc = (headings: [number, string][]): DetectedDoc => ({
+    file: "AGENTS.md",
+    importedBy: null,
+    headings: headings.map(([level, text], index) => ({
+      level,
+      text,
+      slug: text.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      line: index + 1,
+    })),
+  })
+  const agents = doc([
+    [1, "Conventions"],
+    [2, "Errors"],
+    [2, "Logging"],
+    [2, "Layering"],
+  ])
+
+  test("matches on the package doc's file name", () => {
+    const errors = { path: "packages/rules-python/errors.md", anchor: "services-raise-domain-exceptions" }
+    expect(matchHeading(errors, [agents])).toBe("@AGENTS.md#errors")
+    expect(matchHeading({ path: "packages/rules-python/layering.md", anchor: null }, [agents])).toBe(
+      "@AGENTS.md#layering",
+    )
+  })
+
+  test("matches on the anchor when the file name says nothing", () => {
+    expect(matchHeading({ path: "docs/python.md", anchor: "logging-not-print" }, [agents])).toBe("@AGENTS.md#logging")
+  })
+
+  test("no shared word keeps the package doc", () => {
+    expect(matchHeading({ path: "packages/rules-react/data-fetching.md", anchor: null }, [agents])).toBeNull()
+  })
+
+  test("a tie goes to the shallower heading", () => {
+    const nested = doc([
+      [3, "Errors in jobs"],
+      [2, "Errors"],
+    ])
+    expect(matchHeading({ path: "errors.md", anchor: null }, [nested])).toBe("@AGENTS.md#errors")
   })
 })

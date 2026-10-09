@@ -706,7 +706,7 @@ Command names and flags follow pre-commit where it has an equivalent.
 
 | Command | Does |
 |---|---|
-| `rulecast init [--rules id,id \| --no-rules] [--agent <name>]... [--scope shared\|personal] [--yes]` | Interactive setup (below) |
+| `rulecast init [--rules id,id \| --no-rules] [--agent <name>... \| --no-agents] [--scope shared\|personal] [--yes]` | Interactive setup (below) |
 | `rulecast install [--agent <name>]... [--scope shared\|personal]` | Installs agent hooks (default: every adapter, shared scope), merged without modifying existing entries, and fetches missing rule repos |
 | `rulecast uninstall [--agent <name>]...` | Removes only the hook entries rulecast added |
 | `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A [--to-ref B]] [--summary] [--format terminal\|agent\|json\|sarif] [--session <id>] [--llm \| --no-llm]` | Verify event |
@@ -736,8 +736,8 @@ Interactive, in the style of `npx skills add` and `gh skill install`. Agent-neut
 
 1. **Detect.** Stack (file-type tags from `git ls-files`, `pyproject.toml`, `package.json` with `react`), docs, and agents. Docs: `AGENTS.md` at the root and in subdirectories first; a `CLAUDE.md` that imports `@AGENTS.md` is the same document; a `CLAUDE.md` without that import is a doc of its own; then other tracked markdown files except `README*`, `CHANGELOG*`, `LICENSE*` and `node_modules/`. Agents: each adapter's `install.markers`, plus a table of known agents without adapters (Cursor `.cursor/`, Codex `.codex/`).
 2. **Catalog.** Fetch the rulecast repo's latest tag and multi-select its rules, grouped by package prefix. Preselected: rules that apply to at least one project file. Rules already configured are shown as installed. If the fetch fails, the step is skipped with a warning.
-3. **Conventions.** For each selected rule with `context`: keep the package's doc (default) or choose a heading from the detected docs (`file › heading › subheading`), written as a `context` override.
-4. **Agents.** Detected agents with an adapter are selectable and preselected; detected agents without one are shown disabled as "not supported yet". Each selected adapter's scope is chosen from its `install.scopes`.
+3. **Conventions.** For each selected rule with `context`: keep the package's doc or choose a heading from the detected docs (`file › heading › subheading`), written as a `context` override. The default is the detected heading that shares a word with the package doc's file name or anchor (`errors.md#services-raise-domain-exceptions` → `Errors`), the shallowest on a tie; with no shared word, the package's doc. Accepting the defaults then gives the agent the project's own words rather than a package's, which may name different files.
+4. **Agents.** Detected agents with an adapter are selectable and preselected; **when none is detected, every adapter is preselected**, interactively and under `--yes` — a project with only an `AGENTS.md` is the common case, and installing nothing there made rulecast do nothing at all. `--no-agents` installs none. Detected agents without an adapter are shown disabled as "not supported yet". Each selected adapter's scope is chosen from its `install.scopes`. With none chosen, the Review says plainly that rulecast will not run in the agent.
 5. **Review.** Every file `init` will create or change, with a summary. Nothing is written before confirmation; Ctrl+C exits 130 without writing.
 6. **Write.** Write or update `.rulecast-config.yaml` (preserving comments), run `install`, run `validate`.
 7. **Drafting prompt.** Show a prompt for the developer's own coding agent and offer to copy it (`pbcopy`, `wl-copy`, `xclip`, `clip.exe`; print only when none exists):
