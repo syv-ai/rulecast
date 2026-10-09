@@ -58,20 +58,39 @@ export async function appendBaseline(sessionDir: string, records: BaselineRecord
   await appendRecords(storeFile(sessionDir), records)
 }
 
+/**
+ * Adds fingerprint records to `into`, first record per file and rule winning.
+ *
+ * The one merge, used by the store when it reads and by a verify that measured fingerprints in
+ * memory. First-wins is the store's guarantee: baseline appends are lock-free, so two events can
+ * measure the same file at once, and readers must agree on which measurement counts. A verify used
+ * to merge last-wins; that only ever agreed because it measured files with no record at all.
+ */
+export function mergeFingerprints(
+  into: BaselineState["fingerprints"],
+  records: readonly BaselineRecord[],
+): BaselineState["fingerprints"] {
+  for (const record of records) {
+    if (record.t !== "fingerprint") continue
+    const byRule = into.get(record.file) ?? new Map<string, [number, number][]>()
+    into.set(record.file, byRule)
+    if (!byRule.has(record.rule)) byRule.set(record.rule, record.ranges)
+  }
+  return into
+}
+
 /** First start record wins; first snapshot per file wins; first fingerprint per file and rule wins. */
 export async function readBaseline(sessionDir: string): Promise<BaselineState> {
   const state: BaselineState = { started: false, startCommit: null, snapshots: new Map(), fingerprints: new Map() }
-  for (const record of await readRecords<BaselineRecord>(storeFile(sessionDir))) {
+  const records = await readRecords<BaselineRecord>(storeFile(sessionDir))
+  for (const record of records) {
     if (record.t === "start" && !state.started) {
       state.started = true
       state.startCommit = record.commit
     } else if (record.t === "snapshot" && !state.snapshots.has(record.file)) {
       state.snapshots.set(record.file, { fileHash: record.fileHash, lines: decodeLines(record.lines) })
-    } else if (record.t === "fingerprint") {
-      const byRule = state.fingerprints.get(record.file) ?? new Map<string, [number, number][]>()
-      state.fingerprints.set(record.file, byRule)
-      if (!byRule.has(record.rule)) byRule.set(record.rule, record.ranges)
     }
   }
+  mergeFingerprints(state.fingerprints, records)
   return state
 }

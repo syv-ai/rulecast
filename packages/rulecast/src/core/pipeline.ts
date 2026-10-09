@@ -1,17 +1,8 @@
 import { createHash } from "node:crypto"
 
-import { computeChanges } from "./baseline/baseline"
 import { classify } from "./baseline/fingerprint"
-import { type Snapshot, snapshotOf } from "./baseline/hash"
-import { recordFingerprints } from "./baseline/record"
-import {
-  appendBaseline,
-  type BaselineRecord,
-  type BaselineState,
-  readBaseline,
-  snapshotRecord,
-  startRecord,
-} from "./baseline/store"
+import { type BaselineInput, changesFor, touchRecords } from "./baseline/stage"
+import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
 import { writeOverflow } from "./delivery/persist"
@@ -265,97 +256,44 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     touches = selectTouchRules(project.rules, recent, view.context.touched, disabled)
   }
 
+  const baselineInput: BaselineInput = {
+    root,
+    detection,
+    rules: project.rules,
+    disabled,
+    limits: {
+      editDeadlineMs: config.timeouts.editDeadlineMs,
+      verifyMs: config.timeouts.verifyMs,
+      maxFileBytes: config.maxFileBytes,
+    },
+  }
+
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
-    if (session) {
-      const records: BaselineRecord[] = []
-      const snapshotted: string[] = []
-      for (const file of relevant(event.files)) {
-        if (baseline.snapshots.has(file)) continue
-        const text = await readSourceFile(root, file)
-        if (text === null) continue
-        records.push(snapshotRecord(file, snapshotOf(text)))
-        snapshotted.push(file)
-      }
-      // Spec §8: a `container` rule's baseline is what it matched in the file before the agent
-      // touched it, so it is measured here, where the snapshot is taken and the content on disk
-      // is still the baseline. Only `edit`-stage rules: those are the cheap in-process ones by
-      // construction (§13, slow tools default to verify), and a verify fills in the rest itself.
-      if (snapshotted.length > 0) {
-        records.push(
-          ...(await recordFingerprints({
-            detection,
-            files: snapshotted,
-            rules: project.rules,
-            disabled,
-            read: (file) => readSourceFile(root, file),
-            event: "edit",
-            source: "disk",
-            timeoutMs: config.timeouts.editDeadlineMs,
-            ceiling: { maxFileBytes: config.maxFileBytes, sizeOf: (file) => fileBytes(root, file) },
-          })),
-        )
-      }
-      await appendBaseline(session.dir, records)
-    }
+    // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
+    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
   }
 
   if (event.kind === "edit" || event.kind === "verify") {
-    let files = relevant(event.files)
-    let snapshots: ReadonlyMap<string, Snapshot> = session ? baseline.snapshots : new Map()
-    let fallbackCommit = session ? baseline.startCommit : null
-
+    let requested = relevant(event.files)
     if (event.kind === "edit" && session) {
       await appendWork(
         session.dir,
-        files.map((file) => ({ t: "edited" as const, file })),
+        requested.map((file) => ({ t: "edited" as const, file })),
       )
     }
-    if (event.kind === "verify") {
-      if (event.baseCommit) {
-        fallbackCommit = event.baseCommit
-        snapshots = new Map()
-      }
-      if (event.files.length === 0 && session) files = relevant(view.work.edited)
-    }
+    if (event.kind === "verify" && event.files.length === 0 && session) requested = relevant(view.work.edited)
 
-    const baselineChanges = await computeChanges(root, files, { snapshots, fallbackCommit })
+    const stage = await changesFor(
+      baselineInput,
+      { kind: event.kind, baseCommit: event.baseCommit },
+      session ? baseline : null,
+      requested,
+    )
+    const { files, changes: baselineChanges, fingerprints } = stage
     const changes = baselineChanges.sets
-    if (event.kind === "verify" && session && !event.baseCommit) {
-      // Files edited but back to their snapshot content have nothing new.
-      files = files.filter((file) => changes.get(file)?.changedLines.length !== 0)
-    }
-
-    // A verify has seconds where an edit has 350 ms, so it can measure a container rule's baseline
-    // itself instead of falling back to line overlap. This is what lets a pull-request gate see the
-    // same classification the hooks do. Only files whose baseline *is* the commit: where a snapshot
-    // exists, the commit may not be what the agent started from, and a fingerprint measured against
-    // the wrong baseline is worse than no fingerprint at all.
-    if (event.kind === "verify" && baselineChanges.fromCommit.size > 0) {
-      const texts = baselineChanges.fromCommit
-      const missing = [...texts.keys()].filter((file) => !baseline.fingerprints.has(file))
-      const records =
-        missing.length === 0
-          ? []
-          : await recordFingerprints({
-              detection,
-              files: missing,
-              rules: project.rules,
-              disabled,
-              read: async (file) => texts.get(file) ?? null,
-              event: "verify",
-              source: "memory",
-              timeoutMs: config.timeouts.verifyMs,
-            })
-      for (const record of records) {
-        if (record.t !== "fingerprint") continue
-        const byRule = baseline.fingerprints.get(record.file) ?? new Map<string, [number, number][]>()
-        baseline.fingerprints.set(record.file, byRule)
-        byRule.set(record.rule, record.ranges)
-      }
-      // Persisted so the next event in the session reuses them rather than measuring again.
-      if (session && records.length > 0) await appendBaseline(session.dir, records)
-    }
+    // Persisted so the next event in the session reuses them rather than measuring again.
+    if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
@@ -402,7 +340,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     findings = output.findings.map(({ rule, match }) => ({
       rule,
       match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, baseline.fingerprints),
+      status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
     }))
     for (const error of output.errors) {
       failed = true

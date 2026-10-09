@@ -219,14 +219,23 @@ export async function baselineFor(
 ): Promise<BaselineResult>
 ```
 
-- [ ] Add `mergeFingerprints(into, records)` to `store.ts` and have `readBaseline` use it. It takes the store's semantics — **first wins** (Decision 8) — which is a behaviour change for `pipeline.ts:358-363` only in a case that cannot currently arise, because `:340` filters to files with no fingerprints and `recordFingerprints` emits one record per `(file, rule)`. Assert that in a test rather than leaving it to a reader.
-- [ ] Move the touch block (`pipeline.ts:268-305`) into `baselineFor`: snapshot the files that have none, then `recordFingerprints` over the ones snapshotted, returning snapshot records **before** fingerprint records in one array. The order is load-bearing (Decision 7) — say so in a comment on the return type.
-- [ ] Move the verify gap-filling (`:338-366`) in too, returning its records rather than appending them.
-- [ ] Move `computeChanges` and the empty-change-set filter (`:326-331`) in; `baselineFor` returns `changes`.
-- [ ] `pipeline.ts` keeps exactly one `appendBaseline(session.dir, result.records)` per event, and `classify` is called with `result.changes` and `result.fingerprints`.
-- [ ] Tests: the touch path returns snapshots before fingerprints in one array; a file already snapshotted produces no second snapshot record; a verify with `baseCommit` set returns no snapshots; `mergeFingerprints` keeps the first record for a `(file, rule)` pair and a second is ignored; an empty `ranges` record is still distinguishable from an absent one.
-- [ ] Verify: `pnpm vitest run test/core/baseline` → passes; `pnpm test` → passes; `pnpm test:linux` → passes; `pnpm perf` → p95 no worse than 236 ms.
-- [ ] Commit.
+- [x] Add `mergeFingerprints(into, records)` to `store.ts` and have `readBaseline` use it. It takes the store's semantics — **first wins** (Decision 8) — which is a behaviour change for `pipeline.ts:358-363` only in a case that cannot currently arise, because `:340` filters to files with no fingerprints and `recordFingerprints` emits one record per `(file, rule)`. Assert that in a test rather than leaving it to a reader.
+- [x] Move the touch block (`pipeline.ts:268-305`) into `baselineFor`: snapshot the files that have none, then `recordFingerprints` over the ones snapshotted, returning snapshot records **before** fingerprint records in one array. The order is load-bearing (Decision 7) — say so in a comment on the return type.
+- [x] Move the verify gap-filling (`:338-366`) in too, returning its records rather than appending them.
+- [x] Move `computeChanges` and the empty-change-set filter (`:326-331`) in; `baselineFor` returns `changes`.
+- [x] `pipeline.ts` keeps exactly one `appendBaseline(session.dir, result.records)` per event, and `classify` is called with `result.changes` and `result.fingerprints`.
+- [x] Tests: the touch path returns snapshots before fingerprints in one array; a file already snapshotted produces no second snapshot record; a verify with `baseCommit` set returns no snapshots; `mergeFingerprints` keeps the first record for a `(file, rule)` pair and a second is ignored; an empty `ranges` record is still distinguishable from an absent one.
+- [x] Verify: `pnpm vitest run test/core/baseline` → passes; `pnpm test` → passes; `pnpm test:linux` → passes; `pnpm perf` → p95 no worse than 236 ms.
+- [x] Commit.
+
+**Corrected while executing.** The plan sketched one `baselineFor(event, …)`. It is two functions, `touchRecords` and `changesFor`, because the event families do disjoint work: `touch` takes snapshots and computes no change sets, `edit`/`verify` compute change sets and take no snapshots. One function would have returned a half-empty result to every caller. Both honour Decision 7 — they return records and never append — and the pipeline still makes exactly one `appendBaseline` per event.
+
+**One behaviour moved deliberately.** The verify path used to merge newly measured fingerprints straight into the session's `BaselineState`, last-wins. `changesFor` merges them into a *copy*, through the store's first-wins `mergeFingerprints`. The outcome is identical today (it only ever measured files with no record), and a caller holding the state now sees exactly what it read. The first version of the test for that was vacuous — it checked an edit, which merges nothing, so removing the copy did not fail it. It was rewritten as a verify against a real commit baseline, and removing the copy now fails it.
+
+**perf, A/B on the same machine** (load average ~11): this change p95 156 ms, its parent 159 ms, this change again 194 ms. The spread between two runs of the same build is larger than the difference between builds, which is the expected result for a move.
+
+995 tests, 987 passing, on macOS and on node:24-bookworm.
+
 
 ## Task 6: the detectors' shared frame
 
