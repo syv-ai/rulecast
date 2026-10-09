@@ -34,7 +34,9 @@ export function readConfigData(root: string): Promise<Loaded<unknown>> {
 
 export function parseConfig(data: unknown): Loaded<Config> {
   const result = configSchema.safeParse(data)
-  if (!result.success) return { ok: false, message: `${CONFIG_FILE}: ${formatZodError(result.error)}` }
+  if (!result.success) {
+    return { ok: false, message: `${CONFIG_FILE}: ${formatZodError(result.error, { schema: configSchema })}` }
+  }
   return { ok: true, value: result.data }
 }
 

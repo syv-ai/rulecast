@@ -129,7 +129,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
       }
       for (const raw of entry.rules) {
         const rule = ruleSchema.safeParse(raw)
-        if (!rule.success) error(CONFIG_FILE, idOf(raw), formatZodError(rule.error))
+        if (!rule.success) error(CONFIG_FILE, idOf(raw), formatZodError(rule.error, { schema: ruleSchema }))
         else await add({ data: rule.data, source: "local", contextRoot: project }, CONFIG_FILE)
       }
       continue
@@ -167,7 +167,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     for (const raw of entry.rules) {
       const override = overrideSchema.safeParse(raw)
       if (!override.success) {
-        error(CONFIG_FILE, idOf(raw), formatZodError(override.error))
+        error(CONFIG_FILE, idOf(raw), formatZodError(override.error, { schema: overrideSchema }))
         continue
       }
       const { id } = override.data
@@ -178,7 +178,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
       }
       const base = ruleSchema.safeParse(candidates[0])
       if (!base.success) {
-        error(source, id, `manifest: ${formatZodError(base.error)}`)
+        error(source, id, formatZodError(base.error, { prefix: "manifest", schema: ruleSchema }))
         continue
       }
       // Shallow merge (spec §4); an overridden context is written in the project, so it resolves there.
@@ -214,7 +214,12 @@ export async function compileManifest(
   for (const raw of manifest.value) {
     const rule = ruleSchema.safeParse(raw)
     if (!rule.success) {
-      diagnostics.push({ source: MANIFEST_FILE, rule: idOf(raw), message: formatZodError(rule.error), level: "error" })
+      diagnostics.push({
+        source: MANIFEST_FILE,
+        rule: idOf(raw),
+        message: formatZodError(rule.error, { schema: ruleSchema }),
+        level: "error",
+      })
       continue
     }
     const result = await compileRule({ data: rule.data, source: "local", contextRoot: { dir, label: null } }, context)

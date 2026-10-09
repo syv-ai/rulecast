@@ -239,7 +239,7 @@ describe("compile: local rules", () => {
       ["no-detect-edit", "rules without detect need stages: [touch]"],
       ["message-without-detect", "message needs detect"],
       ["unknown-detector", 'unknown detector "nope"'],
-      ["bad-config", "detect.fake: (root): Unrecognized key(s) in object: 'colour'"],
+      ["bad-config", 'detect.fake: unknown key "colour"'],
       ["bad-variable", 'unknown template variable "reason"'],
       ["refuse-unguardable", "refuse_write needs a detector that can judge a file before it is written; fake cannot"],
       ["refuse-verify-only", "refuse_write needs edit among the rule's stages"],
@@ -254,9 +254,9 @@ describe("compile: local rules", () => {
       ["bad-syntax", 'reference "docs/api.md" must start with "@"'],
       ["escapes", 'reference "@../secrets.md" leaves its root'],
       ["too-new", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
-      ["no-name", "name: Required"],
+      ["no-name", "name: required"],
       ["Bad Id", "id: must be lowercase segments separated by /"],
-      [null, "(root): Expected object, received string"],
+      [null, "Expected object, received string"],
     ])
     expect(new Set(project.diagnostics.map((d) => [d.source, d.level].join(" ")))).toEqual(
       new Set([".rulecast-config.yaml error"]),
@@ -301,7 +301,7 @@ describe("compile: local rules", () => {
       repos: cachedRepos(TEST_HOME),
     })
     expect(project.rules.map((rule) => rule.id)).toEqual(["ok"])
-    expect(project.diagnostics.map((d) => d.message)).toEqual(["detect.async-probe: value: value is bad"])
+    expect(project.diagnostics.map((d) => d.message)).toEqual(["detect.async-probe.value: value is bad"])
   })
 })
 
@@ -468,7 +468,7 @@ describe("compile: rule repos", () => {
       [".rulecast-config.yaml", null, "repos[0]: local repos take no rev"],
       [".rulecast-config.yaml", null, `repos[1] ${url}: rev is required`],
       [`${url}@v1.0.0`, "python/nope", "not in the manifest"],
-      [".rulecast-config.yaml", "python/no-print", "(root): Unrecognized key(s) in object: 'colour'"],
+      [".rulecast-config.yaml", "python/no-print", 'unknown key "colour"'],
       [`${bare}@v1.0.0`, null, ".rulecast-rules.yaml not found"],
       [`${url}@v9.9.9`, null, expect.stringMatching(/^fetch failed: /)],
     ])
