@@ -279,7 +279,15 @@ export interface AdapterInstall {
   scopes: { scope: InstallScope; file: string }[]
   /** The hook command; local: rulecast is installed in the project's node_modules. */
   command(local: boolean): string
-  merge(settings: unknown, command: string, verifyMs: number): { settings: unknown; added: string[] }
+  /**
+   * Adds the hooks. `updated` (optional, for adapters that can tell): the adapter's own hooks whose
+   * command differed from `command` and were rewritten — an older install upgraded in place.
+   */
+  merge(
+    settings: unknown,
+    command: string,
+    verifyMs: number,
+  ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
 }
 

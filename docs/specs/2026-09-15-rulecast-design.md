@@ -673,7 +673,7 @@ Pre-existing findings in a hook delivery are headed the same way and name the co
 
 ### Claude Code adapter
 
-Installed by `rulecast install` (and `init`) into `.claude/settings.json` (shared scope) or `.claude/settings.local.json` (personal scope), merged with existing hooks: existing entries are never modified or removed, and a hook whose command runs `rulecast hook claude-code` counts as installed. Every hook runs `rulecast hook claude-code`, or `"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code` when rulecast is installed in the project.
+Installed by `rulecast install` (and `init`) into `.claude/settings.json` (shared scope) or `.claude/settings.local.json` (personal scope), merged with existing hooks: existing entries are never modified or removed, and a hook whose command runs `rulecast hook claude-code` counts as installed. Every hook runs `rulecast hook claude-code`, or `"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code` when rulecast is installed in the project. When rulecast is installed in the project the command is guarded: it runs `node_modules/.bin/rulecast hook claude-code` when that exists, and otherwise exits 0, printing a `systemMessage` that rulecast is configured but not installed on `SessionStart` only. A bare path exits 127 in a clone that has not run `npm install`, which Claude Code shows as a hook error on every event. `install` rewrites rulecast's own entries whose command is not the current one and reports them as updated: an entry rulecast wrote is not someone else's existing entry. `doctor` warns about them.
 
 | Hook | Matcher | Event | Output | Hook timeout |
 |---|---|---|---|---|

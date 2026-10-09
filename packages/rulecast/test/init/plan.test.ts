@@ -67,7 +67,7 @@ describe("planInit", () => {
         commit: false,
       },
     ])
-    expect(changes[0]!.content).toContain("node_modules/.bin/rulecast hook claude-code")
+    expect(changes[0]!.content).toContain("node_modules/.bin/rulecast; [ -x")
   })
 
   test("re-running changes nothing that is already there", async () => {

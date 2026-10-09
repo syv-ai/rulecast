@@ -16,7 +16,7 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { fetchingRepos } from "../core/repos/provider"
-import { hookCommandResolves, hooksInstalled } from "./install"
+import { hookCommandResolves, hookState } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -106,18 +106,22 @@ export async function doctorCommand(
   const resolves = await hookCommandResolves(root)
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
-    const file = await hooksInstalled(root, adapter, project.config.timeouts.verifyMs)
+    const state = await hookState(root, adapter, project.config.timeouts.verifyMs)
+    const file = state?.file ?? null
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
     // on the PATH nor in node_modules/.bin, and doctor said ok.
-    const level: Level = file === null || !resolves ? "warning" : "ok"
+    const stale = (state?.stale ?? []).length > 0
+    const level: Level = file === null || !resolves || stale ? "warning" : "ok"
     count(level)
     const detail =
       file === null
         ? "not installed (run rulecast install)"
-        : resolves
-          ? file
-          : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
+        : stale
+          ? `${file} — but the hooks use an old command; run rulecast install`
+          : resolves
+            ? file
+            : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
     io.stdout(line(level, adapter.label, detail))
   }
 

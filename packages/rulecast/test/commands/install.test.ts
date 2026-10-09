@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { claudeCodeAdapter } from "../../src/adapters/claude-code/adapter"
+import { claudeCodeAdapter, LOCAL_COMMAND } from "../../src/adapters/claude-code/adapter"
 import { hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
@@ -64,12 +64,27 @@ describe("rulecast install", () => {
     expect((await settingsOf(root)).hooks.Stop[0].hooks[0].command).toBe("rulecast hook claude-code")
     const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
     await runCli(local, ["install"])
-    expect((await settingsOf(local)).hooks.Stop[0].hooks[0].command).toBe(
-      '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code',
-    )
-    expect(claudeCodeAdapter.install?.command(true)).toBe(
-      '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code',
-    )
+    expect((await settingsOf(local)).hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
+    expect(claudeCodeAdapter.install?.command(true)).toBe(LOCAL_COMMAND)
+  })
+
+  test("re-running install upgrades rulecast's own hooks from an older command, and nothing else", async () => {
+    const OLD = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
+    await runCli(local, ["install"])
+    const settings = await settingsOf(local)
+    for (const groups of Object.values(settings.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = OLD
+    }
+    settings.hooks.Stop.push({ hooks: [{ type: "command", command: "dash-hook stop" }] })
+    await writeFile(path.join(local, ".claude/settings.json"), JSON.stringify(settings))
+    expect((await runCli(local, ["doctor"])).stdout).toContain("the hooks use an old command; run rulecast install")
+    const result = await runCli(local, ["install"])
+    expect(result.stdout).toContain("updated Claude Code hooks in .claude/settings.json to the current command")
+    const after = await settingsOf(local)
+    expect(after.hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
+    expect(after.hooks.Stop[1].hooks[0].command).toBe("dash-hook stop")
+    expect((await runCli(local, ["install"])).stdout).toContain("already installed")
   })
 
   test("fetches rule repos missing from the cache", async () => {

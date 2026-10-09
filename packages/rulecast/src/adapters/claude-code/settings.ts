@@ -40,23 +40,46 @@ function hooksOf(settings: unknown): JsonObject {
   return hooks
 }
 
-/** Adds rulecast's hooks to Claude Code settings. Existing entries are never modified or removed. */
+/**
+ * Adds rulecast's hooks to Claude Code settings. Entries that are not rulecast's are never modified
+ * or removed. rulecast's own, when their command is not the current one, are rewritten in place and
+ * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense.
+ */
 export function mergeHooks(
   settings: unknown,
   command: string,
   verifyMs: number,
-): { settings: JsonObject; added: string[] } {
+): { settings: JsonObject; added: string[]; updated: string[] } {
   const merged: JsonObject = { ...hooksOf(settings) }
   const added: string[] = []
+  const updated: string[] = []
   for (const { event, matcher, timeout } of hookGroups(verifyMs)) {
     const groups = merged[event] ?? []
     if (!Array.isArray(groups)) throw new SettingsError(`"hooks.${event}" must be an array`)
-    if (installed(groups, matcher)) continue
+    if (installed(groups, matcher)) {
+      let changed = false
+      const rewritten = groups.map((group) => {
+        if (!isObject(group) || group.matcher !== matcher || !Array.isArray(group.hooks)) return group
+        return {
+          ...group,
+          hooks: group.hooks.map((hook) => {
+            if (!isRulecastHook(hook) || (hook as JsonObject).command === command) return hook
+            changed = true
+            return { ...(hook as JsonObject), command }
+          }),
+        }
+      })
+      if (changed) {
+        merged[event] = rewritten
+        updated.push(matcher === undefined ? event : `${event} (${matcher})`)
+      }
+      continue
+    }
     const hook = { type: "command", command, timeout }
     merged[event] = [...groups, matcher === undefined ? { hooks: [hook] } : { matcher, hooks: [hook] }]
     added.push(matcher === undefined ? event : `${event} (${matcher})`)
   }
-  return { settings: { ...(settings as JsonObject), hooks: merged }, added }
+  return { settings: { ...(settings as JsonObject), hooks: merged }, added, updated }
 }
 
 /**

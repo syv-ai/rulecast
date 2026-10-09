@@ -69,12 +69,25 @@ export async function hookCommandResolves(root: string, signal?: AbortSignal): P
  * (spec §12), so install and doctor agree on what "installed" means.
  */
 export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: number): Promise<string | null> {
+  return (await hookState(root, adapter, verifyMs))?.file ?? null
+}
+
+/**
+ * Where the adapter's hooks are and whether their command is the current one. `stale`: installed by
+ * an older rulecast, so `install` rewrites them and `doctor` says so.
+ */
+export async function hookState(
+  root: string,
+  adapter: Adapter,
+  verifyMs: number,
+): Promise<{ file: string; stale: string[] } | null> {
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
   for (const { file } of install.scopes) {
     const current = await readSettings(root, file)
     if (current === null) continue
-    if (inFile(file, () => install.merge(current.value, command, verifyMs)).added.length === 0) return file
+    const merged = inFile(file, () => install.merge(current.value, command, verifyMs))
+    if (merged.added.length === 0) return { file, stale: merged.updated ?? [] }
   }
   return null
 }
@@ -88,11 +101,18 @@ export async function installHooks(
   adapter: Adapter,
   scope: InstallScope,
   verifyMs: number,
-): Promise<{ file: string; added: string[] }> {
+): Promise<{ file: string; added: string[]; updated?: string[] }> {
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
-  const already = await hooksInstalled(root, adapter, verifyMs)
-  if (already !== null) return { file: already, added: [] }
+  const already = await hookState(root, adapter, verifyMs)
+  if (already !== null && already.stale.length === 0) return { file: already.file, added: [] }
+  if (already !== null) {
+    // Installed by an older rulecast: rewrite those entries where they are, nothing else.
+    const current = (await readSettings(root, already.file))?.value ?? {}
+    const merged = inFile(already.file, () => install.merge(current, command, verifyMs))
+    await writeSettings(root, already.file, merged.settings)
+    return { file: already.file, added: [], updated: merged.updated ?? [] }
+  }
   const target = install.scopes.find((candidate) => candidate.scope === scope)
   if (!target) throw new UsageError(`${adapter.name} has no ${scope} settings`)
   const current = (await readSettings(root, target.file))?.value ?? {}
@@ -133,11 +153,18 @@ export async function loadProjectConfig(root: string, command: string): Promise<
   return config.value
 }
 
-export function printInstall(io: CliIo, adapter: Adapter, result: { file: string; added: string[] }): void {
+export function printInstall(
+  io: CliIo,
+  adapter: Adapter,
+  result: { file: string; added: string[]; updated?: string[] },
+): void {
+  const updated = result.updated ?? []
   io.stdout(
-    result.added.length === 0
-      ? `${adapter.label} hooks already installed in ${result.file}\n`
-      : `installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`,
+    updated.length > 0
+      ? `updated ${adapter.label} hooks in ${result.file} to the current command: ${updated.join(", ")}\n`
+      : result.added.length === 0
+        ? `${adapter.label} hooks already installed in ${result.file}\n`
+        : `installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`,
   )
 }
 

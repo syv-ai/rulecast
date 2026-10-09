@@ -30,6 +30,7 @@ describe("Claude Code settings: mergeHooks", () => {
         "UserPromptSubmit",
         "SessionStart (startup|resume|compact)",
       ],
+      updated: [],
     })
   })
 
@@ -56,7 +57,7 @@ describe("Claude Code settings: mergeHooks", () => {
 
   test("is idempotent, and any command running rulecast hook claude-code counts as installed", () => {
     const once = mergeHooks({}, COMMAND, 60_000).settings
-    expect(mergeHooks(once, COMMAND, 60_000)).toEqual({ settings: once, added: [] })
+    expect(mergeHooks(once, COMMAND, 60_000)).toEqual({ settings: once, added: [], updated: [] })
     const local = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     expect(mergeHooks(once, local, 60_000).added).toEqual([])
   })

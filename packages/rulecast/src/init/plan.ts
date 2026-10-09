@@ -80,10 +80,22 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
       throw new PlanError(`${file}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  // Hooks already in any of the agent's settings files count as installed, as for rulecast install.
+  // Hooks already in any of the agent's settings files count as installed, as for rulecast install;
+  // installed by an older rulecast, they are rewritten where they are.
   for (const { file } of install.scopes) {
     const text = await context.readText(file)
-    if (text !== null && merge(parseSettings(text, file), file).added.length === 0) return null
+    if (text === null) continue
+    const merged = merge(parseSettings(text, file), file)
+    if (merged.added.length > 0) continue
+    const updated = merged.updated ?? []
+    if (updated.length === 0) return null
+    return {
+      file,
+      content: `${JSON.stringify(merged.settings, null, 2)}\n`,
+      created: false,
+      summary: `~${plural(updated.length, "hook")} updated (${choice.adapter.label})`,
+      commit: install.scopes.find((entry) => entry.file === file)?.scope === "shared",
+    }
   }
   const target = install.scopes.find((entry) => entry.scope === choice.scope)
   if (target === undefined) throw new PlanError(`${choice.adapter.label} has no ${choice.scope} settings`)

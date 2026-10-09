@@ -18,6 +18,26 @@ const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved
 const DENY_PREAMBLE =
   "This project's rulecast rules (.rulecast-config.yaml) refuse this write. Change what you are writing, or the file you are writing it to, and try again."
 
+/**
+ * What the user sees, once per session, when the project's hooks are committed and rulecast is not
+ * installed yet — a fresh clone before `npm install`. Every other event says nothing.
+ */
+export const NOT_INSTALLED =
+  "rulecast is configured in this project but not installed. Run npm install (or pnpm install), then rulecast doctor."
+
+/**
+ * The committed hook command, guarded. A bare path to `node_modules/.bin/rulecast` exits 127 in a
+ * clone that has not installed yet, which Claude Code shows as a hook error on every Read and Edit
+ * (recorded in test/payloads/claude-code/README.md). Guarded, it runs rulecast when it is there and
+ * otherwise exits 0, after telling the user on `SessionStart` only. stdin is read only on that
+ * branch; `exec` hands it to rulecast untouched. One string for every event, so the plugin API's
+ * `command(local)` is unchanged, and it still contains "rulecast hook claude-code", which is how
+ * settings.ts recognises its own hooks.
+ */
+export const LOCAL_COMMAND =
+  'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+  `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; exit 0`
+
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
   if (delivery.overflowPath !== null) {
@@ -110,8 +130,7 @@ export const claudeCodeAdapter: Adapter = {
       { scope: "shared", file: ".claude/settings.json" },
       { scope: "personal", file: ".claude/settings.local.json" },
     ],
-    command: (local) =>
-      local ? '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code' : "rulecast hook claude-code",
+    command: (local) => (local ? LOCAL_COMMAND : "rulecast hook claude-code"),
     merge: mergeHooks,
     remove: removeHooks,
   },

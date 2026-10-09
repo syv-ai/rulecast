@@ -120,6 +120,7 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
             const twice = install.merge(structuredClone(once.settings), command, 5_000)
             assert.deepEqual(twice.settings, once.settings, "merging twice must change nothing")
             assert.deepEqual(twice.added, [], "merging twice must add nothing")
+            if (twice.updated !== undefined) assert.deepEqual(twice.updated, [], "merging twice must update nothing")
             const removed = install.remove(structuredClone(once.settings))
             assert.deepEqual(removed.settings, original, "remove must return the settings merge was given")
             assert.deepEqual([...removed.removed].sort(), [...once.added].sort(), "remove must name what merge added")
