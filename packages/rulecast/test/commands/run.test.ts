@@ -347,6 +347,23 @@ describe("rulecast run: metered rules in a staged run", () => {
     expect(JSON.parse((await run(root, "--format", "json")).stdout).skipped).toEqual(["py/thin"])
   })
 
+  test("a disabled metered rule is not reported as skipped", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([{ ...LLM_RULES[0], enabled: false }]),
+      "app/a.py": "x = 1\n",
+    })
+    await writeFile(path.join(root, "app/a.py"), "x = 2\n")
+    await git(root, "add", "app/a.py")
+    expect((await run(root)).stdout).not.toContain("skipped")
+  })
+
+  test("--summary says what it skipped and what it checked", async () => {
+    const root = await staged()
+    const result = await run(root, "--summary")
+    expect(result.stdout).toContain("skipped 1 metered rule (py/thin)")
+    expect(result.stdout).toContain("checked 1 staged file")
+  })
+
   test("--llm includes them", async () => {
     const root = await staged()
     const result = await run(root, "--llm")

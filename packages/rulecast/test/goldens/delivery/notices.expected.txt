@@ -1,0 +1,6 @@
+rulecast warnings:
+  - regex detector failed for r/x: bad pattern. Skipped for this run.
+
+rulecast notices (for the user):
+  - rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced. Review: git diff .rulecast-config.yaml
+  - rulecast: the agent added a rulecast-ignore comment this session: app/a.py:3 (r/x: "legacy endpoint")

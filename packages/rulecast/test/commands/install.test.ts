@@ -87,6 +87,21 @@ describe("rulecast install", () => {
     expect((await runCli(local, ["install"])).stdout).toContain("already installed")
   })
 
+  test("a clone without node_modules keeps the committed guarded command", async () => {
+    // The guarded form is right with or without the binary. Rewriting it to the bare command in a
+    // clone before `npm install` would bring back the exit 127 on every hook that it exists to stop.
+    const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
+    await runCli(local, ["install"])
+    const committed = await settingsOf(local)
+    const clone = await createProject({
+      ".rulecast-config.yaml": "repos: []\n",
+      ".claude/settings.json": JSON.stringify(committed),
+    })
+    expect((await runCli(clone, ["doctor"])).stdout).not.toContain("old command")
+    expect((await runCli(clone, ["install"])).stdout).toContain("already installed")
+    expect((await settingsOf(clone)).hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
+  })
+
   test("fetches rule repos missing from the cache", async () => {
     const url = await createRuleRepo([{ tag: "v1.0.0", files: { ".rulecast-rules.yaml": "[]\n" } }])
     const root = await createProject({ ".rulecast-config.yaml": repoConfig(url) })

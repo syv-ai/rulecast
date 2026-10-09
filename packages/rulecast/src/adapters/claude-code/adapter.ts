@@ -131,7 +131,10 @@ export const claudeCodeAdapter: Adapter = {
       { scope: "personal", file: ".claude/settings.local.json" },
     ],
     command: (local) => (local ? LOCAL_COMMAND : "rulecast hook claude-code"),
-    merge: mergeHooks,
+    // The guarded command is never rewritten to the bare one. It is right with or without
+    // node_modules, and `install` in a clone that has not installed yet would otherwise swap the
+    // committed command for one that exits 127 on every hook.
+    merge: (settings, command, verifyMs) => mergeHooks(settings, command, verifyMs, LOCAL_COMMAND),
     remove: removeHooks,
   },
 }

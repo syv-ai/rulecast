@@ -1,0 +1,25 @@
+{
+  "about": "Notices print last, under their own heading, after the warnings.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": ["regex detector failed for r/x: bad pattern. Skipped for this run."],
+    "notices": [
+      "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced. Review: git diff .rulecast-config.yaml",
+      "rulecast: the agent added a rulecast-ignore comment this session: app/a.py:3 (r/x: \"legacy endpoint\")"
+    ],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null
+  }
+}

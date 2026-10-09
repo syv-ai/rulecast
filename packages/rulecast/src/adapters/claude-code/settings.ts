@@ -43,12 +43,14 @@ function hooksOf(settings: unknown): JsonObject {
 /**
  * Adds rulecast's hooks to Claude Code settings. Entries that are not rulecast's are never modified
  * or removed. rulecast's own, when their command is not the current one, are rewritten in place and
- * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense.
+ * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. An entry
+ * whose command is `keep` is current whatever `command` is.
  */
 export function mergeHooks(
   settings: unknown,
   command: string,
   verifyMs: number,
+  keep?: string,
 ): { settings: JsonObject; added: string[]; updated: string[] } {
   const merged: JsonObject = { ...hooksOf(settings) }
   const added: string[] = []
@@ -63,7 +65,8 @@ export function mergeHooks(
         return {
           ...group,
           hooks: group.hooks.map((hook) => {
-            if (!isRulecastHook(hook) || (hook as JsonObject).command === command) return hook
+            const current = (hook as JsonObject).command
+            if (!isRulecastHook(hook) || current === command || current === keep) return hook
             changed = true
             return { ...(hook as JsonObject), command }
           }),

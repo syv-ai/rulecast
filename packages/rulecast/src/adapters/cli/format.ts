@@ -70,6 +70,12 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
     out.push(...problemsBlock(delivery.warnings))
     if (options.backlog === true) out.push(renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
     if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
+    // What was left out and what was looked at are as true of a summary as of the full list.
+    const tail = [
+      ...((options.skipped ?? []).length > 0 ? [skippedLine(options.skipped!)] : []),
+      ...(options.checked !== undefined ? [checkedLine(options.checked)] : []),
+    ]
+    if (tail.length > 0) out.push(...(out.length > 0 ? [""] : []), ...tail)
     return out.join("\n")
   }
   const shown = new Map<string, number>()

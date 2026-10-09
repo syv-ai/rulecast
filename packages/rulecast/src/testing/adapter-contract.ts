@@ -121,6 +121,16 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
             assert.deepEqual(twice.settings, once.settings, "merging twice must change nothing")
             assert.deepEqual(twice.added, [], "merging twice must add nothing")
             if (twice.updated !== undefined) assert.deepEqual(twice.updated, [], "merging twice must update nothing")
+            // A different command over hooks already installed: rewritten in place, never added twice.
+            const upgraded = install.merge(structuredClone(once.settings), install.command(true), 5_000)
+            assert.deepEqual(upgraded.added, [], "merging another command over installed hooks must add nothing")
+            if (upgraded.updated !== undefined) {
+              assert.deepEqual(
+                [...upgraded.updated].sort(),
+                [...once.added].sort(),
+                "merging another command must report every hook it rewrote",
+              )
+            }
             const removed = install.remove(structuredClone(once.settings))
             assert.deepEqual(removed.settings, original, "remove must return the settings merge was given")
             assert.deepEqual([...removed.removed].sort(), [...once.added].sort(), "remove must name what merge added")

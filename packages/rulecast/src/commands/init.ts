@@ -31,6 +31,8 @@ import { findRoot, hasProject } from "./project"
 import { UsageError } from "./usage"
 
 /** The rule catalog: the rulecast repository itself (spec §4, Rule repos). RULECAST_CATALOG overrides it. */
+const NO_HOOKS = "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>."
+
 export const DEFAULT_CATALOG = "https://github.com/syv-ai/rulecast"
 
 const SCOPES: readonly InstallScope[] = ["shared", "personal"]
@@ -286,13 +288,6 @@ async function chooseAgents(detection: Detection, flags: Flags, ui: Ui): Promise
     })
     chosen = installable().filter((adapter) => names.includes(adapter.name))
   }
-  if (chosen.length === 0) {
-    ui.say(
-      "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>.",
-      "Agents",
-    )
-  }
-
   const agents: AgentChoice[] = []
   for (const adapter of chosen) {
     let scope: InstallScope = flags.scope ?? "shared"
@@ -370,9 +365,11 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
     },
   )
 
-  if (changes.length === 0) ui.say("Nothing to change.", "Review")
+  // Said in the Review, where the developer decides: with no hooks, rulecast does nothing in the agent.
+  const noHooks = agents.length === 0 ? [NO_HOOKS] : []
+  if (changes.length === 0) ui.say(["Nothing to change.", ...noHooks].join("\n"), "Review")
   else {
-    ui.say(reviewText(changes), "Review")
+    ui.say([reviewText(changes), ...noHooks].join("\n"), "Review")
     if (ui.prompter !== null) {
       if (!(await ui.prompter.confirm({ message: "Write?", initialValue: true }))) {
         ui.prompter.outro("Nothing written.")

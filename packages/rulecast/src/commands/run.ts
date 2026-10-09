@@ -167,7 +167,7 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
   const meteredKinds = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
   const skipped = skipMetered
     ? project.rules
-        .filter((rule) => rule.detector !== null && meteredKinds.has(rule.detector.kind))
+        .filter((rule) => rule.enabled && rule.detector !== null && meteredKinds.has(rule.detector.kind))
         .filter((rule) => ruleId === null || rule.id === ruleId)
         .filter((rule) => rule.stages.includes("verify") && selected.files.some((file) => rule.matches(file)))
         .map((rule) => rule.id)

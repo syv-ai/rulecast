@@ -130,9 +130,31 @@ describe("rulecast init --yes", () => {
     const result = await runCli(root, ["init", "--no-rules", "--no-agents", "--yes"], "", env)
     expect(result.code).toBe(0)
     expect(existsSync(path.join(root, ".claude"))).toBe(false)
-    expect(result.stdout).toContain(
-      "No agent hooks: rulecast will not run in your agent until you run rulecast install",
-    )
+    // In the Review, where the developer decides, not in a step they have already passed.
+    const review = result.stdout.indexOf("Review")
+    expect(review).toBeGreaterThan(-1)
+    expect(
+      result.stdout.indexOf("No agent hooks: rulecast will not run in your agent until you run rulecast install"),
+    ).toBeGreaterThan(review)
+  })
+
+  test("re-running init upgrades rulecast's own hooks from an older command", async () => {
+    const OLD = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const root = await createRepo({ "app/services/users.py": "x = 1\n", "node_modules/.bin/rulecast": "" })
+    await runCli(root, ["init", "--no-rules", "--agent", "claude-code", "--yes"], "", env)
+    const file = path.join(root, ".claude", "settings.json")
+    const settings = JSON.parse(await readFile(file, "utf8"))
+    for (const groups of Object.values(settings.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = OLD
+    }
+    await writeFile(file, JSON.stringify(settings))
+
+    const result = await runCli(root, ["init", "--no-rules", "--agent", "claude-code", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("~7 hooks updated (Claude Code)")
+    const after = JSON.parse(await readFile(file, "utf8"))
+    expect(after.hooks.Stop[0].hooks[0].command).not.toBe(OLD)
+    expect(after.hooks.Stop).toHaveLength(1)
   })
 
   test("an unreachable catalog is skipped with a warning", async () => {
