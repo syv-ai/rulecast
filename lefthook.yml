@@ -2,10 +2,20 @@
 pre-commit:
   parallel: true
   jobs:
-    - name: biome
-      glob: "*.{js,mjs,cjs,ts,json,jsonc}"
-      run: pnpm exec biome check --write --error-on-warnings --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
-      stage_fixed: true
+    # rulecast reads the index, and biome's stage_fixed restages what it fixes: piped, so rulecast
+    # judges the fixed content rather than racing biome for the index.
+    - name: fix-then-check
+      group:
+        piped: true
+        jobs:
+          - name: biome
+            glob: "*.{js,mjs,cjs,ts,json,jsonc}"
+            run: pnpm exec biome check --write --error-on-warnings --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+            stage_fixed: true
+          # rulecast on rulecast, from source: node_modules/.bin/rulecast runs dist/, which can be
+          # stale or missing (installed before built).
+          - name: rulecast
+            run: packages/rulecast/node_modules/.bin/tsx packages/rulecast/src/cli.ts run
     - name: typecheck
       glob: "*.ts"
       run: pnpm typecheck

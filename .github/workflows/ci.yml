@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # rulecast run --from-ref needs the merge base with the target branch.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -26,6 +29,11 @@ jobs:
       - run: pnpm manifest --check
       - run: pnpm readme --check
       - run: pnpm sync-version --check
+      # rulecast on rulecast: what this pull request changed, judged against its merge base.
+      - run: pnpm build
+        if: github.event_name == 'pull_request'
+      - run: node packages/rulecast/dist/cli.js run --from-ref origin/${{ github.base_ref }}
+        if: github.event_name == 'pull_request'
 
   test:
     runs-on: ubuntu-latest
