@@ -113,4 +113,16 @@ describe("pipeline: detector errors are summarised at the source", () => {
     expect(delivery.warnings).toHaveLength(2)
     for (const text of delivery.warnings) expect(text).toContain("Disabled for this session.")
   })
+
+  test("without a session nothing is disabled for later, and the warning says what happened instead", async () => {
+    const few = await repoWith(missingCommand(2))
+    const { delivery } = await send(few, { kind: "verify", files: ["src/app.ts"] })
+    for (const text of delivery.warnings) {
+      expect(text).toContain("Skipped for this run.")
+      expect(text).not.toContain("session")
+    }
+    const many = await repoWith(missingCommand(5))
+    const summary = await send(many, { kind: "verify", files: ["src/app.ts"] })
+    expect(summary.delivery.warnings[0]).toMatch(/^5 command rules were skipped in this run — see debug\.log\.\n/)
+  })
 })

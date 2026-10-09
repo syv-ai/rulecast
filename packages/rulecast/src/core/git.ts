@@ -70,10 +70,30 @@ export async function fileInIndex(cwd: string, file: string): Promise<string | n
   return result.ok ? result.stdout : null
 }
 
+/** Whether this clone has only part of the history, as `actions/checkout` gives by default. */
+export async function isShallow(cwd: string): Promise<boolean> {
+  const result = await git(cwd, ["rev-parse", "--is-shallow-repository"])
+  return result.ok && result.stdout.trim() === "true"
+}
+
+const FETCH_HISTORY = "fetch full history (actions/checkout: fetch-depth: 0)"
+
+/**
+ * The merge base of `ref` and `other`. When there is none, the error says why and what to do: the
+ * usual cause is CI's shallow checkout, where git's own message is either about a ref that was
+ * never fetched or nothing at all.
+ */
 export async function mergeBase(cwd: string, ref: string, other = "HEAD"): Promise<string> {
   const result = await git(cwd, ["merge-base", other, ref])
-  if (!result.ok) throw new Error(`cannot find merge base with ${ref}: ${result.stderr.trim()}`)
-  return result.stdout.trim()
+  if (result.ok) return result.stdout.trim()
+  const shallow = await isShallow(cwd)
+  const resolves = (await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).ok
+  if (!resolves) {
+    throw new Error(`"${ref}" is not a commit here${shallow ? `; this is a shallow clone: ${FETCH_HISTORY}` : ""}`)
+  }
+  if (shallow) throw new Error(`no merge base with ${ref} in a shallow clone: ${FETCH_HISTORY}`)
+  const detail = result.stderr.trim()
+  throw new Error(`no merge base with ${ref}${detail ? `: ${detail}` : ": the histories are unrelated"}`)
 }
 
 /** Files that exist now and differ from `commit`: committed, uncommitted and untracked. Sorted. */

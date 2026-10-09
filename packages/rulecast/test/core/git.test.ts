@@ -43,7 +43,7 @@ describe("git helpers", () => {
 
   test("mergeBase with an unknown ref throws", async () => {
     const root = await createRepo({ "a.ts": "a\n" })
-    await expect(mergeBase(root, "does-not-exist")).rejects.toThrow(/cannot find merge base with does-not-exist/)
+    await expect(mergeBase(root, "does-not-exist")).rejects.toThrow('"does-not-exist" is not a commit here')
   })
 
   test("allFiles lists tracked and untracked files but not ignored ones", async () => {
@@ -92,5 +92,40 @@ describe("git helpers", () => {
     } finally {
       process.env = saved
     }
+  })
+})
+
+/** The DX review's reproduction (plan 10, H4): CI's default checkout is one commit deep. */
+describe("mergeBase errors say what to do", () => {
+  async function shallowFeatureClone(): Promise<string> {
+    const origin = await createRepo({ "a.ts": "a\n" })
+    await git(origin, "checkout", "-q", "-b", "feature")
+    await writeFile(path.join(origin, "a.ts"), "a2\n")
+    await git(origin, "commit", "-qam", "feature")
+    const clone = await createProject({})
+    await git(clone, "clone", "-q", "--depth", "1", "--branch", "feature", `file://${origin}`, ".")
+    return clone
+  }
+
+  test("a ref a shallow clone never fetched names the fix", async () => {
+    const clone = await shallowFeatureClone()
+    await expect(mergeBase(clone, "origin/main")).rejects.toThrow(
+      '"origin/main" is not a commit here; this is a shallow clone: fetch full history (actions/checkout: fetch-depth: 0)',
+    )
+  })
+
+  test("a fetched ref with no merge base in a shallow clone names the fix, never an empty tail", async () => {
+    const clone = await shallowFeatureClone()
+    await git(clone, "fetch", "-q", "--depth", "1", "origin", "main:refs/remotes/origin/main")
+    await expect(mergeBase(clone, "origin/main")).rejects.toThrow(
+      "no merge base with origin/main in a shallow clone: fetch full history (actions/checkout: fetch-depth: 0)",
+    )
+  })
+
+  test("a typo in a full clone says the ref is not a commit, without the shallow advice", async () => {
+    const root = await createRepo({ "a.ts": "a\n" })
+    const error = await mergeBase(root, "mian").catch((caught: Error) => caught)
+    expect(String(error)).toContain('"mian" is not a commit here')
+    expect(String(error)).not.toContain("shallow")
   })
 })

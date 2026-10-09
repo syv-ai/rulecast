@@ -112,9 +112,14 @@ function compileWarnings(errors: readonly Diagnostic[]): Warning[] {
  * Detector errors, collapsed per kind above the threshold: one detector that fails disables every
  * rule that uses it, and a dozen copies of the same sentence tell the agent nothing the count does not.
  */
-function detectorWarnings(errors: readonly { kind: string; rules: string[]; message: string }[]): Warning[] {
+function detectorWarnings(
+  errors: readonly { kind: string; rules: string[]; message: string }[],
+  /** Whether a session will remember the disable. A CLI run has none, so it says what it did. */
+  scope: "session" | "run",
+): Warning[] {
+  const outcome = scope === "session" ? "Disabled for this session." : "Skipped for this run."
   const text = (error: { kind: string; rules: string[]; message: string }) =>
-    `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. Disabled for this session.`
+    `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. ${outcome}`
   const byKind = new Map<string, { kind: string; rules: string[]; message: string }[]>()
   for (const error of errors) {
     const group = byKind.get(error.kind)
@@ -135,7 +140,7 @@ function detectorWarnings(errors: readonly { kind: string; rules: string[]; mess
     const ids = group.flatMap((error) => error.rules)
     summarised.push({
       key: summaryKey(`detector:${kind}`, ids),
-      text: `${ids.length} ${kind} rules were disabled this session — see debug.log.\nFirst: ${text(group[0]!)}`,
+      text: `${ids.length} ${kind} rules ${scope === "session" ? "were disabled this session" : "were skipped in this run"} — see debug.log.\nFirst: ${text(group[0]!)}`,
     })
   }
   return summarised
@@ -355,7 +360,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       for (const rule of error.rules) workRecords.push({ t: "disabled", rule, reason: error.message })
     }
     // Every one of them is in the debug log above, which is where the summary points.
-    warnings.push(...detectorWarnings(output.errors))
+    warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
     // failure, so it must not change the exit code.
     for (const { kind, max, setting, skipped } of overBudget) {
