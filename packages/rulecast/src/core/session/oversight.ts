@@ -23,8 +23,15 @@ export function notices(input: {
   ignored: readonly { rule: string; match: Match; reason: string; status: "new" | "preexisting" }[]
   /** Keys already told this session: each change is told once, not at every Stop after it. */
   told: ReadonlySet<string>
+  /** Protected files the agent changed with its shell (Delivery.refused). Default: none. */
+  refused?: readonly { file: string; rule: string }[]
 }): Notice[] {
   const out: Notice[] = []
+  for (const { file, rule } of input.refused ?? []) {
+    const key = `refused:${rule}:${file}`
+    if (input.told.has(key)) continue
+    out.push({ key, text: `rulecast: the agent changed a protected file with Bash: ${file} (${rule})` })
+  }
   const configKey = `config:${input.currentConfigHash ?? "gone"}`
   if (
     input.startConfigHash !== null &&

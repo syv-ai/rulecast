@@ -29,6 +29,28 @@ describe("gate: files changed outside the agent's tool calls", () => {
   })
 })
 
+describe("gate: refuse_write under the shell", () => {
+  const protectedFinding = (file: string) => ({
+    rule: rule({ id: "client/generated", severity: "warning", refuseWrite: true }),
+    match: at(file, 1),
+    status: "new" as const,
+  })
+  const workWith = (via: "tool" | "shell") => ({ ...emptyWork(), editedVia: new Map([["api.ts", via]]) })
+
+  test("a warning blocks when the file was changed with the shell", () => {
+    expect(gate([protectedFinding("api.ts")], workWith("shell"), "main", 3).stop).toBe("block")
+  })
+
+  test("the stop-block cap applies as for any block", () => {
+    const work = { ...workWith("shell"), stopBlocks: new Map([["main", 3]]) }
+    expect(gate([protectedFinding("api.ts")], work, "main", 3).stop).toBe("capReached")
+  })
+
+  test("changed by an edit tool, the same warning does not block: the guard had its chance", () => {
+    expect(gate([protectedFinding("api.ts")], workWith("tool"), "main", 3).stop).toBe("allow")
+  })
+})
+
 describe("decide at a stop with swept files", () => {
   const input = {
     agent: "main",

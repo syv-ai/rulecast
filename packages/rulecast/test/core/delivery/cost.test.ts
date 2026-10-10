@@ -108,6 +108,13 @@ describe("deliveryCost", () => {
     )
   })
 
+  test("what to undo in a protected file costs what it prints", () => {
+    for (const dirtyAtStart of [false, true]) {
+      const refused = { file: "src/client/api.ts", rule: "frontend/generated", dirtyAtStart }
+      expect(deliveryCost.refused(refused)).toBe(added(base, { refused: [refused] }))
+    }
+  })
+
   test("the overflow notice, with the longest path it allows for", () => {
     const path = `/${"p".repeat(191)}`
     const notice = added({ ...base, omitted: { ...base.omitted, rules: 12 } }, { overflowPath: path })

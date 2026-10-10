@@ -213,12 +213,12 @@ export function treeChanges(
 
 **Behaviour:** A finding of a `refuse_write` rule in a file changed through Bash is told at once with revert advice, blocks Stop while it is new whatever the rule's severity, and gives the user one notice.
 
-- [ ] `gate()`: a new finding whose rule has `refuseWrite` and whose file has `editedVia === "shell"` blocks, at any severity. The stop-block cap applies as for any block.
-- [ ] `Delivery` gains `refused?: { file: string; rule: string; dirtyAtStart: boolean }[]`: the pipeline fills it for each new finding of a `refuseWrite` rule in a file with `editedVia === "shell"`, calling `dirtyAtStart(work, file)`. The renderer and `notices` read only that.
-- [ ] Render: the rule's message and section, and `This file is protected; revert your change.` followed by `git checkout -- <file>` when `dirtyAtStart` is false, or `It had uncommitted changes before this session: undo only your change, not the whole file.` when true. Golden `shell-refused`.
-- [ ] `notices`: `rulecast: the agent changed a protected file with Bash: <file> (<rule>)`, keyed once per file and rule, with the existing `noticed` records.
-- [ ] Tests: a `path` rule on `src/client/` with `refuse_write`, file changed by Bash → told at once, Stop blocks, the user gets the notice; reverted with `git checkout` → the next Stop allows; a dirty-at-start protected file → the "undo only your change" advice; the same file changed by `Edit` → the existing guard path, unchanged.
-- [ ] Verify: the three test files → pass. Commit.
+- [x] `gate()`: a new finding whose rule has `refuseWrite` and whose file has `editedVia === "shell"` blocks, at any severity. The stop-block cap applies as for any block.
+- [x] `Delivery` gains `refused?: { file: string; rule: string; dirtyAtStart: boolean }[]`: the pipeline fills it for each new finding of a `refuseWrite` rule in a file with `editedVia === "shell"`, calling `dirtyAtStart(work, file)`. The renderer and `notices` read only that.
+- [x] Render: the rule's message and section, and `This file is protected; revert your change.` followed by `git checkout -- <file>` when `dirtyAtStart` is false, or `It had uncommitted changes before this session: undo only your change, not the whole file.` when true. Golden `shell-refused`.
+- [x] `notices`: `rulecast: the agent changed a protected file with Bash: <file> (<rule>)`, keyed once per file and rule, with the existing `noticed` records.
+- [x] Tests: a `path` rule on `src/client/` with `refuse_write`, file changed by Bash → told at once, Stop blocks, the user gets the notice; reverted with `git checkout` → the next Stop allows; a dirty-at-start protected file → the "undo only your change" advice; the same file changed by `Edit` → the existing guard path, unchanged.
+- [x] Verify: the three test files → pass. Commit.
 
 ## Task 9: what it costs
 

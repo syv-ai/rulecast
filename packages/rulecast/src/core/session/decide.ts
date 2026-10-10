@@ -43,6 +43,8 @@ export interface DecideInput {
   via?: "shell"
   /** Files changed outside the agent's tool calls, verified at this stop: reported, never blocking. */
   swept?: readonly string[]
+  /** Protected files the agent changed with its shell (Delivery.refused). */
+  refused?: Delivery["refused"]
 }
 
 export interface Decision {
@@ -165,6 +167,8 @@ export interface AssembleInput {
   via?: "shell"
   /** Default: none. */
   swept?: readonly string[]
+  /** Default: none. */
+  refused?: Delivery["refused"]
 }
 
 /**
@@ -201,6 +205,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   const swept = new Set(input.swept ?? [])
   const sweptWithFindings = [...new Set(fresh.map(({ match }) => match.file))].filter((file) => swept.has(file))
   if (sweptWithFindings.length > 0) delivery.swept = sweptWithFindings.sort()
+  if ((input.refused ?? []).length > 0) delivery.refused = [...(input.refused ?? [])]
   for (const { rule } of fresh) if (rule.message !== null) delivery.templates[rule.id] = rule.message
   const summaries = new Map<string, { rule: string; file: string; count: number }>()
   for (const { rule, match, status } of input.findings) {
@@ -318,7 +323,9 @@ export function trim(
       delivery.via,
     ) +
     (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0) +
-    (swept.size > 0 ? deliveryCost.sweptFrame : 0)
+    (swept.size > 0 ? deliveryCost.sweptFrame : 0) +
+    // Never cut: what to undo is the one thing the agent must not miss.
+    (delivery.refused ?? []).reduce((sum, refused) => sum + deliveryCost.refused(refused), 0)
   const fits = (size: number) => limit === null || used + size <= limit
   const kept = new Map<string, Finding[]>()
   // A reference costs its line whatever its state: one whose content does not fit is not dropped,
@@ -515,7 +522,12 @@ export function gate(
   swept: ReadonlySet<string> = new Set(),
 ): { stop: Exclude<Delivery["stop"], null>; work: WorkRecord[] } {
   const blocking = fresh.filter(({ match }) => !swept.has(match.file))
-  if (!blocking.some(({ rule }) => rule.severity === "error")) return { stop: "allow", work: [] }
+  // A protected file changed with the shell could not be refused before the write, so it blocks
+  // until it is reverted, whatever the rule's severity.
+  const refused = ({ rule, match }: ClassifiedFinding) => rule.refuseWrite && work.editedVia.get(match.file) === "shell"
+  if (!blocking.some((finding) => finding.rule.severity === "error" || refused(finding))) {
+    return { stop: "allow", work: [] }
+  }
   if ((work.stopBlocks.get(agent) ?? 0) < maxBlocks) return { stop: "block", work: [{ t: "stopBlock", agent }] }
   return { stop: "capReached", work: [] }
 }

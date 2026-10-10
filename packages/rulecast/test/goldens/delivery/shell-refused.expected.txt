@@ -1,0 +1,11 @@
+rulecast: 1 rule violated in files changed by your Bash command
+
+warning frontend/no-generated-edits
+  src/client/api.ts is generated. Regenerate it instead of editing.
+  src/client/types.ts is generated. Regenerate it instead of editing.
+
+src/client/api.ts (frontend/no-generated-edits): This file is protected; revert your change.
+  git checkout -- src/client/api.ts
+
+src/client/types.ts (frontend/no-generated-edits): This file is protected; revert your change.
+  It had uncommitted changes before this session: undo only your change, not the whole file.

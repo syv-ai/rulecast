@@ -24,6 +24,28 @@ describe("notices", () => {
     ).toHaveLength(1)
   })
 
+  test("a protected file the agent changed with Bash is told once per file and rule", () => {
+    const refused = [
+      { file: "src/client/api.ts", rule: "frontend/generated" },
+      { file: "src/client/types.ts", rule: "frontend/generated" },
+    ]
+    const told = notices({ startConfigHash: null, currentConfigHash: null, ignored: [], told: new Set(), refused })
+    expect(told.map((notice) => notice.text)).toEqual([
+      "rulecast: the agent changed a protected file with Bash: src/client/api.ts (frontend/generated)",
+      "rulecast: the agent changed a protected file with Bash: src/client/types.ts (frontend/generated)",
+    ])
+    const again = notices({
+      startConfigHash: null,
+      currentConfigHash: null,
+      ignored: [],
+      told: new Set([told[0]!.key]),
+      refused,
+    })
+    expect(again.map((notice) => notice.text)).toEqual([
+      "rulecast: the agent changed a protected file with Bash: src/client/types.ts (frontend/generated)",
+    ])
+  })
+
   test("an unchanged config, or a store older than the check, says nothing", () => {
     expect(notices({ startConfigHash: "a", currentConfigHash: "a", ignored: [], told: new Set() })).toEqual([])
     expect(notices({ startConfigHash: null, currentConfigHash: "b", ignored: [], told: new Set() })).toEqual([])

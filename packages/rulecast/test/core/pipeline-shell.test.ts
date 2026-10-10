@@ -3,10 +3,12 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { readBaseline } from "../../src/core/baseline/store"
+import { renderAgentText } from "../../src/core/delivery/render-agent"
 import { openSession, sessionDir } from "../../src/core/session/session"
 import { type Event, emptyDelivery } from "../../src/core/types"
-import { createFixture, fixtureFiles } from "../helpers/fixture"
-import { git } from "../helpers/git"
+import { localConfig } from "../helpers/config"
+import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
+import { createRepo, git } from "../helpers/git"
 import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -314,5 +316,74 @@ describe("the Stop sweep", () => {
     const stop = await session.send({ kind: "verify", files: [] })
     expect(stop.stop).toBe("block")
     expect(stop.swept).toBeUndefined()
+  })
+})
+
+describe("refuse_write under Bash", () => {
+  const GENERATED = "frontend/no-generated-edits"
+  /** The fixture, with its generated-client rule (a warning) made to refuse writes. */
+  const createProtected = () =>
+    createRepo({
+      ...fixtureFiles,
+      ".rulecast-config.yaml": localConfig(
+        fixtureRules.map((rule) => (rule.id === GENERATED ? { ...rule, refuse_write: true } : rule)),
+      ),
+    })
+
+  test("told at once with what to undo, blocks Stop at any severity, and the user hears of it", async () => {
+    const root = await createProtected()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(() => session.write(API, "export const api = 2\n"))
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false }])
+    const text = renderAgentText(call, { maxMatchesPerRule: 10 })
+    expect(text).toContain(`${API} (${GENERATED}): This file is protected; revert your change.`)
+    expect(text).toContain(`git checkout -- ${API}`)
+    expect(call.notices).toEqual([`rulecast: the agent changed a protected file with Bash: ${API} (${GENERATED})`])
+
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("block")
+    expect(stop.refused).toEqual(call.refused)
+    // Told once: not again at the stop.
+    expect(stop.notices ?? []).toEqual([])
+  })
+
+  test("reverted with git checkout: the next Stop allows", async () => {
+    const root = await createProtected()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(() => session.write(API, "export const api = 2\n"))
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("block")
+    const revert = await session.shell(() => git(root, "checkout", "--", API))
+    expect(revert.refused).toBeUndefined()
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("allow")
+  })
+
+  test("a protected file dirty at start: undo only the agent's change, not the whole file", async () => {
+    const root = await createProtected()
+    const session = sessionAt(root)
+    await session.write(API, "export const api = 1\nexport const users = 1\n")
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(() =>
+      session.write(API, "export const api = 1\nexport const users = 1\nexport const agent = 1\n"),
+    )
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: true }])
+    const text = renderAgentText(call, { maxMatchesPerRule: 10 })
+    expect(text).toContain("It had uncommitted changes before this session: undo only your change, not the whole file.")
+    expect(text).not.toContain("git checkout")
+  })
+
+  test("the same file changed by Edit takes the existing guard path, unchanged", async () => {
+    const root = await createProtected()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const guard = await session.send({
+      kind: "guard",
+      files: [API],
+      intent: { edit: { find: "export const api = 1", replace: "export const api = 2", all: false } },
+    })
+    expect(guard.findings.map((finding) => finding.rule)).toEqual([GENERATED])
+    expect(guard.refused).toBeUndefined()
   })
 })

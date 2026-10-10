@@ -42,6 +42,12 @@ const SWEPT_HEADING =
   "changed outside your tool calls (fix them if a process you started made them; they do not block):"
 /** Prefixes a swept block's key in the budget, which groups by block (decide.ts): no rule id contains it. */
 export const SWEPT_BLOCK = "\0swept:"
+const PROTECTED = "This file is protected; revert your change."
+const DIRTY_ADVICE = "It had uncommitted changes before this session: undo only your change, not the whole file."
+const refusedLines = (refused: NonNullable<Delivery["refused"]>[number]) => [
+  `${refused.file} (${refused.rule}): ${PROTECTED}`,
+  `  ${refused.dirtyAtStart ? DIRTY_ADVICE : `git checkout -- ${refused.file}`}`,
+]
 /** Said in the title of a delivery for files the agent's shell command changed, not its edit tools. */
 const SHELL_TRIGGER = "changed by your Bash command"
 
@@ -263,6 +269,10 @@ export const deliveryCost = {
   referenceContent(ref: string, content: string, location: string | undefined): number {
     return linesCost(referenceLines({ ref, state: "full", content })) - deliveryCost.referenceLine(ref, location)
   },
+  /** What to undo for one protected file changed with the shell, and the blank line after it. */
+  refused(refused: NonNullable<Delivery["refused"]>[number]): number {
+    return linesCost([...refusedLines(refused), ""])
+  },
   /** The heading over findings in swept files, once. */
   sweptFrame: linesCost([SWEPT_HEADING]),
   /** The blank line that closes the references, once. */
@@ -317,6 +327,8 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
     delivery.findings.filter((finding) => !swept.has(finding.file)),
     false,
   )
+  // Right after the findings that explain them: what to undo, and how.
+  for (const refused of delivery.refused ?? []) out.push(...refusedLines(refused), "")
   const outside = delivery.findings.filter((finding) => swept.has(finding.file))
   if (outside.length > 0) {
     out.push(SWEPT_HEADING)

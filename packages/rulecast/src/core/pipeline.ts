@@ -22,7 +22,7 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
-import { emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
+import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
@@ -262,6 +262,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let via: "shell" | undefined
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
+  const refused: NonNullable<Delivery["refused"]> = []
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -446,17 +447,32 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     ignored = output.ignored
-    if (options.stopGate === true && event.kind === "verify" && session !== null) {
+    // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
+    // what to undo, because nothing could refuse the write before it happened.
+    const shellEdited = (file: string) =>
+      via === "shell" ? requested.includes(file) : view.work.editedVia.get(file) === "shell"
+    const seen = new Set<string>()
+    for (const { rule, match, status } of findings) {
+      if (status !== "new" || !rule.refuseWrite || !shellEdited(match.file)) continue
+      if (seen.has(`${rule.id} ${match.file}`)) continue
+      seen.add(`${rule.id} ${match.file}`)
+      refused.push({ file: match.file, rule: rule.id, dirtyAtStart: dirtyAtStart(view.work, match.file) })
+    }
+    const atStop = options.stopGate === true && event.kind === "verify" && session !== null
+    if (session !== null && (atStop || refused.length > 0)) {
       told = notices({
-        startConfigHash: baseline.startConfigHash ?? null,
-        currentConfigHash: await configHash(root),
-        ignored: ignored.map(({ rule, match, reason }) => ({
-          rule: rule.id,
-          match,
-          reason,
-          status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
-        })),
+        startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
+        currentConfigHash: atStop ? await configHash(root) : null,
+        ignored: atStop
+          ? ignored.map(({ rule, match, reason }) => ({
+              rule: rule.id,
+              match,
+              reason,
+              status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
+            }))
+          : [],
         told: view.work.noticed,
+        refused,
       })
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
@@ -531,6 +547,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
+    ...(refused.length === 0 ? {} : { refused }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.

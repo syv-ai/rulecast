@@ -1,0 +1,47 @@
+{
+  "about": "A refuse_write rule's finding in files the agent changed with Bash: after the finding, what to undo — git checkout for a file clean at session start, only its own change for one the user had changed.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "frontend/no-generated-edits",
+        "severity": "warning",
+        "status": "new",
+        "file": "src/client/api.ts",
+        "line": 1,
+        "column": 1,
+        "message": "src/client/api.ts is generated. Regenerate it instead of editing.",
+        "count": 1
+      },
+      {
+        "rule": "frontend/no-generated-edits",
+        "severity": "warning",
+        "status": "new",
+        "file": "src/client/types.ts",
+        "line": 1,
+        "column": 1,
+        "message": "src/client/types.ts is generated. Regenerate it instead of editing.",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null,
+    "via": "shell",
+    "refused": [
+      { "file": "src/client/api.ts", "rule": "frontend/no-generated-edits", "dirtyAtStart": false },
+      { "file": "src/client/types.ts", "rule": "frontend/no-generated-edits", "dirtyAtStart": true }
+    ]
+  }
+}
