@@ -42,7 +42,7 @@ describe("planInit", () => {
         file: ".claude/settings.json",
         content: merged({}),
         created: true,
-        summary: "+10 hooks (Claude Code)",
+        summary: "+11 hooks (Claude Code)",
         commit: true,
       },
     ])
@@ -63,7 +63,7 @@ describe("planInit", () => {
         file: ".claude/settings.local.json",
         content: merged(existing, true),
         created: false,
-        summary: "+10 hooks (Claude Code)",
+        summary: "+11 hooks (Claude Code)",
         commit: false,
       },
     ])

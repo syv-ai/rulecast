@@ -93,6 +93,39 @@ describe("decide at a stop with swept files", () => {
     }
   })
 
+  test("the floor keeps the agent's own blocks before swept ones, and counts rules, not blocks", async () => {
+    /** Every limit at which exactly one of the two blocks fits. */
+    const oneBlockFits = async (findings: ReturnType<typeof finding>[]) => {
+      const decisions = []
+      for (let limit = 100; limit <= 2000; limit += 10) {
+        const decision = await decide({ ...input, findings, swept: ["user.py"], maxContextChars: limit })
+        if (decision.delivery.findings.length === 1) decisions.push(decision)
+      }
+      expect(decisions.length).toBeGreaterThan(0)
+      return decisions
+    }
+
+    // Blocks long enough that one fits where two do not, beside the overflow notice.
+    const long = (file: string, id: string) => ({
+      rule: rule({ id, message: `{{file}}:{{line}} ${"explains the convention at length. ".repeat(12)}` }),
+      match: at(file, 1),
+      status: "new" as const,
+    })
+    // Swept findings first in input order: the floor must still keep the blocking rule.
+    for (const own of await oneBlockFits([long("user.py", "a/swept"), long("mine.py", "b/mine")])) {
+      expect(own.delivery.stop).toBe("block")
+      expect(own.delivery.findings.map((one) => one.file)).toEqual(["mine.py"])
+      expect(own.delivery.omitted.rules).toBe(1)
+    }
+
+    // One rule on both sides, only its own block fitting: no rule was cut, though a block was.
+    for (const decision of await oneBlockFits([long("mine.py", "a/rule"), long("user.py", "a/rule")])) {
+      expect(decision.delivery.findings.map((one) => one.file)).toEqual(["mine.py"])
+      expect(decision.delivery.omitted.rules).toBe(0)
+      expect(decision.overflow).not.toBeNull()
+    }
+  })
+
   test("only swept files with findings are named on the delivery", async () => {
     const decision = await decide({
       ...input,

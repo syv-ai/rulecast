@@ -128,9 +128,11 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
       // A background task finishing also submits a prompt; only the user's own prompts reset the stop gate.
       return result(prompt?.startsWith("<task-notification>") ? null : "prompt")
     case "SessionStart":
-      // clear and fork arrive with a new session id, so their stores are already empty.
       if (source === "compact") return result("reset")
       if (source === "startup" || source === "resume") return { ...result("start"), warmup: true }
+      // clear and fork arrive with a new session id and empty stores: a session of their own, whose
+      // dirty files need their start snapshots like any other. Warm-up already ran at startup.
+      if (source === "clear" || source === "fork") return result("start")
       return result(null)
     default:
       return result(null)

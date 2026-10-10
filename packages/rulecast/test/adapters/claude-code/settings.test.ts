@@ -23,7 +23,10 @@ describe("Claude Code settings: mergeHooks", () => {
           Stop: [{ hooks: [hook(70)] }],
           SubagentStop: [{ hooks: [hook(70)] }],
           UserPromptSubmit: [{ hooks: [hook(5)] }],
-          SessionStart: [{ matcher: "startup|resume|compact", hooks: [hook(5)] }],
+          SessionStart: [
+            { matcher: "startup|resume|compact", hooks: [hook(5)] },
+            { matcher: "clear|fork", hooks: [hook(5)] },
+          ],
         },
       },
       added: [
@@ -37,6 +40,7 @@ describe("Claude Code settings: mergeHooks", () => {
         "SubagentStop",
         "UserPromptSubmit",
         "SessionStart (startup|resume|compact)",
+        "SessionStart (clear|fork)",
       ],
       updated: [],
     })
@@ -111,6 +115,7 @@ describe("Claude Code settings: removeHooks", () => {
         "SubagentStop",
         "UserPromptSubmit",
         "SessionStart (startup|resume|compact)",
+        "SessionStart (clear|fork)",
       ],
     })
   })

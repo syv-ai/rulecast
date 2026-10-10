@@ -1,5 +1,5 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
-import type { Adapter, Delivery, Event } from "../../core/types"
+import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
 import { parseClaudeCode } from "./parse"
 import { mergeHooks, removeHooks } from "./settings"
 
@@ -129,8 +129,18 @@ export const claudeCodeAdapter: Adapter = {
         }
         // Findings in files changed outside the agent's tool calls never block, and a Stop hook
         // reaches the agent only by blocking: the user is the one left to tell.
+        // Only those findings: the agent's own warnings were told at its edits and are not news here.
         if ((delivery.swept ?? []).length > 0) {
-          const outside = withinLimit(`${SWEPT_PREAMBLE}\n\n${text}`, delivery, event)
+          const swept = new Set(delivery.swept)
+          const onlySwept: Delivery = {
+            ...emptyDelivery(),
+            findings: delivery.findings.filter((finding) => swept.has(finding.file)),
+            templates: delivery.templates,
+            omitted: { ...delivery.omitted, findings: delivery.omitted.findings.filter((cut) => cut.swept === true) },
+            swept: delivery.swept,
+          }
+          const sweptText = renderAgentText(onlySwept, { ...options, notices: false, warnings: false })
+          const outside = withinLimit(`${SWEPT_PREAMBLE}\n\n${sweptText}`, delivery, event)
           return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
         }
         return notices === "" ? NONE : json({ systemMessage: notices })

@@ -151,7 +151,7 @@ describe("rulecast init --yes", () => {
 
     const result = await runCli(root, ["init", "--no-rules", "--agent", "claude-code", "--yes"], "", env)
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain("~10 hooks updated (Claude Code)")
+    expect(result.stdout).toContain("~11 hooks updated (Claude Code)")
     const after = JSON.parse(await readFile(file, "utf8"))
     expect(after.hooks.Stop[0].hooks[0].command).not.toBe(OLD)
     expect(after.hooks.Stop).toHaveLength(1)
@@ -189,7 +189,7 @@ describe("rulecast init without a terminal", () => {
     const result = await runCli(root, ["init"], "", env)
     expect(result.code).toBe(2)
     expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 4 rules from .+@v0\.2\.0\n/)
-    expect(result.stdout).toContain(".claude/settings.json  +10 hooks (Claude Code)")
+    expect(result.stdout).toContain(".claude/settings.json  +11 hooks (Claude Code)")
     expect(result.stdout).toContain("Rerun with --yes")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)

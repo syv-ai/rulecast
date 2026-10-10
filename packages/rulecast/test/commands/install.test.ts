@@ -99,12 +99,15 @@ describe("rulecast install", () => {
       (group: { matcher: string }) => group.matcher !== "Bash",
     )
     delete settings.hooks.PostToolUseFailure
+    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(
+      (group: { matcher: string }) => group.matcher !== "clear|fork",
+    )
     await writeFile(path.join(root, PERSONAL), JSON.stringify(settings))
     expect(await hooksInstalled(root, claudeCodeAdapter, 60_000)).toBe(PERSONAL)
 
     const result = await runCli(root, ["install"])
     expect(result.stdout).toBe(
-      "installed Claude Code hooks in .claude/settings.local.json: PreToolUse (Bash), PostToolUse (Bash), PostToolUseFailure (Bash)\n",
+      "installed Claude Code hooks in .claude/settings.local.json: PreToolUse (Bash), PostToolUse (Bash), PostToolUseFailure (Bash), SessionStart (clear|fork)\n",
     )
     // Upgraded where it was, not installed a second time in the shared file.
     expect(existsSync(path.join(root, SHARED))).toBe(false)

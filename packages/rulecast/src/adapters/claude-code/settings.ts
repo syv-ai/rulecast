@@ -28,6 +28,9 @@ function hookGroups(verifyMs: number): { event: string; matcher?: string; timeou
     { event: "SubagentStop", timeout: verifyTimeout },
     { event: "UserPromptSubmit", timeout: 5 },
     { event: "SessionStart", matcher: "startup|resume|compact", timeout: 5 },
+    // A group of its own rather than a wider matcher on the one above: an older install's group
+    // would then no longer match, and upgrading it would leave two hooks firing on every startup.
+    { event: "SessionStart", matcher: "clear|fork", timeout: 5 },
   ]
 }
 

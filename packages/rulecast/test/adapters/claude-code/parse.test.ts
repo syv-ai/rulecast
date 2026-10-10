@@ -132,11 +132,21 @@ describe("Claude Code adapter: parse", () => {
     "subagent-stop.compaction",
     "pre-compact.manual",
     "user-prompt-submit.task-notification",
-    "session-start.clear",
-    "session-start.fork",
   ])("%s has no event", (name) => {
     expect(parse(name).parsed).toEqual({ cwd: "/project", event: null, warmup: false })
   })
+
+  test.each(["session-start.clear", "session-start.fork"])(
+    "%s → start, without warm-up: a new session id, whose dirty files need their snapshots",
+    (name) => {
+      const { payload, parsed } = parse(name)
+      expect(parsed).toEqual({
+        cwd: "/project",
+        event: { kind: "start", files: [], cwd: "/project", session: { id: payload.session_id } },
+        warmup: false,
+      })
+    },
+  )
 
   test.each(["session-start.startup", "session-start.startup.interactive", "session-start.resume"])(
     "%s → start, and starts warm-up",

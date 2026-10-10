@@ -27,6 +27,13 @@ describe("Claude Code adapter: format", () => {
     expect(Object.keys(output)).toEqual(["systemMessage"])
     expect(output.systemMessage).toContain("changed outside the agent's tool calls")
     expect(output.systemMessage).toContain(finding().message)
+    // Only the swept files' findings: the agent's own warnings were told at its edits.
+    const mine = finding({ file: "app/services/mine.py", severity: "warning", message: "mine.py warning" })
+    const mixed = JSON.parse(
+      format(delivery({ findings: [mine, finding()], swept: [finding().file], stop: "allow" }), "verify").stdout,
+    )
+    expect(mixed.systemMessage).toContain(finding().message)
+    expect(mixed.systemMessage).not.toContain("mine.py warning")
     // Without swept files an allowed stop stays silent, as before.
     expect(format(delivery({ findings: [finding()], stop: "allow" }), "verify").stdout).toBe("")
   })

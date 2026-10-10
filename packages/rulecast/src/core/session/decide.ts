@@ -304,8 +304,14 @@ export function trim(
   const swept = new Set(delivery.swept ?? [])
   const blockOf = (finding: Finding) => (swept.has(finding.file) ? `${SWEPT_BLOCK}${finding.rule}` : finding.rule)
   const ruleOf = (block: string) => (block.startsWith(SWEPT_BLOCK) ? block.slice(SWEPT_BLOCK.length) : block)
+  // The agent's own blocks first: the floor fills in this order, and a swept block, which never
+  // blocks, must not take the room a blocking one needs.
   const byRule = new Map<string, Finding[]>()
-  for (const finding of delivery.findings) {
+  const ordered = [
+    ...delivery.findings.filter((finding) => !swept.has(finding.file)),
+    ...delivery.findings.filter((finding) => swept.has(finding.file)),
+  ]
+  for (const finding of ordered) {
     const group = byRule.get(blockOf(finding))
     if (group === undefined) byRule.set(blockOf(finding), [finding])
     else group.push(finding)
@@ -344,7 +350,7 @@ export function trim(
 
   /** One pass at the floor. Returns what it spent, what it kept, and what it had no room for. */
   const floorWithin = (cap: number) => {
-    const spent = { chars: 0, kept: new Map<string, Finding[]>(), refs: new Set<string>(), dropped: 0 }
+    const spent = { chars: 0, kept: new Map<string, Finding[]>(), refs: new Set<string>(), dropped: new Set<string>() }
     const uncharged = (rule: CompiledRule) => [
       ...new Set(rule.context.map((spec) => spec.ref).filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref))),
     ]
@@ -355,7 +361,7 @@ export function trim(
         measureRuleBlock(ruleOf(id), [findings[0]!], findings, delivery.templates[ruleOf(id)], render) +
         refs.reduce((sum, ref) => sum + lineCost(ref), 0)
       if (used + spent.chars + size > cap) {
-        spent.dropped++
+        spent.dropped.add(id)
         continue
       }
       spent.chars += size
@@ -373,15 +379,19 @@ export function trim(
     return spent
   }
 
+  let droppedBlocks = 0
   if (limit !== null) {
     // Twice when the first pass overflows: the lines naming the overflow file are part of the floor
     // too, and only the first pass can say whether there will be any.
     let floor = floorWithin(limit)
     // Priced for every rule being cut, the longest the count can be.
     const notice = deliveryCost.overflowNotice(byRule.size)
-    if (floor.dropped > 0) floor = floorWithin(limit - notice)
-    used += floor.chars + (floor.dropped > 0 ? notice : 0)
-    delivery.omitted.rules = floor.dropped
+    if (floor.dropped.size > 0) floor = floorWithin(limit - notice)
+    used += floor.chars + (floor.dropped.size > 0 ? notice : 0)
+    // Rules, not blocks: a rule whose own block was kept and whose swept block was cut is still shown.
+    const keptRules = new Set([...floor.kept.keys()].map(ruleOf))
+    droppedBlocks = floor.dropped.size
+    delivery.omitted.rules = new Set([...floor.dropped].map(ruleOf).filter((rule) => !keptRules.has(rule))).size
     for (const [id, findings] of floor.kept) kept.set(id, findings)
     for (const ref of floor.refs) charged.add(ref)
     // What is left is cited only by rules that were dropped, and explains nothing the agent can see.
@@ -502,7 +512,7 @@ export function trim(
     delivery.findings = delivery.findings.filter((finding) => kept.get(blockOf(finding))?.includes(finding) === true)
   }
 
-  return { delivery, overflow: delivery.omitted.rules > 0 ? assembled.delivery : null, context }
+  return { delivery, overflow: droppedBlocks > 0 ? assembled.delivery : null, context }
 }
 
 /**

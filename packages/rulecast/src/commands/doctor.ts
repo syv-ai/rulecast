@@ -38,9 +38,9 @@ function naming(rules: string[]): string {
   return ` (${rules.slice(0, 3).join(", ")} and ${rules.length - 3} more)`
 }
 
-/** "PreToolUse (Bash)", "PostToolUse (Bash)" → "Bash": the tools a missing hook watches, else its event. */
+/** "PreToolUse (Bash)", "PostToolUse (Bash)" → "Bash": the tools a missing hook watches, else the group. */
 function missingNames(groups: string[]): string {
-  const names = groups.map((group) => /\((.*)\)$/.exec(group)?.[1] ?? group)
+  const names = groups.map((group) => (/ToolUse/.test(group) ? (/\((.*)\)$/.exec(group)?.[1] ?? group) : group))
   return [...new Set(names)].join(", ")
 }
 
