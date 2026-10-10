@@ -271,6 +271,8 @@ export interface Delivery {
   omitted: Omitted
   /** Absolute path of the untrimmed delivery, written when even the floor did not fit; null when it did. */
   overflowPath: string | null
+  /** The findings are in files the agent's shell command changed: the title says so. Absent: an edit tool. */
+  via?: "shell"
   /**
    * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.

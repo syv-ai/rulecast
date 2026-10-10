@@ -94,6 +94,20 @@ describe("deliveryCost", () => {
     )
   })
 
+  test("a shell edit's header, naming one file or saying files, costs no more than it is priced", () => {
+    const file = "app/routes/a_long_name.py"
+    const shell = { ...emptyDelivery(), via: "shell" as const }
+    const one = render({ ...shell, findings: [finding("r", file, 1)] })
+    const many = render({ ...shell, findings: [finding("r", "a.ts", 1), finding("s", "b.ts", 1)] })
+    expect(one.split("\n")[0]).toContain("changed by your Bash command")
+    expect(deliveryCost.header(1, new Set([file]), false, "shell")).toBeGreaterThanOrEqual(
+      one.split("\n")[0]!.length + 2,
+    )
+    expect(deliveryCost.header(2, new Set(["a.ts", "b.ts"]), false, "shell")).toBeGreaterThanOrEqual(
+      many.split("\n")[0]!.length + 2,
+    )
+  })
+
   test("the overflow notice, with the longest path it allows for", () => {
     const path = `/${"p".repeat(191)}`
     const notice = added({ ...base, omitted: { ...base.omitted, rules: 12 } }, { overflowPath: path })

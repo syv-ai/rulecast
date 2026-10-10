@@ -21,6 +21,11 @@ export interface TreeState {
 /** The size of a listed path that no longer exists. */
 const GONE = -1
 
+/** Listed as deleted: there is nothing left to check. A file absent from the map is clean, and exists. */
+export function isGone(state: TreeState, file: string): boolean {
+  return state.entries[file]?.[1] === GONE
+}
+
 /**
  * Paths from `git status --porcelain=v2 -z`, and `HEAD` from its `--branch` header. Version 2
  * rather than 1 because the header saves another git process on a hook that runs before every

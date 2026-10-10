@@ -96,9 +96,14 @@ export const claudeCodeAdapter: Adapter = {
         })
       case "touch":
       case "edit":
+      case "shell-after":
         return json(
           withNotices({
-            hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: withinLimit(text, delivery, event) },
+            hookSpecificOutput: {
+              // A command that failed fired PostToolUseFailure, which takes context only under its own name.
+              hookEventName: event.failed === true ? "PostToolUseFailure" : "PostToolUse",
+              additionalContext: withinLimit(text, delivery, event),
+            },
           }),
         )
       case "reset":

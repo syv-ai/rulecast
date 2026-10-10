@@ -39,6 +39,8 @@ export interface DecideInput {
   maxMatchesPerRule: number
   /** verify from a stop: decide block / allow / capReached. */
   stopGate: boolean
+  /** The findings are in files the agent's shell command changed (Delivery.via). */
+  via?: "shell"
 }
 
 export interface Decision {
@@ -157,6 +159,8 @@ export interface AssembleInput {
   context?: ContextState
   resolver: ReferenceResolver
   maxBytes: number
+  /** Default: an edit tool, or no edit at all. */
+  via?: "shell"
 }
 
 /**
@@ -182,6 +186,7 @@ export interface Assembled {
 
 export async function assemble(input: AssembleInput): Promise<Assembled> {
   const delivery = emptyDelivery()
+  if (input.via !== undefined) delivery.via = input.via
   const context: ContextRecord[] = []
   const touches = input.touches ?? []
   const state = input.context ?? emptyContext()
@@ -293,8 +298,12 @@ export function trim(
   // a 10,000 character limit).
   const conventions = delivery.references.length > 0 || delivery.preexistingSummary.length > 0
   let used =
-    deliveryCost.header(byRule.size, new Set(delivery.findings.map((finding) => finding.file)), conventions) +
-    (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0)
+    deliveryCost.header(
+      byRule.size,
+      new Set(delivery.findings.map((finding) => finding.file)),
+      conventions,
+      delivery.via,
+    ) + (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0)
   const fits = (size: number) => limit === null || used + size <= limit
   const kept = new Map<string, Finding[]>()
   // A reference costs its line whatever its state: one whose content does not fit is not dropped,

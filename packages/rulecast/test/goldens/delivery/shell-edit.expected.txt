@@ -1,0 +1,4 @@
+rulecast: 1 rule violated in app/services/users.py, changed by your Bash command
+
+error backend/no-httpexception
+  app/services/users.py:3 raises HTTPException(500). Raise a domain exception.

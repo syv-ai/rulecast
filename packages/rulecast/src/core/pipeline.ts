@@ -22,8 +22,8 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
-import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
-import { treeState } from "./session/tree"
+import { emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
+import { isGone, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
@@ -157,7 +157,9 @@ function detectorWarnings(
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-  const { project, stateDir, event, registry } = options
+  const { project, stateDir, registry } = options
+  // Reassigned once: a shell call that changed files continues as the edit event for them.
+  let event = options.event
   const { root, config } = project
   const log = options.log ?? (() => {})
   // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
@@ -195,7 +197,34 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
-  if (event.kind === "shell-before" || event.kind === "shell-after") {
+  const empty = (): SessionView => ({ work: emptyWork(), context: emptyContext() })
+  const relevant = (files: readonly string[]) =>
+    files.filter((file) => project.rules.some((rule) => rule.matches(file)))
+
+  if (event.kind === "shell-before") {
+    // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
+    // agent's last recorded state happened between its calls — the user's editor, a formatter, a
+    // job it left running — and is swept, so it is never folded into this call. No output: swept
+    // findings are reported at Stop, and this hook runs before every shell command.
+    const open = session
+    const now = open ? await treeState(root) : null
+    if (open && now !== null) {
+      const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
+      const reference = referenceState(work, open.agent)
+      const gap = reference === null ? null : treeChanges(reference, now)
+      const edited = new Set(work.edited)
+      const swept =
+        gap === null || gap.gitOperation
+          ? []
+          : relevant(gap.files.filter((file) => !isGone(now, file) && !edited.has(file)))
+      const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
+      if (session !== null) {
+        await appendWork(open.dir, [
+          ...swept.map((file) => ({ t: "swept" as const, file })),
+          { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
+        ])
+      }
+    }
     return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
   if (event.kind === "reset") {
@@ -222,7 +251,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   }
 
-  const empty = (): SessionView => ({ work: emptyWork(), context: emptyContext() })
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
@@ -231,8 +259,25 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
-  const relevant = (files: readonly string[]) =>
-    files.filter((file) => project.rules.some((rule) => rule.matches(file)))
+  let via: "shell" | undefined
+
+  if (event.kind === "shell-after") {
+    // What changed during the call, against the state recorded before it. A moved HEAD is git's
+    // doing, not an edit; no reference at all is a session that began before these hooks existed.
+    // Either way the new state is recorded, so the next call has something to compare with.
+    const open = session
+    const now = open ? await treeState(root) : null
+    if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    const reference = referenceState(view.work, open.agent, event.toolUseId)
+    const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
+    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
+    const call = reference === null ? null : treeChanges(reference, now)
+    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    // From here it is the edit event for those files, exactly as an Edit tool's would be.
+    via = "shell"
+    event = { ...event, kind: "edit", files }
+  }
 
   if (event.kind === "guard") {
     // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
@@ -316,7 +361,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (event.kind === "edit" && session) {
       await appendWork(
         session.dir,
-        requested.map((file) => ({ t: "edited" as const, file })),
+        requested.map((file) => ({ t: "edited" as const, file, ...(via === undefined ? {} : { via }) })),
       )
     }
     if (event.kind === "verify" && event.files.length === 0 && session) requested = relevant(view.work.edited)
@@ -454,6 +499,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxContextChars: options.maxContextChars,
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
+    ...(via === undefined ? {} : { via }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.

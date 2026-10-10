@@ -21,6 +21,19 @@ const delivery = (overrides: Partial<Delivery> = {}): Delivery => ({ ...emptyDel
 const format = (value: Delivery, kind: EventKind, opts = options) => claudeCodeAdapter.format(value, event(kind), opts)
 
 describe("Claude Code adapter: format", () => {
+  test("a shell call's findings are additional context, under the hook that fired", () => {
+    const value = delivery({ findings: [finding()], via: "shell" })
+    const after = { kind: "shell-after" as const, files: [], cwd: "/project", session: { id: "s1" } }
+    const context = renderAgentText(value, options)
+    expect(JSON.parse(claudeCodeAdapter.format(value, after, options).stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: context },
+    })
+    // A command that exited non-zero fired PostToolUseFailure, which takes context only under its own name.
+    expect(JSON.parse(claudeCodeAdapter.format(value, { ...after, failed: true }, options).stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolUseFailure", additionalContext: context },
+    })
+  })
+
   test("touch and edit deliver agent text as additional context", () => {
     const value = delivery({ findings: [finding()] })
     for (const kind of ["touch", "edit"] as const) {

@@ -1,0 +1,33 @@
+{
+  "about": "Findings in a file the agent's shell command changed: the title says so, after naming the file.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "backend/no-httpexception",
+        "severity": "error",
+        "status": "new",
+        "file": "app/services/users.py",
+        "line": 3,
+        "column": 5,
+        "message": "app/services/users.py:3 raises HTTPException(500). Raise a domain exception.",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null,
+    "via": "shell"
+  }
+}

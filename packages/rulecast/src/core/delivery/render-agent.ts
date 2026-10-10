@@ -38,6 +38,8 @@ const BACKLOG_HEADING = "backlog in files you touched (not from your edit; leave
 const WARNINGS_HEADING = "rulecast warnings:"
 const CONVENTIONS_TITLE = "rulecast: conventions for the files you are working on"
 const NOTICES_HEADING = "rulecast notices (for the user):"
+/** Said in the title of a delivery for files the agent's shell command changed, not its edit tools. */
+const SHELL_TRIGGER = "changed by your Bash command"
 
 const backlogLine = (summary: { rule: string; file: string; count: number }) =>
   `  ${summary.rule} ×${summary.count} in ${summary.file}`
@@ -54,12 +56,25 @@ const WRAP = 96
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
+/** The title over findings: in one file it names it, and a shell edit says that is what changed it. */
+function violatedTitle(rules: number, file: string | null, via: Delivery["via"]): string {
+  const where =
+    via === "shell"
+      ? file === null
+        ? ` in files ${SHELL_TRIGGER}`
+        : ` in ${file}, ${SHELL_TRIGGER}`
+      : file === null
+        ? ""
+        : ` in ${file}`
+  return `rulecast: ${plural(rules, "rule")} violated${where}`
+}
+
 function header(delivery: Delivery): string | null {
   if (delivery.findings.length > 0) {
     const rules = new Set(delivery.findings.map((finding) => finding.rule)).size + delivery.omitted.rules
     const files = new Set(delivery.findings.map((finding) => finding.file))
-    const where = files.size === 1 && delivery.omitted.rules === 0 ? ` in ${[...files][0]}` : ""
-    return `rulecast: ${plural(rules, "rule")} violated${where}`
+    const file = files.size === 1 && delivery.omitted.rules === 0 ? [...files][0]! : null
+    return violatedTitle(rules, file, delivery.via)
   }
   if (delivery.references.length > 0 || delivery.preexistingSummary.length > 0) {
     return CONVENTIONS_TITLE
@@ -224,12 +239,13 @@ export const deliveryCost = {
    * It names a file when every *delivered* finding is in one, and the budget may cut a rule down to
    * findings in a single file however many files it fired in; so the longest file name is charged.
    * And if the budget drops every rule that fired, no findings are left and the conventions title
-   * prints instead; so with `conventions` the longer of the two is charged.
+   * prints instead; so with `conventions` the longer of the two is charged. A shell edit's title
+   * names the file or says "files", so both forms are measured and the longer charged.
    */
-  header(rules: number, files: ReadonlySet<string>, conventions: boolean): number {
+  header(rules: number, files: ReadonlySet<string>, conventions: boolean, via?: Delivery["via"]): number {
     const longest = [...files].reduce((most, file) => (file.length > most.length ? file : most), "")
-    const where = longest === "" ? "" : ` in ${longest}`
-    const violated = rules > 0 ? linesCost([`rulecast: ${plural(rules, "rule")} violated${where}`, ""]) : 0
+    const titles = [violatedTitle(rules, longest === "" ? null : longest, via), violatedTitle(rules, null, via)]
+    const violated = rules > 0 ? Math.max(...titles.map((title) => linesCost([title, ""]))) : 0
     return Math.max(violated, conventions ? linesCost([CONVENTIONS_TITLE, ""]) : 0)
   },
   /**

@@ -1,11 +1,12 @@
-import { writeFile } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { readBaseline } from "../../src/core/baseline/store"
 import { openSession, sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import { type Event, emptyDelivery } from "../../src/core/types"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
+import { git } from "../helpers/git"
 import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -21,13 +22,25 @@ function sessionAt(root: string, id = "s1") {
     return (await pipelineAt(root, { ...rest, cwd: root, session: { id, agentId } }, { stopGate: true })).delivery
   }
   const dir = sessionDir(stateDirFor(root), id)
+  let calls = 0
+  /** One shell call: its before hook, what the command does, its after hook. */
+  const shell = async (act: () => Promise<unknown>, options: { agentId?: string; id?: string | null } = {}) => {
+    const toolUseId = options.id === null ? undefined : (options.id ?? `toolu_${++calls}`)
+    await send({ kind: "shell-before", files: [], toolUseId, agentId: options.agentId })
+    await act()
+    return send({ kind: "shell-after", files: [], toolUseId, agentId: options.agentId })
+  }
   return {
     send,
+    shell,
     write: (file: string, content: string) => writeFile(path.join(root, file), content),
     baseline: () => readBaseline(dir),
     work: async () => (await openSession(dir, "main")).work,
   }
 }
+
+const lines = (delivery: { findings: { file: string; line: number }[] }) =>
+  delivery.findings.map((finding) => `${finding.file}:${finding.line}`)
 
 describe("session start", () => {
   test("records the tree and snapshots the dirty files a rule matches", async () => {
@@ -91,5 +104,140 @@ describe("session start", () => {
     expect((await session.send({ kind: "start", files: [] })).warnings).toEqual([])
     expect((await session.work()).startTree).toBeNull()
     expect((await session.baseline()).snapshots.size).toBe(0)
+  })
+})
+
+describe("a shell call's changes go through the edit event", () => {
+  test("an in-place rewrite of a clean file (sed -i): the finding is new, and the agent's", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(() =>
+      session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`),
+    )
+    expect(lines(delivery)).toEqual([`${USERS}:3`])
+    expect(delivery.via).toBe("shell")
+    const work = await session.work()
+    expect(work.edited).toEqual([USERS])
+    expect(work.editedVia.get(USERS)).toBe("shell")
+    // Stop verifies it like any edited file.
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("block")
+  })
+
+  test("a rewrite of a file dirty at start (a Python script): only the agent's lines are new", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    const users = "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n"
+    await session.write(USERS, users)
+    await session.send({ kind: "start", files: [] })
+    // Never read through the edit tools: the start snapshot is the only baseline it has.
+    const delivery = await session.shell(() => session.write(USERS, `${users}    raise HTTPException(503)\n`))
+    expect(lines(delivery)).toEqual([`${USERS}:4`])
+  })
+
+  test("a > redirect creating a file", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const file = "app/services/orders.py"
+    const delivery = await session.shell(() => session.write(file, "def get():\n    raise HTTPException(400)\n"))
+    expect(lines(delivery)).toEqual([`${file}:2`])
+  })
+
+  test("a deleted file: no detector run, no crash, not recorded as edited", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(() => rm(path.join(root, USERS)))
+    expect(delivery.findings).toEqual([])
+    expect((await session.work()).edited).toEqual([])
+  })
+
+  test("checking out another branch is a git operation, not an edit", async () => {
+    const root = await createFixture()
+    await git(root, "checkout", "-q", "-b", "other")
+    await writeFile(path.join(root, USERS), `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+    await git(root, "commit", "-q", "-am", "other")
+    await git(root, "checkout", "-q", "main")
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(() => git(root, "checkout", "-q", "other"))
+    expect(delivery.findings).toEqual([])
+    expect((await session.work()).edited).toEqual([])
+  })
+
+  test("a commit during the call is a git operation, not an edit", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(async () => {
+      await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+      await git(root, "commit", "-q", "-am", "agent")
+    })
+    expect(delivery.findings).toEqual([])
+    expect((await session.work()).edited).toEqual([])
+  })
+
+  test("a codemod across 40 files: every file is the agent's, and Stop verifies them all", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const files = Array.from({ length: 40 }, (_, index) => `app/services/mod${String(index).padStart(2, "0")}.py`)
+    const delivery = await session.shell(() =>
+      Promise.all(files.map((file) => session.write(file, "def f():\n    raise HTTPException(500)\n"))),
+    )
+    // Whatever the edit deadline let finish is delivered now; the rest is the Stop's to verify.
+    expect(delivery.findings.length).toBeGreaterThan(0)
+    expect((await session.work()).edited).toEqual(files)
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("block")
+    expect(new Set(stop.findings.map((finding) => finding.file)).size).toBe(40)
+  })
+
+  test("a call that changes no file a rule matches has no output", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(async () => {
+      await mkdir(path.join(root, "docs"), { recursive: true })
+      await session.write("docs/notes.md", "raise HTTPException(500)\n")
+    })
+    expect(delivery).toEqual(emptyDelivery())
+    expect((await session.work()).edited).toEqual([])
+  })
+
+  test("an after hook with nothing to compare with: no output, and its state is recorded", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    // A session that began before the Bash hooks were installed: no start, no before.
+    await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+    const delivery = await session.send({ kind: "shell-after", files: [], toolUseId: "toolu_x" })
+    expect(delivery.findings).toEqual([])
+    expect((await session.work()).latestTree.get("main")?.entries[USERS]).toBeDefined()
+  })
+
+  test("a file the user changes between two calls is swept, not folded into the next call", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {})
+    // The user's editor, between calls.
+    await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+    const delivery = await session.shell(() => session.write(API, "export const api = 2\n"))
+    expect(delivery.findings.map((finding) => finding.file)).toEqual([API])
+    const work = await session.work()
+    expect(work.edited).toEqual([API])
+    expect(work.swept).toEqual([USERS])
+  })
+
+  test("a call without a tool use id compares with the agent's latest state", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(
+      () => session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`),
+      { id: null },
+    )
+    expect(lines(delivery)).toEqual([`${USERS}:3`])
   })
 })
