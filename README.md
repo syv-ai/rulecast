@@ -222,7 +222,7 @@ rulecast up itself:
 
 ```text
 Set up rulecast in this project. Read
-https://raw.githubusercontent.com/syv-ai/rulecast/v0.4.0/agents/SETUP.md
+https://raw.githubusercontent.com/syv-ai/rulecast/v0.5.0/agents/SETUP.md
 and follow it. Show me every file it creates or changes before I commit anything.
 ```
 
