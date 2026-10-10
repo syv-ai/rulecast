@@ -1,4 +1,5 @@
-import { lstat } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { lstat, readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { isNotFound } from "../errors"
@@ -9,14 +10,25 @@ import { git } from "../git"
  *
  * A shell command says nothing about the files it writes, so rulecast compares the tree before and
  * after the call instead of guessing from the command text. Only what `git status` lists is recorded
- * — a clean file has no entry — so a state costs one git process and one `lstat` per dirty file,
- * whatever the size of the repository.
+ * — a clean file has no entry — so a state costs a few git processes and one `lstat` and read per
+ * dirty file, whatever the size of the repository.
  */
 export interface TreeState {
   head: string | null
-  /** Project-relative path → [mtimeMs, size]; absent from the map means clean (or ignored). */
-  entries: Record<string, [mtimeMs: number, size: number]>
+  /**
+   * Project-relative path → [mtimeMs, size, content hash]; absent from the map means clean (or
+   * ignored). The hash is absent for a file over HASHED_MAX_BYTES, which is compared by mtime and size.
+   */
+  entries: Record<string, [mtimeMs: number, size: number, hash?: string]>
 }
+
+/**
+ * Files up to this size are hashed. A new mtime on the same content is not an edit: `git stash &&
+ * git stash pop` rewrites every dirty file and moves no `HEAD`, and without the hash the user's
+ * uncommitted work would be counted as the command's. Larger files are rare among dirty ones, and
+ * reading them before every shell command would cost more than the mistake it prevents.
+ */
+const HASHED_MAX_BYTES = 1024 * 1024
 
 /** The size of a listed path that no longer exists. */
 const GONE = -1
@@ -77,7 +89,10 @@ export async function treeState(root: string): Promise<TreeState | null> {
     files.map(async (file) => {
       try {
         const stats = await lstat(path.join(root, file))
-        entries[file] = [stats.mtimeMs, stats.size]
+        entries[file] =
+          stats.isFile() && stats.size <= HASHED_MAX_BYTES
+            ? [stats.mtimeMs, stats.size, await contentHash(path.join(root, file))]
+            : [stats.mtimeMs, stats.size]
       } catch (error) {
         if (!isNotFound(error)) throw error
         entries[file] = [0, GONE]
@@ -87,9 +102,26 @@ export async function treeState(root: string): Promise<TreeState | null> {
   return { head, entries }
 }
 
+async function contentHash(file: string): Promise<string> {
+  return createHash("sha1")
+    .update(await readFile(file))
+    .digest("hex")
+    .slice(0, 16)
+}
+
+/** Whether two entries for one path are the same file: by content when both were hashed. */
+function same(
+  [mtime, size, hash]: TreeState["entries"][string],
+  [wasMtime, wasSize, wasHash]: TreeState["entries"][string],
+): boolean {
+  if (hash !== undefined && wasHash !== undefined) return hash === wasHash && size === wasSize
+  return mtime === wasMtime && size === wasSize
+}
+
 /**
  * What changed between two states. A moved `HEAD` means the interval was a git operation — a
- * commit, checkout, pull, rebase or stash pop — and its file changes are git's, not an edit.
+ * commit, checkout, pull or rebase — and its file changes are git's, not an edit. A stash and its
+ * pop move no `HEAD`; they restore the same content, which the hash sees.
  */
 export function treeChanges(
   before: TreeState,
@@ -97,9 +129,9 @@ export function treeChanges(
 ): { gitOperation: true } | { gitOperation: false; files: string[] } {
   if (before.head !== after.head) return { gitOperation: true }
   const files = new Set<string>()
-  for (const [file, [mtime, size]] of Object.entries(after.entries)) {
+  for (const [file, entry] of Object.entries(after.entries)) {
     const was = before.entries[file]
-    if (was === undefined || was[0] !== mtime || was[1] !== size) files.add(file)
+    if (was === undefined || !same(entry, was)) files.add(file)
   }
   for (const file of Object.keys(before.entries)) if (!(file in after.entries)) files.add(file)
   return { gitOperation: false, files: [...files].sort() }

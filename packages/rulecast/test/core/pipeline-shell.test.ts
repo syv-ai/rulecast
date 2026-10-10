@@ -168,6 +168,21 @@ describe("a shell call's changes go through the edit event", () => {
     expect((await session.work()).edited).toEqual([])
   })
 
+  test("git stash && git stash pop restores the same content: not an edit, though every mtime moved", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    // The user's uncommitted violation, there before the session.
+    await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+    await session.send({ kind: "start", files: [] })
+    const delivery = await session.shell(async () => {
+      await git(root, "stash", "-q")
+      await git(root, "stash", "pop", "-q")
+    })
+    expect(delivery.findings).toEqual([])
+    expect((await session.work()).edited).toEqual([])
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("allow")
+  })
+
   test("a commit during the call is a git operation, not an edit", async () => {
     const root = await createFixture()
     const session = sessionAt(root)

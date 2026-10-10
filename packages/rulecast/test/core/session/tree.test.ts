@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, rename, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -138,6 +138,16 @@ describe("treeChanges", () => {
         await git(root, "add", "-A")
       }),
     ).toEqual({ gitOperation: false, files: ["src/b.ts", "src/renamed.ts"] })
+  })
+
+  test("a new mtime on the same content is no change", async () => {
+    const root = await createRepo(files)
+    await writeFile(path.join(root, "src/a.ts"), "export const a = 2\n")
+    const later = new Date(Date.now() + 5_000)
+    expect(await changedBy(root, () => utimes(path.join(root, "src/a.ts"), later, later))).toEqual({
+      gitOperation: false,
+      files: [],
+    })
   })
 
   test("nothing changed", async () => {

@@ -258,7 +258,7 @@ Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. `pnpm perf` replays 50 edit events and checks it. The last measurement, on an Apple M3 Pro with all six detectors configured, was p50 170 ms and p95 187 ms.
 
-The hook before every Bash call only records the working tree: it is held to 150 ms over a hook that does nothing, and adds about 135 ms at p95 on a 20,000-file repository (`microsoft/vscode`). The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget.
+The hook before every Bash call only records the working tree: it is held to 150 ms over a hook that does nothing, and adds 135–150 ms at p95 on a 20,000-file repository (`microsoft/vscode`), nearly all of it git finding untracked files. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 
