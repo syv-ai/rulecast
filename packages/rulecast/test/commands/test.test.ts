@@ -1,3 +1,4 @@
+import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
@@ -51,6 +52,24 @@ describe("rulecast test", () => {
     expect(result.stdout).toContain("good[0] app/services/users.py — fired at line 2")
     expect(result.stdout).toContain("raise HTTPException(404)")
     expect(result.stdout).toContain("1 of 1 rules failed")
+  })
+
+  test("a match that starts on a blank line shows what it matched, line break included", async () => {
+    // `^\s*` under the m flag crosses the blank line: the finding is on line 2, which is empty.
+    // Without the matched text the failure read as "fired at line 2" over an empty line.
+    const root = await project([
+      httpException({
+        detect: { regex: { pattern: "^\\s*print\\(", flags: "m" } },
+        examples: {
+          good: [{ path: PY, code: "x = 1\n\nprint(2)\n" }],
+          bad: [{ path: PY, code: "print(1)\n" }],
+        },
+      }),
+    ])
+    const result = await runTest(root)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("good[0] app/services/users.py — fired at line 2")
+    expect(result.stdout).toContain('matched "\\nprint(", across a line break')
   })
 
   test("a bad example the rule misses exits 1 and says so", async () => {
@@ -116,6 +135,10 @@ describe("rulecast test", () => {
     expect(result.stdout).toContain("skipped (llm; name the rule to run it)")
     // Skipped is not failed and not "no examples": the rule has examples, they were not run.
     expect(result.stdout).not.toContain("no examples")
+    // And the closing count says so, so "nothing failed" is not read as "every rule is tested".
+    expect(result.stdout).toContain(
+      "  not run: backend/judgement (rulecast test <id> runs one; it costs money per example)",
+    )
   })
 })
 
@@ -184,6 +207,16 @@ describe("rulecast test --against", () => {
     expect(result.stdout).not.toContain("Few violations")
     // No empty "worst files" block when there are none.
     expect(result.stdout).not.toMatch(/\n\n\n/)
+  })
+
+  test("--against . is the whole project, from the root or a subdirectory", async () => {
+    const root = await project([httpException()], files)
+    const fromRoot = await runTest(root, "backend/no-httpexception", "--against", ".")
+    expect(fromRoot.code).toBe(0)
+    expect(fromRoot.stdout).toContain("3 violations in 2 of 3 matching files")
+    const fromSub = await runTest(path.join(root, "app"), "backend/no-httpexception", "--against", "..")
+    expect(fromSub.stdout).toContain("3 violations in 2 of 3 matching files")
+    expect((await runTest(root, "backend/no-httpexception", "--against", root)).code).toBe(0)
   })
 
   test("--against without a rule id exits 2", async () => {

@@ -32,7 +32,8 @@ describe("rulecast list", () => {
       "x.md": "# X\n",
     })
     const text = (await runCli(root, ["list"])).stdout
-    expect(text).toContain('  detects {"pattern":"\\\\bprint\\\\(",')
+    // As YAML, the way the rule is written: a pattern reads as it was typed, not JSON-escaped.
+    expect(text).toContain("  detects:\n    pattern: \\bprint\\(\n")
     const json = JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)
     expect(json[0].config.pattern).toBe("\\bprint\\(")
     expect(json[1].config).toBeNull()
@@ -79,7 +80,10 @@ describe("rulecast list", () => {
     expect(result.stdout).toContain("--- AGENTS.md#logging ---\n## Logging\n\nNever print. Use the module logger.")
     expect(result.stdout).not.toContain("Unrelated.")
     expect(result.stdout).not.toContain("app/other")
+    // The files themselves, so a count of 2 that is one module and an __init__.py can be seen.
+    expect(result.stdout).toContain("  matching app/a.py")
     const json = JSON.parse((await runCli(root, ["list", "app/no-print", "--format", "json"])).stdout)
+    expect(json[0].matching).toEqual(["app/a.py"])
     expect(json[0].sections).toEqual([
       { ref: "AGENTS.md#logging", content: "## Logging\n\nNever print. Use the module logger." },
     ])

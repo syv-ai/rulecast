@@ -14,7 +14,7 @@ The steps ask the developer to decide several things. If no developer is there t
 ## 1. Read
 
 1. Read the doc you were pointed at in full.
-2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with its message and the text of those sections. You need both for the catalog rules in step 2.
+2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
 ## 2. Sort the conventions
@@ -43,8 +43,9 @@ Two kinds need splitting:
 
 2. **Does what it checks fit this project?** Compare its `files` match count and its `detects` line with the doc, and read the section it cites with `rulecast list <rule-id>`. Judge what the rule does, not its name:
    - **It fits:** nothing more to do. A convention it already enforces needs no local rule.
-   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses, with an `exclude` for the files it covers, so no site is reported twice. Say in its `description` which catalog rule it extends.
+   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses (a detector rule for a detector rule, a touch rule for a touch rule), with an `exclude` for the files it covers, so no site is reported twice. Say in its `description` which catalog rule it extends. Check the files `rulecast list <rule-id>` names: a count of 2 may be one real module and an `__init__.py`.
    - **It contradicts the doc, or matches no file at all**: it assumes a layer, a library or a layout the project doesn't have, or its cited section says the opposite of the doc. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree. Unattended, propose it and leave the rule on.
+   - **You can't tell**: treat it as a contradiction and propose. Proposing costs nothing, because the developer decides; staying silent hides the question.
 
 For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
@@ -52,7 +53,9 @@ For checkable conventions, prefer `path` (the file itself is the break), then `r
 
 ## 3. Draft one rule at a time
 
-For each checkable convention:
+For each checkable convention, one at a time. Unattended, you can write them all first and then take each through steps 4 to 6.
+
+When the doc can be read two ways ("gets its logger with `log = logging.getLogger(__name__)`": is a logger called `logger` wrong?), write the narrower rule, flagging only what every reading forbids, and name the ambiguity in the summary so the developer can tighten it.
 
 1. Show the developer the rule as YAML and the doc section it enforces.
 2. Add it to the `rules` of the `repo: local` entry in `.rulecast-config.yaml`. Add that entry at the end of `repos` if there is none:
@@ -66,7 +69,7 @@ For each checkable convention:
          exclude: ^backend/tests/
          detect:
            regex:
-             pattern: '^\s*print\('
+             pattern: '^[ \t]*print\('
              flags: m
          message: "{{file}}:{{line}} prints. Use the logger instead."
          context:
@@ -78,7 +81,7 @@ For each checkable convention:
    - `message`: what is wrong at `{{file}}:{{line}}` and what to do instead, in one or two sentences.
    - `context`: the doc section the rule enforces, as `@<file>#<heading-slug>`. The slug is the heading in lowercase, punctuation dropped, spaces turned into `-`.
 3. Give it `examples`: two `good` and two `bad`, no two the same. Each is a `path` the rule matches and the `code` at it.
-   - Quote real code where the repository has some: an actual violation for `bad`, compliant code for `good`.
+   - Quote real code first. Search the files the rule matches for an actual violation to use as `bad` and compliant code for `good`; a violation the repository already has is the best `bad` example there is.
    - Where it has none, which is usual in a small or clean repository, write your own: the smallest code that shows the break for `bad`, and for `good` a near miss, code that looks like the break and is not. Invented examples are fine. Say which ones are invented in the summary.
    - A `path` rule judges the file name, not its code: give it `bad` examples only, at paths the rule must refuse.
 
@@ -97,7 +100,8 @@ For each checkable convention:
 4. Run `rulecast validate` and fix every diagnostic for your rule.
 5. Run `rulecast test <id>`. Every example must pass.
    - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
-   - Revise the pattern **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
+   - A slip is not a revision: a typo, a missing escape, or `\s` crossing a line break (`rulecast test` shows what a failing example matched, and says when it crossed a line). Fix slips as often as you find them.
+   - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
 6. Run `rulecast test <id> --against .`. The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. Neither the numbers nor the note decide it. The developer does.
 7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config. Unattended, keep every rule that passes step 5.
 
@@ -116,9 +120,10 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 ## 4. Finish
 
-Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise:
+Run `rulecast validate` and `rulecast test` a last time; both must be clean. Bare `rulecast test` does not run `llm` rules, because each example costs money, and names them under "not run": run `rulecast test <id>` for each of those. Then summarise:
 
 - the rules kept: id, one line each, and the `--against` count (touch rules have no count);
+- where the doc could be read two ways, and the reading you chose;
 - the rules dropped;
 - the catalog rules you pointed at the project's doc, extended with a local rule, or propose to switch off, and why;
 - the examples you invented;

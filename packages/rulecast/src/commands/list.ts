@@ -1,4 +1,6 @@
 import { parseArgs } from "node:util"
+import { stringify } from "yaml"
+
 import { compile, diagnosticText } from "../core/compile/project"
 import type { CompiledRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
@@ -29,7 +31,8 @@ export interface ListedRule {
   /** How many of the project's files the rule matches; null outside a git repository. */
   matchingFiles: number | null
   context: string[]
-  /** With a RULE_ID only: the rule's message, and the text of each section it cites. */
+  /** With a RULE_ID only: the files it matches, its message, and the text of each section it cites. */
+  matching?: string[]
   message?: string | null
   sections?: { ref: string; content: string | null }[]
 }
@@ -59,6 +62,9 @@ async function projectFiles(root: string): Promise<string[] | null> {
     return null
   }
 }
+
+/** Files named in one rule's view; the count already says how many there are. */
+const MATCHING_SHOWN = 20
 
 function matchingText(count: number | null): string {
   if (count === null) return ""
@@ -103,6 +109,7 @@ export async function listCommand(
   if (ruleId !== null) {
     const rule = compiled[0]!
     const resolver = createReferenceResolver(root)
+    rules[0]!.matching = (files ?? []).filter((file) => rule.matches(file))
     rules[0]!.message = rule.message
     rules[0]!.sections = await Promise.all(
       rule.context.map(async (spec) => {
@@ -123,7 +130,21 @@ export async function listCommand(
     out.push(`  ${rule.name}`)
     const scope = `files ${rule.files === "" ? "(all)" : rule.files}${rule.exclude === "^$" ? "" : `, exclude ${rule.exclude}`}`
     out.push(`  ${scope}${matchingText(rule.matchingFiles)}`)
-    if (rule.config !== null) out.push(`  detects ${JSON.stringify(rule.config)}`)
+    // YAML, as rules are written: JSON doubled every backslash in a pattern.
+    if (rule.config !== null) {
+      out.push(
+        "  detects:",
+        ...stringify(rule.config)
+          .trimEnd()
+          .split("\n")
+          .map((line) => `    ${line}`),
+      )
+    }
+    if (rule.matching !== undefined && rule.matching.length > 0) {
+      const shown = rule.matching.slice(0, MATCHING_SHOWN)
+      const more = rule.matching.length - shown.length
+      out.push(`  matching ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`)
+    }
     if (rule.message !== undefined && rule.message !== null) out.push(`  message ${rule.message}`)
     if (rule.context.length > 0) out.push(`  cites ${rule.context.join(", ")}`)
     out.push("")

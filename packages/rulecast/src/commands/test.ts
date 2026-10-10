@@ -1,3 +1,4 @@
+import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { compile } from "../core/compile/project"
@@ -96,6 +97,19 @@ function summaryLine(rule: DetectorRule, result: ExampleResult): string {
   return `  ${id}${score} P ${ratio(result.precision.correct, result.precision.total)}  R ${ratio(result.recall.matched, result.recall.total)}`
 }
 
+/** Characters of matched text shown; enough to see where a pattern went wrong. */
+const MATCH_PREVIEW = 60
+
+/**
+ * What a detector matched, escaped so a line break shows. A regex whose `\s` crosses a blank line
+ * reports a finding on the empty line, and "fired at line 2" over a blank source line is a puzzle;
+ * the matched text answers it.
+ */
+function matchedLine(text: string): string {
+  const shown = text.length > MATCH_PREVIEW ? `${text.slice(0, MATCH_PREVIEW)}…` : text
+  return `matched ${JSON.stringify(shown)}${/\r?\n/.test(text) ? ", across a line break" : ""}`
+}
+
 /** The site, and the line it is on — an author needs where it fired, not a diff. */
 function failureLines(rule: DetectorRule, result: ExampleResult): string[] {
   const out: string[] = []
@@ -113,6 +127,7 @@ function failureLines(rule: DetectorRule, result: ExampleResult): string[] {
     const source = (rule.examples?.good[outcome.index]?.code ?? "").split(/\r?\n/)
     for (const finding of outcome.findings) {
       out.push(`      ${name} — fired at line ${finding.line}`, `        ${source[finding.line - 1]?.trim() ?? ""}`)
+      out.push(`        ${matchedLine(finding.text)}`)
     }
   }
   return out
@@ -137,9 +152,12 @@ async function reportAgainst(
   io: CliIo,
 ): Promise<number> {
   const prefixes = paths.map((given) => {
+    // The root is a directory to search, not a file in it, which toProjectPath rejects. "." from
+    // the root is what DRAFT-RULES tells an agent to pass, and it was refused as outside.
+    if (path.resolve(io.cwd, given) === path.resolve(root)) return ""
     const resolved = toProjectPath(root, io.cwd, given)
     if (resolved === null) throw new UsageError(`${given} is outside the project`)
-    return resolved === "." ? "" : resolved
+    return resolved
   })
   const under = (file: string) =>
     prefixes.some((prefix) => prefix === "" || file === prefix || file.startsWith(`${prefix}/`))
@@ -213,6 +231,7 @@ export async function testCommand(
 
   const lines: string[] = [""]
   const noExamples: string[] = []
+  const notRun: string[] = []
   let failedRules = 0
   let ranRules = 0
 
@@ -227,7 +246,10 @@ export async function testCommand(
       noExamples.push(rule.id)
       continue
     }
-    if (result.skipped) continue
+    if (result.skipped) {
+      notRun.push(rule.id)
+      continue
+    }
     ranRules++
     if (result.outcomes.some((outcome) => !outcome.passed)) {
       failedRules++
@@ -240,6 +262,10 @@ export async function testCommand(
     return 0
   }
   if (noExamples.length > 0) lines.push("", `  no examples: ${noExamples.join(", ")}`)
+  // A drafting agent took "1 rule passed" as the final check clean while its llm rule never ran.
+  if (notRun.length > 0) {
+    lines.push("", `  not run: ${notRun.join(", ")} (rulecast test <id> runs one; it costs money per example)`)
+  }
   lines.push(
     "",
     failedRules === 0

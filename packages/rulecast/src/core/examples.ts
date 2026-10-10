@@ -9,6 +9,8 @@ import { renderTemplate } from "./template"
 export interface ExampleFinding {
   line: number
   column: number
+  /** What the detector matched, for a failure that the line alone does not explain. */
+  text: string
   message: string
 }
 
@@ -144,6 +146,7 @@ async function runOne(
   const findings = output.findings.map(({ match }) => ({
     line: match.line,
     column: match.column,
+    text: match.text,
     message: renderTemplate(input.rule.message, {
       ...match.captures,
       file: example.path,

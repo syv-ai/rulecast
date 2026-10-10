@@ -69,7 +69,9 @@ describe("runExamples", () => {
       regexRule({ good: [{ path: PY, code: "x = 1\nraise HTTPException(404)\n" }], bad: [] }),
     )
     expect(result.outcomes[0]?.passed).toBe(false)
-    expect(result.outcomes[0]?.findings).toEqual([{ line: 2, column: 1, message: `${PY}:2 raises HTTPException` }])
+    expect(result.outcomes[0]?.findings).toEqual([
+      { line: 2, column: 1, text: "raise HTTPException", message: `${PY}:2 raises HTTPException` },
+    ])
     // Precision counts it against the rule: it fired on something that was not a violation.
     expect(result.precision).toEqual({ correct: 0, total: 1 })
   })

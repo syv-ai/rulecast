@@ -15,6 +15,7 @@ detect:
 
 - `pattern`: a JavaScript regular expression, searched in the whole file. Quote it with single quotes in YAML so backslashes stay as written.
 - `flags`: any of `d`, `i`, `m`, `s`, `u`, `v`, `y`; default none. `g` is always added. Use `m` for `^` and `$` at each line, `s` for `.` across lines.
+- `\s` matches a line break. With `m`, `^\s*print\(` matches from an empty line above the `print(` and reports that empty line. Indentation is `[ \t]*`: `^[ \t]*print\(`. `rulecast test` prints what a failing example matched, line breaks included.
 - Captures: the pattern's named groups. `(?<args>…)` gives `{{args}}`, an empty string when the group did not take part in the match.
 - Position: the line and column where the match starts. A match that spans lines counts as new when any of its lines changed.
 - Default stages: `edit`, `verify`.
