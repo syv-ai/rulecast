@@ -1,54 +1,81 @@
 /*
- * rulecast palette. Ink is the logo's tile; signal is the rule being cast. Light mode uses a deeper
- * signal so links and accents keep AA contrast on paper.
+ * rulecast palette. Ink is the logo's tile; signal is the rule being cast, and the only colour the
+ * site uses for emphasis. Light mode uses a deeper signal so links keep AA contrast on paper.
  */
 :root {
-  --rc-ink: #16151f;
   --rc-signal: #ff6a3d;
-  --rc-signal-deep: #b93c0e;
-  --rc-paper: #fbfaf7;
-  --rc-muted: #8e8ca3;
-  --rc-error: #ff5c5c;
-  --rc-warning: #f2b33d;
-  --rc-ok: #4cc38a;
+  --rc-error: #ff7a7a;
+  --rc-warning: #f2c063;
 
   --sl-color-accent-low: #3a1b10;
-  --sl-color-accent: #ff6a3d;
+  --sl-color-accent: #ff7a50;
   --sl-color-accent-high: #ffc9b5;
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #edecf2;
-  --sl-color-gray-2: #c9c7d6;
-  --sl-color-gray-3: #9a98ad;
-  --sl-color-gray-4: #5f5d73;
-  --sl-color-gray-5: #403e52;
-  --sl-color-gray-6: #262433;
-  --sl-color-black: #16151f;
+  --sl-color-gray-1: #ecebf1;
+  --sl-color-gray-2: #c4c2d0;
+  --sl-color-gray-3: #8f8da2;
+  --sl-color-gray-4: #5d5b6e;
+  --sl-color-gray-5: #34323f;
+  --sl-color-gray-6: #1f1e27;
+  --sl-color-black: #121118;
 }
 
 :root[data-theme="light"] {
-  --sl-color-accent-low: #ffe1d5;
+  --sl-color-accent-low: #ffe6dc;
   --sl-color-accent: #b93c0e;
   --sl-color-accent-high: #5e1d05;
-  --sl-color-white: #16151f;
-  --sl-color-gray-1: #262433;
-  --sl-color-gray-2: #403e52;
-  --sl-color-gray-3: #5f5d73;
-  --sl-color-gray-4: #8e8ca3;
-  --sl-color-gray-5: #c9c7d6;
-  --sl-color-gray-6: #edecf2;
-  --sl-color-gray-7: #f5f4f0;
-  --sl-color-black: #fbfaf7;
+  --sl-color-white: #121118;
+  --sl-color-gray-1: #24232c;
+  --sl-color-gray-2: #45434f;
+  --sl-color-gray-3: #6b6977;
+  --sl-color-gray-4: #9b99a6;
+  --sl-color-gray-5: #dcdae2;
+  --sl-color-gray-6: #f1f0f3;
+  --sl-color-gray-7: #f7f6f8;
+  --sl-color-black: #ffffff;
 }
 
 /* The terminal is dark in both themes: it shows a terminal. */
 .rc-terminal {
-  --rc-term-bg: #16151f;
-  --rc-term-fg: #e6e4ee;
-  --rc-term-dim: #8e8ca3;
+  --rc-term-bg: #1c1b24;
+  --rc-term-fg: #ecebf1;
+  --rc-term-dim: #9f9db1;
 }
 
-/* Starlight spaces splash content with its own margins; the install command sits under the hero. */
-.sl-markdown-content .rc-install {
-  max-width: 26rem;
-  margin: 1.5rem auto 0;
+/* Type: tighter tracking as headings grow, body left alone. */
+.sl-markdown-content :is(h1, h2),
+h1#_top {
+  letter-spacing: -0.022em;
+}
+.sl-markdown-content h3 {
+  letter-spacing: -0.012em;
+}
+
+/* The bar is a material, not a strip: content scrolls under it. */
+.header {
+  background-color: color-mix(in srgb, var(--sl-color-black) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom-color: var(--sl-color-hairline);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .header {
+    background-color: var(--sl-color-black);
+    backdrop-filter: none;
+  }
+}
+
+/* The current page is marked by weight and a quiet tint, not a block of accent. */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  color: var(--sl-color-white);
+  background-color: var(--sl-color-gray-6);
+}
+
+/* The name in the bar is the product, not a link colour. */
+.site-title {
+  color: var(--sl-color-white);
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }

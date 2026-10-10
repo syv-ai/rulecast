@@ -1,197 +1,67 @@
 ---
 /**
- * The README's example rule beside the output it produces, keyed by number. Both are read from the
- * README at build time; exampleBinding() fails the build if the rule's message does not produce
- * the output's message line, so the two cannot drift apart here.
+ * The README's example rule beside the output it produces, built by scripts/anatomy.ts.
  */
-import { exampleBinding, exampleRule, openingOutput } from "../../scripts/sources"
+import { anatomy } from "../../scripts/anatomy"
 
-const keys = [
-  { key: "id", text: "Names the rule in every finding, and in a <code>rulecast-ignore</code> comment." },
-  { key: "files", text: "A regular expression over paths: which files the rule applies to." },
-  {
-    key: "detect",
-    text: "One detector and its config. Named groups become template variables: <code>args</code> here.",
-  },
-  {
-    key: "message",
-    text: "What the agent reads, with <code>{{file}}</code>, <code>{{line}}</code> and the captures filled in.",
-  },
-  {
-    key: "context",
-    text: "The doc section that explains the rule, delivered with the finding so the agent never has to go looking.",
-  },
-]
-const number = (key: string) => keys.findIndex((entry) => entry.key === key) + 1
-
-const ruleLines = exampleRule()
-  .split("\n")
-  .map((text) => {
-    const key = keys.find((entry) => new RegExp(`^\\s*(- )?${entry.key}:`).test(text))?.key
-    return { text, mark: key ? number(key) : null }
-  })
-
-const binding = exampleBinding()
-/** The message line as template pieces: literal text, and each variable with the value it took. */
-const messageParts = binding.template.split(/(\{\{\w+\}\})/).flatMap((part) => {
-  const variable = /^\{\{(\w+)\}\}$/.exec(part)?.[1]
-  if (!variable) return part ? [{ text: part, variable: null }] : []
-  return [{ text: binding.values[variable] ?? "", variable }]
-})
-
-const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-const badge = (mark: number | null) => (mark ? `<b class="rc-a-badge">${mark}</b>` : "")
-
-const outputLines = openingOutput()
-  .split("\n")
-  .map((text) => {
-    if (text.trim() === binding.line) return { kind: "message" as const, text, mark: number("message") }
-    if (/^rulecast:/.test(text)) return { kind: "title" as const, text, mark: number("files") }
-    if (/^(error|warning) /.test(text)) return { kind: "rule" as const, text, mark: number("id") }
-    if (/^--- .* ---$/.test(text)) return { kind: "section" as const, text, mark: number("context") }
-    return { kind: "plain" as const, text, mark: null }
-  })
-
-/** The two panes as HTML, one line per line: a <pre> keeps every space the template would add. */
-const ruleHtml = ruleLines
-  .map(
-    (line) =>
-      `<span class="rc-a-line${line.mark ? " rc-a-marked" : ""}">${escapeHtml(line.text)}${badge(line.mark)}</span>`,
-  )
-  .join("\n")
-const messageHtml = `  ${messageParts
-  .map((part) =>
-    part.variable
-      ? `<span class="rc-a-value" title="{{${part.variable}}}">${escapeHtml(part.text)}</span>`
-      : escapeHtml(part.text),
-  )
-  .join("")}`
-const outputHtml = outputLines
-  .map((line) => {
-    const body = line.kind === "message" ? messageHtml : escapeHtml(line.text)
-    return `<span class="rc-a-line rc-a-${line.kind}${line.mark ? " rc-a-marked" : ""}">${body}${badge(line.mark)}</span>`
-  })
-  .join("\n")
+const { ruleHtml, outputHtml } = anatomy()
 ---
 
 <figure class="rc-anatomy not-content">
-  <div class="rc-anatomy-panes">
-    <div class="rc-anatomy-pane">
-      <p class="rc-anatomy-label"><code>.rulecast-config.yaml</code></p>
-      <pre set:html={ruleHtml} />
-    </div>
-    <div class="rc-anatomy-arrow" aria-hidden="true">→</div>
-    <div class="rc-anatomy-pane">
-      <p class="rc-anatomy-label">What the agent receives, in the same turn</p>
-      <pre set:html={outputHtml} />
-    </div>
+  <div class="rc-anatomy-pane">
+    <figcaption><code>.rulecast-config.yaml</code></figcaption>
+    <pre set:html={ruleHtml} />
   </div>
-  <ol class="rc-anatomy-keys">
-    {
-      keys.map((entry) => (
-        <li>
-          <code>{entry.key}</code> — <span set:html={entry.text} />
-        </li>
-      ))
-    }
-  </ol>
+  <div class="rc-anatomy-pane">
+    <figcaption>What the agent receives</figcaption>
+    <pre set:html={outputHtml} />
+  </div>
 </figure>
 
 <style is:global>
   .rc-anatomy {
-    margin: 2rem 0;
-  }
-  .rc-anatomy-panes {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: 0.75rem;
-    align-items: stretch;
+    /* Side by side where both panes have room, stacked in a docs column or on a phone. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 1.5rem;
+    margin: 0;
+  }
+  .sl-markdown-content .rc-anatomy {
+    margin-top: 1.5rem;
   }
   .rc-anatomy-pane {
-    min-width: 0;
     display: flex;
     flex-direction: column;
+    min-width: 0;
   }
-  .rc-anatomy-label {
-    margin: 0 0 0.4rem;
-    font-size: var(--sl-text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+  .rc-anatomy figcaption {
+    margin-bottom: 0.6rem;
+    font-size: var(--sl-text-sm);
     color: var(--sl-color-gray-3);
   }
-  .rc-anatomy-label code {
-    text-transform: none;
-    letter-spacing: 0;
+  .rc-anatomy figcaption code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
   }
   .rc-anatomy pre {
     flex: 1;
     margin: 0;
-    padding: 0.9rem 1rem;
-    border-radius: 0.6rem;
-    border: 1px solid var(--sl-color-gray-5);
+    padding: 1.1rem 1.25rem;
+    border: 0;
+    border-radius: 0.875rem;
     background: var(--sl-color-gray-6);
-    color: var(--sl-color-gray-1);
-    font-size: 0.75rem;
-    line-height: 1.6;
+    color: var(--sl-color-gray-4);
+    font-family: var(--__sl-font-mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .rc-anatomy-arrow {
-    align-self: center;
-    font-size: 1.5rem;
-    color: var(--sl-color-accent);
-  }
-  .rc-a-badge {
-    display: inline-grid;
-    place-items: center;
-    width: 1.15rem;
-    height: 1.15rem;
-    margin-left: 0.5rem;
-    border-radius: 50%;
-    background: var(--sl-color-accent);
-    color: var(--sl-color-black);
-    font-size: 0.68rem;
-    font-family: var(--__sl-font);
-    vertical-align: 0.05rem;
-  }
-  .rc-a-marked {
+  .rc-a-lit {
     color: var(--sl-color-white);
   }
-  .rc-a-rule {
-    color: #d93b3b;
-    font-weight: 700;
-  }
-  :root:not([data-theme="light"]) .rc-a-rule {
-    color: var(--rc-error);
-  }
-  .rc-a-section {
-    color: var(--sl-color-accent);
-  }
   .rc-a-value {
-    background: var(--sl-color-accent-low);
-    color: var(--sl-color-accent-high);
-    border-radius: 0.2rem;
-    padding: 0 0.15rem;
-  }
-  .rc-anatomy-keys {
-    margin: 1rem 0 0;
-    padding-left: 1.4rem;
-    display: grid;
-    gap: 0.35rem;
-    font-size: var(--sl-text-sm);
-    color: var(--sl-color-gray-2);
-  }
-  .rc-anatomy-keys li::marker {
     color: var(--sl-color-accent);
-    font-weight: 700;
-  }
-  @media (max-width: 50rem) {
-    .rc-anatomy-panes {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .rc-anatomy-arrow {
-      transform: rotate(90deg);
-      justify-self: center;
-    }
   }
 </style>

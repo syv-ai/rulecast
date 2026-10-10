@@ -1,0 +1,279 @@
+---
+/**
+ * The landing page. One statement, one command, then three things to see: rulecast telling an agent
+ * in the same turn, what a rule is made of, and where it runs. The README's own words carry the
+ * explanation (read at build time); the headline and section titles are the site's.
+ */
+import { routeUrl } from "../../scripts/links"
+import { LEAD, readme, version } from "../../scripts/sources"
+import HookFlow from "./HookFlow.astro"
+import RuleAnatomy from "./RuleAnatomy.astro"
+import TerminalDemo from "./TerminalDemo.astro"
+
+const [tagline = "", lede = ""] = (readme().get(LEAD) ?? "").split(/\n\n+/).filter((block) => !block.startsWith("```"))
+/** Inline Markdown in the README's lead: code and emphasis are all it uses. */
+const inline = (text: string) =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+
+const install = "npx @syv-ai/rulecast init"
+const next = [
+  { title: "Getting started", text: "One command sets it up.", route: "getting-started" },
+  { title: "Writing rules", text: "A check, a message, a doc section.", route: "guides/writing-rules" },
+  { title: "Detectors", text: "From a regex to a model.", route: "reference/detectors" },
+  { title: "Git hooks and CI", text: "The same rules, everywhere.", route: "guides/git-hooks-ci" },
+]
+---
+
+<div class="rc-landing not-content">
+  <header class="rc-hero">
+    <h1>Your conventions, in the same turn.</h1>
+    <p class="rc-hero-tagline" set:html={inline(tagline)} />
+    <div class="rc-hero-actions">
+      <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
+        <span class="rc-install-prompt" aria-hidden="true">$</span>
+        <code>{install}</code>
+        <span class="rc-install-state" aria-live="polite">Copy</span>
+      </button>
+      <a class="rc-link" href={routeUrl("getting-started")}>Read the guide <span aria-hidden="true">→</span></a>
+    </div>
+    <p class="rc-hero-meta">v{version()} · Claude Code · Node ≥ 20.12 · macOS and Linux · MIT</p>
+  </header>
+
+  <section>
+    <h2>See it work.</h2>
+    <p class="rc-lede" set:html={inline(lede)} />
+    <TerminalDemo />
+    <p class="rc-note">Every line rulecast prints above is its real output.</p>
+  </section>
+
+  <section>
+    <h2>A check, a message, a doc section.</h2>
+    <p class="rc-lede">
+      The agent reads the message, with the paragraph of your documentation that explains it, so it never has to go
+      looking.
+    </p>
+    <RuleAnatomy />
+  </section>
+
+  <section>
+    <h2>Around the tools it already uses.</h2>
+    <p class="rc-lede">rulecast runs as your agent's hooks. Nothing to start, no daemon.</p>
+    <HookFlow />
+  </section>
+
+  <nav class="rc-next" aria-label="Read on">
+    {
+      next.map((item) => (
+        <a href={routeUrl(item.route)}>
+          <strong>{item.title}</strong>
+          <span>{item.text}</span>
+        </a>
+      ))
+    }
+  </nav>
+</div>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+    const state = button.querySelector<HTMLElement>(".rc-install-state")!
+    let timer: ReturnType<typeof setTimeout> | undefined
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "")
+        state.textContent = "Copied"
+        button.classList.add("rc-copied")
+      } catch {
+        state.textContent = "Select to copy"
+      }
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        state.textContent = "Copy"
+        button.classList.remove("rc-copied")
+      }, 1600)
+    })
+  }
+</script>
+
+<style is:global>
+  /* The splash page's own title panel: the hero carries the page's h1. */
+  .content-panel:has(> .sl-container > h1#_top) {
+    display: none;
+  }
+</style>
+
+<style>
+  .rc-landing {
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+  .rc-landing section {
+    margin-top: clamp(5rem, 12vw, 8rem);
+  }
+  .rc-landing h1,
+  .rc-landing h2 {
+    color: var(--sl-color-white);
+    font-weight: 650;
+    text-wrap: balance;
+  }
+
+  .rc-hero {
+    margin-top: clamp(2rem, 8vw, 5rem);
+    text-align: center;
+  }
+  .rc-hero h1 {
+    margin: 0 auto;
+    max-width: 14em;
+    font-size: clamp(2.5rem, 7vw, 4.25rem);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+  }
+  .rc-hero-tagline {
+    margin: 1.5rem auto 0;
+    max-width: 34em;
+    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+    text-wrap: pretty;
+  }
+  .rc-hero-tagline :global(code) {
+    font-size: 0.88em;
+    background: none;
+    padding: 0;
+    color: var(--sl-color-gray-1);
+  }
+  .rc-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem 1.75rem;
+    margin-top: 2.5rem;
+  }
+  .rc-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 0.8rem 0.8rem 1.1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.75rem;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+    font: inherit;
+    cursor: pointer;
+    transition:
+      transform 100ms ease-out,
+      border-color 150ms ease-out;
+  }
+  .rc-install:hover {
+    border-color: var(--sl-color-gray-4);
+  }
+  .rc-install:active {
+    transform: scale(0.97);
+  }
+  .rc-install code {
+    white-space: nowrap;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.95rem;
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+  .rc-install-prompt {
+    font-family: var(--__sl-font-mono);
+    color: var(--sl-color-gray-3);
+  }
+  .rc-install-state {
+    min-width: 4.2rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 0.45rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-2);
+    background: var(--sl-color-black);
+  }
+  .rc-copied .rc-install-state {
+    color: var(--sl-color-accent);
+  }
+  .rc-link {
+    color: var(--sl-color-accent);
+    text-decoration: none;
+    font-weight: 550;
+  }
+  .rc-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .rc-hero-meta {
+    margin-top: 1.75rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+    letter-spacing: 0.01em;
+  }
+
+  .rc-landing h2 {
+    margin: 0;
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  .rc-lede {
+    margin: 1rem 0 2.25rem;
+    max-width: 38em;
+    font-size: 1.075rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+    text-wrap: pretty;
+  }
+  .rc-note {
+    margin-top: 1rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .rc-next {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0 2rem;
+    margin: clamp(5rem, 12vw, 8rem) 0 2rem;
+    border-top: 1px solid var(--sl-color-hairline);
+  }
+  .rc-next a {
+    display: grid;
+    gap: 0.2rem;
+    padding: 1.25rem 0;
+    text-decoration: none;
+  }
+  .rc-next strong {
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+  .rc-next span {
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .rc-next a:hover strong {
+    color: var(--sl-color-accent);
+  }
+
+  @media (max-width: 30rem) {
+    .rc-install {
+      gap: 0.55rem;
+      padding-left: 0.85rem;
+    }
+    .rc-install code {
+      font-size: 0.82rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rc-install {
+      transition: none;
+    }
+    .rc-install:active {
+      transform: none;
+    }
+  }
+</style>

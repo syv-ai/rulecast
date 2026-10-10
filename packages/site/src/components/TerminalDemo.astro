@@ -23,7 +23,7 @@ const lines: Line[] = [
   agent("Edit app/services/users.py"),
   ...output(openingOutput()),
   agent("Edit app/services/users.py"),
-  note("no new findings: rulecast says nothing"),
+  note("(nothing new: rulecast stays quiet)"),
   agent("Bash python scripts/scaffold_service.py users"),
   ...output(golden("shell-edit")),
 ]
@@ -39,27 +39,23 @@ function tone(text: string): string {
 ---
 
 <figure class="rc-terminal not-content" aria-label="An agent session with rulecast: real rulecast output">
-  <div class="rc-term-bar" aria-hidden="true">
-    <span></span><span></span><span></span>
-    <em>agent session</em>
-  </div>
   <div class="rc-term-body" data-rc-terminal>
     {
       lines.map((line) =>
         line.kind === "agent" ? (
           <div class="rc-term-line rc-t-agent" data-kind="agent">
             <span class="rc-t-prompt" aria-hidden="true">
-              ●
+              ›
             </span>
             <span data-text>{line.text}</span>
           </div>
         ) : line.kind === "note" ? (
           <div class="rc-term-line rc-t-note" data-kind="note">
-            # {line.text}
+            {line.text}
           </div>
         ) : (
           <div class:list={["rc-term-line", "rc-t-out", tone(line.text)]} data-kind="rulecast">
-            {line.text === "" ? " " : line.text}
+            {line.text === "" ? "\u00a0" : line.text}
           </div>
         ),
       )
@@ -118,83 +114,63 @@ function tone(text: string): string {
 
 <style>
   .rc-terminal {
-    margin: 1.25rem 0 0;
-    border-radius: 0.75rem;
-    overflow: hidden;
+    margin: 0;
+    border-radius: 1rem;
     background: var(--rc-term-bg);
-    color: var(--rc-term-fg);
-    box-shadow:
-      0 1px 0 rgb(255 255 255 / 0.04) inset,
-      0 18px 40px -18px rgb(0 0 0 / 0.55);
-    border: 1px solid #2a2839;
+    color: var(--rc-term-dim);
+    border: 1px solid rgb(255 255 255 / 0.06);
+    box-shadow: 0 24px 48px -28px rgb(0 0 0 / 0.5);
     text-align: left;
   }
-  .rc-term-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.6rem 0.8rem;
-    background: #1f1d2b;
-    border-bottom: 1px solid #2a2839;
-  }
-  .rc-term-bar span {
-    width: 0.7rem;
-    height: 0.7rem;
-    border-radius: 50%;
-    background: #3a3850;
-  }
-  .rc-term-bar em {
-    margin-left: auto;
-    font-style: normal;
-    font-size: 0.75rem;
-    color: var(--rc-term-dim);
-    font-family: var(--__sl-font-mono);
-  }
   .rc-term-body {
-    padding: 0.9rem 1rem 1.1rem;
+    padding: 1.5rem 1.6rem 1.75rem;
     font-family: var(--__sl-font-mono);
     font-size: 0.8rem;
-    line-height: 1.55;
+    line-height: 1.65;
   }
   .rc-term-line {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    transition: opacity 220ms ease-out;
   }
   .rc-hidden {
-    visibility: hidden;
+    opacity: 0;
+    transition: none;
   }
   .rc-t-agent {
-    margin-top: 0.6rem;
+    margin-top: 1.1rem;
     color: #ffffff;
-    font-weight: 600;
   }
   .rc-t-agent:first-child {
     margin-top: 0;
   }
   .rc-t-prompt {
     color: var(--rc-signal);
-    margin-right: 0.4rem;
+    margin-right: 0.6rem;
   }
   .rc-t-out {
-    padding-left: 1.1rem;
-    border-left: 2px solid #3a3850;
+    padding-left: 1.3rem;
   }
   .rc-t-title {
-    color: #ffffff;
+    color: var(--rc-term-fg);
   }
   .rc-t-error {
     color: var(--rc-error);
-    font-weight: 600;
   }
   .rc-t-warning {
     color: var(--rc-warning);
-    font-weight: 600;
   }
   .rc-t-section {
-    color: var(--rc-signal);
+    color: var(--rc-term-fg);
   }
   .rc-t-note {
-    margin-top: 0.6rem;
-    color: var(--rc-ok);
+    padding-left: 1.3rem;
+    font-style: italic;
+  }
+  @media (max-width: 40rem) {
+    .rc-term-body {
+      padding: 1.1rem 1.1rem 1.25rem;
+      font-size: 0.74rem;
+    }
   }
 </style>

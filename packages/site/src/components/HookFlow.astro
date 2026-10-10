@@ -4,237 +4,84 @@
  * Claude Code hook table (§12); only what a user needs, so no UserPromptSubmit or SubagentStop.
  */
 interface Step {
-  action: string
-  tool: string
-  before?: { event: string; does: string }
-  after?: { event: string; does: string }
-  gets: string
-  blocks?: boolean
+  when: string
+  hooks: string
+  says: string
 }
 
 const steps: Step[] = [
   {
-    action: "Starts a session",
-    tool: "SessionStart",
-    after: { event: "start", does: "records the working tree; after /compact, reset re-delivers conventions" },
-    gets: "Nothing, unless the config has a problem",
+    when: "Session starts",
+    hooks: "start",
+    says: "rulecast records the working tree, so it can tell later what changed.",
+  },
+  { when: "Reads a file", hooks: "touch", says: "The conventions for that file arrive once, with their doc sections." },
+  {
+    when: "Edits a file",
+    hooks: "guard · edit",
+    says: "A protected file is refused before the write. Anything else is checked after it, and new findings come back in the same turn.",
   },
   {
-    action: "Reads a file",
-    tool: "Read",
-    after: { event: "touch", does: "selects the guidance rules for that file, once per context" },
-    gets: "The conventions for that file, with their doc sections",
+    when: "Runs a command",
+    hooks: "shell-before · shell-after",
+    says: "What the command wrote is checked like an edit. A protected file it touched must be reverted.",
   },
   {
-    action: "Edits a file",
-    tool: "Edit · Write",
-    before: { event: "guard", does: "refuse_write rules judge the text about to be written" },
-    after: { event: "edit", does: "runs the file's rules; only lines the agent changed count as new" },
-    gets: "Each new finding and the doc section it cites, in the same turn",
-  },
-  {
-    action: "Runs a command",
-    tool: "Bash",
-    before: { event: "shell-before", does: "records the working tree" },
-    after: { event: "shell-after", does: "files the call changed are checked like an edit" },
-    gets: "Findings in what the command wrote; a protected file: revert it",
-  },
-  {
-    action: "Tries to stop",
-    tool: "Stop",
-    before: { event: "verify", does: "re-checks every file the agent changed, plus changes no call explains" },
-    gets: "Blocked while a new error stands (once per prompt by default); outside changes are reported, never block",
-    blocks: true,
+    when: "Tries to stop",
+    hooks: "verify",
+    says: "It is held back while a new error stands, once per prompt by default. Changes no tool call explains are reported and never block.",
   },
 ]
 ---
 
-<figure class="rc-flow not-content" aria-labelledby="rc-flow-caption">
-  <div class="rc-flow-head" aria-hidden="true">
-    <span>Your agent</span>
-    <span>rulecast, before the tool</span>
-    <span>rulecast, after the tool</span>
-    <span>What the agent gets back</span>
-  </div>
-  <ol>
-    {
-      steps.map((step) => (
-        <li class:list={["rc-flow-row", { "rc-flow-stop": step.blocks }]}>
-          <div class="rc-flow-agent">
-            <span class="rc-flow-action">{step.action}</span>
-            <code class="rc-flow-tool">{step.tool}</code>
-          </div>
-          <div class:list={["rc-flow-hook", { "rc-flow-empty": !step.before }]}>
-            {step.before ? (
-              <>
-                <span class="rc-flow-when">before</span>
-                <code class="rc-flow-event">{step.before.event}</code>
-                <span class="rc-flow-does">{step.before.does}</span>
-              </>
-            ) : (
-              <span class="rc-flow-none">—</span>
-            )}
-          </div>
-          <div class:list={["rc-flow-hook", { "rc-flow-empty": !step.after }]}>
-            {step.after ? (
-              <>
-                <span class="rc-flow-when">after</span>
-                <code class="rc-flow-event">{step.after.event}</code>
-                <span class="rc-flow-does">{step.after.does}</span>
-              </>
-            ) : (
-              <span class="rc-flow-none">—</span>
-            )}
-          </div>
-          <div class="rc-flow-gets">{step.gets}</div>
-        </li>
-      ))
-    }
-  </ol>
-  <figcaption id="rc-flow-caption">
-    Every hook runs <code>rulecast hook claude-code</code>, a fresh process with no daemon. Rules run in the hook
-    their detector is fast enough for: <code>llm</code> rules wait for <code>verify</code> unless a rule asks otherwise.
-  </figcaption>
-</figure>
+<dl class="rc-flow not-content">
+  {
+    steps.map((step) => (
+      <div class="rc-flow-row">
+        <dt>
+          {step.when}
+          <code>{step.hooks}</code>
+        </dt>
+        <dd>{step.says}</dd>
+      </div>
+    ))
+  }
+</dl>
 
 <style>
   .rc-flow {
-    margin: 2rem 0;
-    font-size: var(--sl-text-sm);
-  }
-  .rc-flow ol {
-    list-style: none;
     margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0.75rem;
+    border-top: 1px solid var(--sl-color-hairline);
   }
-  .rc-flow-head,
   .rc-flow-row {
     display: grid;
-    grid-template-columns: 1fr 1.25fr 1.25fr 1.35fr;
-    gap: 0.75rem;
-    align-items: stretch;
+    grid-template-columns: minmax(10rem, 15rem) 1fr;
+    gap: 0.35rem 2rem;
+    padding: 1.15rem 0;
+    border-bottom: 1px solid var(--sl-color-hairline);
   }
-  .rc-flow-head {
-    padding: 0 0 0.5rem;
-    color: var(--sl-color-gray-3);
-    font-size: var(--sl-text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .rc-flow-row {
-    margin: 0;
-    position: relative;
-  }
-  .rc-flow-row > div {
-    border: 1px solid var(--sl-color-gray-5);
-    border-radius: 0.6rem;
-    padding: 0.65rem 0.75rem;
-    background: var(--sl-color-black);
-    position: relative;
-  }
-  /* The arrow from each box to the next. */
-  .rc-flow-row > div:not(:last-child)::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    right: -0.7rem;
-    width: 0.65rem;
-    border-top: 2px solid var(--sl-color-gray-4);
-  }
-  .rc-flow-agent {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    justify-content: center;
-  }
-  .rc-flow-action {
+  .rc-flow dt {
+    display: grid;
+    gap: 0.2rem;
     font-weight: 600;
     color: var(--sl-color-white);
   }
-  .rc-flow-tool {
-    align-self: flex-start;
+  .rc-flow code {
+    font-family: var(--__sl-font-mono);
     font-size: var(--sl-text-xs);
-    color: var(--sl-color-gray-2);
-    background: var(--sl-color-gray-6);
-    padding: 0.1rem 0.4rem;
-    border-radius: 0.3rem;
-  }
-  .rc-flow-hook {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    border-color: var(--sl-color-accent) !important;
-    background: color-mix(in srgb, var(--sl-color-accent-low) 55%, var(--sl-color-black)) !important;
-  }
-  .rc-flow-empty {
-    border-style: dashed !important;
-    border-color: var(--sl-color-gray-5) !important;
-    background: transparent !important;
-    justify-content: center;
-    align-items: center;
-  }
-  .rc-flow-none {
-    color: var(--sl-color-gray-4);
-  }
-  .rc-flow-when {
-    font-size: var(--sl-text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-weight: 400;
     color: var(--sl-color-gray-3);
-  }
-  .rc-flow-event {
-    align-self: flex-start;
-    font-weight: 700;
-    color: var(--sl-color-accent-high);
     background: none;
     padding: 0;
   }
-  .rc-flow-does {
+  .rc-flow dd {
+    margin: 0;
     color: var(--sl-color-gray-2);
-    line-height: 1.4;
+    line-height: 1.6;
   }
-  .rc-flow-gets {
-    color: var(--sl-color-gray-1);
-    line-height: 1.45;
-    display: flex;
-    align-items: center;
-  }
-  .rc-flow-stop .rc-flow-gets {
-    border-color: var(--sl-color-accent) !important;
-  }
-  .rc-flow figcaption {
-    margin-top: 1rem;
-    color: var(--sl-color-gray-3);
-  }
-
-  @media (max-width: 50rem) {
-    .rc-flow-head {
-      display: none;
-    }
-    .rc-flow ol {
-      gap: 1.25rem;
-    }
+  @media (max-width: 40rem) {
     .rc-flow-row {
       grid-template-columns: 1fr;
-      gap: 0.5rem;
-      padding-left: 0.75rem;
-      border-left: 3px solid var(--sl-color-gray-5);
-    }
-    .rc-flow-row > div:not(:last-child)::after {
-      display: none;
-    }
-    .rc-flow-empty {
-      display: none !important;
-    }
-    .rc-flow-row > div {
-      padding: 0.5rem 0.65rem;
-    }
-    .rc-flow-agent {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
     }
   }
 </style>
