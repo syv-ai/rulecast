@@ -32,6 +32,11 @@ Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/ruleca
         - "@AGENTS.md#errors"
 ```
 
+`rulecast list` shows each rule's `files` and what its detector looks for (`detects …`). Compare those with the doc, not the rule's name:
+
+- **The doc covers more files than the catalog rule** (the doc says "outside `app/api/`", the rule's `files` is `services/`): add the `context` override above, and draft a local rule for the rest, with an `exclude` for the catalog rule's files so no site is reported twice. Say in its `description` which catalog rule it extends.
+- **The catalog rule contradicts the doc** (it assumes a layer or a file the project does not have): leave it as it is and tell the developer, proposing `enabled: false` on that entry. Switch it off only if they agree.
+
 For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
 **Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
@@ -101,7 +106,7 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 ## 4. Finish
 
-Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise: the rules kept (id, one line each, and the `--against` count), the rules dropped, and the conventions you skipped, with the reason.
+Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise: the rules kept (id, one line each, and the `--against` count; touch rules have no count), the rules dropped, the catalog rules you overrode or propose to switch off, and the conventions you skipped, with the reason.
 
 ## Never
 

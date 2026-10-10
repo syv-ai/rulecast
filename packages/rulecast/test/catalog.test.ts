@@ -89,6 +89,12 @@ const cases: Case[] = [
   },
   { rule: "python/layering", kind: "touch", file: "app/services/users.py", content: SERVICE_OK, fires: true },
   { rule: "python/layering", kind: "touch", file: "app/models/user.py", content: "class User: ...\n", fires: false },
+  // A route layer is not always a routes/ directory: the second drafting trial's app/api/routes.py
+  // never got the layering section. thin-routes already names app/api and app/routers.
+  { rule: "python/layering", kind: "touch", file: "app/api/routes.py", content: "x = 1\n", fires: true },
+  { rule: "python/layering", kind: "touch", file: "app/routers/users.py", content: "x = 1\n", fires: true },
+  { rule: "python/layering", kind: "touch", file: "app/crud.py", content: "x = 1\n", fires: true },
+  { rule: "python/layering", kind: "touch", file: "tests/api/test_users.py", content: "x = 1\n", fires: false },
   {
     rule: "react/no-fetch-in-components",
     kind: "verify",

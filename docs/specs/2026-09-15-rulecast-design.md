@@ -710,7 +710,7 @@ Command names and flags follow pre-commit where it has an equivalent.
 | `rulecast install [--agent <name>]... [--scope shared\|personal]` | Installs agent hooks (default: every adapter, shared scope), merged without modifying existing entries, and fetches missing rule repos |
 | `rulecast uninstall [--agent <name>]...` | Removes only the hook entries rulecast added |
 | `rulecast run [RULE_ID] [--all-files \| --files F…] [--from-ref A [--to-ref B]] [--summary] [--format terminal\|agent\|json\|sarif] [--session <id>] [--llm \| --no-llm]` | Verify event |
-| `rulecast list [--format terminal\|json]` | Every compiled rule, catalog rules included: id, source, enabled, stages, detector kind, severity, `files`, `exclude`, context references |
+| `rulecast list [--format terminal\|json]` | Every compiled rule, catalog rules included: id, source, enabled, stages, detector kind and config (a regex's pattern, an llm rule's question), severity, `files`, `exclude`, context references |
 | `rulecast test [RULE_ID] [--against PATH…]` | Authoring-time rule scoring (below) |
 | `rulecast autoupdate [--freeze] [--repo URL]` | Moves each URL repo's `rev` to its latest tag, preserving comments and formatting; `--freeze` writes the commit SHA with a `# frozen: <tag>` comment |
 | `rulecast try-repo <path\|url> [RULE_ID] [--ref REV] [run flags]` | Runs a repo's rules against the project without editing the config (for rule authors): a local directory as it is on disk, a URL at `--ref` (default `HEAD`) |

@@ -19,6 +19,8 @@ export interface ListedRule {
   stages: string[]
   /** The detector kind; null for a touch rule. */
   detector: string | null
+  /** The detector's config as compiled (a regex's pattern, an llm rule's question); null for a touch rule. */
+  config: unknown
   severity: string
   files: string
   exclude: string
@@ -33,6 +35,7 @@ function listed(rule: CompiledRule): ListedRule {
     enabled: rule.enabled,
     stages: [...rule.stages],
     detector: rule.detector?.kind ?? null,
+    config: rule.detector?.config ?? null,
     severity: rule.severity,
     files: rule.patterns.files,
     exclude: rule.patterns.exclude,
@@ -75,6 +78,9 @@ export async function listCommand(
     out.push(`  ${rule.name}`)
     const scope = `files ${rule.files === "" ? "(all)" : rule.files}${rule.exclude === "^$" ? "" : `, exclude ${rule.exclude}`}`
     out.push(`  ${scope}`)
+    // The pattern is what decides whether a new rule would duplicate this one; without it, an agent
+    // drafting rules went looking for the rule repo's manifest (plan 10, second drafting trial).
+    if (rule.config !== null) out.push(`  detects ${JSON.stringify(rule.config)}`)
     if (rule.context.length > 0) out.push(`  cites ${rule.context.join(", ")}`)
     out.push("")
   }

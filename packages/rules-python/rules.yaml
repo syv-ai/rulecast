@@ -52,7 +52,10 @@
 - id: layering
   name: Route, service and CRUD layering
   description: Delivers the layering conventions the first time an agent works on a route, service or CRUD module.
-  files: '(^|/)(routes|services|crud)/.*\.py$'
+  # A layer is a directory or a single module: app/api/routes.py and app/crud.py count, as do
+  # app/routers/ and app/api/ (the paths thin-routes uses).
+  files: '(^|/)(api|routers?|routes|services|crud)(/.*)?\.py$'
+  exclude: '(^|/)tests?/'
   stages: [touch]
   context:
     - "@layering.md"

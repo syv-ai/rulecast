@@ -8,7 +8,7 @@ HTTP request → route → service → CRUD → database
 
 | Layer | Directory | Does | Never |
 |---|---|---|---|
-| Route | `routes/` (often `api/routes/`) | Parses input, resolves auth dependencies, calls one service, returns the response | Business rules, database queries |
+| Route | `routes/` (often `api/routes/`, or one `api/routes.py` module) | Parses input, resolves auth dependencies, calls one service, returns the response | Business rules, database queries |
 | Service | `services/` | Business logic, authorization decisions, domain exceptions | HTTP (`HTTPException`, status codes), database queries |
 | CRUD | `crud/` | Database queries, one function per query | Business rules, HTTP |
 

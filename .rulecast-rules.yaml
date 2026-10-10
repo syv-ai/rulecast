@@ -71,7 +71,8 @@
 - id: python/layering
   name: Route, service and CRUD layering
   description: Delivers the layering conventions the first time an agent works on a route, service or CRUD module.
-  files: (^|/)(routes|services|crud)/.*\.py$
+  files: (^|/)(api|routers?|routes|services|crud)(/.*)?\.py$
+  exclude: (^|/)tests?/
   stages:
     - touch
   context:

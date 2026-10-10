@@ -17,6 +17,27 @@ describe("rulecast list", () => {
     expect((await runCli(root, ["list"])).stdout).toContain("frontend/no-generated-edits  (disabled)")
   })
 
+  test("shows what each detector looks for, so overlap can be judged without the rule repo", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([
+        {
+          id: "app/no-print",
+          name: "No print",
+          files: "^app/",
+          detect: { regex: { pattern: "\\bprint\\(" } },
+          message: "{{file}}:{{line}} prints",
+        },
+        { id: "app/services", name: "Services", files: "^app/services/", stages: ["touch"], context: ["@x.md"] },
+      ]),
+      "x.md": "# X\n",
+    })
+    const text = (await runCli(root, ["list"])).stdout
+    expect(text).toContain('  detects {"pattern":"\\\\bprint\\\\(",')
+    const json = JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)
+    expect(json[0].config.pattern).toBe("\\bprint\\(")
+    expect(json[1].config).toBeNull()
+  })
+
   test("outside a project it fails, and an unknown format is a usage error", async () => {
     const outside = await createProject({})
     expect((await runCli(outside, ["list"])).code).toBe(2)
