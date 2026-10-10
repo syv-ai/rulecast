@@ -69,7 +69,7 @@ repos:
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
 | `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
-| `refuse_write` | no, default `false` | Refuse the edit itself when this rule fires on what the agent is writing (below) |
+| `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
@@ -155,6 +155,13 @@ writing it. Three things it does not do, all deliberate:
   — `old_string` missing, or appearing twice without `replace_all` — the write goes ahead.
 - **It refuses once per file per session** (`refuse_gate.max_refusals`), so a rule cannot trap an
   agent that has no way to satisfy it.
+
+**A write made with the shell is caught right after it, not refused.** Nothing can know what a
+command such as `sed -i` will write before it runs. So rulecast compares the working tree before and
+after the command: a `refuse_write` finding in a file the command changed is told to the agent at
+once, with how to revert it (`git checkout -- <file>`, or "undo only your change" when the file had
+uncommitted work before the session). Stop is blocked while the finding is new, whatever the rule's
+severity, and the developer is told which file the agent changed.
 
 `refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`.
 `linter`, `command` and `llm` hand a path to another program, which would read the file as it still

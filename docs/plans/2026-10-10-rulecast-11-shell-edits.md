@@ -235,10 +235,10 @@ export function treeChanges(
 
 **Files:** modify `README.md` · modify `agents/reference/rule-format.md` · modify `docs/specs/2026-09-15-rulecast-design.md` · run `pnpm readme`
 
-- [ ] README: what rulecast checks during a session ("files the agent changes, with its edit tools or with Bash"); the `refuse_write` section says it refuses edit-tool writes before they happen and catches shell writes right after.
-- [ ] rule-format: `refuse_write` the same way.
-- [ ] Spec: §7 the three event kinds; §8 session-start snapshots of dirty files, and the "another tool" case rewritten; §9 tree records, the sweep, `gate()`'s two new rules; §12 the hook table's Bash rows and the payload facts from Task 1; §13 the Bash hook budget.
-- [ ] Verify: `pnpm readme --check`; `pnpm test`. Commit.
+- [x] README: what rulecast checks during a session ("files the agent changes, with its edit tools or with Bash"); the `refuse_write` section says it refuses edit-tool writes before they happen and catches shell writes right after.
+- [x] rule-format: `refuse_write` the same way.
+- [x] Spec: §7 the three event kinds; §8 session-start snapshots of dirty files, and the "another tool" case rewritten; §9 tree records, the sweep, `gate()`'s two new rules; §12 the hook table's Bash rows and the payload facts from Task 1; §13 the Bash hook budget.
+- [x] Verify: `pnpm readme --check`; `pnpm test`. Commit.
 
 ## Task 11: changeset, index, review
 

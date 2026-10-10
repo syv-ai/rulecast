@@ -476,10 +476,15 @@ detect:
 | Event | Claude Code source | Rules selected | Files |
 |---|---|---|---|
 | `touch` | `PostToolUse` on `Read`; implicit on every `edit` | rules with stage `touch` matching the file, not yet touched in this agent context | the file (no detection) |
-| `edit` | `PostToolUse` on `Edit`, `Write` | rules with stage `edit` matching the file | the edited file |
-| `verify` | `Stop`, `SubagentStop`; `rulecast run` | rules with stage `verify` | Stop: work memory's edited files whose content differs from their snapshot; CLI: §12 |
+| `edit` | `PostToolUse` on `Edit`, `Write`; a `shell-after` that found changed files | rules with stage `edit` matching the file | the edited file, or the files the shell call changed |
+| `verify` | `Stop`, `SubagentStop`; `rulecast run` | rules with stage `verify` | Stop: work memory's edited files whose content differs from their snapshot, and the swept files (§9, Shell edits); CLI: §12 |
 | `prompt` | `UserPromptSubmit` from the user | none | none; resets the agent's stop-block counter |
 | `reset` | `SessionStart` with source `compact` | touch rules matching the restored files | clears the agent's context memory, then the agent's `restoredFiles` most recently read or edited files (no detection) |
+| `start` | `SessionStart` with source `startup` or `resume` | none | records the working tree, and snapshots the dirty files a rule matches (§8) |
+| `shell-before` | `PreToolUse` on `Bash` | none | records the working tree; changes since the agent's last recorded state are swept (§9, Shell edits) |
+| `shell-after` | `PostToolUse` or `PostToolUseFailure` on `Bash` | as `edit`, when the call changed files a rule matches | the files changed during the call, which continue as an `edit` event |
+
+The three shell and start events are agent-neutral: an adapter maps its shell tool's before and after hooks and its session start to them, and the core owns the tree, the comparison and the sweep (`core/session/tree.ts`).
 
 ## 8. Baseline
 
@@ -490,7 +495,9 @@ A finding is **new** when it touches a line the agent changed. Findings on uncha
 - On the first read `touch` of a file in a session, the baseline stores a snapshot: `{ fileHash: u32, lines: Uint32Array }`. The implicit touch of an edit never takes a snapshot, because the file already contains the agent's change.
 - Each line is normalised by stripping leading and trailing whitespace, then hashed with 32-bit FNV-1a. `fileHash` is FNV-1a over the line-hash array. No file content is stored.
 - Snapshots are first-writer-wins: a later touch never replaces one.
-- Claude Code's `Edit` requires a prior `Read`, so the snapshot of an edited existing file is taken before the edit. A `Write` or `Edit` arriving with no snapshot (the file was changed through another tool, or the adapter has no read event) falls back to the session-start commit: the file's content at that commit, hashed the same way.
+- Claude Code's `Edit` requires a prior `Read`, so the snapshot of an edited existing file is taken before the edit.
+- A file the agent changes with its shell may never have been read through its tools (`cat`, then `sed -i`). So `start` snapshots every file that is dirty at session start and that a rule matches — at most 200, within `timeouts.edit_deadline_ms` — and a shell edit to one of them is judged against the user's content, not the commit. A `resume` takes them again, first writer wins, so nothing is replaced.
+- An edit arriving with no snapshot — a file clean at session start that was never read, a dirty file past the start limits, or an adapter with no read event — falls back to the session-start commit: the file's content at that commit, hashed the same way. For a file clean at session start that commit *is* its content then, so the fallback is exact.
 - The session-start commit is `HEAD` recorded at the session's first event. A file absent there, or a session outside git, has no baseline: every finding in it is new.
 
 ### Change sets
@@ -508,7 +515,7 @@ A rule with `scope: instance` — the default, and every rule before 0.2 — is 
 
 - **Fingerprints.** When the baseline snapshots a file, rulecast also runs the project's `container` rules over it and records what they matched: `file → rule → ranges`. Classification maps a recorded range into the current file through the same diff that produced the change set, and a match is new unless some mapped range overlaps it.
 - **A range keeps only the lines that survived the edit**, and a range with none left maps to nothing. A container deleted outright, or rewritten line for line, no longer exists and must not stand in for whatever now occupies its lines.
-- **No record means instance classification.** Four cases leave none: no snapshot (the file was changed through another tool), the file was over `max_file_bytes`, the fingerprint run passed the deadline, or the rule is an `llm` rule — a fingerprint run is a second evaluation, and for `llm` that would be a billed model call as a side effect of the agent opening a file, which §6 Consent does not allow. An *empty* record is not a missing one: it means the rule was measured and the file was clean, so every match found later is new.
+- **No record means instance classification.** Four cases leave none: no snapshot (a file changed with the shell that was never read), the file was over `max_file_bytes`, the fingerprint run passed the deadline, or the rule is an `llm` rule — a fingerprint run is a second evaluation, and for `llm` that would be a billed model call as a side effect of the agent opening a file, which §6 Consent does not allow. An *empty* record is not a missing one: it means the rule was measured and the file was clean, so every match found later is new.
 - **A `verify` measures what it is missing.** It has seconds where an edit has 350 ms, so for a file whose baseline is a commit it computes the fingerprints on demand from that commit's content, using only detectors that read through `read` (§6 `guards`) — a linter handed a path would measure the file as it stands now. This is what lets `run --from-ref` classify as the hooks do. An `edit` never does this: the edit path runs each detector exactly once.
 - **Known recall cost:** a second violation added inside a container that was already violating is pre-existing (R 0.15 against 0.26 for changed lines only). That is the trade the precision buys, and it is asserted in the tests rather than left to be rediscovered.
 
@@ -531,7 +538,7 @@ Session owns everything rulecast remembers about a session and every decision ab
 | Store | Contents | Scope | Cleared by |
 |---|---|---|---|
 | **Context memory** | references delivered (ref → covered range + content hash), touch rules fired, pre-existing summaries shown, rule warnings shown | session + agent | `reset` |
-| **Work memory** | edited files; files each agent read or edited, most recent last; stop-block counter per agent | session | `prompt` resets that agent's counter; nothing clears the file lists |
+| **Work memory** | edited files, each with how it was last changed (an edit tool or the shell); files each agent read or edited, most recent last; stop-block counter per agent; working-tree states (`tree` records) and swept files (§9, Shell edits) | session | `prompt` resets that agent's counter; nothing clears the file lists |
 
 Files: `sessions/<session-id>/work.jsonl` and `context.<agent-id|main>.jsonl` in the project's cache directory (§12). Agent id comes from the adapter (Claude Code: `agent_id`, present only inside subagents).
 
@@ -553,6 +560,17 @@ The lock is a lock file per session directory, considered stale after 5 s; it is
 ### Oversight
 
 Two things an agent can do to get past the Stop gate without fixing anything — widen `.rulecast-config.yaml`, or add a `rulecast-ignore` comment (§8) — are sometimes right, and `DRAFT-RULES.md` asks agents to edit the config, so neither is refused. Instead the user hears about them. The baseline's `start` record carries the config's sha256 at the session's first event; at a Stop, a config whose hash differs, and every ignored finding on a line changed this session, become `Delivery.notices`. A notice is told once per key (the config hash, or the ignore's rule and site) and recorded as a `noticed` work record, so the same change is not repeated at every later Stop. Notices are attached after the budget is spent and are never agent context: the Claude Code adapter prints them as `systemMessage`, beside a block, before a cap's text, or alone on an allow; the CLI prints them above its tail; `--format agent` prints them under "rulecast notices (for the user):", since an agent without hooks has nobody else to show them to.
+
+### Shell edits
+
+A shell command says nothing about the files it writes, and parsing `sed -i` or `>` out of command text would refuse harmless commands and miss others. So rulecast compares the working tree instead. A tree state is what `git status` lists as changed or untracked, each path with its mtime and size, and `HEAD` (`treeState`); a clean file has no entry, so a state costs two git processes and one `lstat` per dirty file whatever the repository's size. `treeChanges` compares two states: a moved `HEAD` means a git operation, otherwise a path changed when it is in one state and not the other, or its mtime or size differs.
+
+- **Attribution is per tool call.** `shell-before` records a `tree` record (phase `before`, with the call's `tool_use_id`); `shell-after` compares the state after the call with it, and the files that changed — a rule matching them, not deleted — are the agent's: they run through the `edit` path exactly as an `Edit` would, recorded as `edited` with `via: "shell"`, and the agent text's title says "changed by your Bash command".
+- **Reference state.** With an id, the `before` state recorded under it, so subagents running commands at the same time do not read each other's states. Without one, the agent's latest recorded state, else the session's latest (a subagent's first call). With none at all — a session begun before these hooks were installed — the call records its state and runs nothing.
+- **Git operations are not edits.** A call during which `HEAD` moved (commit, checkout, pull, rebase, stash pop) runs no edit event; its state becomes the next reference.
+- **The sweep.** Changes between calls are not the agent's: the user's editor, a formatter, a job the agent left running. `shell-before` compares the agent's latest state with now before recording its own, and appends `swept` records for the matched files that changed and are not in `edited`; a Stop does the same for changes since the last call, appends a `stop` tree record, and verifies `edited ∪ swept`. Swept findings are delivered under "changed outside your tool calls (fix them if a process you started made them; they do not block)", after the agent's own, and never block. A file the agent edits leaves `swept`. A subagent's Stop sweeps too, so it also reports the main agent's gap changes; they never block, so that is noise at worst.
+- **Outside git**, `start` warns once ("rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI") and nothing else changes: Stop verifies `edited` as before.
+- **Overlap.** Two subagents whose commands overlap in time both see a change made in the overlap: the id pairing keeps their reference states apart, not the files.
 
 ### Decisions in commit
 
@@ -612,6 +630,8 @@ Every uncertainty allows the write, because a refusal the agent cannot act on is
 
 A guard takes no snapshots, starts no session, and records nothing as delivered: the write it describes may never happen.
 
+**A shell write is caught after it.** Nothing knows what a command will write before it runs, so `refuse_write` cannot refuse it. A new finding of a `refuse_write` rule in a file whose `edited` record says `via: "shell"` goes on `Delivery.refused` with whether the file was dirty at session start (the `start` tree state). The agent text says "This file is protected; revert your change." with `git checkout -- <file>` for a file clean at start, or "It had uncommitted changes before this session: undo only your change, not the whole file." for one that was not; the advice is priced at the floor and never cut. The user gets a notice once per file and rule ("rulecast: the agent changed a protected file with Bash: <file> (<rule>)"), and Stop blocks while the finding is new (Stop decision, below).
+
 **Grouping**
 
 A rule that fired three or more times, whose `message` is at least 40 characters of literal text, is rendered as the message once — its variables shown as `{name}` — followed by one line per site: the location, then that site's captures, or a packed list of locations when the message has nothing that varies. Below either threshold, or for a message that is nearly all variables (`{{file}}:{{line}} {{text}}`, how a `linter` or `command` rule passes its detector's own wording through), each finding is rendered whole as before. Grouping is lossless — nothing is dropped, it is only not repeated — so it applies at every size, not only near the budget.
@@ -622,8 +642,10 @@ A `touch` from a complete read (`completeRead: true`) of a file records that fil
 
 **Stop decision** (verify from a stop)
 
-- No new error findings: `allow`.
-- New error findings and the agent's stop-block counter is below `stop_gate.max_blocks`: `block`, counter incremented.
+- Findings in swept files are set aside: they never block.
+- A new finding of a `refuse_write` rule in a file the agent changed with its shell counts as blocking whatever the rule's severity: the write could not be refused before it happened, so the agent must revert it.
+- No blocking findings: `allow`.
+- Blocking findings and the agent's stop-block counter is below `stop_gate.max_blocks`: `block`, counter incremented.
 - Otherwise: `capReached` (the agent may stop; the delivery lists what remains).
 - Only `block` reaches the agent. A stop that does not block records nothing in context memory, so what it would have delivered is delivered again at the next event.
 
@@ -680,9 +702,12 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 | `PreToolUse` | `Edit\|Write` | `guard`, carrying `tool_input` as a write intent (`content`, or `old_string`/`new_string`/`replace_all`) | findings: `{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": <agent text> } }`; nothing to say: nothing | 5 s |
 | `PostToolUse` | `Read` | `touch` (`completeRead` when `tool_response.file` has `startLine` 1 and `numLines` equal to `totalLines`) | `hookSpecificOutput.additionalContext` | 5 s |
 | `PostToolUse` | `Edit\|Write` | `edit` | `hookSpecificOutput.additionalContext` | 5 s |
+| `PreToolUse` | `Bash` | `shell-before`, with `tool_use_id` | none | 5 s |
+| `PostToolUse` | `Bash` | `shell-after`, with `tool_use_id` | `hookSpecificOutput.additionalContext` | 5 s |
+| `PostToolUseFailure` | `Bash` | `shell-after`, with `tool_use_id` and `failed` | `hookSpecificOutput` with `hookEventName: "PostToolUseFailure"` and `additionalContext` | 5 s |
 | `Stop`, `SubagentStop` | — | `verify` | `block`: `{ "decision": "block", "reason": <agent text> }`; `capReached`: `{ "systemMessage": <agent text> }`; `allow`: nothing | `timeouts.verify_ms` + 10 s |
 | `UserPromptSubmit` | — | `prompt` | none | 5 s |
-| `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: none, starts warm-up (§13); `compact`: `reset` | `compact`: `hookSpecificOutput.additionalContext` | 5 s |
+| `SessionStart` | `startup\|resume\|compact` | `startup`, `resume`: `start`, and starts warm-up (§13); `compact`: `reset` | `compact`: `hookSpecificOutput.additionalContext`; `start`: problems as `systemMessage` | 5 s |
 
 - **Output limit.** Claude Code injects `additionalContext` of up to 10,000 chars whole and replaces anything longer with a pointer to a saved file plus a 2 KB preview — a preview that is the first 2 KB, not the part worth reading. The adapter declares `maxContextChars` 9,000 so the budget (§9) keeps output under the limit on its own. Anything still longer is cut at a line break, never mid-word, with a line naming the overflow file when there is one and pointing at `rulecast run --format agent` when there is not. Block reasons and system messages get the same cut.
 - **Block reason.** Starts with a sentence saying the findings come from the project's rulecast rules; without it, agents can read a block as instruction injection.
@@ -693,12 +718,15 @@ Installed by `rulecast install` (and `init`) into `.claude/settings.json` (share
 - **Compaction.** `/compact` re-attaches the main agent's 5 most recently read, edited or written files (a partial read comes back whole, an edited file with its current content) without tool calls, so the adapter declares `restoredFiles` 5. `SessionStart` `compact` output has the same 10,000-char limit as `PostToolUse`.
 - Session id from `session_id`; agent id from `agent_id`. File paths come from `tool_input.file_path` (absolute; `tool_response` paths can be relative); the hook command makes them repo-relative and ignores files outside the project.
 - `SubagentStop` with an empty `agent_type` is `/compact`'s summariser, not an agent doing work: no `verify`.
+- **Bash payloads** (recorded from 2.1.296). Every one carries `tool_use_id`, the same on `PreToolUse` and on its `PostToolUse` or `PostToolUseFailure`. A command that exits non-zero fires `PostToolUseFailure` only, with no `tool_response`, and may have written files first, so it is a `shell-after` too; Claude Code takes its context only under `hookEventName: "PostToolUseFailure"`, which is why the event carries `failed`. A `run_in_background` call's `PostToolUse` fires at launch and nothing fires when the job ends, so the job's writes are swept. Subagent payloads carry `agent_id`.
+- **Swept findings on an allowed Stop.** A Stop hook reaches the agent only by blocking, so when the stop is allowed and swept files have findings, the adapter shows them to the user as `systemMessage`. On a block they are in the reason, under their heading.
+- **Upgrading an install.** `install` adds the groups an older install lacks to the settings file it is in, and `doctor` names them ("hooks for Bash missing; run rulecast install").
 - `UserPromptSubmit` also fires when a background task finishes, with a `prompt` starting `<task-notification>` and no other distinguishing field. That is not the user: no `prompt` event, so it does not reset the stop gate.
 - `/clear` and `fork` start a new `session_id`, so they begin with empty stores and need no event. Work from before a `/clear` is not verified at the next Stop: `/clear` starts a new task.
 - `rulecast hook` always exits 0 (§14). A directory with no `.rulecast-config.yaml` above it is not a rulecast project: the hook does nothing and creates no state.
 - Install markers for `init`: `.claude/` or `CLAUDE.md`.
 
-Payloads for every row are recorded from Claude Code 2.1.273 in `packages/rulecast/test/payloads/claude-code/` (findings in its `README.md`, including the compaction behaviour recorded with 2.1.278), and the adapter is written against them. Claude Code 2.1.273 has no `MultiEdit` tool.
+Payloads for every row are recorded from Claude Code 2.1.273 (the Bash rows from 2.1.296) in `packages/rulecast/test/payloads/claude-code/` (findings in its `README.md`, including the compaction behaviour recorded with 2.1.278), and the adapter is written against them. Claude Code 2.1.273 has no `MultiEdit` tool.
 
 ### CLI
 
@@ -808,6 +836,8 @@ Mechanisms:
 Measured on an Apple M3 Pro: p50 ~207 ms, p95 229–358 ms depending on machine load (2026-09-20, five detectors); **p50 170 ms, p95 187 ms** (2026-09-23, all six). A GitHub `ubuntu-latest` runner measured p50 218–235 ms, p95 237–247 ms on the same fixture — slower and more variable, which is why the budget is checked here and not there. Most of the growth over a regex-only project is subprocess start, one per external tool per event.
 
 **The guard costs a process per write.** `PreToolUse` runs before every Edit and Write, ahead of the tool rather than beside it, and measured **~80 ms** on the same machine (2026-09-23) — the same whether a `refuse_write` rule matches the file or none does, because the time is node starting and the config compiling, not detection. Projects with no `refuse_write` rule pay it too. That is the price of the hook being installed unconditionally, which is what makes adding a refusing rule later work without another `rulecast install`.
+
+**The Bash hooks.** `PreToolUse` on `Bash` runs before every shell command, and what it adds over a hook that does nothing (a `prompt` event: node starting, stdin, the config compiling) is held to **150 ms** at p95 on a large repository; past that, the design would fall back to the after hook alone, comparing with the agent's latest state and attributing changes between calls to the next one. Measured 2026-10-10 on an Apple M3 Pro under load: on `microsoft/vscode` (20,300 files) the before hook's p95 was 204 ms against a floor of 69 ms, **135 ms added**; nearly all of it is finding untracked files, so `treeState` runs `git status -uno` and `git ls-files --others` as parallel processes. On the 30-rule fixture with 20 dirty files it adds ~7 ms. The after hook, when the call changed a file, is an edit event under the 500 ms budget: p95 282 ms on the fixture. `pnpm perf` reports both, with the floor.
 
 ## 14. Error handling
 

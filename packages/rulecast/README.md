@@ -4,7 +4,7 @@
 
 Your project's conventions are written down in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them once, forty tool calls ago. rulecast delivers them again at the moment they matter: when the agent is about to break one.
 
-A rule pairs a check with a message and a pointer to the doc section it enforces. rulecast runs as an agent hook, so when the agent edits a file that breaks a rule, it gets told — in the same turn, before it moves on.
+A rule pairs a check with a message and a pointer to the doc section it enforces. rulecast runs as an agent hook, so when the agent changes a file that breaks a rule — with its edit tools or with Bash — it gets told, in the same turn, before it moves on.
 
 ```
 rulecast: 1 rule violated in app/services/users.py
@@ -19,6 +19,8 @@ Services raise domain exceptions. `app/api/errors.py` maps each one to a status 
 ```
 
 That is real output. The agent sees the finding *and* the paragraph of your documentation that explains it, without having to go looking.
+
+A file the agent rewrites with `sed -i` or a script is checked like one it changes with `Edit`: rulecast compares the working tree before and after each Bash call. A change no call explains — your own editor, a formatter, a job the agent left running — is reported when the agent stops, and never blocks it.
 
 ## Getting started
 
@@ -84,6 +86,8 @@ Some rules are not advice. `refuse_write: true` refuses the edit before it happe
 ```
 
 A refusal only ever rests on the text the agent is writing, never on a reconstruction rulecast is unsure of, and it happens once per file per session — so a rule can stop a mistake without trapping the agent. Generated code, vendored directories, files that must not change. Everything else is better reported after the write, which is what the other rules do.
+
+That covers the edit tools. A write through Bash cannot be refused before it runs, because nothing knows what a command will write, so rulecast catches it right after: the agent is told the file is protected and how to revert it, it cannot stop until it has, and you are told which file it changed.
 
 ## Commands
 
@@ -255,6 +259,8 @@ Node ≥ 20.12. Linux and macOS; Windows is not supported.
 ## Performance
 
 The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. `pnpm perf` replays 50 edit events and checks it. The last measurement, on an Apple M3 Pro with all six detectors configured, was p50 170 ms and p95 187 ms.
+
+The hook before every Bash call only records the working tree: it is held to 150 ms over a hook that does nothing, and adds about 135 ms at p95 on a 20,000-file repository (`microsoft/vscode`). The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 
