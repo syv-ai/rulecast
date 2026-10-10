@@ -96,11 +96,13 @@ Paths under `src/` and `test/` are in `packages/rulecast/`.
 
 **Behaviour:** The plan rests on facts only a live session can settle, as G3 did in plan 10. Record them before writing code.
 
-- [ ] In a scratch project with a logging hook (a `command` that appends stdin to a file) on `PreToolUse`, `PostToolUse` and `PostToolUseFailure` for `Bash`, run a live Claude Code session that: runs a succeeding command; a failing one (`false`); a `sed -i` edit; a background command (`run_in_background`); a subagent's Bash call.
-- [ ] Record each payload, with the session id and paths scrubbed as the existing payloads are.
-- [ ] Answer, in the README, with the Claude Code version: does a failing command fire `PostToolUse`, `PostToolUseFailure` or both? Does every payload carry `tool_use_id`, the same on Pre and Post? What does a background call's `PostToolUse` carry, and when does it fire? Does a subagent's carry `agent_id`?
-- [ ] Update Decisions 8 and 9 if an answer differs from what they assume, before Task 4.
-- [ ] Commit.
+- [x] In a scratch project with a logging hook (a `command` that appends stdin to a file) on `PreToolUse`, `PostToolUse` and `PostToolUseFailure` for `Bash`, run a live Claude Code session that: runs a succeeding command; a failing one (`false`); a `sed -i` edit; a background command (`run_in_background`); a subagent's Bash call.
+- [x] Record each payload, with the session id and paths scrubbed as the existing payloads are.
+- [x] Answer, in the README, with the Claude Code version: does a failing command fire `PostToolUse`, `PostToolUseFailure` or both? Does every payload carry `tool_use_id`, the same on Pre and Post? What does a background call's `PostToolUse` carry, and when does it fire? Does a subagent's carry `agent_id`?
+- [x] Update Decisions 8 and 9 if an answer differs from what they assume, before Task 4.
+- [x] Commit.
+
+**Recorded (2026-10-10, Claude Code 2.1.296, headless `claude -p`):** a failing command fires `PostToolUseFailure` only (so it maps to `shell-after` too); every Bash payload carries `tool_use_id`, the same on Pre and Post; a background call's `PostToolUse` fires at launch with `backgroundTaskId`, and nothing fires when the job ends (the sweep covers it); a subagent's payloads carry `agent_id`. Decisions 8 and 9 stand unchanged.
 
 ## Task 2: the working tree's state, and what changed
 

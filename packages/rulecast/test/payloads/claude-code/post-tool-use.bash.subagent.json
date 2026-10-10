@@ -1,0 +1,27 @@
+{
+  "session_id": "7b1c76bc-2096-4781-8c13-e91a4d930cc8",
+  "transcript_path": "/home/user/.claude/projects/-project/7b1c76bc-2096-4781-8c13-e91a4d930cc8.jsonl",
+  "cwd": "/project",
+  "prompt_id": "73d92d36-2baa-4b33-a61c-447b6dd76582",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "aa1dab120344eddb2",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo from-subagent",
+    "description": "Print test string"
+  },
+  "tool_response": {
+    "stdout": "from-subagent",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01Hq6aFeDpUKTpTJrtSJH8qy",
+  "duration_ms": 14
+}

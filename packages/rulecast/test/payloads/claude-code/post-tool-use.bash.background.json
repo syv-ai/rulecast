@@ -1,0 +1,27 @@
+{
+  "session_id": "7b1c76bc-2096-4781-8c13-e91a4d930cc8",
+  "transcript_path": "/home/user/.claude/projects/-project/7b1c76bc-2096-4781-8c13-e91a4d930cc8.jsonl",
+  "cwd": "/project",
+  "prompt_id": "73d92d36-2baa-4b33-a61c-447b6dd76582",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "sleep 3 && echo bg-done > bg.txt",
+    "description": "Write bg-done to bg.txt after 3 seconds",
+    "run_in_background": true
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false,
+    "backgroundTaskId": "b09iwo6qa"
+  },
+  "tool_use_id": "toolu_0166jb5Ew633mynFx1R97eW2",
+  "duration_ms": 5
+}
