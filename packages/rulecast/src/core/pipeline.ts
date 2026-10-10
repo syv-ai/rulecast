@@ -190,6 +190,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
+  if (event.kind === "start" || event.kind === "shell-before" || event.kind === "shell-after") {
+    return { delivery: emptyDelivery(), failed, deadlineMissed }
+  }
   if (event.kind === "reset") {
     if (session) await appendContext(session.dir, session.agent, [{ t: "reset" }])
     // Without re-attached files there is nothing to re-deliver (§9 reset).

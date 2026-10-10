@@ -10,6 +10,8 @@ const common = z.object({
   agent_type: z.string().optional(),
   source: z.string().optional(),
   prompt: z.string().optional(),
+  tool_name: z.string().optional(),
+  tool_use_id: z.string().min(1).optional(),
 })
 
 const fileTool = z.object({
@@ -46,6 +48,8 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
     agent_type: agentType,
     source,
     prompt,
+    tool_name: toolName,
+    tool_use_id: toolUseId,
   } = head.data
   const session = agentId === undefined ? { id } : { id, agentId }
   const result = (kind: EventKind | null, files: string[] = [], completeRead?: boolean): AdapterInput => ({
@@ -54,6 +58,27 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
       kind === null ? null : { kind, files, cwd, session, ...(completeRead === undefined ? {} : { completeRead }) },
     warmup: false,
   })
+  // Before the file tools: a Bash payload has no file_path, which their schema requires. A command
+  // that exits non-zero fires PostToolUseFailure instead of PostToolUse, and may have written files
+  // before it failed, so both end the call (test/payloads/claude-code/README.md).
+  const shell = (kind: "shell-before" | "shell-after", failed = false): AdapterInput => ({
+    cwd,
+    event: {
+      kind,
+      files: [],
+      cwd,
+      session,
+      ...(toolUseId === undefined ? {} : { toolUseId }),
+      ...(failed ? { failed } : {}),
+    },
+    warmup: false,
+  })
+  if (toolName === "Bash") {
+    if (hook === "PreToolUse") return shell("shell-before")
+    if (hook === "PostToolUse") return shell("shell-after")
+    // Answered under its own hookEventName, so the event says which one fired.
+    if (hook === "PostToolUseFailure") return shell("shell-after", true)
+  }
 
   switch (hook) {
     case "PreToolUse": {
@@ -105,7 +130,8 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
     case "SessionStart":
       // clear and fork arrive with a new session id, so their stores are already empty.
       if (source === "compact") return result("reset")
-      return { ...result(null), warmup: source === "startup" || source === "resume" }
+      if (source === "startup" || source === "resume") return { ...result("start"), warmup: true }
+      return result(null)
     default:
       return result(null)
   }

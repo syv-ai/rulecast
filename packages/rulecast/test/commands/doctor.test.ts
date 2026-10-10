@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { chmod, readdir } from "node:fs/promises"
+import { chmod, readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -184,6 +184,27 @@ describe("rulecast doctor", () => {
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
     expect(result.stdout).toContain("ok       Claude Code — .claude/settings.json")
+  })
+
+  test("an install from before the Bash hooks names what is missing, and install fixes it", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    const file = path.join(root, ".claude/settings.json")
+    const settings = JSON.parse(await readFile(file, "utf8"))
+    for (const event of ["PreToolUse", "PostToolUse"]) {
+      settings.hooks[event] = settings.hooks[event].filter((group: { matcher: string }) => group.matcher !== "Bash")
+    }
+    delete settings.hooks.PostToolUseFailure
+    await writeFile(file, JSON.stringify(settings))
+    expect((await doctor(root)).stdout).toContain(
+      "warning  Claude Code — .claude/settings.json — but hooks for Bash missing; run rulecast install",
+    )
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
   })
 
   test("hooks installed but pointing at a rulecast nothing can find are a warning", async () => {

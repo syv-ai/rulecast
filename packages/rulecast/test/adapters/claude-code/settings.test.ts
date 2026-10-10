@@ -10,11 +10,16 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(mergeHooks({}, COMMAND, 60_000)).toEqual({
       settings: {
         hooks: {
-          PreToolUse: [{ matcher: "Edit|Write", hooks: [hook(5)] }],
+          PreToolUse: [
+            { matcher: "Edit|Write", hooks: [hook(5)] },
+            { matcher: "Bash", hooks: [hook(5)] },
+          ],
           PostToolUse: [
             { matcher: "Read", hooks: [hook(5)] },
             { matcher: "Edit|Write", hooks: [hook(5)] },
+            { matcher: "Bash", hooks: [hook(5)] },
           ],
+          PostToolUseFailure: [{ matcher: "Bash", hooks: [hook(5)] }],
           Stop: [{ hooks: [hook(70)] }],
           SubagentStop: [{ hooks: [hook(70)] }],
           UserPromptSubmit: [{ hooks: [hook(5)] }],
@@ -25,6 +30,9 @@ describe("Claude Code settings: mergeHooks", () => {
         "PreToolUse (Edit|Write)",
         "PostToolUse (Read)",
         "PostToolUse (Edit|Write)",
+        "PreToolUse (Bash)",
+        "PostToolUse (Bash)",
+        "PostToolUseFailure (Bash)",
         "Stop",
         "SubagentStop",
         "UserPromptSubmit",
@@ -51,6 +59,7 @@ describe("Claude Code settings: mergeHooks", () => {
       existing.hooks.PostToolUse[0],
       { matcher: "Read", hooks: [hook(5)] },
       { matcher: "Edit|Write", hooks: [hook(5)] },
+      { matcher: "Bash", hooks: [hook(5)] },
     ])
     expect(hooks.Stop).toEqual([existing.hooks.Stop[0], { hooks: [hook(30)] }])
   })
@@ -60,6 +69,24 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(mergeHooks(once, COMMAND, 60_000)).toEqual({ settings: once, added: [], updated: [] })
     const local = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     expect(mergeHooks(once, local, 60_000).added).toEqual([])
+  })
+
+  test("an install from before the Bash hooks gains them, and only them", () => {
+    const once = mergeHooks({}, COMMAND, 60_000).settings
+    const hooks = once.hooks as Record<string, { matcher?: string }[]>
+    const older = {
+      hooks: {
+        ...hooks,
+        PreToolUse: hooks.PreToolUse!.filter((group) => group.matcher !== "Bash"),
+        PostToolUse: hooks.PostToolUse!.filter((group) => group.matcher !== "Bash"),
+        PostToolUseFailure: undefined,
+      },
+    }
+    delete older.hooks.PostToolUseFailure
+    const upgraded = mergeHooks(older, COMMAND, 60_000)
+    expect(upgraded.added).toEqual(["PreToolUse (Bash)", "PostToolUse (Bash)", "PostToolUseFailure (Bash)"])
+    expect(upgraded.updated).toEqual([])
+    expect(upgraded.settings).toEqual(once)
   })
 
   test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {
@@ -75,8 +102,11 @@ describe("Claude Code settings: removeHooks", () => {
       settings: {},
       removed: [
         "PreToolUse (Edit|Write)",
+        "PreToolUse (Bash)",
         "PostToolUse (Read)",
         "PostToolUse (Edit|Write)",
+        "PostToolUse (Bash)",
+        "PostToolUseFailure (Bash)",
         "Stop",
         "SubagentStop",
         "UserPromptSubmit",

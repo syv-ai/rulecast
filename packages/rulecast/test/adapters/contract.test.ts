@@ -16,6 +16,9 @@ const claudeCode: AdapterFixture = {
     "stop",
     "user-prompt-submit",
     "session-start.compact",
+    "session-start.startup",
+    "pre-tool-use.bash",
+    "post-tool-use-failure.bash",
   ].map((name) => {
     const input = claudeCodePayload(name)
     // Recorded from the adapter itself: this case pins that parsing stays stable and pure. What

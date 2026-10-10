@@ -1,6 +1,19 @@
 import type { ZodType, ZodTypeDef } from "zod"
 
-export type EventKind = "touch" | "edit" | "verify" | "prompt" | "reset" | "guard"
+/**
+ * `start`: the session began or resumed. `shell-before` / `shell-after`: around one call of the
+ * agent's shell tool, whose writes rulecast finds by comparing the working tree (session/tree.ts).
+ */
+export type EventKind =
+  | "touch"
+  | "edit"
+  | "verify"
+  | "prompt"
+  | "reset"
+  | "guard"
+  | "start"
+  | "shell-before"
+  | "shell-after"
 export type DetectorEvent = "edit" | "verify"
 export type Severity = "error" | "warning"
 export type ReferenceMode = "inject" | "read"
@@ -26,8 +39,12 @@ export type ContentSource = { kind: "worktree" } | { kind: "index" } | { kind: "
 
 export interface Event {
   kind: EventKind
-  /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt and reset. */
+  /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt, reset, start and shell events. */
   files: string[]
+  /** shell events: pairs a call's before and after states when the agent's payloads carry an id. */
+  toolUseId?: string
+  /** shell-after: the command exited non-zero. It may still have written files; an adapter may answer it differently. */
+  failed?: boolean
   /** guard only: what the agent is about to write to `files[0]`. */
   intent?: WriteIntent
   /** touch from a read: the whole file was read. */

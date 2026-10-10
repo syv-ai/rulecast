@@ -38,6 +38,12 @@ function naming(rules: string[]): string {
   return ` (${rules.slice(0, 3).join(", ")} and ${rules.length - 3} more)`
 }
 
+/** "PreToolUse (Bash)", "PostToolUse (Bash)" → "Bash": the tools a missing hook watches, else its event. */
+function missingNames(groups: string[]): string {
+  const names = groups.map((group) => /\((.*)\)$/.exec(group)?.[1] ?? group)
+  return [...new Set(names)].join(", ")
+}
+
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`
 }
@@ -112,16 +118,19 @@ export async function doctorCommand(
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0
-    const level: Level = file === null || !resolves || stale ? "warning" : "ok"
+    const missing = state?.missing ?? []
+    const level: Level = file === null || !resolves || stale || missing.length > 0 ? "warning" : "ok"
     count(level)
     const detail =
       file === null
         ? "not installed (run rulecast install)"
-        : stale
-          ? `${file} — but the hooks use an old command; run rulecast install`
-          : resolves
-            ? file
-            : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
+        : missing.length > 0
+          ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
+          : stale
+            ? `${file} — but the hooks use an old command; run rulecast install`
+            : resolves
+              ? file
+              : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
     io.stdout(line(level, adapter.label, detail))
   }
 

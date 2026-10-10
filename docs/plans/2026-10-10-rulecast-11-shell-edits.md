@@ -161,12 +161,14 @@ export function treeChanges(
 
 **Behaviour:** `EventKind` gains `start`, `shell-before` and `shell-after`; `Event` gains `toolUseId?`. Claude Code's Bash payloads map to the shell events, and SessionStart `startup`/`resume` to `start` (keeping warm-up). `install` adds the Bash hooks; an install from plan 10 is upgraded in place.
 
-- [ ] parse: the Bash branch comes before `fileTool` is parsed (it requires `tool_input.file_path`, which a Bash payload lacks). Add `tool_use_id` to the `common` schema, optional. `PreToolUse` with `tool_name: "Bash"` → `shell-before`; `PostToolUse` (and `PostToolUseFailure`, if Task 1 found it fires for a failed command) with `Bash` → `shell-after`. `files` is empty; `toolUseId` from the payload. Use the Task 1 payloads as fixtures.
-- [ ] SessionStart `startup` and `resume` → a `start` event, `warmup` unchanged.
-- [ ] `hookGroups`: `PreToolUse` `Bash` (5 s), `PostToolUse` `Bash` (5 s; it can run an edit event), and `PostToolUseFailure` `Bash` if Task 1 says so. `mergeHooks` adds groups missing from an older install and reports them in `added`.
-- [ ] `doctor`: an install missing some groups says `hooks for Bash missing; run rulecast install`, not "not installed".
-- [ ] Until Tasks 5 and 6 handle them, `runPipeline` returns an empty delivery for `start`, `shell-before` and `shell-after`, the way it does for `prompt`. Any `switch` on `EventKind` elsewhere (typecheck finds them) treats them as producing no output. The contract test's fixtures stay valid.
-- [ ] Verify: the four test files above → pass. Commit.
+- [x] parse: the Bash branch comes before `fileTool` is parsed (it requires `tool_input.file_path`, which a Bash payload lacks). Add `tool_use_id` to the `common` schema, optional. `PreToolUse` with `tool_name: "Bash"` → `shell-before`; `PostToolUse` (and `PostToolUseFailure`, if Task 1 found it fires for a failed command) with `Bash` → `shell-after`. `files` is empty; `toolUseId` from the payload. Use the Task 1 payloads as fixtures.
+- [x] SessionStart `startup` and `resume` → a `start` event, `warmup` unchanged.
+- [x] `hookGroups`: `PreToolUse` `Bash` (5 s), `PostToolUse` `Bash` (5 s; it can run an edit event), and `PostToolUseFailure` `Bash` if Task 1 says so. `mergeHooks` adds groups missing from an older install and reports them in `added`.
+- [x] `doctor`: an install missing some groups says `hooks for Bash missing; run rulecast install`, not "not installed".
+- [x] Until Tasks 5 and 6 handle them, `runPipeline` returns an empty delivery for `start`, `shell-before` and `shell-after`, the way it does for `prompt`. Any `switch` on `EventKind` elsewhere (typecheck finds them) treats them as producing no output. The contract test's fixtures stay valid.
+- [x] Verify: the four test files above → pass. Commit.
+
+**Done with two additions:** `Event.failed` marks a `shell-after` from `PostToolUseFailure`, because Claude Code takes that hook's `additionalContext` only under its own `hookEventName`; and `hookState` reports the groups a partial install is missing, so `install` upgrades that file in place instead of writing a second copy into the shared settings.
 
 ## Task 5: session start records the tree and snapshots the dirty files
 

@@ -73,23 +73,28 @@ export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: n
 }
 
 /**
- * Where the adapter's hooks are and whether their command is the current one. `stale`: installed by
- * an older rulecast, so `install` rewrites them and `doctor` says so.
+ * Where the adapter's hooks are and whether they are current. `stale`: installed by an older
+ * rulecast with another command; `missing`: installed before rulecast needed every hook it needs
+ * now (plan 11's Bash hooks). Either way `install` upgrades that file in place and `doctor` says so.
+ * A file with every hook wins over one with only some.
  */
 export async function hookState(
   root: string,
   adapter: Adapter,
   verifyMs: number,
-): Promise<{ file: string; stale: string[] } | null> {
+): Promise<{ file: string; stale: string[]; missing: string[] } | null> {
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
+  let partial: { file: string; stale: string[]; missing: string[] } | null = null
   for (const { file } of install.scopes) {
     const current = await readSettings(root, file)
     if (current === null) continue
     const merged = inFile(file, () => install.merge(current.value, command, verifyMs))
-    if (merged.added.length === 0) return { file, stale: merged.updated ?? [] }
+    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [] }
+    const ours = inFile(file, () => install.remove(current.value)).removed.length > 0
+    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added }
   }
-  return null
+  return partial
 }
 
 /**
@@ -105,13 +110,15 @@ export async function installHooks(
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
   const already = await hookState(root, adapter, verifyMs)
-  if (already !== null && already.stale.length === 0) return { file: already.file, added: [] }
+  if (already !== null && already.stale.length === 0 && already.missing.length === 0) {
+    return { file: already.file, added: [] }
+  }
   if (already !== null) {
-    // Installed by an older rulecast: rewrite those entries where they are, nothing else.
+    // Installed by an older rulecast: rewrite its entries and add the missing ones where they are.
     const current = (await readSettings(root, already.file))?.value ?? {}
     const merged = inFile(already.file, () => install.merge(current, command, verifyMs))
     await writeSettings(root, already.file, merged.settings)
-    return { file: already.file, added: [], updated: merged.updated ?? [] }
+    return { file: already.file, added: merged.added, updated: merged.updated ?? [] }
   }
   const target = install.scopes.find((candidate) => candidate.scope === scope)
   if (!target) throw new UsageError(`${adapter.name} has no ${scope} settings`)
@@ -159,13 +166,15 @@ export function printInstall(
   result: { file: string; added: string[]; updated?: string[] },
 ): void {
   const updated = result.updated ?? []
-  io.stdout(
-    updated.length > 0
-      ? `updated ${adapter.label} hooks in ${result.file} to the current command: ${updated.join(", ")}\n`
-      : result.added.length === 0
-        ? `${adapter.label} hooks already installed in ${result.file}\n`
-        : `installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`,
-  )
+  if (updated.length > 0) {
+    io.stdout(`updated ${adapter.label} hooks in ${result.file} to the current command: ${updated.join(", ")}\n`)
+  }
+  if (result.added.length > 0) {
+    io.stdout(`installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`)
+  }
+  if (updated.length === 0 && result.added.length === 0) {
+    io.stdout(`${adapter.label} hooks already installed in ${result.file}\n`)
+  }
 }
 
 /** Fetches every URL repo the config pins that is missing from the cache. False when a fetch failed. */

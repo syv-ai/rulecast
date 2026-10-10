@@ -27,6 +27,7 @@ describe("rulecast install", () => {
     const settings = await settingsOf(root)
     expect(Object.keys(settings.hooks).sort()).toEqual([
       "PostToolUse",
+      "PostToolUseFailure",
       "PreToolUse",
       "SessionStart",
       "Stop",
@@ -85,6 +86,30 @@ describe("rulecast install", () => {
     expect(after.hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
     expect(after.hooks.Stop[1].hooks[0].command).toBe("dash-hook stop")
     expect((await runCli(local, ["install"])).stdout).toContain("already installed")
+  })
+
+  test("re-running install adds the Bash hooks to an install from before them, in the same file", async () => {
+    const root = await createFixture()
+    await runCli(root, ["install", "--scope", "personal"])
+    const settings = await settingsOf(root, PERSONAL)
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+      (group: { matcher: string }) => group.matcher !== "Bash",
+    )
+    settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter(
+      (group: { matcher: string }) => group.matcher !== "Bash",
+    )
+    delete settings.hooks.PostToolUseFailure
+    await writeFile(path.join(root, PERSONAL), JSON.stringify(settings))
+    expect(await hooksInstalled(root, claudeCodeAdapter, 60_000)).toBe(PERSONAL)
+
+    const result = await runCli(root, ["install"])
+    expect(result.stdout).toBe(
+      "installed Claude Code hooks in .claude/settings.local.json: PreToolUse (Bash), PostToolUse (Bash), PostToolUseFailure (Bash)\n",
+    )
+    // Upgraded where it was, not installed a second time in the shared file.
+    expect(existsSync(path.join(root, SHARED))).toBe(false)
+    expect((await settingsOf(root, PERSONAL)).hooks.PostToolUseFailure).toHaveLength(1)
+    expect((await runCli(root, ["install"])).stdout).toContain("already installed")
   })
 
   test("a clone without node_modules keeps the committed guarded command", async () => {

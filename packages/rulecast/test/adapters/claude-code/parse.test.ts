@@ -58,9 +58,55 @@ describe("Claude Code adapter: parse", () => {
     expect(parsed?.event?.intent).toEqual({ content: "export const added = 1\n" })
   })
 
-  test("a PreToolUse for a tool that is not a write has no event", () => {
-    const payload = { ...claudeCodePayload("pre-tool-use.edit"), tool_name: "Bash" }
+  test("a PreToolUse for a tool that is neither a write nor the shell has no event", () => {
+    const payload = { ...claudeCodePayload("pre-tool-use.edit"), tool_name: "Grep" }
     expect(parseClaudeCode(payload)?.event).toBeNull()
+  })
+
+  test.each<[string, EventKind]>([
+    ["pre-tool-use.bash", "shell-before"],
+    ["post-tool-use.bash", "shell-after"],
+    // Fires at launch; the job's writes are swept later.
+    ["post-tool-use.bash.background", "shell-after"],
+  ])("%s → %s, carrying the tool use id and no files", (name, kind) => {
+    const { payload, parsed } = parse(name)
+    expect(parsed).toEqual({
+      cwd: "/project",
+      warmup: false,
+      event: { kind, files: [], cwd: "/project", session: { id: payload.session_id }, toolUseId: payload.tool_use_id },
+    })
+  })
+
+  test("post-tool-use-failure.bash → shell-after, marked failed", () => {
+    // A command that exits non-zero fires only the Failure hook, and may have written files first.
+    const { payload, parsed } = parse("post-tool-use-failure.bash")
+    expect(parsed?.event).toEqual({
+      kind: "shell-after",
+      files: [],
+      cwd: "/project",
+      session: { id: payload.session_id },
+      toolUseId: payload.tool_use_id,
+      failed: true,
+    })
+  })
+
+  test("Pre and Post of one Bash call carry the same tool use id", () => {
+    expect(parse("pre-tool-use.bash").parsed?.event?.toolUseId).toBe(
+      parse("post-tool-use.bash").parsed?.event?.toolUseId,
+    )
+  })
+
+  test("post-tool-use.bash.subagent carries the subagent's agent id", () => {
+    const { payload, parsed } = parse("post-tool-use.bash.subagent")
+    expect(parsed?.event?.kind).toBe("shell-after")
+    expect(parsed?.event?.session).toEqual({ id: payload.session_id, agentId: payload.agent_id })
+  })
+
+  test("a Bash payload without a tool use id still maps, without one", () => {
+    const { tool_use_id: _, ...payload } = claudeCodePayload("post-tool-use.bash")
+    const event = parseClaudeCode(payload)?.event
+    expect(event?.kind).toBe("shell-after")
+    expect(event && "toolUseId" in event).toBe(false)
   })
 
   test("a write whose shape rulecast does not recognise has no event, so it cannot be refused", () => {
@@ -93,9 +139,14 @@ describe("Claude Code adapter: parse", () => {
   })
 
   test.each(["session-start.startup", "session-start.startup.interactive", "session-start.resume"])(
-    "%s starts warm-up",
+    "%s → start, and starts warm-up",
     (name) => {
-      expect(parse(name).parsed).toEqual({ cwd: "/project", event: null, warmup: true })
+      const { payload, parsed } = parse(name)
+      expect(parsed).toEqual({
+        cwd: "/project",
+        event: { kind: "start", files: [], cwd: "/project", session: { id: payload.session_id } },
+        warmup: true,
+      })
     },
   )
 

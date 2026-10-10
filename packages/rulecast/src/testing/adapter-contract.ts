@@ -69,7 +69,7 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
           if (!event) continue
           assert.ok(event.cwd.length > 0, `${name}: event.cwd must not be empty`)
           for (const file of event.files) assert.equal(typeof file, "string", `${name}: files must be strings`)
-          if (event.kind === "prompt" || event.kind === "reset") {
+          if (["prompt", "reset", "start", "shell-before", "shell-after"].includes(event.kind)) {
             assert.deepEqual(event.files, [], `${name}: ${event.kind} carries no files`)
           }
         }

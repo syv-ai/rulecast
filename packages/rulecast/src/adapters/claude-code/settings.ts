@@ -19,6 +19,11 @@ function hookGroups(verifyMs: number): { event: string; matcher?: string; timeou
     { event: "PreToolUse", matcher: "Edit|Write", timeout: 5 },
     { event: "PostToolUse", matcher: "Read", timeout: 5 },
     { event: "PostToolUse", matcher: "Edit|Write", timeout: 5 },
+    // Around every shell call: the working tree before and after it is how rulecast sees what a
+    // command wrote. After can run an edit event; a command that fails fires the Failure hook instead.
+    { event: "PreToolUse", matcher: "Bash", timeout: 5 },
+    { event: "PostToolUse", matcher: "Bash", timeout: 5 },
+    { event: "PostToolUseFailure", matcher: "Bash", timeout: 5 },
     { event: "Stop", timeout: verifyTimeout },
     { event: "SubagentStop", timeout: verifyTimeout },
     { event: "UserPromptSubmit", timeout: 5 },
