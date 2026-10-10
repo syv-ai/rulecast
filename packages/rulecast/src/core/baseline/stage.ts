@@ -39,16 +39,52 @@ export async function touchRecords(
   state: BaselineState,
   files: readonly string[],
 ): Promise<BaselineRecord[]> {
+  return (await snapshotRecords(input, state, files, null)).records
+}
+
+/** Most dirty files snapshotted at session start; the rest fall back to the start commit. */
+export const START_SNAPSHOT_MAX = 200
+
+/**
+ * On `start`: snapshots of the files already dirty, so a file the agent later changes without
+ * reading it through its edit tools (`cat`, then `sed -i`) is judged against what the user had, not
+ * the commit (spec §8). Bounded, because SessionStart has a hook timeout: at most
+ * `START_SNAPSHOT_MAX` files and the edit deadline. `skipped` counts the files past either limit.
+ * First writer wins, as on `touch`: a resume never replaces a snapshot.
+ */
+export async function startRecords(
+  input: BaselineInput,
+  state: BaselineState,
+  files: readonly string[],
+): Promise<{ records: BaselineRecord[]; skipped: number }> {
+  return snapshotRecords(input, state, files, {
+    max: START_SNAPSHOT_MAX,
+    deadlineAt: Date.now() + input.limits.editDeadlineMs,
+  })
+}
+
+async function snapshotRecords(
+  input: BaselineInput,
+  state: BaselineState,
+  files: readonly string[],
+  bounds: { max: number; deadlineAt: number } | null,
+): Promise<{ records: BaselineRecord[]; skipped: number }> {
   const records: BaselineRecord[] = []
   const snapshotted: string[] = []
-  for (const file of files) {
-    if (state.snapshots.has(file)) continue
+  const pending = files.filter((file) => !state.snapshots.has(file))
+  let taken = 0
+  for (const file of pending) {
+    if (bounds !== null && (taken >= bounds.max || Date.now() >= bounds.deadlineAt)) break
+    taken++
     const text = await readSourceFile(input.root, file)
     if (text === null) continue
     records.push(snapshotRecord(file, snapshotOf(text)))
     snapshotted.push(file)
   }
-  if (snapshotted.length === 0) return records
+  const skipped = pending.length - taken
+  // Fingerprints are an optimisation a verify fills in itself, so a start out of time skips them.
+  const timeoutMs = bounds === null ? input.limits.editDeadlineMs : bounds.deadlineAt - Date.now()
+  if (snapshotted.length === 0 || timeoutMs <= 0) return { records, skipped }
   records.push(
     ...(await recordFingerprints({
       detection: input.detection,
@@ -58,11 +94,11 @@ export async function touchRecords(
       read: (file) => readSourceFile(input.root, file),
       event: "edit",
       source: "disk",
-      timeoutMs: input.limits.editDeadlineMs,
+      timeoutMs,
       ceiling: { maxFileBytes: input.limits.maxFileBytes, sizeOf: (file) => fileBytes(input.root, file) },
     })),
   )
-  return records
+  return { records, skipped }
 }
 
 export interface ChangesResult {

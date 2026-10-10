@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/fingerprint"
-import { type BaselineInput, changesFor, touchRecords } from "./baseline/stage"
+import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
@@ -23,6 +23,7 @@ import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { emptyContext, emptyWork, type WorkRecord } from "./session/state"
+import { treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
@@ -58,6 +59,10 @@ export interface PipelineResult {
 }
 
 type Warning = { key: string; text: string }
+
+/** Said once: without a working tree to compare, shell edits are seen only after the session. */
+const TREE_UNAVAILABLE =
+  "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
 
 /**
  * Above this many warnings of one kind, they collapse into one carrying a count and an example.
@@ -190,7 +195,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
-  if (event.kind === "start" || event.kind === "shell-before" || event.kind === "shell-after") {
+  if (event.kind === "shell-before" || event.kind === "shell-after") {
     return { delivery: emptyDelivery(), failed, deadlineMissed }
   }
   if (event.kind === "reset") {
@@ -289,6 +294,21 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
     if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+  }
+
+  if (event.kind === "start" && session) {
+    // What was dirty before the agent did anything: a shell edit to one of these files is judged
+    // against the user's content, not the commit, even when the agent only ever `cat`-ed it.
+    const tree = await treeState(root)
+    if (tree === null) warnings.push({ key: "tree-unavailable", text: TREE_UNAVAILABLE })
+    else {
+      await appendWork(session.dir, [{ t: "tree", phase: "start", agent: session.agent, state: tree }])
+      const start = await startRecords(baselineInput, baseline, relevant(Object.keys(tree.entries).sort()))
+      if (start.records.length > 0) await appendBaseline(session.dir, start.records)
+      if (start.skipped > 0) {
+        log(`session start: ${start.skipped} dirty files past the snapshot limits; their baseline is the start commit`)
+      }
+    }
   }
 
   if (event.kind === "edit" || event.kind === "verify") {

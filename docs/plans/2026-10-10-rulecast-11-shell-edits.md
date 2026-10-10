@@ -176,10 +176,10 @@ export function treeChanges(
 
 **Behaviour:** A `start` event writes the baseline's `start` record (as the first event of any kind does today), a `tree` record with phase `start`, and snapshots of the dirty files that any rule matches. A file the agent later changes with Bash, having only `cat`-ed it, is classified against its pre-session content.
 
-- [ ] `start`: `treeState(root)`; on null, nothing more (one warning per session, key `tree-unavailable`, "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI").
-- [ ] Snapshots through `touchRecords` in `baseline/stage.ts`, which already does first-writer-wins: a `resume` never replaces a snapshot. At most 200 dirty files, and only within `timeouts.edit_deadline_ms` (SessionStart's hook timeout is 5 s): files past either limit get no snapshot and fall back to the session-start commit as today, logged once with the count.
-- [ ] Tests: a dirty file snapshotted at start; a clean file not snapshotted (the commit fallback is exact); a resumed session keeps its first snapshot; outside git, a single warning and no records.
-- [ ] Verify: `pnpm vitest run test/core/pipeline-shell.test.ts` → pass. `pnpm perf` against the parent: the edit hook is unchanged. Commit.
+- [x] `start`: `treeState(root)`; on null, nothing more (one warning per session, key `tree-unavailable`, "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI").
+- [x] Snapshots through `touchRecords` in `baseline/stage.ts`, which already does first-writer-wins: a `resume` never replaces a snapshot. At most 200 dirty files, and only within `timeouts.edit_deadline_ms` (SessionStart's hook timeout is 5 s): files past either limit get no snapshot and fall back to the session-start commit as today, logged once with the count.
+- [x] Tests: a dirty file snapshotted at start; a clean file not snapshotted (the commit fallback is exact); a resumed session keeps its first snapshot; outside git, a single warning and no records.
+- [x] Verify: `pnpm vitest run test/core/pipeline-shell.test.ts` → pass. `pnpm perf` against the parent: the edit hook is unchanged (measured in Task 9, back to back against `4de580b`). Commit.
 
 ## Task 6: a Bash call's changes go through the edit event
 
