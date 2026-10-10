@@ -126,11 +126,13 @@ export function treeChanges(
 ): { gitOperation: true } | { gitOperation: false; files: string[] }
 ```
 
-- [ ] `treeState`: `git status --porcelain=v1 -z --untracked-files=all` (renames give both paths), then `lstat` each path. A path that no longer exists has size `-1`.
-- [ ] `treeChanges`: `head` differs → `gitOperation: true`. Otherwise a path is changed when it is in one map and not the other, or its `[mtime, size]` differs. Sorted.
-- [ ] Tests: an edit to a clean file, an edit to an already dirty file (same status, new mtime), a new untracked file, a deleted file, a revert to clean, a commit (`HEAD` moved), an ignored file (never listed), a rename.
-- [ ] **Measure:** `treeState` p50/p95 over 50 runs on this repository and on a large one (clone `microsoft/vscode` at depth 1 into the job's tmp, with 0 and with 50 dirty files). Record the numbers in this task. If the large repository's p95 exceeds 150 ms, apply Decision 9's fallback.
-- [ ] Verify: `pnpm vitest run test/core/session/tree.test.ts` → pass. `pnpm test:linux test/core/session/tree.test.ts` → pass (mtime resolution differs on Linux). Commit.
+- [x] `treeState`: `git status --porcelain=v1 -z --untracked-files=all` (renames give both paths), then `lstat` each path. A path that no longer exists has size `-1`.
+- [x] `treeChanges`: `head` differs → `gitOperation: true`. Otherwise a path is changed when it is in one map and not the other, or its `[mtime, size]` differs. Sorted.
+- [x] Tests: an edit to a clean file, an edit to an already dirty file (same status, new mtime), a new untracked file, a deleted file, a revert to clean, a commit (`HEAD` moved), an ignored file (never listed), a rename.
+- [x] **Measure:** `treeState` p50/p95 over 50 runs on this repository and on a large one (clone `microsoft/vscode` at depth 1 into the job's tmp, with 0 and with 50 dirty files). Record the numbers in this task. If the large repository's p95 exceeds 150 ms, apply Decision 9's fallback.
+- [x] Verify: `pnpm vitest run test/core/session/tree.test.ts` → pass. `pnpm test:linux test/core/session/tree.test.ts` → pass (mtime resolution differs on Linux). Commit.
+
+**Measured (2026-10-10, macOS, load ~5, 50 runs in process):** this repository p50 19 ms, p95 22 ms. `microsoft/vscode` at depth 1 (20,300 files): with a single `git status --untracked-files=all`, p95 155–159 ms with 0 or 50 dirty files, over the limit. The untracked scan is most of it (`status -uno` 31 ms, `ls-files --others` 110 ms), so `treeState` runs tracked changes (`status --porcelain=v2 --branch -uno`) and untracked files (`ls-files --others`) as parallel processes: p50 133–136 ms, p95 142–149 ms. Under the limit with little room; Task 9 measures the whole hook against the floor and decides. **Deviation:** porcelain v2 instead of v1, because its `--branch` header gives `HEAD` without another process.
 
 ## Task 3: session records for the tree, shell edits and swept files
 
