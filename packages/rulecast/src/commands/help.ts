@@ -64,9 +64,12 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "list",
-    synopsis: "rulecast list [--format terminal|json]",
+    synopsis: "rulecast list [RULE_ID] [--format terminal|json]",
     summary: "Show every configured rule: where it comes from, what it matches, what it cites",
-    flags: [["--format", "terminal or json"]],
+    flags: [
+      ["RULE_ID", "Only this rule, with its message and the text of the sections it cites"],
+      ["--format", "terminal or json"],
+    ],
   },
   {
     name: "test",

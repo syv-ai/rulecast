@@ -38,6 +38,56 @@ describe("rulecast list", () => {
     expect(json[1].config).toBeNull()
   })
 
+  test("says how many project files each rule matches, and calls out a rule that matches none", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([
+        { id: "a/services", name: "S", files: "^app/services/", stages: ["touch"], context: ["@x.md"] },
+        { id: "a/routes", name: "R", files: "(^|/)routes/", stages: ["touch"], context: ["@x.md"] },
+      ]),
+      "x.md": "# X\n",
+      "app/services/a.py": "x = 1\n",
+      "app/services/b.py": "x = 1\n",
+      "app/api/routes.py": "x = 1\n",
+    })
+    const text = (await runCli(root, ["list"])).stdout
+    expect(text).toContain("files ^app/services/ — matches 2 files")
+    expect(text).toContain("files (^|/)routes/ — matches no file in this project")
+    const json = JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)
+    expect(json.map((rule: { matchingFiles: number }) => rule.matchingFiles)).toEqual([2, 0])
+  })
+
+  test("a rule id prints that rule in full, with the text of every section it cites", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([
+        {
+          id: "app/no-print",
+          name: "No print",
+          files: "^app/",
+          detect: { regex: { pattern: "print\\(" } },
+          message: "{{file}}:{{line}} prints. Use the logger.",
+          context: ["@AGENTS.md#logging"],
+        },
+        { id: "app/other", name: "Other", files: "^app/", stages: ["touch"], context: ["@AGENTS.md"] },
+      ]),
+      "AGENTS.md": "# Project\n\n## Logging\n\nNever print. Use the module logger.\n\n## Other\n\nUnrelated.\n",
+      "app/a.py": "x = 1\n",
+    })
+    const result = await runCli(root, ["list", "app/no-print"])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("app/no-print  regex")
+    expect(result.stdout).toContain("message {{file}}:{{line}} prints. Use the logger.")
+    expect(result.stdout).toContain("--- AGENTS.md#logging ---\n## Logging\n\nNever print. Use the module logger.")
+    expect(result.stdout).not.toContain("Unrelated.")
+    expect(result.stdout).not.toContain("app/other")
+    const json = JSON.parse((await runCli(root, ["list", "app/no-print", "--format", "json"])).stdout)
+    expect(json[0].sections).toEqual([
+      { ref: "AGENTS.md#logging", content: "## Logging\n\nNever print. Use the module logger." },
+    ])
+    const unknown = await runCli(root, ["list", "app/nope"])
+    expect(unknown.code).toBe(2)
+    expect(unknown.stderr).toContain('no rule "app/nope"')
+  })
+
   test("outside a project it fails, and an unknown format is a usage error", async () => {
     const outside = await createProject({})
     expect((await runCli(outside, ["list"])).code).toBe(2)

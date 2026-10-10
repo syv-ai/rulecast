@@ -126,6 +126,9 @@ describe("rulecast test --against", () => {
     "app/services/c.py": "pass\n",
     "app/other/d.py": "raise HTTPException(4)\n",
   }
+  /** `count` clean service files: enough matching files for the count to mean something. */
+  const clean = (count: number) =>
+    Object.fromEntries(Array.from({ length: count }, (_, i) => [`app/services/clean${i}.py`, "pass\n"]))
 
   test("reports the violations and the spread, and exits 0 whatever it finds", async () => {
     const root = await project([httpException()], files)
@@ -134,20 +137,31 @@ describe("rulecast test --against", () => {
     // app/other/d.py is under the path but the rule does not match it, so it is not the denominator.
     expect(result.stdout).toContain("3 violations in 2 of 3 matching files")
     expect(result.stdout).toContain("app/services/a.py")
-    // One note, chosen by the count: 2 of 3 matching files is most of them.
+    // Three matching files say nothing about how often the rule is broken, and the note says so
+    // instead of reading a verdict into them.
+    expect(result.stdout).toContain(
+      "Only 3 matching files: too few for these numbers to say how often the rule is broken.",
+    )
+    expect(result.stdout).toContain("Judge the rule by the doc it enforces.")
+    expect(result.stdout).not.toContain("Most matching files")
+    expect(result.stdout).not.toContain("Few violations")
+  })
+
+  test("violations in most of enough matching files ask whether it is a convention", async () => {
+    const violating = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`app/services/bad${i}.py`, "raise HTTPException(1)\n"]),
+    )
+    const root = await project([httpException()], { ...violating, ...clean(10) })
+    const result = await runTest(root, "backend/no-httpexception", "--against", "app")
+    expect(result.stdout).toContain("20 violations in 20 of 30 matching files")
     expect(result.stdout).toContain("Most matching files violate it: check it is a convention")
     expect(result.stdout).not.toContain("Few violations")
   })
 
-  test("a few violations in a minority of files says a rule nobody breaks costs context", async () => {
-    const root = await project([httpException()], {
-      ...files,
-      "app/services/b.py": "pass\n",
-      "app/services/e.py": "pass\n",
-      "app/services/f.py": "pass\n",
-    })
+  test("a few violations in enough matching files says a rule nobody breaks costs context", async () => {
+    const root = await project([httpException()], { "app/services/a.py": files["app/services/a.py"], ...clean(29) })
     const result = await runTest(root, "backend/no-httpexception", "--against", "app")
-    expect(result.stdout).toContain("2 violations in 1 of 5 matching files")
+    expect(result.stdout).toContain("2 violations in 1 of 30 matching files")
     expect(result.stdout).toContain("Few violations: a rule nobody breaks costs an agent context")
     expect(result.stdout).not.toContain("Most matching files")
   })
@@ -159,10 +173,10 @@ describe("rulecast test --against", () => {
   })
 
   test("a rule that fires nowhere still exits 0, and says what the zero does not mean", async () => {
-    const root = await project([httpException()], { "app/services/c.py": "pass\n" })
+    const root = await project([httpException()], clean(30))
     const result = await runTest(root, "backend/no-httpexception", "--against", "app")
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain("0 violations in 0 of 1 matching files")
+    expect(result.stdout).toContain("0 violations in 0 of 30 matching files")
     // Without this the second note reads as a verdict: rulecast's own three rules all measure 0,
     // and none of them is a rule nobody would break.
     expect(result.stdout).toContain("counts the")

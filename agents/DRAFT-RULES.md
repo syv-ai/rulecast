@@ -9,10 +9,12 @@ Load these when you need them. Relative links resolve against this file's own UR
 
 Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
 
+The steps ask the developer to decide several things. If no developer is there to answer (you were told to work unattended, or nobody replies), don't wait: take the default each step names, and list every choice you made that way in the summary (step 4).
+
 ## 1. Read
 
 1. Read the doc you were pointed at in full.
-2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`: it prints every configured rule, catalog rules included, with its files, detector and the doc sections it cites. Note them, so you don't draft duplicates.
+2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
 ## 2. Sort the conventions
@@ -21,21 +23,28 @@ Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/ruleca
 - **Guidance**: true and useful, but not visible as a pattern. "Keep services small", "test RBAC both ways".
 - **Not about code**: commands, deployment, process. Skip these.
 
-**A convention a catalog rule already enforces** (a rule `rulecast list` shows from a URL repo) needs no new rule. If the catalog rule cites the package's own doc while the project's doc says something more specific, point it at the project's section with a `context` override, and change nothing else:
+Two kinds need splitting:
 
-```yaml
-- repo: https://github.com/syv-ai/rulecast
-  rev: v0.3.0   # unchanged: keep the entry as init wrote it
-  rules:
-    - id: python/no-httpexception-in-services
-      context:
-        - "@AGENTS.md#errors"
-```
+- **Partly checkable**: one part is visible as a pattern and the rest is not. "Keep services small and free of framework types": a `fastapi` import in a service is visible, "small" is not. Draft a pattern rule for the visible part and a touch rule for the rest, both citing the same section.
+- **Something must be present**: "every module gets its logger with `logging.getLogger(__name__)`". A detector reports what is in a file, so it cannot see a missing line without firing on every file that lacks it, `__init__.py` included. Check the wrong form instead, if there is one (a logger with another name), and let a touch rule deliver the rest.
 
-`rulecast list` shows each rule's `files` and what its detector looks for (`detects …`). Compare those with the doc, not the rule's name:
+**Catalog rules** (the rules `rulecast list` shows from a URL repo) were written for projects in general. For each one, answer two questions, separately. A rule can need a change for both.
 
-- **The doc covers more files than the catalog rule** (the doc says "outside `app/api/`", the rule's `files` is `services/`): add the `context` override above, and draft a local rule for the rest, with an `exclude` for the catalog rule's files so no site is reported twice. Say in its `description` which catalog rule it extends.
-- **The catalog rule contradicts the doc** (it assumes a layer or a file the project does not have): leave it as it is and tell the developer, proposing `enabled: false` on that entry. Switch it off only if they agree.
+1. **Which section should it cite?** If the project's doc has a section on the same subject, point the rule at it with a `context` override and change nothing else. The developer's own words beat the package's, even when they agree.
+
+   ```yaml
+   - repo: https://github.com/syv-ai/rulecast
+     rev: v0.3.0   # unchanged: keep the entry as init wrote it
+     rules:
+       - id: python/no-httpexception-in-services
+         context:
+           - "@AGENTS.md#errors"
+   ```
+
+2. **Does what it checks fit this project?** Compare its `files` match count and its `detects` line with the doc, and read the section it cites with `rulecast list <rule-id>`. Judge what the rule does, not its name:
+   - **It fits:** nothing more to do. A convention it already enforces needs no local rule.
+   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses, with an `exclude` for the files it covers, so no site is reported twice. Say in its `description` which catalog rule it extends.
+   - **It contradicts the doc, or matches no file at all**: it assumes a layer, a library or a layout the project doesn't have, or its cited section says the opposite of the doc. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree. Unattended, propose it and leave the rule on.
 
 For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
@@ -68,8 +77,9 @@ For each checkable convention:
    - `files`: a regex searched in the repo-relative path. Anchor it with `^` so it matches the directory you mean.
    - `message`: what is wrong at `{{file}}:{{line}}` and what to do instead, in one or two sentences.
    - `context`: the doc section the rule enforces, as `@<file>#<heading-slug>`. The slug is the heading in lowercase, punctuation dropped, spaces turned into `-`.
-3. Give it `examples`: two `good` and two `bad`, taken from real code in this repository rather than invented. Each is a `path` the rule matches and the `code` at it.
-   - When the repository has no violation to quote, write the smallest `bad` example that shows the break, and tell the developer it is invented. For `good`, prefer near misses: code that looks like the break and is not.
+3. Give it `examples`: two `good` and two `bad`, no two the same. Each is a `path` the rule matches and the `code` at it.
+   - Quote real code where the repository has some: an actual violation for `bad`, compliant code for `good`.
+   - Where it has none, which is usual in a small or clean repository, write your own: the smallest code that shows the break for `bad`, and for `good` a near miss, code that looks like the break and is not. Invented examples are fine. Say which ones are invented in the summary.
    - A `path` rule judges the file name, not its code: give it `bad` examples only, at paths the rule must refuse.
 
    ```yaml
@@ -88,8 +98,8 @@ For each checkable convention:
 5. Run `rulecast test <id>`. Every example must pass.
    - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
    - Revise the pattern **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
-6. Run `rulecast test <id> --against <the directory the rule is scoped to>`. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. Neither the numbers nor the note decide it. The developer does.
-7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config.
+6. Run `rulecast test <id> --against .`. The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. Neither the numbers nor the note decide it. The developer does.
+7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config. Unattended, keep every rule that passes step 5.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
 
@@ -106,11 +116,18 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 ## 4. Finish
 
-Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise: the rules kept (id, one line each, and the `--against` count; touch rules have no count), the rules dropped, the catalog rules you overrode or propose to switch off, and the conventions you skipped, with the reason.
+Run `rulecast validate` and `rulecast test` a last time; both must be clean. Then summarise:
+
+- the rules kept: id, one line each, and the `--against` count (touch rules have no count);
+- the rules dropped;
+- the catalog rules you pointed at the project's doc, extended with a local rule, or propose to switch off, and why;
+- the examples you invented;
+- the conventions you skipped, with the reason;
+- unattended, every choice you made without the developer.
 
 ## Never
 
-- Never change rules or overrides under other `repos` entries, except to add a `context` override to a catalog rule (step 2). Everything else goes in the `repo: local` entry.
+- Never change rules or overrides under other `repos` entries, except to add a `context` override to a catalog rule, or `enabled: false` when the developer agrees (step 2). Everything else goes in the `repo: local` entry.
 - Never add a `rulecast-ignore` comment or `enabled: false` unless the developer agrees the finding or the rule is wrong.
 - Never change code to make a rule pass. Report findings; the developer decides.
 - Never commit.

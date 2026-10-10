@@ -39,6 +39,13 @@ export function parseTestArgs(args: string[]): TestArgs {
 const FEW_VIOLATIONS = 25
 
 /**
+ * Under this many matching files no count means anything: a rule over 8 files is under 25
+ * violations however often it is broken, and "few" or "most" would be read as a verdict on the rule
+ * rather than on the size of the repository. A drafting agent in a 4-file project said exactly that.
+ */
+const SMALL_SAMPLE = 25
+
+/**
  * The note for one count: the two ways a rule is not worth shipping, and what a zero does not mean.
  *
  * Everybody breaks it: `react/no-inline-style` produced 131 true-by-definition findings that nobody
@@ -50,6 +57,12 @@ const FEW_VIOLATIONS = 25
  * disaster for one rule and a normal Tuesday for a migration.
  */
 function againstNote(violations: number, violatingFiles: number, matchingFiles: number): string[] {
+  if (matchingFiles < SMALL_SAMPLE) {
+    return [
+      `  Only ${matchingFiles} matching ${matchingFiles === 1 ? "file" : "files"}: too few for these numbers to say how often the rule is broken.`,
+      "  Judge the rule by the doc it enforces.",
+    ]
+  }
   if (violations === 0) {
     return [
       "  Nothing to fix today is not the same as nothing to catch: this counts the",
