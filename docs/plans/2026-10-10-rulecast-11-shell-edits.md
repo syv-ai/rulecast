@@ -226,8 +226,10 @@ export function treeChanges(
 
 **Behaviour:** `pnpm perf` reports the Bash hooks next to the edit hook: `shell-before` p50/p95, `shell-after` with a one-file change, and the floor (a `prompt` event). `shell-after` is held to the 500 ms budget; `shell-before` to Decision 9's limit, 150 ms over the floor. Exceeding it triggers Decision 9's fallback, recorded as a deviation.
 
-- [ ] Fixture: the existing 30-rule project in a git repository with 20 dirty files; 50 calls each.
-- [ ] Verify: `pnpm perf` → all within budget, recorded in the index row. Commit.
+- [x] Fixture: the existing 30-rule project in a git repository with 20 dirty files; 50 calls each.
+- [x] Verify: `pnpm perf` → all within budget, recorded in the index row. Commit.
+
+**Measured (2026-10-10, macOS, load 7–9):** back to back, the edit hook at `4de580b` p50 188 ms, p95 202 ms; with this plan p50 189 ms, p95 213 ms (204 in an earlier run): unchanged within noise. Bash hooks on the fixture (20 dirty files): before p50 105 ms, p95 121 ms; after p50 230 ms, p95 282 ms; floor p50 95 ms, p95 114 ms, so before adds 7 ms. On `microsoft/vscode` (one rule, 30 calls, alternating with the floor): before p95 204 ms against a floor of 69 ms, **135 ms added, under the 150 ms limit: no fallback.** Starting the tree read before compiling the config was tried and measured no faster (p95 204 ms both ways); it was not kept.
 
 ## Task 10: docs
 

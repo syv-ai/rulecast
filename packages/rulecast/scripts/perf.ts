@@ -1,4 +1,11 @@
-import { BUDGET_MS, type Measurement, measureEditHook } from "./perf-fixture"
+import {
+  BUDGET_MS,
+  type Measurement,
+  measureEditHook,
+  measureShellHooks,
+  SHELL_BEFORE_ADDED_MS,
+  type ShellMeasurement,
+} from "./perf-fixture"
 
 const bold = (s: string) => `\u001B[1m${s}\u001B[0m`
 const dim = (s: string) => `\u001B[2m${s}\u001B[0m`
@@ -25,6 +32,29 @@ function report(result: Measurement): string {
   ].join("\n")
 }
 
+function shellReport(result: ShellMeasurement): { text: string; pass: boolean } {
+  const added = result.before.p95 - result.floor.p95
+  const beforePass = added <= SHELL_BEFORE_ADDED_MS
+  const afterPass = result.after.p95 < BUDGET_MS
+  const row = (name: string, m: Measurement) => `  ${name.padEnd(13)}${ms(m.p50)}  ${ms(m.p95)}  ${ms(m.max)}`
+  const verdict = (pass: boolean, text: string) => `  ${pass ? green("✓") : red("✗")} ${text}`
+  const text = [
+    `${bold("rulecast Bash hooks")} ${dim(`· ${result.after.rules} rules · ${result.dirty} dirty files · ${result.after.events} calls`)}`,
+    "",
+    dim("                   p50      p95      max"),
+    row("before", result.before),
+    row("after", result.after),
+    row("floor", result.floor),
+    "",
+    verdict(beforePass, `before adds ${added.toFixed(0)} ms at p95 over the floor (limit ${SHELL_BEFORE_ADDED_MS} ms)`),
+    verdict(afterPass, `after ${result.after.p95.toFixed(0)} ms at p95 (budget ${BUDGET_MS} ms)`),
+    "",
+  ].join("\n")
+  return { text, pass: beforePass && afterPass }
+}
+
 const result = await measureEditHook()
 process.stdout.write(report(result))
-process.exitCode = result.p95 < BUDGET_MS ? 0 : 1
+const shell = shellReport(await measureShellHooks())
+process.stdout.write(`\n${shell.text}`)
+process.exitCode = result.p95 < BUDGET_MS && shell.pass ? 0 : 1
