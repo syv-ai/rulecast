@@ -26,11 +26,13 @@ The steps ask the developer to decide several things. If no developer is there t
 Two kinds need splitting:
 
 - **Partly checkable**: one part is visible as a pattern and the rest is not. "Keep services small and free of framework types": a `fastapi` import in a service is visible, "small" is not. Draft a pattern rule for the visible part and a touch rule for the rest, both citing the same section.
-- **Something must be present**: "every module gets its logger with `logging.getLogger(__name__)`". A detector reports what is in a file, so it cannot see a missing line without firing on every file that lacks it, `__init__.py` included. Check the wrong form instead, if there is one (a logger with another name), and let a touch rule deliver the rest.
+- **Something must be present**: "every module gets its logger with `logging.getLogger(__name__)`". A detector reports what is in a file, so it cannot see a missing line without firing on every file that lacks it, `__init__.py` included. Check the wrong form instead, if there is one (a logger with another name), and let a touch rule deliver the rest. Scope that touch rule to the files the convention is about, and exclude files that are empty by design, such as `__init__.py`.
+
+Touch rules go one per area, not one per section: a single rule whose `files` is the area (`^app/services/`) and whose `context` lists every section that applies there. Two touch rules on the same files deliver twice as many reminders for the same reading.
 
 **Catalog rules** (the rules `rulecast list` shows from a URL repo) were written for projects in general. For each one, answer two questions, separately. A rule can need a change for both.
 
-1. **Which section should it cite?** If the project's doc has a section on the same subject, point the rule at it with a `context` override and change nothing else. The developer's own words beat the package's, even when they agree.
+1. **Which section should it cite?** If the project's doc has a section that states the same convention, point the rule at it with a `context` override and change nothing else. The developer's own words beat the package's, even when they agree. A section about the same area is not enough: a section on how to raise errors does not state a rule against swallowing them. A rule you propose to switch off (question 2) keeps its context: pointing it at a section that contradicts it would make it cite the opposite of what it checks.
 
    ```yaml
    - repo: https://github.com/syv-ai/rulecast
@@ -43,7 +45,13 @@ Two kinds need splitting:
 
 2. **Does what it checks fit this project?** Compare its `files` match count and its `detects` line with the doc, and read the section it cites with `rulecast list <rule-id>`. Judge what the rule does, not its name:
    - **It fits:** nothing more to do. A convention it already enforces needs no local rule.
-   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses (a detector rule for a detector rule, a touch rule for a touch rule), with an `exclude` for the files it covers, so no site is reported twice. Say in its `description` which catalog rule it extends. Check the files `rulecast list <rule-id>` names: a count of 2 may be one real module and an `__init__.py`.
+   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses (a detector rule for a detector rule, a touch rule for a touch rule):
+     - Its `files` is what the doc covers. A doc that says "never" without naming a place covers every file of that language: `\.py$`.
+     - Its `exclude` is the catalog rule's `files`, copied as `rulecast list` prints it, so no site is reported twice. If your rule already has an `exclude`, join the two with `|`.
+     - Its `description` names the catalog rule it extends.
+     - Check the files `rulecast list <rule-id>` names: a count of 2 may be one real module and an `__init__.py`.
+
+     A local rule, not a `files` override on the catalog rule: an override freezes the catalog rule's scope, so a later tag that fixes its `files` would never reach this project. After `rulecast autoupdate`, compare the catalog rule's `files` with your rule's `exclude` again.
    - **It contradicts the doc, or matches no file at all**: it assumes a layer, a library or a layout the project doesn't have, or its cited section says the opposite of the doc. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree. Unattended, propose it and leave the rule on.
    - **You can't tell**: treat it as a contradiction and propose. Proposing costs nothing, because the developer decides; staying silent hides the question.
 
@@ -55,7 +63,7 @@ For checkable conventions, prefer `path` (the file itself is the break), then `r
 
 For each checkable convention, one at a time. Unattended, you can write them all first and then take each through steps 4 to 6.
 
-When the doc can be read two ways ("gets its logger with `log = logging.getLogger(__name__)`": is a logger called `logger` wrong?), write the narrower rule, flagging only what every reading forbids, and name the ambiguity in the summary so the developer can tighten it.
+When the doc can be read two ways, flag only what both readings call wrong, and name the rest in the summary so the developer can tighten it. "Every module gets its logger with `log = logging.getLogger(__name__)`; no other logger names": `logging.getLogger("users")` is wrong whichever way you read it, so the rule flags it; `logger = logging.getLogger(__name__)` is wrong only if "logger names" means the variable, so the rule leaves it and the summary asks.
 
 1. Show the developer the rule as YAML and the doc section it enforces.
 2. Add it to the `rules` of the `repo: local` entry in `.rulecast-config.yaml`. Add that entry at the end of `repos` if there is none:
@@ -102,7 +110,7 @@ When the doc can be read two ways ("gets its logger with `log = logging.getLogge
    - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
    - A slip is not a revision: a typo, a missing escape, or `\s` crossing a line break (`rulecast test` shows what a failing example matched, and says when it crossed a line). Fix slips as often as you find them.
    - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
-6. Run `rulecast test <id> --against .`. The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. Neither the numbers nor the note decide it. The developer does.
+6. Run `rulecast test <id> --against .`. The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. In a small repository the note is the same for every rule ("too few matching files"): report the counts and judge the rule by its doc. Neither the numbers nor the note decide it. The developer does.
 7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config. Unattended, keep every rule that passes step 5.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
