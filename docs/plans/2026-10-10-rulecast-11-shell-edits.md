@@ -148,12 +148,12 @@ export function treeChanges(
 | { t: "edited"; file: string; via?: "shell" }
 ```
 
-- [ ] `WorkState` gains `latestTree: Map<agent, TreeState>` (the last `tree` record of any phase for that agent, in store order: the store is append-only, so record order is time order), `sessionLatestTree: TreeState | null` (the last of any agent), `beforeTrees: Map<toolUseId, TreeState>`, `startTree: TreeState | null`, `swept: string[]`, and `editedVia: Map<string, "tool" | "shell">`. A file edited by any tool leaves `swept`.
-- [ ] `referenceState(work, agent, toolUseId?)`: with an id, the `before` state recorded under it; otherwise, or when there is none, `latestTree.get(agent)`; else `sessionLatestTree`; else null.
-- [ ] Tests: the ordering across phases (`before`, then `after`, then `stop`: the latest is the `stop` state); two agents interleaved; a missing id.
-- [ ] `dirtyAtStart(work, file)`: whether the `start` state lists the file.
-- [ ] Old stores without these records read as before.
-- [ ] Verify: `pnpm vitest run test/core/session/state.test.ts` → pass. Commit.
+- [x] `WorkState` gains `latestTree: Map<agent, TreeState>` (the last `tree` record of any phase for that agent, in store order: the store is append-only, so record order is time order), `sessionLatestTree: TreeState | null` (the last of any agent), `beforeTrees: Map<toolUseId, TreeState>`, `startTree: TreeState | null`, `swept: string[]`, and `editedVia: Map<string, "tool" | "shell">`. A file edited by any tool leaves `swept`.
+- [x] `referenceState(work, agent, toolUseId?)`: with an id, the `before` state recorded under it; otherwise, or when there is none, `latestTree.get(agent)`; else `sessionLatestTree`; else null.
+- [x] Tests: the ordering across phases (`before`, then `after`, then `stop`: the latest is the `stop` state); two agents interleaved; a missing id.
+- [x] `dirtyAtStart(work, file)`: whether the `start` state lists the file.
+- [x] Old stores without these records read as before.
+- [x] Verify: `pnpm vitest run test/core/session/state.test.ts` → pass. Commit.
 
 ## Task 4: events and the Claude Code mapping
 
