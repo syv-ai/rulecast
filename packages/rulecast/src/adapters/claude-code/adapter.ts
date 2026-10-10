@@ -15,6 +15,9 @@ const BLOCK_PREAMBLE =
 
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
+const SWEPT_PREAMBLE =
+  "rulecast: files changed outside the agent's tool calls this session have findings (not blocking the agent)."
+
 const DENY_PREAMBLE =
   "This project's rulecast rules (.rulecast-config.yaml) refuse this write. Change what you are writing, or the file you are writing it to, and try again."
 
@@ -123,6 +126,12 @@ export const claudeCodeAdapter: Adapter = {
         if (delivery.stop === "capReached") {
           const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
           return json({ systemMessage: notices === "" ? cap : `${notices}\n\n${cap}` })
+        }
+        // Findings in files changed outside the agent's tool calls never block, and a Stop hook
+        // reaches the agent only by blocking: the user is the one left to tell.
+        if ((delivery.swept ?? []).length > 0) {
+          const outside = withinLimit(`${SWEPT_PREAMBLE}\n\n${text}`, delivery, event)
+          return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
         }
         return notices === "" ? NONE : json({ systemMessage: notices })
       default:

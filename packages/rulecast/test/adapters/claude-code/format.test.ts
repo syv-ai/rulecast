@@ -21,6 +21,16 @@ const delivery = (overrides: Partial<Delivery> = {}): Delivery => ({ ...emptyDel
 const format = (value: Delivery, kind: EventKind, opts = options) => claudeCodeAdapter.format(value, event(kind), opts)
 
 describe("Claude Code adapter: format", () => {
+  test("an allowed stop with findings in swept files tells the user, since only a block reaches the agent", () => {
+    const value = delivery({ findings: [finding()], swept: [finding().file], stop: "allow" })
+    const output = JSON.parse(format(value, "verify").stdout)
+    expect(Object.keys(output)).toEqual(["systemMessage"])
+    expect(output.systemMessage).toContain("changed outside the agent's tool calls")
+    expect(output.systemMessage).toContain(finding().message)
+    // Without swept files an allowed stop stays silent, as before.
+    expect(format(delivery({ findings: [finding()], stop: "allow" }), "verify").stdout).toBe("")
+  })
+
   test("a shell call's findings are additional context, under the hook that fired", () => {
     const value = delivery({ findings: [finding()], via: "shell" })
     const after = { kind: "shell-after" as const, files: [], cwd: "/project", session: { id: "s1" } }

@@ -1,0 +1,11 @@
+rulecast: 2 rules violated
+
+error backend/no-httpexception
+  app/services/orders.py:2 raises HTTPException(400). Raise a domain exception.
+
+changed outside your tool calls (fix them if a process you started made them; they do not block):
+error backend/no-httpexception
+  app/services/users.py:3 raises HTTPException(500). Raise a domain exception.
+
+warning frontend/no-generated-edits
+  src/client/api.ts is generated. Regenerate it instead of editing.

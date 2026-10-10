@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import type { CompiledRule } from "../compile/rule"
-import { deliveryCost, measureRuleBlock } from "../delivery/render-agent"
+import { deliveryCost, measureRuleBlock, SWEPT_BLOCK } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate, templateBindings } from "../template"
@@ -41,6 +41,8 @@ export interface DecideInput {
   stopGate: boolean
   /** The findings are in files the agent's shell command changed (Delivery.via). */
   via?: "shell"
+  /** Files changed outside the agent's tool calls, verified at this stop: reported, never blocking. */
+  swept?: readonly string[]
 }
 
 export interface Decision {
@@ -161,6 +163,8 @@ export interface AssembleInput {
   maxBytes: number
   /** Default: an edit tool, or no edit at all. */
   via?: "shell"
+  /** Default: none. */
+  swept?: readonly string[]
 }
 
 /**
@@ -194,6 +198,9 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
   delivery.findings = renderFindings(fresh)
+  const swept = new Set(input.swept ?? [])
+  const sweptWithFindings = [...new Set(fresh.map(({ match }) => match.file))].filter((file) => swept.has(file))
+  if (sweptWithFindings.length > 0) delivery.swept = sweptWithFindings.sort()
   for (const { rule } of fresh) if (rule.message !== null) delivery.templates[rule.id] = rule.message
   const summaries = new Map<string, { rule: string; file: string; count: number }>()
   for (const { rule, match, status } of input.findings) {
@@ -286,10 +293,16 @@ export function trim(
   // Appended in place. Rebuilding the array per finding is quadratic in one rule's matches, which
   // an ordinary pattern reaches on a generated or minified file: 62k matches took 5.9 s, and an
   // 8 MB file never finished. Nothing can preempt it either — the work is synchronous (§13).
+  //
+  // Keyed by block, not rule: findings in swept files print in their own block under their own
+  // heading (render-agent.ts), so a rule with findings on both sides is two blocks, priced apart.
+  const swept = new Set(delivery.swept ?? [])
+  const blockOf = (finding: Finding) => (swept.has(finding.file) ? `${SWEPT_BLOCK}${finding.rule}` : finding.rule)
+  const ruleOf = (block: string) => (block.startsWith(SWEPT_BLOCK) ? block.slice(SWEPT_BLOCK.length) : block)
   const byRule = new Map<string, Finding[]>()
   for (const finding of delivery.findings) {
-    const group = byRule.get(finding.rule)
-    if (group === undefined) byRule.set(finding.rule, [finding])
+    const group = byRule.get(blockOf(finding))
+    if (group === undefined) byRule.set(blockOf(finding), [finding])
     else group.push(finding)
   }
 
@@ -303,7 +316,9 @@ export function trim(
       new Set(delivery.findings.map((finding) => finding.file)),
       conventions,
       delivery.via,
-    ) + (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0)
+    ) +
+    (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0) +
+    (swept.size > 0 ? deliveryCost.sweptFrame : 0)
   const fits = (size: number) => limit === null || used + size <= limit
   const kept = new Map<string, Finding[]>()
   // A reference costs its line whatever its state: one whose content does not fit is not dropped,
@@ -327,10 +342,10 @@ export function trim(
       ...new Set(rule.context.map((spec) => spec.ref).filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref))),
     ]
     for (const [id, findings] of byRule) {
-      const rule = rulesById.get(id)
+      const rule = rulesById.get(ruleOf(id))
       const refs = rule === undefined ? [] : uncharged(rule)
       const size =
-        measureRuleBlock(id, [findings[0]!], findings, delivery.templates[id], render) +
+        measureRuleBlock(ruleOf(id), [findings[0]!], findings, delivery.templates[ruleOf(id)], render) +
         refs.reduce((sum, ref) => sum + lineCost(ref), 0)
       if (used + spent.chars + size > cap) {
         spent.dropped++
@@ -453,10 +468,10 @@ export function trim(
         // counts both. Past that the delta is 0, fits() is always true, and without this bound the
         // loop would pull every finding of every rule into the delivery at no apparent cost.
         if (shown === undefined || shown.length >= Math.min(findings.length, limits.maxMatchesPerRule)) continue
-        const template = delivery.templates[rule]
+        const template = delivery.templates[ruleOf(rule)]
         const delta =
-          measureRuleBlock(rule, [...shown, findings[shown.length]!], findings, template, render) -
-          measureRuleBlock(rule, shown, findings, template, render)
+          measureRuleBlock(ruleOf(rule), [...shown, findings[shown.length]!], findings, template, render) -
+          measureRuleBlock(ruleOf(rule), shown, findings, template, render)
         if (!fits(delta)) continue
         used += delta
         shown.push(findings[shown.length]!)
@@ -471,12 +486,13 @@ export function trim(
       const shownFiles = new Set(shown.map((finding) => finding.file))
       const dropped = findings.slice(shown.length)
       delivery.omitted.findings.push({
-        rule,
+        rule: ruleOf(rule),
         count: dropped.length,
         files: new Set(dropped.map((finding) => finding.file).filter((file) => !shownFiles.has(file))).size,
+        ...(rule === ruleOf(rule) ? {} : { swept: true }),
       })
     }
-    delivery.findings = delivery.findings.filter((finding) => kept.get(finding.rule)?.includes(finding) === true)
+    delivery.findings = delivery.findings.filter((finding) => kept.get(blockOf(finding))?.includes(finding) === true)
   }
 
   return { delivery, overflow: delivery.omitted.rules > 0 ? assembled.delivery : null, context }
@@ -495,8 +511,11 @@ export function gate(
   work: WorkState,
   agent: string,
   maxBlocks: number,
+  /** Files changed outside the agent's tool calls: the user's edits must never trap the agent. */
+  swept: ReadonlySet<string> = new Set(),
 ): { stop: Exclude<Delivery["stop"], null>; work: WorkRecord[] } {
-  if (!fresh.some(({ rule }) => rule.severity === "error")) return { stop: "allow", work: [] }
+  const blocking = fresh.filter(({ match }) => !swept.has(match.file))
+  if (!blocking.some(({ rule }) => rule.severity === "error")) return { stop: "allow", work: [] }
   if ((work.stopBlocks.get(agent) ?? 0) < maxBlocks) return { stop: "block", work: [{ t: "stopBlock", agent }] }
   return { stop: "capReached", work: [] }
 }
@@ -511,7 +530,7 @@ export async function decide(input: DecideInput): Promise<Decision> {
   const context = [...assembled.context, ...trimmed.context]
   if (!input.stopGate) return { delivery: trimmed.delivery, overflow: trimmed.overflow, work: [], context }
 
-  const gated = gate(assembled.fresh, input.work, input.agent, input.maxBlocks)
+  const gated = gate(assembled.fresh, input.work, input.agent, input.maxBlocks, new Set(input.swept ?? []))
   const delivery = { ...trimmed.delivery, stop: gated.stop }
   // Only a block reaches the agent as context; anything else must not count as delivered. A
   // capReached still prints its delivery as a system message, so it keeps the overflow file — the

@@ -241,3 +241,78 @@ describe("a shell call's changes go through the edit event", () => {
     expect(lines(delivery)).toEqual([`${USERS}:3`])
   })
 })
+
+describe("the Stop sweep", () => {
+  const violation = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
+
+  test("a background job that writes after its call: reported at Stop, Stop allowed", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    // run_in_background: the after hook fires at launch, before the job writes anything.
+    await session.shell(async () => {})
+    await session.write(USERS, violation)
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("allow")
+    expect(lines(stop)).toEqual([`${USERS}:3`])
+    expect(stop.swept).toEqual([USERS])
+  })
+
+  test("the same write, then a call that changes nothing: swept by that call's before hook", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {})
+    await session.write(USERS, violation)
+    const call = await session.shell(async () => {})
+    expect(call.findings).toEqual([])
+    expect((await session.work()).swept).toEqual([USERS])
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("allow")
+    expect(stop.swept).toEqual([USERS])
+  })
+
+  test("the user's own edit, with no call after it: reported at Stop, Stop allowed", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.write(USERS, violation)
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("allow")
+    expect(stop.swept).toEqual([USERS])
+  })
+
+  test("a file the agent changed, changed again between calls, stays the agent's and blocks", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(() => session.write(USERS, violation))
+    await session.write(USERS, `${violation}    raise HTTPException(503)\n`)
+    await session.shell(async () => {})
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("block")
+    expect(stop.swept).toBeUndefined()
+    expect((await session.work()).swept).toEqual([])
+  })
+
+  test("a subagent's stop sweeps too, and never blocks on it", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.write(USERS, violation)
+    const stop = await session.send({ kind: "verify", files: [], agentId: "sub1" })
+    expect(stop.stop).toBe("allow")
+    expect(stop.swept).toEqual([USERS])
+  })
+
+  test("no tree (outside git): Stop verifies the edited files as before", async () => {
+    const root = await createProject(fixtureFiles)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.write(USERS, violation)
+    await session.send({ kind: "edit", files: [USERS] })
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("block")
+    expect(stop.swept).toBeUndefined()
+  })
+})

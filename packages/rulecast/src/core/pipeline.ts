@@ -260,6 +260,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
   let via: "shell" | undefined
+  /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
+  let swept: string[] = []
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -364,7 +366,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         requested.map((file) => ({ t: "edited" as const, file, ...(via === undefined ? {} : { via }) })),
       )
     }
-    if (event.kind === "verify" && event.files.length === 0 && session) requested = relevant(view.work.edited)
+    if (event.kind === "verify" && event.files.length === 0 && session) {
+      requested = relevant(view.work.edited)
+      if (options.stopGate === true) {
+        swept = await sweep(session, new Set(requested))
+        requested = [...requested, ...swept]
+      }
+    }
 
     // One reader for the baseline diff and the detectors, so they agree on what "the file" is.
     const read = contentReader(root, event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE)
@@ -485,6 +493,28 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   }
 
+  /**
+   * At a stop: what changed since the agent's latest recorded state that no call of its explains —
+   * a job it left running, a formatter, the user's own edits — joined with what earlier calls'
+   * before hooks already swept. A git operation in between sweeps nothing. Never the agent's own
+   * edited files, which stay its own.
+   */
+  async function sweep(open: { dir: string; agent: string }, edited: ReadonlySet<string>): Promise<string[]> {
+    const now = await treeState(root)
+    let found: string[] = []
+    if (now !== null) {
+      const reference = referenceState(view.work, open.agent)
+      const gap = reference === null ? null : treeChanges(reference, now)
+      if (gap !== null && !gap.gitOperation) found = relevant(gap.files.filter((file) => !edited.has(file)))
+      await appendWork(open.dir, [
+        ...found.map((file) => ({ t: "swept" as const, file })),
+        { t: "tree", phase: "stop", agent: open.agent, state: now },
+      ])
+    }
+    const all = [...new Set([...relevant(view.work.swept), ...found])].filter((file) => !edited.has(file))
+    return now === null ? all : all.filter((file) => !isGone(now, file))
+  }
+
   const inputFor = (state: SessionView): DecideInput => ({
     agent: session?.agent ?? "main",
     findings,
@@ -500,6 +530,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
     ...(via === undefined ? {} : { via }),
+    ...(swept.length === 0 ? {} : { swept }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.

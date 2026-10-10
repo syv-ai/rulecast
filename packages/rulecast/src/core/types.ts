@@ -253,7 +253,7 @@ export interface DeliveredReference {
 /** What the context budget left out. A renderer says how much is missing; it never recomputes it. */
 export interface Omitted {
   /** Findings of a rule that is still delivered, and how many files they were in. */
-  findings: { rule: string; count: number; files: number }[]
+  findings: { rule: string; count: number; files: number; swept?: true }[]
   /** Rules dropped whole, with their findings: only when the floor itself did not fit. */
   rules: number
   preexisting: number
@@ -273,6 +273,11 @@ export interface Delivery {
   overflowPath: string | null
   /** The findings are in files the agent's shell command changed: the title says so. Absent: an edit tool. */
   via?: "shell"
+  /**
+   * Files with findings that changed outside the agent's tool calls (spec §9, Shell edits): printed
+   * under their own heading, after the agent's own, and never blocking. Set at a stop.
+   */
+  swept?: string[]
   /**
    * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.

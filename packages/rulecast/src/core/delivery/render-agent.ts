@@ -38,6 +38,10 @@ const BACKLOG_HEADING = "backlog in files you touched (not from your edit; leave
 const WARNINGS_HEADING = "rulecast warnings:"
 const CONVENTIONS_TITLE = "rulecast: conventions for the files you are working on"
 const NOTICES_HEADING = "rulecast notices (for the user):"
+const SWEPT_HEADING =
+  "changed outside your tool calls (fix them if a process you started made them; they do not block):"
+/** Prefixes a swept block's key in the budget, which groups by block (decide.ts): no rule id contains it. */
+export const SWEPT_BLOCK = "\0swept:"
 /** Said in the title of a delivery for files the agent's shell command changed, not its edit tools. */
 const SHELL_TRIGGER = "changed by your Bash command"
 
@@ -150,8 +154,8 @@ function referenceLines(reference: DeliveredReference): string[] {
 }
 
 /** What the budget dropped for a rule before the renderer saw it. */
-function omittedFor(omitted: Omitted, rule: string): { count: number; files: number } {
-  const entry = omitted.findings.find((finding) => finding.rule === rule)
+function omittedFor(omitted: Omitted, rule: string, swept: boolean): { count: number; files: number } {
+  const entry = omitted.findings.find((finding) => finding.rule === rule && (finding.swept === true) === swept)
   return { count: entry?.count ?? 0, files: entry?.files ?? 0 }
 }
 
@@ -259,6 +263,8 @@ export const deliveryCost = {
   referenceContent(ref: string, content: string, location: string | undefined): number {
     return linesCost(referenceLines({ ref, state: "full", content })) - deliveryCost.referenceLine(ref, location)
   },
+  /** The heading over findings in swept files, once. */
+  sweptFrame: linesCost([SWEPT_HEADING]),
   /** The blank line that closes the references, once. */
   referencesEnd: 1,
   /** The warnings heading, once. */
@@ -292,15 +298,29 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
 
   // Appended in place: rebuilding the array per finding is quadratic in one rule's matches, and a
   // json or sarif delivery is never trimmed, so this sees every match the detector found.
-  const byRule = new Map<string, Finding[]>()
-  for (const finding of delivery.findings) {
-    const group = byRule.get(finding.rule)
-    if (group === undefined) byRule.set(finding.rule, [finding])
-    else group.push(finding)
+  // The agent's own findings first; those in files changed outside its tool calls after, under their
+  // own heading, so it can tell what it did from what happened around it.
+  const swept = new Set(delivery.swept ?? [])
+  const blocks = (findings: Finding[], isSwept: boolean) => {
+    const byRule = new Map<string, Finding[]>()
+    for (const finding of findings) {
+      const group = byRule.get(finding.rule)
+      if (group === undefined) byRule.set(finding.rule, [finding])
+      else group.push(finding)
+    }
+    for (const [rule, ruleFindings] of byRule) {
+      const dropped = omittedFor(delivery.omitted, rule, isSwept)
+      out.push(...ruleBlock(rule, ruleFindings, delivery.templates[rule], dropped, options), "")
+    }
   }
-  for (const [rule, findings] of byRule) {
-    out.push(...ruleBlock(rule, findings, delivery.templates[rule], omittedFor(delivery.omitted, rule), options))
-    out.push("")
+  blocks(
+    delivery.findings.filter((finding) => !swept.has(finding.file)),
+    false,
+  )
+  const outside = delivery.findings.filter((finding) => swept.has(finding.file))
+  if (outside.length > 0) {
+    out.push(SWEPT_HEADING)
+    blocks(outside, true)
   }
 
   // "pre-existing (not blocking)" read as *ignore this*, and the backlog it names is the thing that

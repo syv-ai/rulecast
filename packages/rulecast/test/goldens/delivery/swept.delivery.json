@@ -1,0 +1,53 @@
+{
+  "about": "At a stop, findings in files changed outside the agent's tool calls print after its own, under their own heading; a rule with findings on both sides prints once on each.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "backend/no-httpexception",
+        "severity": "error",
+        "status": "new",
+        "file": "app/services/orders.py",
+        "line": 2,
+        "column": 5,
+        "message": "app/services/orders.py:2 raises HTTPException(400). Raise a domain exception.",
+        "count": 1
+      },
+      {
+        "rule": "backend/no-httpexception",
+        "severity": "error",
+        "status": "new",
+        "file": "app/services/users.py",
+        "line": 3,
+        "column": 5,
+        "message": "app/services/users.py:3 raises HTTPException(500). Raise a domain exception.",
+        "count": 1
+      },
+      {
+        "rule": "frontend/no-generated-edits",
+        "severity": "warning",
+        "status": "new",
+        "file": "src/client/api.ts",
+        "line": 1,
+        "column": 1,
+        "message": "src/client/api.ts is generated. Regenerate it instead of editing.",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [],
+    "touches": [],
+    "stop": "block",
+    "warnings": [],
+    "templates": {},
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPath": null,
+    "swept": ["app/services/users.py", "src/client/api.ts"]
+  }
+}

@@ -199,11 +199,13 @@ export function treeChanges(
 
 **Behaviour:** At a Stop, the pipeline compares the tree with the agent's latest recorded state. Files that changed and no call explains are recorded as `swept`, verified with the rest, and reported under their own heading. Their findings never block.
 
-- [ ] Stop (and `SubagentStop`): `treeChanges(referenceState(work, agent), now)`; not a git operation → `swept` records for the matched files not already in `edited` (by any agent); append a `stop` tree record. Verify `edited ∪ swept`. A subagent's Stop therefore also reports the main agent's gap changes as swept; they never block, so that is noise at worst, and it is said in the spec.
-- [ ] `gate()` takes the swept set and ignores findings in swept files. (Shell `refuse_write` is Task 8.)
-- [ ] `Delivery` gains `swept?: string[]`, set by the pipeline. Render: findings in those files under `changed outside your tool calls (fix them if a process you started made them; they do not block)`, after the agent's own. Priced in `render-agent.ts`. Golden `swept`.
-- [ ] Tests: a background job that writes a violation after its call → reported at Stop, Stop allowed; the same write followed by another Bash call that changes nothing (swept by that call's `shell-before`) → reported at Stop, Stop allowed; the user's edit between calls → the same; a file in both `edited` and changed again between calls → stays the agent's and blocks; no tree (outside git) → Stop verifies `edited` as today.
-- [ ] Verify: the three test files → pass. Commit.
+- [x] Stop (and `SubagentStop`): `treeChanges(referenceState(work, agent), now)`; not a git operation → `swept` records for the matched files not already in `edited` (by any agent); append a `stop` tree record. Verify `edited ∪ swept`. A subagent's Stop therefore also reports the main agent's gap changes as swept; they never block, so that is noise at worst, and it is said in the spec.
+- [x] `gate()` takes the swept set and ignores findings in swept files. (Shell `refuse_write` is Task 8.)
+- [x] `Delivery` gains `swept?: string[]`, set by the pipeline. Render: findings in those files under `changed outside your tool calls (fix them if a process you started made them; they do not block)`, after the agent's own. Priced in `render-agent.ts`. Golden `swept`.
+- [x] Tests: a background job that writes a violation after its call → reported at Stop, Stop allowed; the same write followed by another Bash call that changes nothing (swept by that call's `shell-before`) → reported at Stop, Stop allowed; the user's edit between calls → the same; a file in both `edited` and changed again between calls → stays the agent's and blocks; no tree (outside git) → Stop verifies `edited` as today.
+- [x] Verify: the three test files → pass. Commit.
+
+**Done with one addition:** Claude Code's Stop hook reaches the agent only by blocking, so on an allowed Stop the swept findings go to the user as a `systemMessage`; on a blocked one they are in the agent's reason under their heading. The budget groups findings by block (rule, swept or not), so a rule with findings on both sides is priced as the two blocks it prints.
 
 ## Task 8: `refuse_write` under Bash
 
