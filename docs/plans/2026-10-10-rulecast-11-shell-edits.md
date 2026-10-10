@@ -244,10 +244,12 @@ export function treeChanges(
 
 **Files:** create `.changeset/plan-eleven-shell-edits.md` · modify `docs/plans/2026-09-15-rulecast-00-index.md`
 
-- [ ] Minor changeset, leading with what changes for a user: Bash edits are now checked during the session, and `refuse_write` catches them.
-- [ ] Index row for plan 11 with status, perf numbers and deviations.
-- [ ] End-to-end verification below, `pnpm test:linux` (full), and a fresh-context review of the diff against this plan.
-- [ ] Commit and push.
+- [x] Minor changeset, leading with what changes for a user: Bash edits are now checked during the session, and `refuse_write` catches them.
+- [x] Index row for plan 11 with status, perf numbers and deviations.
+- [x] End-to-end verification below, `pnpm test:linux` (full), and a fresh-context review of the diff against this plan.
+
+**Done (2026-10-10).** End-to-end, headless `claude -p` (one session, resumed per step; step 4 over `--input-format stream-json` so the user's edit lands between two calls of one live session) against a `pnpm pack` of this build: every step as written. Step 1's finding arrived titled "changed by your Bash command"; step 3 gave the `git checkout` advice and the user notice, Stop blocked on a warning-severity rule and allowed after the revert; step 4's file was reported to the user at Stop without blocking; step 5 reported nothing; step 6 flagged only the agent's line, the user's showing as backlog; step 7 named the missing Bash hooks. Step 5 failed by reading before it was run: `git stash && git stash pop` moves no `HEAD`, so Decision 2's assumption did not hold; tree states now hash dirty files (fix commit, spec §9). The review found four gaps, fixed: `clear` and `fork` start sessions of their own and now record a `start` (a new `SessionStart (clear|fork)` group); an allowed Stop's user message showed the agent's own warnings under the swept heading; the title counted blocks as rules; the floor could keep a swept block over a blocking one. **Deviation:** the codemod test does not force the edit deadline; the edit path has no pointer of its own to unfinished files, and Stop verifying all 40 is what the test checks.
+- [x] Commit and push (after PR #20 released 0.4.0).
 
 ---
 
