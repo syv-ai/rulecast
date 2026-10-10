@@ -22,3 +22,12 @@ packages/rulecast/stress/
 .env
 .env.*
 !.env.example
+
+# The docs site: pages generated from README.md and agents/ by packages/site/scripts/sync.ts, and
+# Astro's own type cache.
+packages/site/src/generated/
+packages/site/src/content/docs/getting-started.md
+packages/site/src/content/docs/guides/
+packages/site/src/content/docs/reference/
+packages/site/src/content/docs/agents/
+packages/site/.astro/

@@ -1,0 +1,26 @@
+{
+  "name": "@syv-ai/rulecast-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "tsx scripts/sync.ts",
+    "predev": "pnpm sync",
+    "dev": "astro dev",
+    "prebuild": "pnpm sync",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.scripts.json"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.3.8",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

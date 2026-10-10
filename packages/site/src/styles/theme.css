@@ -1,0 +1,54 @@
+/*
+ * rulecast palette. Ink is the logo's tile; signal is the rule being cast. Light mode uses a deeper
+ * signal so links and accents keep AA contrast on paper.
+ */
+:root {
+  --rc-ink: #16151f;
+  --rc-signal: #ff6a3d;
+  --rc-signal-deep: #b93c0e;
+  --rc-paper: #fbfaf7;
+  --rc-muted: #8e8ca3;
+  --rc-error: #ff5c5c;
+  --rc-warning: #f2b33d;
+  --rc-ok: #4cc38a;
+
+  --sl-color-accent-low: #3a1b10;
+  --sl-color-accent: #ff6a3d;
+  --sl-color-accent-high: #ffc9b5;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #edecf2;
+  --sl-color-gray-2: #c9c7d6;
+  --sl-color-gray-3: #9a98ad;
+  --sl-color-gray-4: #5f5d73;
+  --sl-color-gray-5: #403e52;
+  --sl-color-gray-6: #262433;
+  --sl-color-black: #16151f;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ffe1d5;
+  --sl-color-accent: #b93c0e;
+  --sl-color-accent-high: #5e1d05;
+  --sl-color-white: #16151f;
+  --sl-color-gray-1: #262433;
+  --sl-color-gray-2: #403e52;
+  --sl-color-gray-3: #5f5d73;
+  --sl-color-gray-4: #8e8ca3;
+  --sl-color-gray-5: #c9c7d6;
+  --sl-color-gray-6: #edecf2;
+  --sl-color-gray-7: #f5f4f0;
+  --sl-color-black: #fbfaf7;
+}
+
+/* The terminal is dark in both themes: it shows a terminal. */
+.rc-terminal {
+  --rc-term-bg: #16151f;
+  --rc-term-fg: #e6e4ee;
+  --rc-term-dim: #8e8ca3;
+}
+
+/* Starlight spaces splash content with its own margins; the install command sits under the hero. */
+.sl-markdown-content .rc-install {
+  max-width: 26rem;
+  margin: 1.5rem auto 0;
+}

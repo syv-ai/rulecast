@@ -1,5 +1,7 @@
 # rulecast
 
+**Documentation: [syv-ai.github.io/rulecast](https://syv-ai.github.io/rulecast/)**
+
 Your project's conventions are written down in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them once, forty tool calls ago. rulecast delivers them again at the moment they matter: when the agent is about to break one.
 
 A rule pairs a check with a message and a pointer to the doc section it enforces. rulecast runs as an agent hook, so when the agent changes a file that breaks a rule — with its edit tools or with Bash — it gets told, in the same turn, before it moves on.
@@ -44,7 +46,7 @@ repos:
         detect:
           regex:
             pattern: 'raise\s+HTTPException\((?<args>[^)]*)\)'
-        message: "{{file}}:{{line}} raises HTTPException({{args}}). Raise a domain exception."
+        message: "{{file}}:{{line}} raises HTTPException({{args}}) in the service layer. Raise a domain exception; the API layer maps it to a response."
         context:
           - "@conventions/backend.md#errors"
 ```

@@ -1,0 +1,45 @@
+---
+title: rulecast
+description: Your project's conventions, delivered to your coding agent at the moment it is about to break one.
+template: splash
+pagefind: false
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components"
+import HookFlow from "../../components/HookFlow.astro"
+import LandingHero from "../../components/LandingHero.astro"
+import RuleAnatomy from "../../components/RuleAnatomy.astro"
+import TerminalDemo from "../../components/TerminalDemo.astro"
+
+<LandingHero />
+
+<div class="rc-install">
+
+```sh
+npx @syv-ai/rulecast init
+```
+
+</div>
+
+## The agent is told, in the same turn
+
+<TerminalDemo />
+
+Every line rulecast prints above is its real output. The agent sees the finding *and* the paragraph of your documentation that explains it. When there is nothing new to say, rulecast says nothing. A file changed by a command is checked like one changed with the edit tools.
+
+## Anatomy of a rule
+
+<RuleAnatomy />
+
+## Where it runs
+
+<HookFlow />
+
+## Read on
+
+<CardGrid>
+  <LinkCard title="Getting started" description="One command reads your project, offers catalog rules and installs the hooks." href="getting-started/" />
+  <LinkCard title="Writing rules" description="Checks, messages, doc sections, and rules that refuse a write." href="guides/writing-rules/" />
+  <LinkCard title="Detectors" description="regex, path, ast-grep, command, linter and llm." href="reference/detectors/" />
+  <LinkCard title="Git hooks and CI" description="The same rules report the same line the same way everywhere." href="guides/git-hooks-ci/" />
+</CardGrid>

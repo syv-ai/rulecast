@@ -58,6 +58,20 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The build is the check: a README section no page places, or an example rule that no longer
+      # produces the README's opening output, fails it (packages/site/scripts/sources.ts).
+      - run: pnpm --filter @syv-ai/rulecast-site build
+
   binary:
     strategy:
       fail-fast: false

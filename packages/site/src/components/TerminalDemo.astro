@@ -1,0 +1,200 @@
+---
+/**
+ * An agent gets a finding and fixes it. Every line rulecast prints here is real output, read at
+ * build time: the README's opening block (which the README says is real output) and the renderer's
+ * recorded `shell-edit` golden. Only the agent's own actions are written here.
+ *
+ * The page renders the whole session; the script replays it line by line. Without JavaScript, or
+ * with reduced motion, the whole session simply shows.
+ */
+import { golden, openingOutput } from "../../scripts/sources"
+
+type Line = { kind: "agent" | "rulecast" | "note"; text: string }
+
+const agent = (text: string): Line => ({ kind: "agent", text })
+const note = (text: string): Line => ({ kind: "note", text })
+const output = (text: string): Line[] =>
+  text
+    .trimEnd()
+    .split("\n")
+    .map((line) => ({ kind: "rulecast", text: line }))
+
+const lines: Line[] = [
+  agent("Edit app/services/users.py"),
+  ...output(openingOutput()),
+  agent("Edit app/services/users.py"),
+  note("no new findings: rulecast says nothing"),
+  agent("Bash python scripts/scaffold_service.py users"),
+  ...output(golden("shell-edit")),
+]
+
+/** How a line of rulecast's output is coloured. */
+function tone(text: string): string {
+  if (/^rulecast:/.test(text)) return "rc-t-title"
+  if (/^error /.test(text)) return "rc-t-error"
+  if (/^warning /.test(text)) return "rc-t-warning"
+  if (/^--- .* ---$/.test(text)) return "rc-t-section"
+  return ""
+}
+---
+
+<figure class="rc-terminal not-content" aria-label="An agent session with rulecast: real rulecast output">
+  <div class="rc-term-bar" aria-hidden="true">
+    <span></span><span></span><span></span>
+    <em>agent session</em>
+  </div>
+  <div class="rc-term-body" data-rc-terminal>
+    {
+      lines.map((line) =>
+        line.kind === "agent" ? (
+          <div class="rc-term-line rc-t-agent" data-kind="agent">
+            <span class="rc-t-prompt" aria-hidden="true">
+              ●
+            </span>
+            <span data-text>{line.text}</span>
+          </div>
+        ) : line.kind === "note" ? (
+          <div class="rc-term-line rc-t-note" data-kind="note">
+            # {line.text}
+          </div>
+        ) : (
+          <div class:list={["rc-term-line", "rc-t-out", tone(line.text)]} data-kind="rulecast">
+            {line.text === "" ? " " : line.text}
+          </div>
+        ),
+      )
+    }
+  </div>
+</figure>
+
+<script>
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  async function play(body: HTMLElement) {
+    const lines = [...body.querySelectorAll<HTMLElement>(".rc-term-line")]
+    for (;;) {
+      for (const line of lines) line.classList.add("rc-hidden")
+      await wait(600)
+      for (const line of lines) {
+        const kind = line.dataset.kind
+        if (kind === "agent") {
+          const text = line.querySelector<HTMLElement>("[data-text]")!
+          const full = text.textContent ?? ""
+          text.textContent = ""
+          line.classList.remove("rc-hidden")
+          for (let i = 1; i <= full.length; i++) {
+            text.textContent = full.slice(0, i)
+            await wait(28)
+          }
+          await wait(500)
+        } else {
+          line.classList.remove("rc-hidden")
+          await wait(kind === "note" ? 1400 : 70)
+        }
+        // A pause after each block of output, so it can be read.
+        const next = line.nextElementSibling as HTMLElement | null
+        if (kind === "rulecast" && next?.dataset.kind !== "rulecast") await wait(2600)
+      }
+      await wait(4000)
+    }
+  }
+
+  // The whole session shows until the terminal scrolls into view; only then does the replay start.
+  if (!reduced) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          observer.unobserve(entry.target)
+          void play(entry.target as HTMLElement)
+        }
+      },
+      { threshold: 0.4 },
+    )
+    for (const body of document.querySelectorAll<HTMLElement>("[data-rc-terminal]")) observer.observe(body)
+  }
+</script>
+
+<style>
+  .rc-terminal {
+    margin: 1.25rem 0 0;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: var(--rc-term-bg);
+    color: var(--rc-term-fg);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.04) inset,
+      0 18px 40px -18px rgb(0 0 0 / 0.55);
+    border: 1px solid #2a2839;
+    text-align: left;
+  }
+  .rc-term-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 0.8rem;
+    background: #1f1d2b;
+    border-bottom: 1px solid #2a2839;
+  }
+  .rc-term-bar span {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: #3a3850;
+  }
+  .rc-term-bar em {
+    margin-left: auto;
+    font-style: normal;
+    font-size: 0.75rem;
+    color: var(--rc-term-dim);
+    font-family: var(--__sl-font-mono);
+  }
+  .rc-term-body {
+    padding: 0.9rem 1rem 1.1rem;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+  .rc-term-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .rc-hidden {
+    visibility: hidden;
+  }
+  .rc-t-agent {
+    margin-top: 0.6rem;
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .rc-t-agent:first-child {
+    margin-top: 0;
+  }
+  .rc-t-prompt {
+    color: var(--rc-signal);
+    margin-right: 0.4rem;
+  }
+  .rc-t-out {
+    padding-left: 1.1rem;
+    border-left: 2px solid #3a3850;
+  }
+  .rc-t-title {
+    color: #ffffff;
+  }
+  .rc-t-error {
+    color: var(--rc-error);
+    font-weight: 600;
+  }
+  .rc-t-warning {
+    color: var(--rc-warning);
+    font-weight: 600;
+  }
+  .rc-t-section {
+    color: var(--rc-signal);
+  }
+  .rc-t-note {
+    margin-top: 0.6rem;
+    color: var(--rc-ok);
+  }
+</style>

@@ -1,0 +1,25 @@
+---
+title: How it works
+description: Where rulecast sits between your agent and its tools, and what it costs.
+---
+
+import HookFlow from "../../components/HookFlow.astro"
+import RuleAnatomy from "../../components/RuleAnatomy.astro"
+import { Content as Lead } from "../../generated/lead.md"
+import { Content as Performance } from "../../generated/performance.md"
+
+<Lead />
+
+## Where it sits
+
+rulecast runs as your agent's hooks. Each tool call the agent makes passes through it on the way out, on the way back, or both.
+
+<HookFlow />
+
+## From rule to message
+
+<RuleAnatomy />
+
+## Performance
+
+<Performance />
