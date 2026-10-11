@@ -262,6 +262,11 @@ export function exampleRule(sections = readme()): string {
   return firstFence(sections.get("A rule") ?? "", "yaml")
 }
 
+/** The prompt the README gives a developer to paste into their agent, so it sets rulecast up. */
+export function agentPrompt(sections = readme()): string {
+  return firstFence(sections.get("Agents") ?? "", "text")
+}
+
 /** The README's opening output, which it says is real output. */
 export function openingOutput(sections = readme()): string {
   return firstFence(sections.get(LEAD) ?? "", "")

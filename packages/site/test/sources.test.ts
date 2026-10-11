@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentPrompt,
   assertPlaced,
   exampleBinding,
   LEAD,
@@ -74,5 +75,12 @@ describe("exampleBinding", () => {
     const sections = new Map(readme())
     sections.set("A rule", (sections.get("A rule") ?? "").replace(/message: ".*"/, 'message: "{{file}} is wrong."'))
     expect(() => exampleBinding(sections)).toThrow(/produces no line of the opening output/)
+  })
+})
+
+describe("agentPrompt", () => {
+  it("is the README's paste-this prompt, pointing at SETUP.md at a release tag", () => {
+    expect(agentPrompt()).toMatch(/^Set up rulecast in this project\./)
+    expect(agentPrompt()).toMatch(/raw\.githubusercontent\.com\/syv-ai\/rulecast\/v\d+\.\d+\.\d+\/agents\/SETUP\.md/)
   })
 })

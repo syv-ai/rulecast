@@ -16,7 +16,7 @@ export default defineConfig({
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/syv-ai/rulecast" }],
       editLink: undefined,
       lastUpdated: false,
-      components: { Header: "./src/components/Header.astro" },
+      components: { Header: "./src/components/Header.astro", ThemeSelect: "./src/components/ThemeSelect.astro" },
       // Code blocks are surfaces, not framed boxes: no borders, no window chrome.
       expressiveCode: {
         defaultProps: { frame: "none" },

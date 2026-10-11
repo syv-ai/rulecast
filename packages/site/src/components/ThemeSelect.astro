@@ -1,0 +1,105 @@
+---
+/**
+ * Light, dark or system, as three icons rather than a select. The choice is stored where
+ * Starlight's theme provider reads it (`starlight-theme`: "light", "dark", or "" for system), so its
+ * inline script still sets the theme before first paint.
+ */
+import { Icon } from "@astrojs/starlight/components"
+
+const options = [
+  { value: "light", label: "Light", icon: "sun" },
+  { value: "dark", label: "Dark", icon: "moon" },
+  { value: "auto", label: "System", icon: "laptop" },
+] as const
+---
+
+<rc-theme-toggle class="rc-theme" role="radiogroup" aria-label="Theme">
+  {
+    options.map((option) => (
+      <button type="button" role="radio" aria-checked="false" data-theme-value={option.value} title={option.label}>
+        <Icon name={option.icon} size="0.95rem" />
+        <span class="sr-only">{option.label}</span>
+      </button>
+    ))
+  }
+</rc-theme-toggle>
+
+{/* Inlined so the current choice is marked before first paint. */}
+<script is:inline>
+  {
+    const stored = typeof localStorage !== "undefined" && localStorage.getItem("starlight-theme")
+    const current = stored === "light" || stored === "dark" ? stored : "auto"
+    for (const button of document.querySelectorAll("rc-theme-toggle [data-theme-value]")) {
+      button.setAttribute("aria-checked", String(button.dataset.themeValue === current))
+    }
+  }
+</script>
+
+<script>
+  type Theme = "auto" | "dark" | "light"
+  const key = "starlight-theme"
+  const system = (): "light" | "dark" => (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+  const load = (): Theme => {
+    const stored = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null
+    return stored === "light" || stored === "dark" ? stored : "auto"
+  }
+
+  function apply(theme: Theme) {
+    document.documentElement.dataset.theme = theme === "auto" ? system() : theme
+    try {
+      localStorage.setItem(key, theme === "auto" ? "" : theme)
+    } catch {}
+    for (const button of document.querySelectorAll<HTMLElement>("rc-theme-toggle [data-theme-value]")) {
+      button.setAttribute("aria-checked", String(button.dataset.themeValue === theme))
+    }
+  }
+
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+    if (load() === "auto") apply("auto")
+  })
+
+  class ThemeToggle extends HTMLElement {
+    connectedCallback() {
+      for (const button of this.querySelectorAll<HTMLElement>("[data-theme-value]")) {
+        button.addEventListener("click", () => apply(button.dataset.themeValue as Theme))
+      }
+    }
+  }
+  if (!customElements.get("rc-theme-toggle")) customElements.define("rc-theme-toggle", ThemeToggle)
+</script>
+
+<style>
+  .rc-theme {
+    display: inline-flex;
+    gap: 0.125rem;
+    padding: 0.2rem;
+    border-radius: 999px;
+    background: var(--sl-color-gray-6);
+  }
+  .rc-theme button {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      color 150ms ease-out,
+      transform 100ms ease-out;
+  }
+  .rc-theme button:hover {
+    color: var(--sl-color-white);
+  }
+  .rc-theme button:active {
+    transform: scale(0.92);
+  }
+  .rc-theme button[aria-checked="true"] {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+  }
+</style>

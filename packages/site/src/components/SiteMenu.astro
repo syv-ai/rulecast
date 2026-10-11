@@ -5,6 +5,7 @@
  */
 import { routeUrl } from "../../scripts/links"
 import { GROUPS, PAGES } from "../../scripts/sources"
+import ThemeSelect from "./ThemeSelect.astro"
 
 const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => page.group === label) }))
 ---
@@ -31,7 +32,10 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
         </section>
       ))
     }
-    <a class="rc-menu-github" href="https://github.com/syv-ai/rulecast">GitHub</a>
+    <div class="rc-menu-foot">
+      <a class="rc-menu-github" href="https://github.com/syv-ai/rulecast">GitHub</a>
+      <ThemeSelect />
+    </div>
   </nav>
 </div>
 
@@ -210,8 +214,13 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
   .rc-menu a:active {
     background: var(--sl-color-gray-5);
   }
-  .rc-menu a.rc-menu-github {
+  .rc-menu-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-top: 1.5rem;
+  }
+  .rc-menu a.rc-menu-github {
     color: var(--sl-color-gray-3);
   }
 

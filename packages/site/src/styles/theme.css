@@ -3,46 +3,48 @@
  * other, by colour alone. Blue is the rule being cast, and the only colour used for emphasis.
  */
 :root {
-  --rc-error: #ff6b6b;
-  --rc-warning: #f5c26b;
-  /* Syntax, shared by the rule anatomy and the terminal. */
-  --rc-syn-key: #6cb6ff;
-  --rc-syn-string: #9fdea0;
-  --rc-syn-var: #f0a6ff;
-  --rc-syn-punct: #6e6e78;
-  --rc-band: rgb(59 158 255 / 0.09);
+  --rc-error: #f27c7c;
+  --rc-warning: #e8c27a;
+  /* Syntax, shared by the rule anatomy and the terminal: muted, so blue stays the quiet accent. */
+  --rc-syn-key: #8fb3dc;
+  --rc-syn-string: #a9cfa4;
+  --rc-syn-var: #d3a9df;
+  --rc-syn-punct: #7c7c87;
+  --rc-band: rgb(127 164 214 / 0.12);
 
-  --sl-color-accent-low: #0a2440;
-  --sl-color-accent: #3b9eff;
-  --sl-color-accent-high: #b3d9ff;
+  /* A soft, slightly grey blue: it marks, it does not shout. */
+  --sl-color-accent-low: #1b2636;
+  --sl-color-accent: #7fa4d6;
+  --sl-color-accent-high: #c9d9ee;
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #ececf1;
-  --sl-color-gray-2: #c3c3cb;
-  --sl-color-gray-3: #8c8c96;
-  --sl-color-gray-4: #4a4a52;
-  --sl-color-gray-5: #222227;
-  --sl-color-gray-6: #121215;
+  --sl-color-gray-1: #eeeef2;
+  --sl-color-gray-2: #c8c8d0;
+  --sl-color-gray-3: #9696a0;
+  --sl-color-gray-4: #5a5a64;
+  /* Surfaces: each step is far enough from the last to read without a border. */
+  --sl-color-gray-5: #2e2e35;
+  --sl-color-gray-6: #1b1b20;
   --sl-color-black: #050506;
 }
 
 :root[data-theme="light"] {
-  --rc-syn-key: #0550ae;
-  --rc-syn-string: #116329;
-  --rc-syn-var: #8250df;
-  --rc-syn-punct: #8c8c96;
-  --rc-band: rgb(0 102 204 / 0.07);
+  --rc-syn-key: #2f5a8a;
+  --rc-syn-string: #3d6b37;
+  --rc-syn-var: #7a4c8c;
+  --rc-syn-punct: #8a8a94;
+  --rc-band: rgb(58 98 150 / 0.09);
 
-  --sl-color-accent-low: #e0efff;
-  --sl-color-accent: #0066cc;
-  --sl-color-accent-high: #003366;
+  --sl-color-accent-low: #e3ebf6;
+  --sl-color-accent: #3a6296;
+  --sl-color-accent-high: #1d3554;
   --sl-color-white: #0b0b0d;
   --sl-color-gray-1: #232327;
   --sl-color-gray-2: #45454c;
-  --sl-color-gray-3: #6e6e78;
-  --sl-color-gray-4: #a4a4ad;
-  --sl-color-gray-5: #e4e4e9;
-  --sl-color-gray-6: #f2f2f5;
-  --sl-color-gray-7: #f7f7f9;
+  --sl-color-gray-3: #66666f;
+  --sl-color-gray-4: #9a9aa4;
+  --sl-color-gray-5: #d9d9e0;
+  --sl-color-gray-6: #ebebef;
+  --sl-color-gray-7: #f4f4f6;
   --sl-color-black: #ffffff;
 }
 
@@ -58,11 +60,11 @@ hr {
 
 /* The terminal is dark in both themes: it shows a terminal. */
 .rc-terminal {
-  --rc-term-bg: #111114;
+  --rc-term-bg: #18181d;
   --rc-term-fg: #ececf1;
   --rc-term-dim: #9a9aa4;
-  --rc-syn-key: #6cb6ff;
-  --rc-syn-var: #f0a6ff;
+  --rc-syn-key: #8fb3dc;
+  --rc-syn-var: #d3a9df;
 }
 
 /* Type: tighter tracking as headings grow, body left alone. */
@@ -133,4 +135,12 @@ h1#_top {
   site-search > button:hover {
     background-color: var(--sl-color-gray-5);
   }
+}
+
+/* The GitHub mark is GitHub's, not ours: plain text colour. */
+.social-icons a {
+  color: var(--sl-color-gray-2);
+}
+.social-icons a:hover {
+  color: var(--sl-color-white);
 }

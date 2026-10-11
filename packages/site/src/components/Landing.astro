@@ -1,11 +1,12 @@
 ---
 /**
- * The landing page. One statement, one command, then three things to see: rulecast telling an agent
- * in the same turn, what a rule is made of, and where it runs. The README's own words carry the
- * explanation (read at build time); the headline and section titles are the site's.
+ * The landing page. The name and one command; why it helps, in plain words; then three things to
+ * see (rulecast telling an agent in the same turn, what a rule is made of, where it runs); and the
+ * prompt that has an agent set it up. The README's own words carry the tagline, the demo's lede and
+ * the prompt (read at build time); the rest is the site's.
  */
 import { routeUrl } from "../../scripts/links"
-import { LEAD, readme, version } from "../../scripts/sources"
+import { agentPrompt, LEAD, readme, version } from "../../scripts/sources"
 import HookFlow from "./HookFlow.astro"
 import RuleAnatomy from "./RuleAnatomy.astro"
 import TerminalDemo from "./TerminalDemo.astro"
@@ -20,6 +21,7 @@ const inline = (text: string) =>
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
 
 const install = "npx @syv-ai/rulecast init"
+const prompt = agentPrompt()
 const next = [
   { title: "Getting started", text: "One command sets it up.", route: "getting-started" },
   { title: "Writing rules", text: "A check, a message, a doc section.", route: "guides/writing-rules" },
@@ -30,18 +32,33 @@ const next = [
 
 <div class="rc-landing not-content">
   <header class="rc-hero">
-    <h1>Your conventions, in the same turn.</h1>
+    <h1>Rulecast</h1>
     <p class="rc-hero-tagline" set:html={inline(tagline)} />
     <div class="rc-hero-actions">
       <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
         <span class="rc-install-prompt" aria-hidden="true">$</span>
         <code>{install}</code>
-        <span class="rc-install-state" aria-live="polite">Copy</span>
+        <span class="rc-copy-state" aria-live="polite">Copy</span>
       </button>
       <a class="rc-link" href={routeUrl("getting-started")}>Read the guide <span aria-hidden="true">→</span></a>
     </div>
     <p class="rc-hero-meta">v{version()} · Claude Code · Node ≥ 20.12 · macOS and Linux · MIT</p>
   </header>
+
+  <section class="rc-why">
+    <h2>Why it helps</h2>
+    <p>
+      You wrote down how your project works: which files are generated, where errors get handled, what a service may
+      import. Your agent read all of it at the start of the session. Forty tool calls later it is deep in some file, and
+      that one paragraph is long gone.
+    </p>
+    <p>So it writes exactly what your docs say not to, and you find out in review. Or you don't.</p>
+    <p>
+      Rulecast closes that gap. Each convention becomes a rule. When an edit breaks one, the agent hears about it right
+      away, with the part of your docs that explains why, and fixes the code before it moves on. The same rules run in
+      your git hooks and CI, so nothing slips past there either.
+    </p>
+  </section>
 
   <section>
     <h2>See it work.</h2>
@@ -65,6 +82,17 @@ const next = [
     <HookFlow />
   </section>
 
+  <section id="agent-setup">
+    <h2>Let your agent set it up.</h2>
+    <p class="rc-lede">Paste this into your coding agent. It installs rulecast, then shows you every file it changed.</p>
+    <div class="rc-prompt">
+      <pre>{prompt}</pre>
+      <button class="rc-prompt-copy" type="button" data-copy={prompt} aria-label="Copy the prompt">
+        <span class="rc-copy-state" aria-live="polite">Copy</span>
+      </button>
+    </div>
+  </section>
+
   <nav class="rc-next" aria-label="Read on">
     {
       next.map((item) => (
@@ -79,7 +107,7 @@ const next = [
 
 <script>
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
-    const state = button.querySelector<HTMLElement>(".rc-install-state")!
+    const state = button.querySelector<HTMLElement>(".rc-copy-state")!
     let timer: ReturnType<typeof setTimeout> | undefined
     button.addEventListener("click", async () => {
       try {
@@ -186,7 +214,7 @@ const next = [
     font-family: var(--__sl-font-mono);
     color: var(--sl-color-gray-3);
   }
-  .rc-install-state {
+  .rc-copy-state {
     min-width: 4.2rem;
     padding: 0.2rem 0.55rem;
     border-radius: 0.45rem;
@@ -194,10 +222,14 @@ const next = [
     color: var(--sl-color-gray-2);
     background: var(--sl-color-gray-5);
   }
-  .rc-install:hover .rc-install-state {
+  .rc-install:hover .rc-copy-state {
     background: var(--sl-color-gray-4);
   }
-  .rc-copied .rc-install-state {
+  .rc-prompt-copy:hover .rc-copy-state {
+    background: var(--sl-color-gray-4);
+    color: var(--sl-color-white);
+  }
+  .rc-copied .rc-copy-state {
     color: var(--sl-color-accent);
   }
   .rc-link {
@@ -234,6 +266,49 @@ const next = [
     margin-top: 1rem;
     font-size: var(--sl-text-sm);
     color: var(--sl-color-gray-3);
+  }
+
+  .rc-why p {
+    margin: 1rem 0 0;
+    max-width: 36em;
+    font-size: clamp(1.05rem, 2vw, 1.2rem);
+    line-height: 1.65;
+    color: var(--sl-color-gray-2);
+    text-wrap: pretty;
+  }
+  .rc-why h2 + p {
+    margin-top: 1.25rem;
+  }
+
+  .rc-prompt {
+    position: relative;
+    border-radius: 1rem;
+    background: var(--sl-color-gray-6);
+  }
+  .rc-prompt pre {
+    margin: 0;
+    padding: 1.4rem 1.5rem;
+    padding-right: 6rem;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    color: var(--sl-color-gray-1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: none;
+  }
+  .rc-prompt-copy {
+    position: absolute;
+    top: 0.9rem;
+    right: 0.9rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font: inherit;
+  }
+  .rc-prompt-copy:active {
+    transform: scale(0.96);
   }
 
   .rc-next {
