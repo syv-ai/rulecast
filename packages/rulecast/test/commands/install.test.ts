@@ -217,7 +217,15 @@ describe("rulecast uninstall", () => {
     expect(result.stdout).toContain("removed Claude Code hooks from .claude/settings.json: ")
     expect(result.stdout).toContain("removed Claude Code hooks from .claude/settings.local.json: ")
     expect(await settingsOf(root)).toEqual(original)
-    expect(await settingsOf(root, PERSONAL)).toEqual({})
+    // install created the personal file, so removing its hooks removes the file: no `{}` left behind.
+    expect(existsSync(path.join(root, PERSONAL))).toBe(false)
     expect(await runCli(root, ["uninstall"])).toMatchObject({ code: 0, stdout: "no Claude Code hooks to remove\n" })
+  })
+
+  test("a settings file that held only rulecast's hooks is removed, not left as {}", async () => {
+    const root = await createFixture()
+    await runCli(root, ["install"])
+    await runCli(root, ["uninstall"])
+    expect(existsSync(path.join(root, SHARED))).toBe(false)
   })
 })

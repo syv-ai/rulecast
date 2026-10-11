@@ -171,7 +171,8 @@ is, so `rulecast validate` rejects them.
 
 `examples` holds `good` code the rule must leave alone and `bad` code it must flag. `rulecast test`
 runs them; `rulecast test <id> --against <paths>` fires the rule over real files and says how many
-violations it would produce and in how many of the files it matches.
+violations it would produce and in how many of the files it matches. Without an id,
+`rulecast test --against <paths>` prints that count for every rule, one line each.
 
 ```yaml
 examples:

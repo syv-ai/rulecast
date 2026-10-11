@@ -66,6 +66,14 @@ describe("rulecast init --yes", () => {
     expect(result.copied).toEqual([])
   })
 
+  test("says so when nothing in the catalog applies, rather than only 'no rules yet'", async () => {
+    const root = await createRepo({ "src/index.ts": "export const x = 1\n", "AGENTS.md": "# Agents\n" })
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toMatch(/Nothing in \S+@v0\.2\.0 applies to this project's files\./)
+    expect(result.stdout).toContain("new, no rules yet")
+  })
+
   test("--yes never installs an llm rule, however well it matches", async () => {
     const root = await createRepo(PROJECT)
     await runCli(root, ["init", "--yes"], "", env)

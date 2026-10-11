@@ -180,7 +180,13 @@ async function chooseRules(
   const preselected = available
     .filter((rule) => !metered(rule) && files.some((file) => rule.matches(file)))
     .map((rule) => rule.id)
-  if (ui.prompter === null) return available.filter((rule) => preselected.includes(rule.id))
+  if (ui.prompter === null) {
+    // An empty config otherwise reads as a dead one: say the catalog was consulted and why it gave nothing.
+    if (available.length > 0 && preselected.length === 0) {
+      ui.say(`Nothing in ${catalog.label} applies to this project's files. Draft rules from your own docs.`, "Rules")
+    }
+    return available.filter((rule) => preselected.includes(rule.id))
+  }
   if (available.length === 0) {
     ui.say(`Every rule from ${catalog.label} is already configured.`, "Rules")
     return []

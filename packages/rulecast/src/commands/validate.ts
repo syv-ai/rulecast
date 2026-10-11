@@ -75,7 +75,14 @@ export async function validateCommand(
             configData: data.ok ? data.value : undefined,
           })
         : await compileManifest(dir, registry, full)
-    for (const diagnostic of result.diagnostics) io.stdout(`${shown}: ${formatDiagnostic(diagnostic)}\n`)
+    for (const diagnostic of result.diagnostics) {
+      // A diagnostic about the file itself names it once, as given; one from a rule repo the file
+      // pins keeps its own source after the file's name.
+      const own = diagnostic.source === path.basename(full)
+      io.stdout(
+        own ? `${formatDiagnostic({ ...diagnostic, source: shown })}\n` : `${shown}: ${formatDiagnostic(diagnostic)}\n`,
+      )
+    }
     if (result.diagnostics.some((diagnostic) => diagnostic.level === "error")) {
       failed = true
       continue

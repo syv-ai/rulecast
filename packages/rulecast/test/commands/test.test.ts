@@ -219,11 +219,34 @@ describe("rulecast test --against", () => {
     expect((await runTest(root, "backend/no-httpexception", "--against", root)).code).toBe(0)
   })
 
-  test("--against without a rule id exits 2", async () => {
+  test("--against without a rule id counts every rule, one line each, and never runs an llm rule", async () => {
+    const other = httpException({
+      id: "backend/no-other",
+      files: "^app/other/",
+      examples: { bad: [{ path: "app/other/x.py", code: "raise HTTPException(1)\n" }] },
+    })
+    const judgement = {
+      id: "backend/judgement",
+      name: "Judgement",
+      files: "^app/services/.*\\.py$",
+      detect: { llm: { model: "haiku", question: "Does this need judgement?" } },
+      message: "{{file}}:{{line}} needs judgement",
+    }
+    const root = await project([httpException(), other, judgement], files)
+    const result = await runTest(root, "--against", ".")
+    expect(result.code).toBe(0)
+    const lines = result.stdout.split("\n")
+    expect(lines).toContain("  rule                      violations  files")
+    expect(lines).toContain("  backend/no-httpexception           3  2 of 3")
+    expect(lines).toContain("  backend/no-other                   1  1 of 1")
+    expect(lines).toContain("  not run: backend/judgement (rulecast test <id> --against runs one; it costs money)")
+    expect(result.stdout).toContain("The counts are the stock")
+  })
+
+  test("--against without a rule id says when a rule matches nothing", async () => {
     const root = await project([httpException()], files)
-    const result = await runTest(root, "--against", "app")
-    expect(result.code).toBe(2)
-    expect(result.stderr).toContain("--against needs a RULE_ID")
+    const result = await runTest(root, "--against", "app/other")
+    expect(result.stdout.split("\n")).toContain("  backend/no-httpexception           0  no files match")
   })
 
   test("a path the rule matches nothing under says so rather than printing zeroes", async () => {

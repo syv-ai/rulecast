@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -36,6 +36,10 @@ async function writeSettings(root: string, file: string, settings: unknown): Pro
   const full = path.join(root, file)
   await mkdir(path.dirname(full), { recursive: true })
   await writeFile(full, `${JSON.stringify(settings, null, 2)}\n`)
+}
+
+function isEmptyObject(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
 }
 
 function installOf(adapter: Adapter): AdapterInstall {
@@ -137,7 +141,10 @@ export async function uninstallHooks(root: string, adapter: Adapter): Promise<{ 
     if (current === null) continue
     const { settings, removed } = inFile(file, () => install.remove(current.value))
     if (removed.length === 0) continue
-    await writeSettings(root, file, settings)
+    // Nothing left but rulecast's own hooks: the file is ours too, and `{}` is not a settings file
+    // anyone wrote.
+    if (isEmptyObject(settings)) await rm(path.join(root, file))
+    else await writeSettings(root, file, settings)
     results.push({ file, removed })
   }
   return results

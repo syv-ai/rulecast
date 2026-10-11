@@ -77,7 +77,10 @@ export const COMMANDS: CommandHelp[] = [
     summary: "Run each rule's good/bad examples; --against says how much it would flag",
     flags: [
       ["RULE_ID", "Only this rule. Needed for llm rules, which cost money per example"],
-      ["--against PATH...", "With RULE_ID: fire the rule over real files and count what it finds"],
+      [
+        "--against PATH...",
+        "Fire the rule over real files and count what it finds; without RULE_ID, every rule, one line each",
+      ],
     ],
   },
   {

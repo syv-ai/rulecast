@@ -32,7 +32,6 @@ export function parseTestArgs(args: string[]): TestArgs {
   if (positionals.length > 1) throw new UsageError(`unexpected arguments: ${positionals.slice(1).join(" ")}`)
   const against = values.against ?? []
   const ruleId = positionals[0] ?? null
-  if (against.length > 0 && ruleId === null) throw new UsageError("--against needs a RULE_ID")
   return { ruleId, against }
 }
 
@@ -143,14 +142,7 @@ const AGAINST_TOP_FILES = 10
  * the rule *matches* under the given paths, not every file walked: a rule scoped to `routes/` must
  * not be diluted by the rest of the repository.
  */
-async function reportAgainst(
-  root: string,
-  rule: DetectorRule,
-  paths: string[],
-  detection: DetectionContext,
-  timeoutMs: number,
-  io: CliIo,
-): Promise<number> {
+function againstPrefixes(root: string, paths: string[], io: CliIo): (file: string) => boolean {
   const prefixes = paths.map((given) => {
     // The root is a directory to search, not a file in it, which toProjectPath rejects. "." from
     // the root is what DRAFT-RULES tells an agent to pass, and it was refused as outside.
@@ -159,15 +151,25 @@ async function reportAgainst(
     if (resolved === null) throw new UsageError(`${given} is outside the project`)
     return resolved
   })
-  const under = (file: string) =>
-    prefixes.some((prefix) => prefix === "" || file === prefix || file.startsWith(`${prefix}/`))
-  const files = (await allFiles(root)).filter((file) => under(file) && rule.matches(file))
+  return (file) => prefixes.some((prefix) => prefix === "" || file === prefix || file.startsWith(`${prefix}/`))
+}
 
-  if (files.length === 0) {
-    io.stdout(`\n  no files under ${paths.join(", ")} match ${rule.id}\n\n`)
-    return 0
-  }
+interface AgainstCount {
+  /** Files under the paths that the rule matches: the denominator. */
+  files: number
+  violations: number
+  byFile: Map<string, number>
+}
 
+async function countAgainst(
+  root: string,
+  rule: DetectorRule,
+  candidates: readonly string[],
+  detection: DetectionContext,
+  timeoutMs: number,
+): Promise<AgainstCount> {
+  const files = candidates.filter((file) => rule.matches(file))
+  if (files.length === 0) return { files: 0, violations: 0, byFile: new Map() }
   const output = await runDetection({
     detection,
     event: "verify",
@@ -178,21 +180,81 @@ async function reportAgainst(
   })
   const failure = output.errors[0]
   if (failure !== undefined) throw new Error(`${rule.detector.kind} detector failed: ${failure.message}`)
-
   const byFile = new Map<string, number>()
   for (const { match } of output.findings) byFile.set(match.file, (byFile.get(match.file) ?? 0) + 1)
+  return { files: files.length, violations: output.findings.length, byFile }
+}
+
+async function reportAgainst(
+  root: string,
+  rule: DetectorRule,
+  paths: string[],
+  detection: DetectionContext,
+  timeoutMs: number,
+  io: CliIo,
+): Promise<number> {
+  const under = againstPrefixes(root, paths, io)
+  const count = await countAgainst(root, rule, (await allFiles(root)).filter(under), detection, timeoutMs)
+  if (count.files === 0) {
+    io.stdout(`\n  no files under ${paths.join(", ")} match ${rule.id}\n\n`)
+    return 0
+  }
+  const { byFile, violations } = count
   const worst = [...byFile].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, AGAINST_TOP_FILES)
   const width = Math.max(...worst.map(([file]) => file.length), 0)
 
-  const violations = output.findings.length
-  const out = ["", `  ${plural(violations, "violation")} in ${byFile.size} of ${files.length} matching files`]
+  const out = ["", `  ${plural(violations, "violation")} in ${byFile.size} of ${count.files} matching files`]
   if (worst.length > 0) {
-    out.push("", ...worst.map(([file, count]) => `  ${file.padEnd(width + 2)}${count}`))
+    out.push("", ...worst.map(([file, n]) => `  ${file.padEnd(width + 2)}${n}`))
     if (byFile.size > worst.length) out.push(`  …and ${byFile.size - worst.length} more files`)
   }
-  const note = againstNote(violations, byFile.size, files.length)
+  const note = againstNote(violations, byFile.size, count.files)
   if (note.length > 0) out.push("", ...note)
   out.push("")
+  io.stdout(out.join("\n"))
+  return 0
+}
+
+/**
+ * `--against` with no rule: one line per rule, so drafting a whole config is one command rather than
+ * a shell loop over ids. Metered rules are named and not run, as in bare `rulecast test`.
+ */
+async function reportAgainstAll(
+  root: string,
+  rules: readonly DetectorRule[],
+  paths: string[],
+  detection: DetectionContext,
+  timeoutMs: number,
+  isMetered: (rule: DetectorRule) => boolean,
+  io: CliIo,
+): Promise<number> {
+  const under = againstPrefixes(root, paths, io)
+  const candidates = (await allFiles(root)).filter(under)
+  const rows: [string, string, string][] = [["rule", "violations", "files"]]
+  const notRun: string[] = []
+  for (const rule of rules) {
+    if (isMetered(rule)) {
+      notRun.push(rule.id)
+      continue
+    }
+    const count = await countAgainst(root, rule, candidates, detection, timeoutMs)
+    rows.push([
+      rule.id,
+      String(count.violations),
+      count.files === 0 ? "no files match" : `${count.byFile.size} of ${count.files}`,
+    ])
+  }
+  const idWidth = Math.max(...rows.map(([id]) => id.length))
+  const countWidth = Math.max(...rows.map(([, n]) => n.length))
+  const out = ["", ...rows.map(([id, n, files]) => `  ${id.padEnd(idWidth + 2)}${n.padStart(countWidth)}  ${files}`)]
+  if (notRun.length > 0)
+    out.push("", `  not run: ${notRun.join(", ")} (rulecast test <id> --against runs one; it costs money)`)
+  out.push(
+    "",
+    "  The counts are the stock, not how often an edit breaks a rule. rulecast test <id> --against",
+    "  shows one rule's worst files and what its count does and does not mean.",
+    "",
+  )
   io.stdout(out.join("\n"))
   return 0
 }
@@ -227,7 +289,12 @@ export async function testCommand(
   const detection = detectionFor(project, registry, stateDir, resolver)
   const timeoutMs = project.config.timeouts.verifyMs
 
-  if (against.length > 0) return await reportAgainst(root, rules[0]!, against, detection, timeoutMs, io)
+  if (against.length > 0 && ruleId !== null)
+    return await reportAgainst(root, rules[0]!, against, detection, timeoutMs, io)
+  if (against.length > 0) {
+    const isMetered = (rule: DetectorRule) => registry.get(rule.detector.kind)?.metered === true
+    return await reportAgainstAll(root, rules, against, detection, timeoutMs, isMetered, io)
+  }
 
   const lines: string[] = [""]
   const noExamples: string[] = []

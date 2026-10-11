@@ -43,7 +43,7 @@ describe("rulecast validate", () => {
     })
     expect(await validate(root)).toMatchObject({
       code: 2,
-      stdout: '.rulecast-config.yaml: .rulecast-config.yaml (broken): unknown detector "nope"\n',
+      stdout: '.rulecast-config.yaml (broken): unknown detector "nope"\n',
     })
   })
 
@@ -53,7 +53,7 @@ describe("rulecast validate", () => {
     await writeFile(path.join(root, ".rulecast-rules.yaml"), MANIFEST + BROKEN_RULE)
     expect(await validate(root)).toMatchObject({
       code: 2,
-      stdout: '.rulecast-rules.yaml: .rulecast-rules.yaml (demo/bad): unknown template variable "nope"\n',
+      stdout: '.rulecast-rules.yaml (demo/bad): unknown template variable "nope"\n',
     })
   })
 
@@ -108,7 +108,7 @@ describe("rulecast validate", () => {
     })
     expect(await validate(root, "scratch/bad.yaml")).toMatchObject({
       code: 2,
-      stdout: 'scratch/bad.yaml: bad.yaml (demo/bad): unknown template variable "nope"\n',
+      stdout: 'scratch/bad.yaml (demo/bad): unknown template variable "nope"\n',
     })
   })
 

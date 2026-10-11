@@ -13,7 +13,7 @@ The steps ask the developer to decide several things. If no developer is there t
 
 ## 1. Read
 
-1. Read the doc you were pointed at in full.
+1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer.
 2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
@@ -108,9 +108,10 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
 4. Run `rulecast validate` and fix every diagnostic for your rule.
 5. Run `rulecast test <id>`. Every example must pass.
    - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
+   - A `regex` pattern also matches inside comments and strings. If the only hits it finds in the code are prose — a comment that names `process.env` — that is a slip: use `ast-grep`, which matches code, not text.
    - A slip is not a revision: a typo, a missing escape, or `\s` crossing a line break (`rulecast test` shows what a failing example matched, and says when it crossed a line). Fix slips as often as you find them.
    - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
-6. Run `rulecast test <id> --against .`. The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. In a small repository the note is the same for every rule ("too few matching files"): report the counts and judge the rule by its doc. Neither the numbers nor the note decide it. The developer does.
+6. Run `rulecast test <id> --against .` (`rulecast test --against .` prints one line for every rule, for checking a whole config at once). The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. In a small repository the note is the same for every rule ("too few matching files"): report the counts and judge the rule by its doc. Neither the numbers nor the note decide it. The developer does.
 7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config. Unattended, keep every rule that passes step 5.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
