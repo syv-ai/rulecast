@@ -1,0 +1,235 @@
+---
+/**
+ * The docs, one tap away on pages without a sidebar. A panel slides in from the left, under the
+ * header, so the button that opened it stays put and closes it. It can be dragged shut.
+ */
+import { routeUrl } from "../../scripts/links"
+import { GROUPS, PAGES } from "../../scripts/sources"
+
+const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => page.group === label) }))
+---
+
+<button class="rc-menu-button" type="button" aria-expanded="false" aria-controls="rc-menu" aria-label="Menu">
+  <span aria-hidden="true"></span>
+  <span aria-hidden="true"></span>
+</button>
+
+<div class="rc-menu-root" data-rc-menu-root>
+  <div class="rc-menu-scrim" data-rc-menu-scrim></div>
+  <nav id="rc-menu" class="rc-menu" aria-label="Documentation" inert>
+    {
+      groups.map((group) => (
+        <section>
+          <h2>{group.label}</h2>
+          <ul>
+            {group.pages.map((page) => (
+              <li>
+                <a href={routeUrl(page.route)}>{page.title}</a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+    <a class="rc-menu-github" href="https://github.com/syv-ai/rulecast">GitHub</a>
+  </nav>
+</div>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>(".rc-menu-button")
+  const root = document.querySelector<HTMLElement>("[data-rc-menu-root]")
+  const panel = root?.querySelector<HTMLElement>(".rc-menu")
+  const scrim = root?.querySelector<HTMLElement>("[data-rc-menu-scrim]")
+
+  if (button && root && panel && scrim) {
+    // The header is a backdrop-filtered layer, which would contain a fixed panel: move it out.
+    document.body.append(root)
+
+    const setOpen = (open: boolean) => {
+      root.classList.toggle("rc-open", open)
+      button.setAttribute("aria-expanded", String(open))
+      panel.inert = !open
+      document.documentElement.classList.toggle("rc-menu-locked", open)
+      if (open) panel.querySelector<HTMLElement>("a")?.focus({ preventScroll: true })
+    }
+    const isOpen = () => root.classList.contains("rc-open")
+
+    button.addEventListener("click", () => setOpen(!isOpen()))
+    scrim.addEventListener("click", () => setOpen(false))
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && isOpen()) {
+        setOpen(false)
+        button.focus()
+      }
+    })
+
+    // Drag it shut: the panel follows the pointer 1:1 from where it was grabbed, and a flick or a
+    // drag past a third of its width closes it. Anything less springs back.
+    let start: { x: number; t: number } | null = null
+    let last = { x: 0, t: 0 }
+    panel.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse") return
+      start = { x: event.clientX, t: event.timeStamp }
+      last = start
+    })
+    panel.addEventListener("pointermove", (event) => {
+      if (!start) return
+      const dx = Math.min(0, event.clientX - start.x)
+      if (dx > -10 && !root.classList.contains("rc-dragging")) return
+      if (!root.classList.contains("rc-dragging")) {
+        root.classList.add("rc-dragging")
+        panel.setPointerCapture(event.pointerId)
+      }
+      panel.style.transform = `translateX(${dx}px)`
+      scrim.style.opacity = String(1 + dx / panel.offsetWidth)
+      last = { x: event.clientX, t: event.timeStamp }
+    })
+    const release = (event: PointerEvent) => {
+      if (!start) return
+      const dragging = root.classList.contains("rc-dragging")
+      const dx = event.clientX - start.x
+      const velocity = (event.clientX - last.x) / Math.max(1, event.timeStamp - last.t)
+      start = null
+      root.classList.remove("rc-dragging")
+      panel.style.transform = ""
+      scrim.style.opacity = ""
+      if (dragging && (dx < -panel.offsetWidth / 3 || velocity < -0.4)) setOpen(false)
+    }
+    panel.addEventListener("pointerup", release)
+    panel.addEventListener("pointercancel", release)
+  }
+</script>
+
+<style>
+  .rc-menu-button {
+    display: grid;
+    place-content: center;
+    gap: 5px;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-inline-start: -0.4rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.6rem;
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      transform 100ms ease-out;
+  }
+  .rc-menu-button:hover {
+    background: var(--sl-color-gray-6);
+  }
+  .rc-menu-button:active {
+    transform: scale(0.94);
+  }
+  .rc-menu-button span {
+    display: block;
+    width: 1.05rem;
+    height: 1.5px;
+    border-radius: 1px;
+    background: var(--sl-color-white);
+    transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .rc-menu-button[aria-expanded="true"] span:first-child {
+    transform: translateY(3.25px) rotate(45deg);
+  }
+  .rc-menu-button[aria-expanded="true"] span:last-child {
+    transform: translateY(-3.25px) rotate(-45deg);
+  }
+
+  .rc-menu-root {
+    position: fixed;
+    inset: var(--sl-nav-height) 0 0 0;
+    z-index: var(--sl-z-index-menu);
+    pointer-events: none;
+  }
+  .rc-menu-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 0.55);
+    opacity: 0;
+    transition: opacity 320ms ease-out;
+  }
+  .rc-menu {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(20rem, 86vw);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.5rem 1.25rem 2rem;
+    background: var(--sl-color-gray-6);
+    transform: translateX(-100%);
+    transition: transform 380ms cubic-bezier(0.32, 0.72, 0, 1);
+    touch-action: pan-y;
+  }
+  .rc-open {
+    pointer-events: auto;
+  }
+  .rc-open .rc-menu-scrim {
+    opacity: 1;
+  }
+  .rc-open .rc-menu {
+    transform: translateX(0);
+  }
+  /* While dragged, the panel follows the finger with no easing in between. */
+  .rc-dragging .rc-menu,
+  .rc-dragging .rc-menu-scrim {
+    transition: none;
+  }
+
+  .rc-menu section + section {
+    margin-top: 1.5rem;
+  }
+  .rc-menu h2 {
+    margin: 0 0 0.35rem 0.6rem;
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--sl-color-gray-3);
+  }
+  .rc-menu ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .rc-menu a {
+    display: block;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-1);
+    text-decoration: none;
+    transition: background-color 120ms ease-out;
+  }
+  .rc-menu a:hover,
+  .rc-menu a:focus-visible {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+  }
+  .rc-menu a:active {
+    background: var(--sl-color-gray-5);
+  }
+  .rc-menu a.rc-menu-github {
+    margin-top: 1.5rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  :global(.rc-menu-locked) {
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rc-menu {
+      transform: none;
+      opacity: 0;
+      transition: opacity 200ms ease;
+    }
+    .rc-open .rc-menu {
+      opacity: 1;
+    }
+    .rc-menu-button span {
+      transition: none;
+    }
+  }
+</style>

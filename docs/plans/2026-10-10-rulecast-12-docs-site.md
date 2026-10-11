@@ -16,6 +16,7 @@
 - The README links the site in a line under its title; `readmeSections()` drops any paragraph that contains the site URL, so the site never links itself.
 - The two agents/ pages open with a note that they are written for agents, linking the raw file at the released tag (`PAGES[].intro`).
 - Redesigned the same day for simplicity: the landing page is one component (`Landing.astro`) with a statement headline, a copy-to-clipboard install command and three sections; the rule anatomy lights only the message and the doc section in both panes (no numbered callouts), its HTML built in `scripts/anatomy.ts`; the hook flow is a plain two-column list; the header is translucent, and Starlight's layered styles are overridden without `!important`.
+- Restyled on 2026-10-11: blue accent on a near-black background; no borders or dividers anywhere (a universal `border-color: transparent`, which beats Starlight's layered styles), surfaces told apart by colour; the logo on a black tile with a blue arrow, one file for both themes; YAML and output highlighting in the rule anatomy (`highlightYaml` in `scripts/anatomy.ts`); a header override (`Header.astro`) that adds a sliding docs menu (`SiteMenu.astro`) on pages without a sidebar.
 - `BASE`, `SITE` and `SITE_URL` live in `sources.ts` (not `links.ts`), since the README filter needs them and `links.ts` imports `sources.ts`.
 
 Prerequisite: plan 11 is done (0.5.0 released).

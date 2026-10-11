@@ -47,21 +47,55 @@ const { ruleHtml, outputHtml } = anatomy()
   .rc-anatomy pre {
     flex: 1;
     margin: 0;
-    padding: 1.1rem 1.25rem;
-    border: 0;
+    padding: 1.1rem 0;
     border-radius: 0.875rem;
     background: var(--sl-color-gray-6);
-    color: var(--sl-color-gray-4);
+    color: var(--sl-color-gray-2);
     font-family: var(--__sl-font-mono);
     font-size: 0.78rem;
     line-height: 1.65;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  /* Each line is a block, so the band runs edge to edge. */
+  .rc-a-line {
+    display: block;
+    min-height: 1.65em;
+    padding: 0 1.25rem;
+  }
   .rc-a-lit {
+    background: var(--rc-band);
     color: var(--sl-color-white);
   }
   .rc-a-value {
     color: var(--sl-color-accent);
+    font-weight: 600;
+  }
+  .rc-y-key {
+    color: var(--rc-syn-key);
+  }
+  .rc-y-str {
+    color: var(--rc-syn-string);
+  }
+  .rc-y-var {
+    color: var(--rc-syn-var);
+  }
+  .rc-y-lit {
+    color: var(--rc-syn-var);
+  }
+  .rc-y-punct {
+    color: var(--rc-syn-punct);
+  }
+  .rc-y-error {
+    color: var(--rc-error);
+    font-weight: 600;
+  }
+  .rc-y-warning {
+    color: var(--rc-warning);
+    font-weight: 600;
+  }
+  .rc-y-heading {
+    color: var(--sl-color-white);
+    font-weight: 600;
   }
 </style>

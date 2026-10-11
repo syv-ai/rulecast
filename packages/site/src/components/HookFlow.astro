@@ -50,15 +50,23 @@ const steps: Step[] = [
 
 <style>
   .rc-flow {
+    display: grid;
+    gap: 0.25rem;
     margin: 0;
-    border-top: 1px solid var(--sl-color-hairline);
+    padding: 0.75rem;
+    border-radius: 1rem;
+    background: var(--sl-color-gray-6);
   }
   .rc-flow-row {
     display: grid;
     grid-template-columns: minmax(10rem, 15rem) 1fr;
     gap: 0.35rem 2rem;
-    padding: 1.15rem 0;
-    border-bottom: 1px solid var(--sl-color-hairline);
+    padding: 0.9rem 1rem;
+    border-radius: 0.6rem;
+    transition: background-color 150ms ease-out;
+  }
+  .rc-flow-row:hover {
+    background: var(--sl-color-gray-5);
   }
   .rc-flow dt {
     display: grid;
@@ -70,7 +78,7 @@ const steps: Step[] = [
     font-family: var(--__sl-font-mono);
     font-size: var(--sl-text-xs);
     font-weight: 400;
-    color: var(--sl-color-gray-3);
+    color: var(--sl-color-accent);
     background: none;
     padding: 0;
   }
@@ -80,6 +88,9 @@ const steps: Step[] = [
     line-height: 1.6;
   }
   @media (max-width: 40rem) {
+    .rc-flow {
+      padding: 0.4rem;
+    }
     .rc-flow-row {
       grid-template-columns: 1fr;
     }
