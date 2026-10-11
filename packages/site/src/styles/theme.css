@@ -144,3 +144,10 @@ h1#_top {
 .social-icons a:hover {
   color: var(--sl-color-white);
 }
+
+/* In-page links glide, unless motion is unwelcome. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

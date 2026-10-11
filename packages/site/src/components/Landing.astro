@@ -5,7 +5,7 @@
  * prompt that has an agent set it up, which is the README's own (read at build time).
  */
 import { routeUrl } from "../../scripts/links"
-import { agentPrompt, version } from "../../scripts/sources"
+import { agentPrompt } from "../../scripts/sources"
 import ConventionFlow from "./ConventionFlow.astro"
 import HookFlow from "./HookFlow.astro"
 import RuleAnatomy from "./RuleAnatomy.astro"
@@ -30,9 +30,9 @@ const next = [
         <code>{install}</code>
         <span class="rc-copy-state" aria-live="polite">Copy</span>
       </button>
+      <a class="rc-link" href="#agent-setup">Copy setup prompt <span aria-hidden="true">↓</span></a>
       <a class="rc-link" href={routeUrl("getting-started")}>Read the guide <span aria-hidden="true">→</span></a>
     </div>
-    <p class="rc-hero-meta">v{version()} · Claude Code · Node ≥ 20.12 · macOS and Linux · MIT</p>
   </header>
 
   <section class="rc-why">
@@ -228,12 +228,6 @@ const next = [
     text-decoration: underline;
     text-underline-offset: 0.2em;
   }
-  .rc-hero-meta {
-    margin-top: 1.75rem;
-    font-size: var(--sl-text-xs);
-    color: var(--sl-color-gray-3);
-    letter-spacing: 0.01em;
-  }
 
   .rc-landing h2 {
     margin: 0;
@@ -265,6 +259,11 @@ const next = [
   }
   .rc-why {
     margin-top: clamp(4rem, 10vw, 6rem);
+  }
+
+  /* Landing under the fixed header, not behind it. */
+  #agent-setup {
+    scroll-margin-top: calc(var(--sl-nav-height) + 2rem);
   }
 
   .rc-prompt {
