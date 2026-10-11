@@ -88,15 +88,17 @@ const options = [
     color: var(--sl-color-gray-3);
     cursor: pointer;
     transition:
-      background-color 150ms ease-out,
-      color 150ms ease-out,
-      transform 100ms ease-out;
+      background-color 150ms ease,
+      color 150ms ease,
+      transform 160ms var(--rc-ease-out);
   }
-  .rc-theme button:hover {
-    color: var(--sl-color-white);
+  @media (hover: hover) and (pointer: fine) {
+    .rc-theme button:hover {
+      color: var(--sl-color-white);
+    }
   }
   .rc-theme button:active {
-    transform: scale(0.92);
+    transform: scale(0.94);
   }
   .rc-theme button[aria-checked="true"] {
     background: var(--sl-color-gray-5);

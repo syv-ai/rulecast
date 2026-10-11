@@ -48,6 +48,13 @@
   --sl-color-black: #ffffff;
 }
 
+/* Motion: one ease-out for everything that answers the user, one curve for the drawer, one press. */
+:root {
+  --rc-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --rc-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --rc-press: 0.97;
+}
+
 /* No borders or dividers anywhere. Starlight's own styles sit in cascade layers, so this wins. */
 *,
 ::before,
@@ -123,8 +130,10 @@ h1#_top {
 .pagination-links a {
   background-color: var(--sl-color-gray-6);
 }
-.pagination-links a:hover {
-  background-color: var(--sl-color-gray-5);
+@media (hover: hover) and (pointer: fine) {
+  .pagination-links a:hover {
+    background-color: var(--sl-color-gray-5);
+  }
 }
 
 /* Search is a field: without a border it needs a surface. On a phone it is only an icon. */

@@ -1,14 +1,13 @@
 ---
 /**
  * The landing page. The name and one command; what rulecast is, in plain words; a convention
- * becoming a rule becoming what the agent hears; what a rule is made of; where it runs; and the
+ * becoming a rule becoming what the agent hears; where it runs; and the
  * prompt that has an agent set it up, which is the README's own (read at build time).
  */
 import { routeUrl } from "../../scripts/links"
 import { agentPrompt } from "../../scripts/sources"
 import ConventionFlow from "./ConventionFlow.astro"
 import HookFlow from "./HookFlow.astro"
-import RuleAnatomy from "./RuleAnatomy.astro"
 
 const install = "npx @syv-ai/rulecast init"
 const prompt = agentPrompt()
@@ -52,15 +51,6 @@ const next = [
 
   <section>
     <ConventionFlow />
-  </section>
-
-  <section>
-    <h2>A check, a message, a doc section.</h2>
-    <p class="rc-lede">
-      The agent reads the message, with the paragraph of your documentation that explains it, so it never has to go
-      looking.
-    </p>
-    <RuleAnatomy />
   </section>
 
   <section>
@@ -154,12 +144,6 @@ const next = [
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
   }
-  .rc-hero-tagline :global(code) {
-    font-size: 0.88em;
-    background: none;
-    padding: 0;
-    color: var(--sl-color-gray-1);
-  }
   .rc-hero-actions {
     display: flex;
     flex-wrap: wrap;
@@ -180,14 +164,11 @@ const next = [
     font: inherit;
     cursor: pointer;
     transition:
-      transform 100ms ease-out,
-      background-color 150ms ease-out;
-  }
-  .rc-install:hover {
-    background: var(--sl-color-gray-5);
+      transform 160ms var(--rc-ease-out),
+      background-color 150ms ease;
   }
   .rc-install:active {
-    transform: scale(0.97);
+    transform: scale(var(--rc-press));
   }
   .rc-install code {
     white-space: nowrap;
@@ -208,25 +189,20 @@ const next = [
     font-size: var(--sl-text-xs);
     color: var(--sl-color-gray-2);
     background: var(--sl-color-gray-5);
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
   }
-  .rc-install:hover .rc-copy-state {
-    background: var(--sl-color-gray-4);
-  }
-  .rc-prompt-copy:hover .rc-copy-state {
-    background: var(--sl-color-gray-4);
-    color: var(--sl-color-white);
-  }
+  /* Copied: the pill answers in the accent, so the change reads before the word does. */
   .rc-copied .rc-copy-state {
-    color: var(--sl-color-accent);
+    color: var(--sl-color-accent-high);
+    background: var(--sl-color-accent-low);
   }
   .rc-link {
     color: var(--sl-color-accent);
     text-decoration: none;
-    font-weight: 550;
-  }
-  .rc-link:hover {
-    text-decoration: underline;
     text-underline-offset: 0.2em;
+    font-weight: 550;
   }
 
   .rc-landing h2 {
@@ -242,11 +218,6 @@ const next = [
     line-height: 1.6;
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
-  }
-  .rc-note {
-    margin-top: 1rem;
-    font-size: var(--sl-text-sm);
-    color: var(--sl-color-gray-3);
   }
 
   .rc-why p {
@@ -292,9 +263,10 @@ const next = [
     background: none;
     cursor: pointer;
     font: inherit;
+    transition: transform 160ms var(--rc-ease-out);
   }
   .rc-prompt-copy:active {
-    transform: scale(0.96);
+    transform: scale(var(--rc-press));
   }
 
   .rc-next {
@@ -312,14 +284,11 @@ const next = [
     background: var(--sl-color-gray-6);
     text-decoration: none;
     transition:
-      background-color 150ms ease-out,
-      transform 100ms ease-out;
-  }
-  .rc-next a:hover {
-    background: var(--sl-color-gray-5);
+      background-color 150ms ease,
+      transform 160ms var(--rc-ease-out);
   }
   .rc-next a:active {
-    transform: scale(0.98);
+    transform: scale(var(--rc-press));
   }
   .rc-next strong {
     color: var(--sl-color-white);
@@ -328,6 +297,22 @@ const next = [
   .rc-next span {
     color: var(--sl-color-gray-3);
     font-size: var(--sl-text-sm);
+  }
+
+  /* Hover only where there is a hovering pointer: on touch, a tap would leave it stuck on. */
+  @media (hover: hover) and (pointer: fine) {
+    .rc-install:hover,
+    .rc-next a:hover {
+      background: var(--sl-color-gray-5);
+    }
+    .rc-install:hover .rc-copy-state,
+    .rc-prompt-copy:hover .rc-copy-state {
+      background: var(--sl-color-gray-4);
+      color: var(--sl-color-white);
+    }
+    .rc-link:hover {
+      text-decoration: underline;
+    }
   }
 
   @media (max-width: 30rem) {
@@ -340,12 +325,4 @@ const next = [
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .rc-install {
-      transition: none;
-    }
-    .rc-install:active {
-      transform: none;
-    }
-  }
 </style>

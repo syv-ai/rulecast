@@ -118,11 +118,8 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     background: transparent;
     cursor: pointer;
     transition:
-      background-color 150ms ease-out,
-      transform 100ms ease-out;
-  }
-  .rc-menu-button:hover {
-    background: var(--sl-color-gray-6);
+      background-color 150ms ease,
+      transform 160ms var(--rc-ease-out);
   }
   .rc-menu-button:active {
     transform: scale(0.94);
@@ -133,7 +130,7 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     height: 1.5px;
     border-radius: 1px;
     background: var(--sl-color-white);
-    transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 240ms var(--rc-ease-out);
   }
   .rc-menu-button[aria-expanded="true"] span:first-child {
     transform: translateY(3.25px) rotate(45deg);
@@ -153,7 +150,8 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     inset: 0;
     background: rgb(0 0 0 / 0.55);
     opacity: 0;
-    transition: opacity 320ms ease-out;
+    /* Out faster than in: closing is the system answering, opening is the user looking. */
+    transition: opacity 200ms ease;
   }
   .rc-menu {
     position: absolute;
@@ -164,7 +162,7 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     padding: 1.5rem 1.25rem 2rem;
     background: var(--sl-color-gray-6);
     transform: translateX(-100%);
-    transition: transform 380ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 220ms var(--rc-ease-out);
     touch-action: pan-y;
   }
   .rc-open {
@@ -172,9 +170,41 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
   }
   .rc-open .rc-menu-scrim {
     opacity: 1;
+    transition-duration: 320ms;
   }
   .rc-open .rc-menu {
     transform: translateX(0);
+    transition: transform 380ms var(--rc-ease-drawer);
+  }
+  /* The groups follow the panel in, a beat apart; on the way out they simply go with it. */
+  .rc-menu > * {
+    opacity: 0;
+    transform: translateX(-0.5rem);
+    transition:
+      opacity 120ms ease,
+      transform 120ms ease;
+  }
+  .rc-open .rc-menu > * {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 260ms ease,
+      transform 320ms var(--rc-ease-out);
+  }
+  .rc-open .rc-menu > :nth-child(1) {
+    transition-delay: 60ms;
+  }
+  .rc-open .rc-menu > :nth-child(2) {
+    transition-delay: 100ms;
+  }
+  .rc-open .rc-menu > :nth-child(3) {
+    transition-delay: 140ms;
+  }
+  .rc-open .rc-menu > :nth-child(4) {
+    transition-delay: 180ms;
+  }
+  .rc-open .rc-menu > :nth-child(n + 5) {
+    transition-delay: 220ms;
   }
   /* While dragged, the panel follows the finger with no easing in between. */
   .rc-dragging .rc-menu,
@@ -204,15 +234,21 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     border-radius: 0.5rem;
     color: var(--sl-color-gray-1);
     text-decoration: none;
-    transition: background-color 120ms ease-out;
+    transition: background-color 120ms ease;
   }
-  .rc-menu a:hover,
-  .rc-menu a:focus-visible {
+  .rc-menu a:focus-visible,
+  .rc-menu a:active {
     background: var(--sl-color-gray-5);
     color: var(--sl-color-white);
   }
-  .rc-menu a:active {
-    background: var(--sl-color-gray-5);
+  @media (hover: hover) and (pointer: fine) {
+    .rc-menu-button:hover {
+      background: var(--sl-color-gray-6);
+    }
+    .rc-menu a:hover {
+      background: var(--sl-color-gray-5);
+      color: var(--sl-color-white);
+    }
   }
   .rc-menu-foot {
     display: flex;
@@ -239,6 +275,11 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     }
     .rc-menu-button span {
       transition: none;
+    }
+    .rc-menu > *,
+    .rc-open .rc-menu > * {
+      transform: none;
+      transition-delay: 0ms;
     }
   }
 </style>
