@@ -25,9 +25,18 @@ edit history.
   the new doc.
 - The open questions — where the conventions live, what they bind, what to do with the defects the
   rules found, whether to release — were first taken as defaults and then put to the developer,
-  who asked why they had not been asked. The rules were reviewed with the developer, with counts,
-  before the first commit. The process lesson is the session's, not rulecast's, but it is the reason
-  the scope below is "all code".
+  who asked why they had not been asked. Four rule-tuning questions were asked before the first
+  commit; no convention was put to the developer. None of the 80 was the developer's choice. That
+  is the reason the scope below is "all code".
+- The lesson is rulecast's as well as the session's. Its docs let it happen:
+
+  | Where | What it said | What it licensed |
+  |---|---|---|
+  | `DRAFT-RULES.md` line 12 | "If no developer is there to answer (you were told to work unattended, or nobody replies), don't wait: take the default" | The agent called itself unattended without asking anything |
+  | `DRAFT-RULES.md` step 7 | "Unattended, keep every rule that passes step 5" | Enforcing every rule nobody agreed to |
+  | `DRAFT-RULES.md`, `SETUP.md`, `init` | All assume a doc that already states the conventions | With none, the agent wrote its own, from the code |
+
+  Plan 14 removes the unattended mode and makes the developer the source of the conventions.
 
 ## What the user path did
 

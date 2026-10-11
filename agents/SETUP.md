@@ -10,16 +10,17 @@ Relative links in this file resolve against this file's own URL.
 2. Run `init` with `--agent` set to your own adapter name, `claude-code` if you are Claude Code:
 
    ```sh
-   npx @syv-ai/rulecast init --yes --agent claude-code
+   npx @syv-ai/rulecast init --agent claude-code
    ```
 
-   `--agent` installs your hooks and only yours; without it, `--yes` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet. `init` detects the project, selects the catalog rules that apply to its files, writes `.rulecast-config.yaml`, installs your hooks in your shared settings file, validates the result, and prints every file it created or changed, followed by a drafting prompt.
-3. If it fails with `unknown agent`, rulecast has no adapter for you yet (the message lists the ones it has). Run `npx @syv-ai/rulecast init --yes` without `--agent`, and tell the developer that rulecast cannot deliver rules to you yet. If it exits non-zero for any other reason, show the developer its output and stop.
-4. Show the developer `.rulecast-config.yaml` and the other files `init` listed. Name the selected rules and say that any of them can be removed from the config.
-5. Ask whether to draft rules for the project's own conventions. If yes, follow [DRAFT-RULES.md](DRAFT-RULES.md), using the doc named in the drafting prompt `init` printed.
+   `init` detects the project, selects the catalog rules that apply to its files, and prints a review: every file it would create or change. Without a terminal it writes nothing and exits 2. `--agent` installs your hooks and only yours; without it, `init` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet.
+3. If it fails with `unknown agent`, rulecast has no adapter for you yet (the message lists the ones it has). Run it again without `--agent`, and tell the developer that rulecast cannot deliver rules to you yet. If it fails for any other reason than exit 2 with a review, show the developer its output and stop.
+4. Show the developer the review. Name the selected rules and say that any of them can be removed from the config afterwards. Ask whether to write it, and wait for the answer. If yes, run the same command with `--yes`: it writes the files, validates them, and prints a drafting prompt. If it exits non-zero, show the developer its output and stop.
+5. Ask whether to draft rules for the project's own conventions, and wait for the answer. If yes, follow [DRAFT-RULES.md](DRAFT-RULES.md), using the doc named in the drafting prompt `init` printed.
 
 ## Never
 
 - Never add a `rulecast-ignore` comment or set `enabled: false` on a rule without the developer's agreement. Ignores added during a session are reported to the developer when you stop.
 - Never edit agent hook settings (such as `.claude/settings.json`) by hand: `rulecast install` and `rulecast uninstall` manage them.
+- Never set rulecast up without the developer. If you were told to work without them, stop before step 2 and say why: rulecast enforces conventions the developer chose.
 - Never commit. The developer reviews and commits the changes.
