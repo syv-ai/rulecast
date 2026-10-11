@@ -41,6 +41,17 @@ describe("git helpers", () => {
     expect(await changedFilesSince(root, base!)).toEqual(["a.ts", "b.ts", "new.ts"])
   })
 
+  test("changedFilesSince lists a non-ASCII path as written, not as git quotes it", async () => {
+    const root = await createRepo({ "a.ts": "a\n" })
+    const base = await headCommit(root)
+    await writeFile(path.join(root, "a.ts"), "a2\n")
+    await writeFile(path.join(root, "café.ts"), "new\n")
+    await git(root, "add", "café.ts")
+    await git(root, "commit", "-q", "-m", "add café")
+    await writeFile(path.join(root, "naïve.ts"), "untracked\n")
+    expect(await changedFilesSince(root, base!)).toEqual(["a.ts", "café.ts", "naïve.ts"])
+  })
+
   test("mergeBase with an unknown ref throws", async () => {
     const root = await createRepo({ "a.ts": "a\n" })
     await expect(mergeBase(root, "does-not-exist")).rejects.toThrow('"does-not-exist" is not a commit here')

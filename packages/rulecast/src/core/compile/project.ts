@@ -162,7 +162,10 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     const byId = new Map<string, unknown[]>()
     for (const raw of manifest.value) {
       const id = idOf(raw)
-      if (id !== null) byId.set(id, [...(byId.get(id) ?? []), raw])
+      if (id === null) continue
+      const group = byId.get(id)
+      if (group) group.push(raw)
+      else byId.set(id, [raw])
     }
     const repoRoot: ReferenceRoot = { dir: checkout.dir, label: checkout.label }
     for (const raw of entry.rules) {

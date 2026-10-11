@@ -67,9 +67,10 @@ const byDepth = (a: string, b: string) => segments(a).length - segments(b).lengt
 function usesReact(text: string | null): boolean {
   if (text === null) return false
   try {
-    const manifest = JSON.parse(text) as Record<string, unknown>
+    const manifest: unknown = JSON.parse(text)
+    if (typeof manifest !== "object" || manifest === null) return false
     return ["dependencies", "devDependencies", "peerDependencies"].some((key) => {
-      const dependencies = manifest[key]
+      const dependencies = (manifest as Record<string, unknown>)[key]
       return typeof dependencies === "object" && dependencies !== null && "react" in dependencies
     })
   } catch {

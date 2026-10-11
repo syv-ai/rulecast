@@ -144,7 +144,10 @@ export const claudeCodeAdapter: Adapter = {
           return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
         }
         return notices === "" ? NONE : json({ systemMessage: notices })
-      default:
+      // Nothing to say before a prompt, a session or a command: these events only record state.
+      case "prompt":
+      case "start":
+      case "shell-before":
         return NONE
     }
   },

@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -13,7 +12,7 @@ import { type Config, defaultConfig } from "../core/config/schema"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
-import { allFiles } from "../core/git"
+import { allFiles, git } from "../core/git"
 import { cacheHome } from "../core/home"
 import { ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
@@ -106,18 +105,12 @@ function parseFlags(args: string[]): Flags {
 }
 
 /** The configured project, else the enclosing git repository, else the current directory. */
-function projectRoot(cwd: string): string {
+async function projectRoot(cwd: string): Promise<string> {
   const found = findRoot(cwd)
   if (hasProject(found)) return found
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim()
-  } catch {
-    return cwd
-  }
+  // Through core/git.ts: a GIT_DIR inherited from a git hook would otherwise name another repository.
+  const top = await git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => null)
+  return top?.ok ? top.stdout.trim() : cwd
 }
 
 async function readConfig(root: string): Promise<{ text: string | null; config: Config | null }> {
@@ -403,7 +396,7 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
 /** rulecast init (spec §12): detect, choose, review, write, validate, hand over the drafting prompt. */
 export async function initCommand(args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const flags = parseFlags(args)
-  const root = projectRoot(io.cwd)
+  const root = await projectRoot(io.cwd)
   const prompter = io.interactive && !flags.yes ? await io.prompter() : null
   const ui: Ui = {
     prompter,

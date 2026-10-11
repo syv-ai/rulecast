@@ -25,14 +25,17 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     io.stderr(`rulecast: could not read hook input: ${errorMessage(error)}\n`)
     return 0
   }
-  const parsed = adapter.parse(input)
-  if (!parsed || (!parsed.event && !parsed.warmup)) return 0
-  const root = findRoot(parsed.cwd)
-  if (!hasProject(root)) return 0
-  const home = cacheHome(io.env)
-  const stateDir = ensureProjectState(home, root)
-  const log = debugLogger(stateDir)
+  // Everything from here can throw — an unwritable cache home, a root that vanished — and the hook
+  // still exits 0. Until the state directory exists there is no debug log to write to.
+  let log: ((line: string) => void) | undefined
   try {
+    const parsed = adapter.parse(input)
+    if (!parsed || (!parsed.event && !parsed.warmup)) return 0
+    const root = findRoot(parsed.cwd)
+    if (!hasProject(root)) return 0
+    const home = cacheHome(io.env)
+    const stateDir = ensureProjectState(home, root)
+    log = debugLogger(stateDir)
     // Hooks never fetch: a pinned repo missing from the cache disables its rules with a warning (spec §4).
     const compileProject = () => compile({ root, registry, repos: cachedRepos(home) })
     if (parsed.warmup) {
@@ -53,7 +56,7 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       })
     }
   } catch (error) {
-    log(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+    log?.(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
   }
   return 0

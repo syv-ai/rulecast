@@ -68,7 +68,9 @@ export const commandDetector: Detector<CommandConfig> = {
     const byCommand = new Map<string, string[]>()
     for (const rule of input.rules) {
       const command = rule.config.run[0]!
-      byCommand.set(command, [...(byCommand.get(command) ?? []), rule.id])
+      const group = byCommand.get(command)
+      if (group) group.push(rule.id)
+      else byCommand.set(command, [rule.id])
     }
     return Promise.all(
       [...byCommand].map(async ([command, rules]): Promise<CheckResult> => {

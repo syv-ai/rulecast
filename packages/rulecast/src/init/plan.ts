@@ -1,4 +1,5 @@
 import { CONFIG_FILE } from "../core/config/load"
+import { errorMessage } from "../core/errors"
 import { repoLabel } from "../core/repos/layout"
 import type { Adapter, InstallScope } from "../core/types"
 import { addCatalogRules, type CatalogRef, newConfigText, type RuleSelection } from "./config-text"
@@ -46,7 +47,7 @@ function parseSettings(text: string, file: string): unknown {
   try {
     return JSON.parse(text)
   } catch (error) {
-    throw new PlanError(`${file}: ${error instanceof Error ? error.message : String(error)}`)
+    throw new PlanError(`${file}: ${errorMessage(error)}`)
   }
 }
 
@@ -77,7 +78,7 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
     try {
       return install.merge(settings, command, context.verifyMs)
     } catch (error) {
-      throw new PlanError(`${file}: ${error instanceof Error ? error.message : String(error)}`)
+      throw new PlanError(`${file}: ${errorMessage(error)}`)
     }
   }
   // Hooks already in any of the agent's settings files count as installed, as for rulecast install;

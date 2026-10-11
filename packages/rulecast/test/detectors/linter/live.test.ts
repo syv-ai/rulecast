@@ -117,6 +117,8 @@ describe.runIf(process.env.RULECAST_LINTERS === "1")("live linters", () => {
       const onStdin = async (file: string) => {
         const args = [...resolved.prefix, ...TOOLS[keyed.tool].stdinArgs!(file)]
         const child = exec(resolved.command, args, { cwd: root })
+        // A tool that exits without reading stdin raises EPIPE on it, unhandled unless listened for.
+        child.child.stdin?.on("error", () => {})
         child.child.stdin?.end(keyed.files[file])
         const { stdout } = await child.catch((error: { stdout?: string }) => error as { stdout: string })
         return TOOLS[keyed.tool].parse(stdout, root).map((finding) => finding.ruleId)

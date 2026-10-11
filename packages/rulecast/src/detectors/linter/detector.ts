@@ -68,7 +68,9 @@ export const linterDetector: Detector<LinterConfig> = {
     const result: DetectorResult = { findings: [], errors: [] }
     const byTool = new Map<ToolName, DetectorRuleInput<LinterConfig>[]>()
     for (const rule of input.rules) {
-      byTool.set(rule.config.tool, [...(byTool.get(rule.config.tool) ?? []), rule])
+      const group = byTool.get(rule.config.tool)
+      if (group) group.push(rule)
+      else byTool.set(rule.config.tool, [rule])
     }
     const onDisk = input.fromDisk !== false
     const read = onDisk ? sourceReader(input.cwd) : input.read
@@ -113,7 +115,9 @@ export const linterDetector: Detector<LinterConfig> = {
     // One result per tool, in first-use order: every rule naming a tool shares its fate.
     const byTool = new Map<ToolName, string[]>()
     for (const rule of input.rules) {
-      byTool.set(rule.config.tool, [...(byTool.get(rule.config.tool) ?? []), rule.id])
+      const group = byTool.get(rule.config.tool)
+      if (group) group.push(rule.id)
+      else byTool.set(rule.config.tool, [rule.id])
     }
     return Promise.all(
       [...byTool].map(async ([tool, rules]): Promise<CheckResult> => {

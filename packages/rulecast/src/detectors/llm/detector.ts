@@ -231,7 +231,9 @@ export const llmDetector: Detector<LlmConfig> = {
     // One result per distinct model, in first-use order: every rule naming it shares its fate.
     const byModel = new Map<string, string[]>()
     for (const rule of input.rules) {
-      byModel.set(rule.config.model, [...(byModel.get(rule.config.model) ?? []), rule.id])
+      const group = byModel.get(rule.config.model)
+      if (group) group.push(rule.id)
+      else byModel.set(rule.config.model, [rule.id])
     }
     for (const [model, rules] of byModel) {
       const resolved = resolveModel(model, settings.provider)

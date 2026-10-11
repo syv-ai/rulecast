@@ -54,7 +54,9 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
     const result: DetectorResult = { findings: [], errors: [] }
     const byLanguage = new Map<Language, DetectorRuleInput<AstGrepConfig>[]>()
     for (const rule of input.rules) {
-      byLanguage.set(rule.config.language, [...(byLanguage.get(rule.config.language) ?? []), rule])
+      const group = byLanguage.get(rule.config.language)
+      if (group) group.push(rule)
+      else byLanguage.set(rule.config.language, [rule])
     }
 
     await Promise.all(

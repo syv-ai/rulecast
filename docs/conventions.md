@@ -25,8 +25,6 @@ a pattern rule; the rest are delivered by a touch rule on the area they bind.
 [tests](#tests-never-reach-the-network) ·
 [catalog, docs and release](#catalog-rule-ids-carry-no-package-prefix)
 
----
-
 ## Only cli.ts touches the process
 
 `src/cli.ts` is the composition root and the only file in `src/` that touches `process`: it builds a
@@ -73,9 +71,8 @@ cannot see (spec §14). It went wrong five ways: a corrupt store crashed the hoo
 `node_modules/.bin/rulecast` exited 127 on every event (`21e56db`), `install` rewrote the guarded
 command back to the bare one (`8686ce2`), `doctor` said "ok" for hooks that could not run
 (`84754b1`), and an oversized proposal blocked the agent (`8578864`).
-
-**Backlog:** in `commands/hook.ts`, `adapter.parse`, `findRoot`, `ensureProjectState` and
-`debugLogger` run before the `try`. An unwritable cache directory makes the hook exit 2.
+Until 2026-10-11 the hook parsed the payload and created its state directory before the `try`, so an
+unwritable cache home made it exit 2.
 
 ## Prefix stderr with the tool name
 
@@ -141,8 +138,6 @@ Every hook is a fresh process with a p95 budget of 500 ms (spec §13); a native 
 top of the graph is paid on every event that never parses anything. `bun --compile` bundles only
 literal dynamic imports (spec §16, plan 5a Decisions 1 and 3), so a computed one works under node and
 fails in the standalone binary.
-
----
 
 ## Guarding detectors read only through read
 
@@ -213,8 +208,6 @@ Classification is the core's (spec §8, plan 8a Decision 6), and it is pinned by
 `test/goldens/classification/`. A detector that pre-filters makes the baseline lie: the finding that
 was dropped is the one `container` scope needed to see.
 
----
-
 ## Spawn with an argument array, never a shell
 
 Child processes are started with `execFile` or `spawn` and an argument array. Never `exec`,
@@ -235,8 +228,6 @@ fixtures to the branch being pushed and tagged this repository `v1.0.0` (`b98d0c
 list of variables was then copied in two places, and removing one entry left the suite green
 (`fd498c7`).
 
-**Backlog:** `commands/init.ts` calls `execFileSync("git", ["rev-parse", "--show-toplevel"])`.
-
 ## List git paths NUL-separated
 
 Every `git diff --name-only`, `ls-files` or `status` that lists paths passes `-z` and splits with
@@ -245,9 +236,8 @@ Every `git diff --name-only`, `ls-files` or `status` that lists paths passes `-z
 Without `-z` git quotes and escapes any path with a non-ASCII or special character
 (`"caf\303\251.ts"`). No rule's `files` regex matches the quoted form, so the file is silently never
 checked.
-
-**Backlog:** `changedFilesSince` in `core/git.ts` lists both its diff and its untracked files without
-`-z`.
+`changedFilesSince` did exactly that until 2026-10-11, so `rulecast run --from-ref` never checked a
+file named `café.ts`.
 
 ## Pass file arguments after a double dash
 
@@ -282,8 +272,6 @@ JSON was scanned inside a CLI's `result.stdout`, where its quotes are escaped, s
 could never parse and became a rule error (`109ef0c`). Parsing changesets' "New tag:" line shipped a
 release with no tag (`f720a13`); a renamed action input meant no release ran for fourteen pushes
 (`336062b`).
-
----
 
 ## Repo-relative paths use forward slashes
 
@@ -321,8 +309,6 @@ Every path segment derived from agent input — a session id, a repo name — pa
 A session id of `.` or `..` escaped the sessions directory (`fdc1ca3`). The payload is written by
 another program and is not ours to trust.
 
----
-
 ## Narrow every catch
 
 A `catch` either narrows — `isNotFound(error)`, `instanceof SomeError`, `pastDeadline` — and rethrows
@@ -341,8 +327,6 @@ on, and the rule that should have fired is quiet. `core/pipeline.ts` catches onl
 One definition each, which absent files and every user-facing message depend on. Inline copies drift:
 the next one handles `ENOTDIR` and the others do not.
 
-**Backlog:** `core/git.ts` compares `"ENOENT"` inline; `init/plan.ts` spells out `errorMessage` twice.
-
 ## Throw typed errors and match them with instanceof
 
 A failure the caller must tell apart is its own class, `export class XError extends Error {}`, and is
@@ -358,8 +342,6 @@ An error message starts in lowercase and has no trailing period.
 Messages are composed: `pipeline.ts` builds `${kind} detector failed for ${rules}: ${message}.` and
 `main.ts` prints `rulecast: ${message}`. A capitalised, full-stopped message reads as two sentences
 glued together.
-
----
 
 ## No module-level mutable state
 
@@ -412,8 +394,6 @@ other way.
 
 Spec §8, plan 8a Decisions 2 and 5. Erring towards "pre-existing" lets an agent's violation through
 without anyone seeing it; erring towards "new" costs one extra finding.
-
----
 
 ## The renderer prices its own output, a line at a time
 
@@ -474,8 +454,6 @@ Spec §9, Oversight; plan 10 Decision 10. An agent that silences a finding must 
 who knows, and rule problems are the developer's to fix — an agent told its rule is broken "fixes"
 the rule.
 
----
-
 ## Validate external input with safeParse
 
 External input is validated with `safeParse` or `safeParseAsync`, never `.parse`. Schemas for what
@@ -508,8 +486,8 @@ sometimes absent fails the contract on one machine's payload and not another's.
 A `switch` over a union rulecast defines has no `default` branch, so a new member fails the
 type-check. `default` is for strings from outside: hook names, argv.
 
-A `default` absorbs the next member silently. `adapters/claude-code/adapter.ts` has
-`default: return NONE` over `EventKind`, which is exactly where a new event kind would vanish.
+A `default` absorbs the next member silently. `adapters/claude-code/adapter.ts` returned `NONE` from
+a `default` over `EventKind` until 2026-10-11, exactly where a new event kind would have vanished.
 
 ## Module style
 
@@ -535,10 +513,8 @@ for the constant stops finding every reader.
 Group into a map with `get` and `push`. Never `map.set(k, [...(map.get(k) ?? []), x])`.
 
 The spread copies the whole group on every item. Grouping findings that way was quadratic: 62,000
-matches took 5.9 s, and an 8 MB file never finished (`71f2f69`). Six places still group *rules* that
-way, which are few; the next copy will group matches.
-
----
+matches took 5.9 s, and an 8 MB file never finished (`71f2f69`). Grouping a handful of rules that way is
+harmless, and it is the code the next grouping of matches gets copied from.
 
 ## A rule key is four changes, not one
 
@@ -572,8 +548,6 @@ pinned by nobody.
 A hook has 350 ms and no network promise (spec §4, plan 3a Decision 6). A pinned repo missing from
 the cache disables its rules with a warning; the CLI is what fetches it.
 
----
-
 ## Adapter parse returns null, never throws
 
 `Adapter.parse` is pure and returns `null` for any input it does not handle: junk, an unknown event,
@@ -601,8 +575,6 @@ Widening `startup|resume|compact` would have stopped matching older installs, an
 fire per event (`cfa4996`). Re-running `install` swapped the guarded command for one that exits 127
 (`8686ce2`). `testing/adapter-contract.ts` pins the round trip.
 
----
-
 ## Tests never reach the network
 
 No test in `pnpm test` may call a model or open a socket to one (spec §15). The helpers own the
@@ -622,9 +594,6 @@ and never a path under `~/.cache/rulecast`. In `src/`, only `core/home.ts` calls
 
 A test that writes the developer's real cache corrupts their sessions and passes or fails on what
 earlier runs left there (plan 3a Decision 5).
-
-**Backlog:** `test/integrations/pre-commit.test.ts` runs rulecast through real git hooks with
-`process.env` and no `RULECAST_HOME`.
 
 ## Tests never chdir and never write inside the repository
 
@@ -750,8 +719,6 @@ A hard-coded "running 0.0.0" broke the 0.1.0 bump inside the release job (`b4e43
 
 The suites ship in the package for plugin authors, who use whatever runner they like
 (`test/build.test.ts`: "imports no test framework").
-
----
 
 ## Catalog rule ids carry no package prefix
 

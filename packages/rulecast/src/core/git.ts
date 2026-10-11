@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
+import { isNotFound } from "./errors"
 
 const exec = promisify(execFile)
 
@@ -46,7 +47,7 @@ export async function git(cwd: string, args: string[], env?: Readonly<Record<str
     return { ok: true, stdout }
   } catch (error) {
     const failure = error as { code?: unknown; stderr?: string }
-    if (failure.code === "ENOENT") throw new Error("git is not installed or not on PATH")
+    if (isNotFound(error)) throw new Error("git is not installed or not on PATH")
     if (typeof failure.code === "number") return { ok: false, stderr: failure.stderr ?? "" }
     throw error
   }
@@ -98,12 +99,11 @@ export async function mergeBase(cwd: string, ref: string, other = "HEAD"): Promi
 
 /** Files that exist now and differ from `commit`: committed, uncommitted and untracked. Sorted. */
 export async function changedFilesSince(cwd: string, commit: string): Promise<string[]> {
-  const diff = await git(cwd, ["diff", "--name-only", "--relative", "--diff-filter=d", commit])
+  const diff = await git(cwd, ["diff", "-z", "--name-only", "--relative", "--diff-filter=d", commit])
   if (!diff.ok) throw new Error(`git diff against ${commit} failed: ${diff.stderr.trim()}`)
-  const untracked = await git(cwd, ["ls-files", "--others", "--exclude-standard"])
+  const untracked = await git(cwd, ["ls-files", "-z", "--others", "--exclude-standard"])
   if (!untracked.ok) throw new Error(`git ls-files failed: ${untracked.stderr.trim()}`)
-  const files = [...diff.stdout.split("\n"), ...untracked.stdout.split("\n")].filter(Boolean)
-  return [...new Set(files)].sort()
+  return nulSeparated(`${diff.stdout}\0${untracked.stdout}`)
 }
 
 function nulSeparated(stdout: string): string[] {

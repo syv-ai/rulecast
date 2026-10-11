@@ -9,6 +9,7 @@ import { beforeAll, describe, expect, test } from "vitest"
 import { withoutInheritedGitEnv } from "../../src/core/git"
 import { localConfig } from "../helpers/config"
 import { git } from "../helpers/git"
+import { testEnv } from "../helpers/home"
 import { createProject } from "../helpers/project"
 
 const exec = promisify(execFile)
@@ -66,7 +67,7 @@ describe.skipIf(!hasPreCommit())("the shipped pre-commit hooks", () => {
 
   /** git with the repository's own hooks, which `git()` turns off. */
   async function hooked(cwd: string, ...args: string[]): Promise<Result> {
-    const env = { ...withoutInheritedGitEnv(process.env), PRE_COMMIT_HOME: preCommitHome }
+    const env = { ...withoutInheritedGitEnv(process.env), ...testEnv, PRE_COMMIT_HOME: preCommitHome }
     try {
       const { stdout, stderr } = await exec(
         "git",
@@ -113,7 +114,7 @@ describe.skipIf(!hasPreCommit())("the shipped pre-commit hooks", () => {
     await git(root, "push", "-q", "origin", "main")
     const installed = await exec("pre-commit", ["install", "-t", "pre-commit", "-t", "pre-push"], {
       cwd: root,
-      env: { ...withoutInheritedGitEnv(process.env), PRE_COMMIT_HOME: preCommitHome },
+      env: { ...withoutInheritedGitEnv(process.env), ...testEnv, PRE_COMMIT_HOME: preCommitHome },
     })
     expect(installed.stdout).toContain("pre-push")
     return { root, remote }

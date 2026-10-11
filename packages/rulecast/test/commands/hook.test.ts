@@ -12,7 +12,7 @@ import { captureIo, runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
-import { stateDirFor } from "../helpers/home"
+import { stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { createProject } from "../helpers/project"
 
@@ -77,6 +77,18 @@ describe("rulecast hook claude-code", () => {
     const unknown = await runCli(root, ["hook", "cursor"], "{}")
     expect(unknown.code).toBe(0)
     expect(unknown.stderr).toContain('unknown hook adapter "cursor"')
+  })
+
+  test("a cache home that cannot be created fails open", async () => {
+    const root = await createFixture()
+    // A path under a regular file can never become a directory, on any platform.
+    await writeFile(path.join(root, "not-a-dir"), "")
+    const env = { ...testEnv, RULECAST_HOME: path.join(root, "not-a-dir", "home") }
+    const payload = claudeCodePayload("post-tool-use.read.complete", { root, file: USERS, sessionId: "s1" })
+    const result = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toMatch(/^rulecast: .*ENOTDIR/)
   })
 })
 
