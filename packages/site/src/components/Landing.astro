@@ -4,6 +4,7 @@
  * becoming a rule becoming what the agent hears; where it runs; and the
  * prompt that has an agent set it up, which is the README's own (read at build time).
  */
+import { Icon } from "@astrojs/starlight/components"
 import { routeUrl } from "../../scripts/links"
 import { agentPrompt } from "../../scripts/sources"
 import ConventionFlow from "./ConventionFlow.astro"
@@ -21,7 +22,7 @@ const next = [
 
 <div class="rc-landing not-content">
   <header class="rc-hero">
-    <h1>Rulecast</h1>
+    <h1>rulecast</h1>
     <p class="rc-hero-tagline">Make your rules and conventions enforceable. Inject them when they matter.</p>
     <div class="rc-hero-actions">
       <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
@@ -29,6 +30,8 @@ const next = [
         <code>{install}</code>
         <span class="rc-copy-state" aria-live="polite">Copy</span>
       </button>
+    </div>
+    <div class="rc-hero-links">
       <a class="rc-link" href="#agent-setup">Copy setup prompt <span aria-hidden="true">↓</span></a>
       <a class="rc-link" href={routeUrl("getting-started")}>Read the guide <span aria-hidden="true">→</span></a>
     </div>
@@ -46,7 +49,11 @@ const next = [
       away, with the part of your docs that explains why, and fixes the code before it moves on. The same rules can run
       in your git hooks and CI, so nothing slips past there either.
     </p>
-    <p><a class="rc-link" href="#agent-setup">Ask your agent about Rulecast today.</a></p>
+    <p>
+      <a class="rc-quiet-link" href="#agent-setup">
+        Ask your agent about Rulecast today.<Icon name="link" size="0.95em" class="rc-quiet-link-icon" />
+      </a>
+    </p>
   </section>
 
   <section>
@@ -146,11 +153,15 @@ const next = [
   }
   .rc-hero-actions {
     display: flex;
+    justify-content: center;
+    margin-top: 2.5rem;
+  }
+  .rc-hero-links {
+    display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    align-items: center;
-    gap: 0.75rem 1.75rem;
-    margin-top: 2.5rem;
+    gap: 0.5rem 1.75rem;
+    margin-top: 1.25rem;
   }
   .rc-install {
     display: inline-flex;
@@ -220,16 +231,33 @@ const next = [
     text-wrap: pretty;
   }
 
+  /* One centred column under the headline: the text inside stays left-aligned to be read. */
+  .rc-why {
+    max-width: 40rem;
+    margin-inline: auto;
+    margin-top: clamp(4rem, 10vw, 6rem);
+  }
   .rc-why p {
     margin: 1rem 0 0;
-    max-width: 36em;
     font-size: clamp(1.05rem, 2vw, 1.2rem);
     line-height: 1.65;
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
   }
-  .rc-why {
-    margin-top: clamp(4rem, 10vw, 6rem);
+
+  /* A link in the prose's own colour: the underline and the icon say it is one. */
+  .rc-quiet-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--sl-color-gray-4);
+    text-underline-offset: 0.2em;
+    transition: text-decoration-color 150ms ease;
+  }
+  .rc-quiet-link :global(.rc-quiet-link-icon) {
+    color: var(--sl-color-gray-3);
   }
 
   /* Landing under the fixed header, not behind it. */
@@ -312,6 +340,9 @@ const next = [
     }
     .rc-link:hover {
       text-decoration: underline;
+    }
+    .rc-quiet-link:hover {
+      text-decoration-color: currentColor;
     }
   }
 
