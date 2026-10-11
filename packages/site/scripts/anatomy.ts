@@ -85,8 +85,8 @@ export function inlineHtml(text: string): string {
 
 /**
  * The convention-to-rule picture: the doc section the README's example rule cites, as headings and
- * paragraphs, and the rule cut down to what ties it to that section (id, files, context), with
- * context on the band.
+ * paragraphs, and the whole rule but its `name` (a label, not behaviour), with context on the band.
+ * Nothing that makes it a check may be cut: a rule with `context` and no `detect` catches nothing.
  */
 export function conventionFlow(): { file: string; sectionHtml: string; ruleHtml: string } {
   const section = exampleSection()
@@ -101,14 +101,9 @@ export function conventionFlow(): { file: string; sectionHtml: string; ruleHtml:
   const lines = exampleRule().split("\n")
   const start = lines.findIndex((text) => /^\s*- id:/.test(text))
   const indent = /^\s*/.exec(lines[start] ?? "")?.[0].length ?? 0
-  let inContext = false
   const ruleHtml = lines
     .slice(start)
-    .filter((text) => {
-      if (/^\s*context:/.test(text)) inContext = true
-      else if (inContext && !/^\s*- /.test(text)) inContext = false
-      return inContext || /^\s*(- id|files):/.test(text)
-    })
+    .filter((text) => text.trim() !== "" && !/^\s*name:/.test(text))
     .map((text) => {
       const lit = /^\s*context:/.test(text) || /^\s*- "?@/.test(text)
       return line(highlightYaml(text.slice(indent)), lit)

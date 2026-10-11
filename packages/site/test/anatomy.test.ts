@@ -59,10 +59,13 @@ describe("conventionFlow", () => {
     )
   })
 
-  it("cuts the rule to id, files and context, in the README's own quoting, with context on the band", () => {
-    expect(text(ruleHtml.replace(/<\/span>(?=<span class="rc-a-line)/g, "\n"))).toBe(
-      "- id: backend/no-httpexception\n  files: '^app/services/.*\\.py$'\n  context:\n    - \"@conventions/backend.md#errors\"",
-    )
+  it("shows the whole rule but its name, in the README's own quoting, with context on the band", () => {
+    const shown = text(ruleHtml.replace(/<\/span>(?=<span class="rc-a-line)/g, "\n")).split("\n")
+    expect(shown[0]).toBe("- id: backend/no-httpexception")
+    // A rule with no detect only delivers guidance: the picture must show the check.
+    expect(shown.join("\n")).toMatch(/^ {2}detect:\n {4}regex:\n {6}pattern: /m)
+    expect(shown.some((line) => line.startsWith("  message: "))).toBe(true)
+    expect(shown.some((line) => line.includes("name:"))).toBe(false)
     expect(litLines(ruleHtml)).toEqual(["  context:", '    - "@conventions/backend.md#errors"'])
   })
 })
