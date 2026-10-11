@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentDocUrl,
   agentPrompt,
   assertPlaced,
   exampleBinding,
+  exampleSection,
   LEAD,
   PAGES,
   pageBody,
@@ -19,9 +21,12 @@ describe("readmeSections", () => {
     expect(sections.get("One")).toContain("## not a heading")
   })
 
-  it("drops the README's pointer to the site", () => {
-    const sections = readmeSections("# rulecast\n\nDocs: https://syv-ai.github.io/rulecast/\n\nLead.")
+  it("drops the README's pointer to the site, and keeps text that only names a page on it", () => {
+    const sections = readmeSections(
+      "# rulecast\n\n**Docs: [the site](https://syv-ai.github.io/rulecast/)**\n\nLead.\n\n## Agents\n\nRead https://syv-ai.github.io/rulecast/agents/SETUP.md",
+    )
     expect(sections.get(LEAD)).toBe("Lead.")
+    expect(sections.get("Agents")).toContain("agents/SETUP.md")
   })
 })
 
@@ -79,8 +84,18 @@ describe("exampleBinding", () => {
 })
 
 describe("agentPrompt", () => {
-  it("is the README's paste-this prompt, pointing at SETUP.md at a release tag", () => {
+  it("is the README's paste-this prompt, pointing at the SETUP.md this site serves", () => {
     expect(agentPrompt()).toMatch(/^Set up rulecast in this project\./)
-    expect(agentPrompt()).toMatch(/raw\.githubusercontent\.com\/syv-ai\/rulecast\/v\d+\.\d+\.\d+\/agents\/SETUP\.md/)
+    expect(agentPrompt()).toContain(agentDocUrl("agents/SETUP.md"))
+  })
+})
+
+describe("exampleSection", () => {
+  it("is the doc section the opening output delivers, by file and text", () => {
+    expect(exampleSection()).toEqual({
+      ref: "conventions/backend.md#errors",
+      file: "conventions/backend.md",
+      text: expect.stringMatching(/^## Errors\n\nServices raise domain exceptions\./),
+    })
   })
 })

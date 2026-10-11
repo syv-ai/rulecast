@@ -1,0 +1,124 @@
+---
+/**
+ * Where a finding comes from: a section of your docs, a rule that cites it, and the agent hearing
+ * both when an edit breaks the rule. All three are the README's own example, read at build time
+ * (scripts/anatomy.ts), and the section is on the same band wherever it appears.
+ */
+import { conventionFlow } from "../../scripts/anatomy"
+import TerminalDemo from "./TerminalDemo.astro"
+
+const { file, sectionHtml, ruleHtml } = conventionFlow()
+---
+
+<figure class="rc-cflow not-content">
+  <div class="rc-cflow-sources">
+    <div class="rc-cflow-step">
+      <p class="rc-cflow-label"><b>1</b> Your docs say it</p>
+      <div class="rc-cflow-card rc-doc">
+        <p class="rc-doc-file">{file}</p>
+        <span class="rc-doc-skeleton" style="width: 72%"></span>
+        <span class="rc-doc-skeleton" style="width: 55%"></span>
+        <div class="rc-doc-section" set:html={sectionHtml} />
+        <span class="rc-doc-skeleton" style="width: 64%"></span>
+        <span class="rc-doc-skeleton" style="width: 40%"></span>
+      </div>
+    </div>
+    <div class="rc-cflow-step">
+      <p class="rc-cflow-label"><b>2</b> A rule points at it</p>
+      <div class="rc-cflow-card">
+        <p class="rc-doc-file">.rulecast-config.yaml</p>
+        <pre class="rc-cflow-rule" set:html={ruleHtml} />
+      </div>
+    </div>
+  </div>
+  <div class="rc-cflow-step">
+    <p class="rc-cflow-label"><b>3</b> An edit breaks it, and your agent hears both, in the same turn</p>
+    <TerminalDemo />
+  </div>
+</figure>
+
+<style is:global>
+  .rc-cflow {
+    display: grid;
+    gap: 2rem;
+    margin: 0;
+  }
+  .rc-cflow-sources {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: 1.5rem;
+  }
+  .rc-cflow-step {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .rc-cflow-label {
+    margin: 0 0 0.7rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+  }
+  .rc-cflow-label b {
+    display: inline-grid;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    margin-right: 0.45rem;
+    border-radius: 50%;
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+    font-size: 0.72rem;
+  }
+  .rc-cflow-card {
+    flex: 1;
+    padding: 1rem 0 1.1rem;
+    border-radius: 0.875rem;
+    background: var(--sl-color-gray-6);
+  }
+  .rc-doc-file {
+    margin: 0 1.25rem 0.75rem;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-3);
+  }
+  /* The rest of the document, as shape only: the section is what matters. */
+  .rc-doc-skeleton {
+    display: block;
+    height: 0.5rem;
+    margin: 0.6rem 1.25rem;
+    border-radius: 999px;
+    background: var(--sl-color-gray-5);
+  }
+  .rc-doc-section {
+    margin: 0.9rem 0;
+    padding: 0.7rem 1.25rem;
+    background: var(--rc-band);
+  }
+  .rc-doc-section p {
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--sl-color-gray-1);
+  }
+  .rc-doc-section p + p {
+    margin-top: 0.35rem;
+  }
+  .rc-doc-section .rc-doc-h {
+    font-weight: 650;
+    color: var(--sl-color-white);
+  }
+  .rc-doc-section code {
+    font-size: 0.82em;
+  }
+  .rc-cflow-rule {
+    margin: 0;
+    padding: 0;
+    background: none;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--sl-color-gray-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+</style>

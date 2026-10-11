@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { anatomy, highlightYaml } from "../scripts/anatomy"
+import { anatomy, conventionFlow, highlightYaml } from "../scripts/anatomy"
 
 const text = (html: string) =>
   html
@@ -46,5 +46,23 @@ describe("anatomy", () => {
     expect(outputHtml).toContain('<span class="rc-a-value" title="{{args}}">404</span>')
     expect(litLines(outputHtml)).toContain("--- conventions/backend.md#errors ---")
     expect(litLines(outputHtml).some((line) => line.startsWith("rulecast:"))).toBe(false)
+  })
+})
+
+describe("conventionFlow", () => {
+  const { file, sectionHtml, ruleHtml } = conventionFlow()
+
+  it("shows the cited section as a heading and its paragraph", () => {
+    expect(file).toBe("conventions/backend.md")
+    expect(sectionHtml).toBe(
+      '<p class="rc-doc-h">Errors</p><p>Services raise domain exceptions. <code>app/api/errors.py</code> maps each one to a status code.</p>',
+    )
+  })
+
+  it("cuts the rule to id, files and context, in the README's own quoting, with context on the band", () => {
+    expect(text(ruleHtml.replace(/<\/span>(?=<span class="rc-a-line)/g, "\n"))).toBe(
+      "- id: backend/no-httpexception\n  files: '^app/services/.*\\.py$'\n  context:\n    - \"@conventions/backend.md#errors\"",
+    )
+    expect(litLines(ruleHtml)).toEqual(["  context:", '    - "@conventions/backend.md#errors"'])
   })
 })

@@ -19,7 +19,7 @@ const output = (text: string): Line[] =>
     .split("\n")
     .map((line) => ({ kind: "rulecast", text: line }))
 
-const lines: Line[] = [
+const session: Line[] = [
   agent("Edit app/services/users.py"),
   ...output(openingOutput()),
   agent("Edit app/services/users.py"),
@@ -27,6 +27,17 @@ const lines: Line[] = [
   agent("Bash python scripts/scaffold_service.py users"),
   ...output(golden("shell-edit")),
 ]
+
+/** A delivered doc section, from its `--- file#anchor ---` header to the end of that output. */
+function withBands(input: Line[]): (Line & { band: boolean })[] {
+  let inSection = false
+  return input.map((line) => {
+    if (line.kind !== "rulecast") inSection = false
+    else if (/^-{3} .* -{3}$/.test(line.text)) inSection = true
+    return { ...line, band: inSection }
+  })
+}
+const lines = withBands(session)
 
 /** How a line of rulecast's output is coloured. */
 function tone(text: string): string {
@@ -54,7 +65,7 @@ function tone(text: string): string {
             {line.text}
           </div>
         ) : (
-          <div class:list={["rc-term-line", "rc-t-out", tone(line.text)]} data-kind="rulecast">
+          <div class:list={["rc-term-line", "rc-t-out", tone(line.text), { "rc-t-band": line.band }]} data-kind="rulecast">
             {line.text === "" ? "\u00a0" : line.text}
           </div>
         ),
@@ -162,6 +173,13 @@ function tone(text: string): string {
   .rc-t-section {
     color: var(--rc-syn-var);
   }
+  /* The same band as the section in the docs and the rule above it. */
+  .rc-t-band {
+    margin: 0 -1.6rem;
+    padding-left: calc(1.3rem + 1.6rem);
+    background: rgb(127 164 214 / 0.12);
+    color: var(--rc-term-fg);
+  }
   .rc-t-note {
     padding-left: 1.3rem;
     font-style: italic;
@@ -170,6 +188,10 @@ function tone(text: string): string {
     .rc-term-body {
       padding: 1.1rem 1.1rem 1.25rem;
       font-size: 0.74rem;
+    }
+    .rc-t-band {
+      margin: 0 -1.1rem;
+      padding-left: calc(1.3rem + 1.1rem);
     }
   }
 </style>

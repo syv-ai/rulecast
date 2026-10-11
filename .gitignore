@@ -31,3 +31,4 @@ packages/site/src/content/docs/guides/
 packages/site/src/content/docs/reference/
 packages/site/src/content/docs/agents/
 packages/site/.astro/
+packages/site/public/agents/

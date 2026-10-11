@@ -1,4 +1,4 @@
-import { exampleBinding, exampleRule, openingOutput } from "./sources"
+import { exampleBinding, exampleRule, exampleSection, openingOutput } from "./sources"
 
 /**
  * The rule-anatomy graphic's two panes, as HTML: the README's example rule, highlighted as YAML,
@@ -74,4 +74,45 @@ export function anatomy(): { ruleHtml: string; outputHtml: string } {
     })
     .join("")
   return { ruleHtml, outputHtml }
+}
+
+/** Inline Markdown: code and emphasis, which is all the README's prose and doc sections use. */
+export function inlineHtml(text: string): string {
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+}
+
+/**
+ * The convention-to-rule picture: the doc section the README's example rule cites, as headings and
+ * paragraphs, and the rule cut down to what ties it to that section (id, files, context), with
+ * context on the band.
+ */
+export function conventionFlow(): { file: string; sectionHtml: string; ruleHtml: string } {
+  const section = exampleSection()
+  const sectionHtml = section.text
+    .split(/\n\n+/)
+    .map((block) => {
+      const heading = /^#+ (.*)$/.exec(block)
+      return heading ? `<p class="rc-doc-h">${inlineHtml(heading[1] ?? "")}</p>` : `<p>${inlineHtml(block)}</p>`
+    })
+    .join("")
+  // The rule's own lines, so its quoting and escapes are the README's, outdented to the list item.
+  const lines = exampleRule().split("\n")
+  const start = lines.findIndex((text) => /^\s*- id:/.test(text))
+  const indent = /^\s*/.exec(lines[start] ?? "")?.[0].length ?? 0
+  let inContext = false
+  const ruleHtml = lines
+    .slice(start)
+    .filter((text) => {
+      if (/^\s*context:/.test(text)) inContext = true
+      else if (inContext && !/^\s*- /.test(text)) inContext = false
+      return inContext || /^\s*(- id|files):/.test(text)
+    })
+    .map((text) => {
+      const lit = /^\s*context:/.test(text) || /^\s*- "?@/.test(text)
+      return line(highlightYaml(text.slice(indent)), lit)
+    })
+    .join("")
+  return { file: section.file, sectionHtml, ruleHtml }
 }

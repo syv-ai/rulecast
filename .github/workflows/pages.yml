@@ -1,11 +1,27 @@
 name: pages
 
-# The docs site, https://syv-ai.github.io/rulecast/, built from README.md and agents/ on every push
-# to main. Pull requests build it in ci.yml; only main deploys.
+# The docs site, https://syv-ai.github.io/rulecast/. Its code is main's; its content (README.md,
+# agents/, the version, the renderer goldens) is a release's, so the site documents what
+# `npx @syv-ai/rulecast` installs and its raw agents/SETUP.md always means the latest release.
+#
+# Not `on: push` or `on: release`: release.yml creates the tag with GITHUB_TOKEN, which starts no
+# workflow run, so it calls this directly once a release is tagged (as it does binaries.yml).
+# workflow_dispatch redeploys by hand: "latest" for the newest tag, or "main" for a docs fix that
+# cannot wait for a release.
 on:
-  push:
-    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: The release tag whose content to publish, such as v0.6.0.
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Content from "latest" (the newest vX.Y.Z tag), a tag, or "main".
+        required: true
+        default: latest
+        type: string
 
 permissions:
   contents: read
@@ -21,12 +37,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # content-from needs the tags.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @syv-ai/rulecast-site content-from "${{ inputs.ref }}"
       - run: pnpm --filter @syv-ai/rulecast-site build
       - uses: actions/upload-pages-artifact@v5
         with:

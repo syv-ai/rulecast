@@ -1,24 +1,14 @@
 ---
 /**
- * The landing page. The name and one command; why it helps, in plain words; then three things to
- * see (rulecast telling an agent in the same turn, what a rule is made of, where it runs); and the
- * prompt that has an agent set it up. The README's own words carry the tagline, the demo's lede and
- * the prompt (read at build time); the rest is the site's.
+ * The landing page. The name and one command; what rulecast is, in plain words; a convention
+ * becoming a rule becoming what the agent hears; what a rule is made of; where it runs; and the
+ * prompt that has an agent set it up, which is the README's own (read at build time).
  */
 import { routeUrl } from "../../scripts/links"
-import { agentPrompt, LEAD, readme, version } from "../../scripts/sources"
+import { agentPrompt, version } from "../../scripts/sources"
+import ConventionFlow from "./ConventionFlow.astro"
 import HookFlow from "./HookFlow.astro"
 import RuleAnatomy from "./RuleAnatomy.astro"
-import TerminalDemo from "./TerminalDemo.astro"
-
-const [tagline = "", lede = ""] = (readme().get(LEAD) ?? "").split(/\n\n+/).filter((block) => !block.startsWith("```"))
-/** Inline Markdown in the README's lead: code and emphasis are all it uses. */
-const inline = (text: string) =>
-  text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
 
 const install = "npx @syv-ai/rulecast init"
 const prompt = agentPrompt()
@@ -33,7 +23,7 @@ const next = [
 <div class="rc-landing not-content">
   <header class="rc-hero">
     <h1>Rulecast</h1>
-    <p class="rc-hero-tagline" set:html={inline(tagline)} />
+    <p class="rc-hero-tagline">Make your rules and conventions enforceable. Inject them when they matter.</p>
     <div class="rc-hero-actions">
       <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
         <span class="rc-install-prompt" aria-hidden="true">$</span>
@@ -46,25 +36,22 @@ const next = [
   </header>
 
   <section class="rc-why">
-    <h2>Why it helps</h2>
     <p>
-      You wrote down how your project works: which files are generated, where errors get handled, what a service may
-      import. Your agent read all of it at the start of the session. Forty tool calls later it is deep in some file, and
-      that one paragraph is long gone.
+      Rulecast helps enforce your conventions in your codebase. It taps into agent hooks and injects your conventions
+      when they are relevant. You can think of it as guardrails + progressive disclosure of rules. Could we just write
+      everything down directly in agent hooks? Yes, absolutely. But with rulecast we can tie in our documented
+      conventions and limit repeat instructions too.
     </p>
-    <p>So it writes exactly what your docs say not to, and you find out in review. Or you don't.</p>
     <p>
-      Rulecast closes that gap. Each convention becomes a rule. When an edit breaks one, the agent hears about it right
-      away, with the part of your docs that explains why, and fixes the code before it moves on. The same rules run in
-      your git hooks and CI, so nothing slips past there either.
+      Ideally, each convention becomes a rule. When, for example, an edit breaks one, the agent hears about it right
+      away, with the part of your docs that explains why, and fixes the code before it moves on. The same rules can run
+      in your git hooks and CI, so nothing slips past there either.
     </p>
+    <p><a class="rc-link" href="#agent-setup">Ask your agent about Rulecast today.</a></p>
   </section>
 
   <section>
-    <h2>See it work.</h2>
-    <p class="rc-lede" set:html={inline(lede)} />
-    <TerminalDemo />
-    <p class="rc-note">Every line rulecast prints above is its real output.</p>
+    <ConventionFlow />
   </section>
 
   <section>
@@ -276,8 +263,8 @@ const next = [
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
   }
-  .rc-why h2 + p {
-    margin-top: 1.25rem;
+  .rc-why {
+    margin-top: clamp(4rem, 10vw, 6rem);
   }
 
   .rc-prompt {

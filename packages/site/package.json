@@ -10,7 +10,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.scripts.json"
+    "typecheck": "tsc -p tsconfig.scripts.json",
+    "content-from": "tsx scripts/content-from.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.6",

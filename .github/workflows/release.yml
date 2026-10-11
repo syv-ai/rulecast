@@ -126,3 +126,16 @@ jobs:
       tag: ${{ needs.release.outputs.tag }}
     permissions:
       contents: write
+
+  # The docs site is built from the release's content, so it is redeployed when, and only when, a
+  # release is tagged. Called for the same reason as binaries above.
+  pages:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

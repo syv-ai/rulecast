@@ -47,7 +47,29 @@ export const SITE_URL = `${SITE}${BASE}/`
 
 /** The note on a page written for agents: they read it raw, at the released tag. */
 function forAgents(file: string): string {
-  return `:::note[Written for coding agents]\nThis page is the file your agent reads. Give it the raw file at the released tag: <https://raw.githubusercontent.com/syv-ai/rulecast/v${version()}/${file}>\n:::`
+  return `:::note[Written for coding agents]\nThis page is the file your agent reads. Give it the raw file, from the latest release: <${agentDocUrl(file)}>\n:::`
+}
+
+/**
+ * Everything the site is built from, as repository paths. The site's own code is always main's;
+ * these come from the latest release tag (scripts/content-from.ts), so the site documents what
+ * `npx @syv-ai/rulecast` installs, not what main has not released yet.
+ */
+export const CONTENT_PATHS = [
+  "README.md",
+  "agents",
+  "packages/rulecast/package.json",
+  "packages/rulecast/test/goldens/delivery",
+]
+
+/**
+ * The agent docs are also served raw, at their repository paths under the site, so their relative
+ * links still resolve. Built from the latest release, these URLs always mean "the version npx
+ * installs", with no tag to bump.
+ */
+export const AGENT_DOCS_DIR = "agents"
+export function agentDocUrl(file: string): string {
+  return `${SITE_URL}${file}`
 }
 
 /** Sidebar groups, in order. */
@@ -151,14 +173,14 @@ export function readmeSections(markdown: string): Map<string, string> {
   let heading = LEAD
   let lines: string[] = []
   let fenced = false
-  // The README's pointer to the site is no part of the site.
+  // The README's pointer to the site (a link to its home page) is no part of the site.
   const flush = () =>
     sections.set(
       heading,
       lines
         .join("\n")
         .split(/\n\n+/)
-        .filter((paragraph) => !paragraph.includes(SITE_URL))
+        .filter((paragraph) => !paragraph.includes(`](${SITE_URL})`))
         .join("\n\n")
         .trim(),
     )
@@ -270,6 +292,22 @@ export function agentPrompt(sections = readme()): string {
 /** The README's opening output, which it says is real output. */
 export function openingOutput(sections = readme()): string {
   return firstFence(sections.get(LEAD) ?? "", "")
+}
+
+/** The doc section the README's opening output delivers: where it comes from, and its text. */
+export function exampleSection(sections = readme()): { ref: string; file: string; text: string } {
+  const lines = openingOutput(sections).split("\n")
+  const at = lines.findIndex((line) => /^-{3} .* -{3}$/.test(line))
+  if (at === -1) throw new Error("README.md: the opening output delivers no doc section")
+  const ref = lines[at]!.replace(/^-{3} | -{3}$/g, "")
+  return {
+    ref,
+    file: ref.split("#")[0]!,
+    text: lines
+      .slice(at + 1)
+      .join("\n")
+      .trim(),
+  }
 }
 
 export interface ExampleBinding {
