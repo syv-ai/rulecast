@@ -57,3 +57,7 @@ Tests sit under `packages/rulecast/test/` and mirror `src/`. Renderer and baseli
 ### Docs site (`packages/site`)
 
 Pages are generated at build time from `README.md` and `agents/` (`scripts/sources.ts` maps README sections)
+
+## Conventions
+
+`docs/conventions.md` holds the conventions code here is held to, one section each with the reason and the commit that made it necessary. `.rulecast-config.yaml` enforces them: pattern rules for what one file can show, touch rules that deliver the rest when you open a file in their area. Read the section a finding cites before arguing with it.

@@ -1,55 +1,650 @@
 # rulecast config: https://github.com/syv-ai/rulecast
-# rulecast run on rulecast. The catalog has nothing for this repository — its rules are Python,
-# React and generated clients — so every rule here is local and drafted from docs/conventions.md.
+# Rules from rule repos are pinned by rev; add your own rules under repo: local.
+#
+# rulecast on rulecast. Every rule is local and cites docs/conventions.md: the catalog is Python,
+# React and generated clients, and none of it applies here. Pattern rules catch what one file can
+# show; the touch rules at the end deliver the conventions no pattern can see, one rule per area.
 repos:
   - repo: local
     rules:
-      - id: detectors/no-direct-reads
-        name: A guarding detector reads through run's read, never from disk
-        files: '^packages/rulecast/src/detectors/.*\.ts$'
-        # The convention binds the detectors that declare `guards: true` — that promise is its whole
-        # reason. command, linter and llm hand a path to another program, which reads the file on
-        # disk whatever this code does, so they decline `guards` and read the file honestly instead.
-        exclude: '^packages/rulecast/src/detectors/(command|linter|llm)/'
-        severity: error
+      # ── process and layers ──────────────────────────────────────────────────────────────────
+
+      - id: process/no-process-io
+        name: Only cli.ts touches the process's streams
+        files: '^packages/rulecast/src/.*\.ts$'
+        exclude: '^packages/rulecast/src/cli\.ts$'
         detect:
           regex:
-            # readSourceFile too: it is how a detector actually reaches the disk here, and the
-            # narrower pattern matched neither of the two files this rule was written to catch.
-            pattern: '\b(readFile(Sync)?|readSourceFile)\b'
-        message: "{{file}}:{{line}} reads a file directly. A detector that declares `guards` reads through the `read` on its DetectorRun: before a write, the content that matters is the one the agent proposed, which is not on disk."
+            pattern: '\bconsole\.\w+\(|\bprocess\.(stdout|stderr|stdin|argv|exitCode)\b'
+        message: "{{file}}:{{line}} uses `{{text}}`. Print through `io.stdout`/`io.stderr` and return data or an exit code: a stray write to a hook's stdout corrupts the JSON the agent parses."
         context:
-          - "@docs/conventions.md#detectors-never-read-a-file-themselves"
+          - "@docs/conventions.md#only-clits-touches-the-process"
         examples:
           good:
-            - path: packages/rulecast/src/detectors/example/detector.ts
+            - path: packages/rulecast/src/commands/example.ts
               code: |
-                const source = await input.read(file)
+                io.stdout(`checked ${count} files\n`)
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                // console output belongs to cli.ts
+                return { findings, exitCode: 0 }
           bad:
-            - path: packages/rulecast/src/detectors/example/detector.ts
+            - path: packages/rulecast/src/commands/example.ts
               code: |
-                const source = await readFile(path.join(input.cwd, file), "utf8")
-            # The case the narrower pattern missed: going through the core's helper is still the disk.
-            - path: packages/rulecast/src/detectors/example/detector.ts
+                console.log("debug", findings)
+            - path: packages/rulecast/src/core/example.ts
               code: |
-                const source = await readSourceFile(input.cwd, file)
+                process.stdout.write(JSON.stringify(delivery))
 
-      - id: core/no-module-state
-        name: No module-level mutable state
-        description: Every hook is a fresh process, so a module-level cache buys nothing and leaks between rules and tests.
+      - id: process/no-exit
+        name: Never call process.exit
         files: '^packages/rulecast/src/.*\.ts$'
-        # The one documented exception: a process-global native-module registration (plan 5a).
-        exclude: '^packages/rulecast/src/detectors/ast-grep/load\.ts$'
-        severity: error
+        detect:
+          regex:
+            pattern: '\bprocess\.exit\('
+        message: "{{file}}:{{line}} calls process.exit. Return the exit code (0, 1 or 2) and let cli.ts set it: exiting skips the session append and the lock release."
+        context:
+          - "@docs/conventions.md#never-call-processexit"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                return findings.length > 0 ? 1 : 0
+            - path: packages/rulecast/src/cli.ts
+              code: |
+                process.exitCode = await main(process.argv.slice(2), io)
+          bad:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                if (failed) process.exit(2)
+            - path: packages/rulecast/src/cli.ts
+              code: |
+                main(args, io).then((code) => process.exit(code))
+
+      - id: process/no-global-env-or-cwd
+        name: Read env and cwd from what you were handed
+        files: '^packages/rulecast/src/.*\.ts$'
+        # cli.ts builds the CliIo from them; git.ts starts a child's env from process.env and scrubs it.
+        exclude: '^packages/rulecast/src/(cli|core/git)\.ts$'
         detect:
           ast-grep:
             language: typescript
             rule:
-              kind: lexical_declaration
+              any:
+                - pattern: process.env
+                - pattern: process.cwd()
+        message: "{{file}}:{{line}} reads `{{text}}`. Use what you were handed — `io.env`/`io.cwd`, `project.root`, `input.cwd`, `DetectorCheck.env`: in a hook the process cwd is wherever the agent was."
+        context:
+          - "@docs/conventions.md#read-env-and-cwd-from-what-you-were-handed"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const home = cacheHome(io.env)
+            - path: packages/rulecast/src/detectors/example.ts
+              code: |
+                const target = path.join(input.cwd, file)
+          bad:
+            - path: packages/rulecast/src/detectors/example.ts
+              code: |
+                const key = process.env[settings.llm.apiKeyEnv]
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const root = findRoot(process.cwd())
+
+      - id: process/stderr-prefix
+        name: Prefix stderr with the tool name
+        files: '^packages/rulecast/src/.*\.ts$'
+        severity: warning
+        detect:
+          regex:
+            # A help text printed after an already-prefixed line starts with a newline.
+            pattern: '\bio\.stderr\((?![`"]rulecast: |`\\n)'
+        message: "{{file}}:{{line}} writes to stderr without the `rulecast: ` prefix. Hook stderr is interleaved with the agent's and other hooks' output."
+        context:
+          - "@docs/conventions.md#prefix-stderr-with-the-tool-name"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                io.stderr(`rulecast: ${errorMessage(error)}\n`)
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                io.stderr(`\n${usage()}`)
+          bad:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                io.stderr(`could not read ${file}\n`)
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                io.stderr(errorMessage(error))
+
+      - id: layers/core-imports-inward
+        name: The core imports nothing from outside it
+        files: '^packages/rulecast/src/core/.*\.ts$'
+        detect:
+          regex:
+            pattern: 'from "(\.\./)+(adapters|commands|detectors|init|testing)(/|")'
+        message: "{{file}}:{{line}} imports outside the core. The core is agent- and detector-neutral: take what you need through the registry or the Adapter type."
+        context:
+          - "@docs/conventions.md#the-core-imports-nothing-from-outside-it"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/detection/example.ts
+              code: |
+                import type { DetectorRegistry } from "./registry"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { errorMessage } from "./errors"
+          bad:
+            - path: packages/rulecast/src/core/detection/example.ts
+              code: |
+                import { regexDetector } from "../../detectors/regex"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { claudeCodeAdapter } from "../adapters/claude-code/adapter"
+
+      - id: layers/adapter-surface
+        name: Adapters see only types and the renderer
+        files: '^packages/rulecast/src/adapters/.*\.ts$'
+        detect:
+          regex:
+            pattern: 'from "(\.\./)+(core/(?!types"|delivery/render-agent")[^"]*|commands/[^"]*|detectors[^"]*|init[^"]*)"|from "\.\./(claude-code|cli)/'
+        message: "{{file}}:{{line}} imports past the adapter surface. An adapter has `core/types` and `core/delivery/render-agent`, exactly what a third-party adapter gets."
+        context:
+          - "@docs/conventions.md#adapters-see-only-types-and-the-renderer"
+        examples:
+          good:
+            - path: packages/rulecast/src/adapters/claude-code/example.ts
+              code: |
+                import { renderAgentText } from "../../core/delivery/render-agent"
+            - path: packages/rulecast/src/adapters/cli/example.ts
+              code: |
+                import type { Delivery, Finding } from "../../core/types"
+          bad:
+            - path: packages/rulecast/src/adapters/claude-code/example.ts
+              code: |
+                import { readRecords } from "../../core/jsonl"
+            - path: packages/rulecast/src/adapters/claude-code/example.ts
+              code: |
+                import { formatBacklog } from "../cli/backlog"
+
+      - id: layers/detector-surface
+        name: Detectors use only the plugin surface
+        files: '^packages/rulecast/src/detectors/.*\.ts$'
+        # The registry lists every detector; that is its job.
+        exclude: '^packages/rulecast/src/detectors/index\.ts$'
+        detect:
+          regex:
+            pattern: 'from "(\.\./)+core/(?!(types|errors|which|template|detection/(per-rule|tool|paths|positions|registry))")[^"]*"|from "\.{1,2}/(\.\./)*(regex|path|ast-grep|command|linter|llm)(/[^"]*)?"'
+        message: "{{file}}:{{line}} imports past the plugin surface. A detector may use core/{types,errors,which,template} and core/detection/{per-rule,tool,paths,positions,registry}, and no other detector."
+        context:
+          - "@docs/conventions.md#detectors-use-only-the-plugin-surface"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/linter/example.ts
+              code: |
+                import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                import { loadNapi } from "./load"
+          bad:
+            - path: packages/rulecast/src/detectors/linter/example.ts
+              code: |
+                import { compile } from "../../core/compile/project"
+            - path: packages/rulecast/src/detectors/linter/example.ts
+              code: |
+                import { matchAllWithin } from "../regex"
+
+      - id: layers/no-kind-literal
+        name: The core names no detector kind
+        files: '^packages/rulecast/src/(core|commands|adapters|init)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\.kind\s*[!=]==?\s*"(regex|path|ast-grep|command|linter|llm)"|"(regex|path|ast-grep|command|linter|llm)"\s*[!=]==?\s*[\w.]*kind\b'
+        message: "{{file}}:{{line}} branches on a detector kind. Ask the registry for a declaration (`metered`, `guards`, `wholeFile`, `takesContent`, `fileBudget`) so the next detector needs no edit here."
+        context:
+          - "@docs/conventions.md#the-core-names-no-detector-kind"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (registry.get(rule.kind)?.metered) continue
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const kinds = rules.map((rule) => rule.kind)
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (rule.kind === "llm") continue
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const metered = rules.filter((rule) => "llm" === rule.kind)
+
+      - id: layers/no-agent-names
+        name: The core names no agent
+        files: '^packages/rulecast/src/(core|commands|detectors)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '"(PreToolUse|PostToolUse|PostToolUseFailure|UserPromptSubmit|SessionStart|SubagentStop|hook_event_name|tool_input|MultiEdit|NotebookEdit)"'
+        message: "{{file}}:{{line}} names a Claude Code event or field. That belongs in src/adapters/claude-code/; the core sees Adapter fields and neutral events."
+        context:
+          - "@docs/conventions.md#the-core-names-no-agent"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (event.kind === "shell-after") return compareTrees(before, after)
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const limit = adapter.maxContextChars
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (payload.hook_event_name === "PostToolUse") return
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const input = raw["tool_input"]
+
+      - id: deps/lazy-heavy-imports
+        name: Heavy dependencies load lazily
+        files: '^packages/rulecast/src/.*\.ts$'
+        # clack.ts is itself only reached through cli.ts's dynamic import.
+        exclude: '^packages/rulecast/src/init/clack\.ts$'
+        detect:
+          regex:
+            pattern: '^import (?!type\b)[^\n]*from "@(ast-grep|clack)/[^"]*"|^import (?!type\b)[^\n]*from "(\./|\.\./)+init/clack"'
+            flags: m
+        message: "{{file}}:{{line}} imports a heavy dependency statically. Import it as `import type` and load the value with a literal `await import()`: every hook is a fresh process that would pay for it."
+        context:
+          - "@docs/conventions.md#heavy-dependencies-load-lazily-by-literal-import"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                import type { SgRoot } from "@ast-grep/napi"
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                const napi = await import("@ast-grep/napi")
+          bad:
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                import { parse } from "@ast-grep/napi"
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                import { select } from "@clack/prompts"
+
+      - id: deps/literal-dynamic-import
+        name: Dynamic imports use a literal specifier
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bcreateRequire\b|(?<![\w.])require\(|\bimport\(\s*(?!["`][^"`$]*["`]\s*\))'
+        message: "{{file}}:{{line}} loads a module by `require` or a computed specifier. `bun --compile` bundles only literal `await import(\"…\")`, so this works under node and fails in the binary."
+        context:
+          - "@docs/conventions.md#heavy-dependencies-load-lazily-by-literal-import"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                const lang = await import("@ast-grep/lang-python")
+            - path: packages/rulecast/src/cli.ts
+              code: |
+                const { clackPrompter } = await import("./init/clack")
+          bad:
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                const lang = await import(`@ast-grep/lang-${name}`)
+            - path: packages/rulecast/src/detectors/ast-grep/example.ts
+              code: |
+                const require = createRequire(import.meta.url)
+
+      # ── detectors ───────────────────────────────────────────────────────────────────────────
+
+      - id: detectors/no-direct-reads
+        name: Guarding detectors read only through read
+        files: '^packages/rulecast/src/detectors/((regex|path)\.ts|ast-grep/.*\.ts)$'
+        detect:
+          regex:
+            pattern: '\b(readFile(Sync)?|readSourceFile|sourceReader|createReadStream)\b'
+        message: "{{file}}:{{line}} reads a file itself. A detector that declares `guards` reads through `read` on its DetectorRun: before a write, the content that matters is the proposal, which is not on disk."
+        context:
+          - "@docs/conventions.md#guarding-detectors-read-only-through-read"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/regex.ts
+              code: |
+                const text = await input.read(file)
+            - path: packages/rulecast/src/detectors/ast-grep/detector.ts
+              code: |
+                const real = await realpath(path.join(input.cwd, file))
+          bad:
+            - path: packages/rulecast/src/detectors/regex.ts
+              code: |
+                const text = await readFile(path.join(input.cwd, file), "utf8")
+            - path: packages/rulecast/src/detectors/ast-grep/detector.ts
+              code: |
+                const text = await readSourceFile(input.cwd, file)
+
+      - id: detectors/past-deadline
+        name: Rethrow the clock with pastDeadline, not signal.aborted
+        files: '^packages/rulecast/src/detectors/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bsignal\.aborted\)?\s*\{?\s*throw\b'
+        message: "{{file}}:{{line}} rethrows on `signal.aborted`. Use `if (pastDeadline(error, input)) throw error`: a native parse holds the loop, so the signal is still unset when the deadline has passed."
+        context:
+          - "@docs/conventions.md#rethrow-the-clock-before-recording-a-rule-error"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/linter/detector.ts
+              code: |
+                } catch (error) {
+                  if (pastDeadline(error, input)) throw error
+                  result.errors.push({ rule: rule.id, message: errorMessage(error) })
+                }
+            - path: packages/rulecast/src/detectors/regex.ts
+              code: |
+                input.signal.throwIfAborted()
+          bad:
+            - path: packages/rulecast/src/detectors/linter/detector.ts
+              code: |
+                } catch (error) {
+                  if (input.signal.aborted) throw error
+                  result.errors.push({ rule: rule.id, message: errorMessage(error) })
+                }
+            - path: packages/rulecast/src/detectors/ast-grep/detector.ts
+              code: |
+                if (input.signal.aborted) { throw error }
+
+      - id: detectors/no-own-timers
+        name: Detectors make no timers of their own
+        files: '^packages/rulecast/src/detectors/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\b(setTimeout|setInterval)\(|\bAbortSignal\.timeout\(|\bnew AbortController\('
+        message: "{{file}}:{{line}} makes its own timer. Use `input.signal` and `input.deadlineAt`: core/detection/run.ts owns the deadline, and a timer cannot fire while sync work holds the loop."
+        context:
+          - "@docs/conventions.md#detectors-make-no-timers-of-their-own"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/regex.ts
+              code: |
+                const budget = input.deadlineAt - Date.now()
+            - path: packages/rulecast/src/detectors/llm/detector.ts
+              code: |
+                await provider.call(prompt, { signal: input.signal })
+          bad:
+            - path: packages/rulecast/src/detectors/llm/detector.ts
+              code: |
+                const signal = AbortSignal.timeout(30_000)
+            - path: packages/rulecast/src/detectors/command/detector.ts
+              code: |
+                const timer = setTimeout(() => child.kill(), 5000)
+
+      # ── subprocesses and git ────────────────────────────────────────────────────────────────
+
+      - id: spawn/no-shell
+        name: Spawn with an argument array, never a shell
+        files: '^packages/rulecast/(src|scripts)/.*\.ts$'
+        detect:
+          regex:
+            # `exec` alone is often a local alias of promisified execFile, so look at the import.
+            pattern: 'import\s*\{[^}]*\b(exec|execSync)\b(?!\s+as\b)[^}]*\}\s*from\s*"(node:)?child_process"|\bshell:\s*true\b'
+        message: "{{file}}:{{line}} runs a command through a shell. Use execFile/spawn with an argument array (detectors use runTool): rule repos control argv, so a shell is code execution."
+        context:
+          - "@docs/conventions.md#spawn-with-an-argument-array-never-a-shell"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const { stdout } = await execFileAsync("ruff", ["check", "--", ...files], { signal })
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const exec = promisify(execFile)
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { execSync } from "node:child_process"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                spawn(command, args, { shell: true })
+
+      - id: git/through-core
+        name: Every git call goes through core/git.ts
+        files: '^packages/rulecast/(src|scripts|test)/.*\.ts$'
+        # The two helpers own the scrub; pre-commit.test.ts runs real hooks on purpose, with the scrub.
+        exclude: '^packages/rulecast/(src/core/git\.ts|test/helpers/git\.ts|test/integrations/pre-commit\.test\.ts)$'
+        detect:
+          regex:
+            pattern: '\b(execFile|spawn|execa)\w*\(\s*["''`]git["''`]'
+        message: "{{file}}:{{line}} spawns git directly. Use `git()` from core/git.ts (test/helpers/git.ts in tests): under a git hook the inherited GIT_DIR overrides cwd, and fixtures once committed to this repository."
+        context:
+          - "@docs/conventions.md#every-git-call-goes-through-coregitts"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const top = await git(cwd, ["rev-parse", "--show-toplevel"])
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const repo = await createRepo({ "a.ts": "x" })
+          bad:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd })
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                await execFileAsync("git", ["commit", "-m", "x"], { cwd: repo })
+
+      - id: git/nul-separated
+        name: List git paths NUL-separated
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\[\s*"(ls-files|status)"(?![^\]]*"-z")[^\]]*\]|\[\s*"diff"(?=[^\]]*"--name-(only|status)")(?![^\]]*"-z")[^\]]*\]'
+        message: "{{file}}:{{line}} lists paths without `-z`. Git quotes non-ASCII paths, and no rule's `files` matches the quoted form: pass `-z` and split with `nulSeparated`."
+        context:
+          - "@docs/conventions.md#list-git-paths-nul-separated"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/git.ts
+              code: |
+                const listed = await git(cwd, ["ls-files", "-z", "--others", "--exclude-standard"])
+            - path: packages/rulecast/src/core/git.ts
+              code: |
+                const patch = await git(cwd, ["diff", "--unified=0", commit])
+          bad:
+            - path: packages/rulecast/src/core/git.ts
+              code: |
+                const untracked = await git(cwd, ["ls-files", "--others", "--exclude-standard"])
+            - path: packages/rulecast/src/core/git.ts
+              code: |
+                const diff = await git(cwd, ["diff", "--name-only", "--relative", commit])
+
+      - id: spawn/stdin-epipe
+        name: Ignore EPIPE on a child's stdin before ending it
+        files: '^packages/rulecast/(src|scripts|test)/.*\.ts$'
+        detect:
+          regex:
+            # Whole-file: an `end` with no `on("error")` for stdin anywhere above it.
+            pattern: '(?<!stdin\??\.on\(\s*"error"[\s\S]*)\bstdin\??\.end\('
+        message: "{{file}}:{{line}} ends a child's stdin with no error handler. Add `child.stdin.on(\"error\", () => {})` first: a tool that exits without reading raises an unhandled EPIPE (Linux)."
+        context:
+          - "@docs/conventions.md#close-a-childs-stdin-and-ignore-epipe-on-it"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/detection/tool.ts
+              code: |
+                child.stdin.on("error", () => {})
+                child.stdin.end(input)
+            - path: packages/rulecast/test/detectors/example.test.ts
+              code: |
+                child.stdin?.on("error", () => {})
+                child.stdin?.end()
+          bad:
+            - path: packages/rulecast/src/core/detection/tool.ts
+              code: |
+                child.stdin.end(input)
+            - path: packages/rulecast/test/detectors/example.test.ts
+              code: |
+                const child = spawn("ruff", ["check", "-"])
+                child.stdin?.end(source)
+
+      # ── paths ───────────────────────────────────────────────────────────────────────────────
+
+      - id: paths/file-url
+        name: File URIs go through fileURLToPath
+        files: '^packages/rulecast/(src|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bnew URL\([^)]*\)\.pathname\b'
+        message: "{{file}}:{{line}} takes a URL's `.pathname` as a path. Use `fileURLToPath`: SARIF URIs are percent-encoded, and `.pathname` keeps the encoding."
+        context:
+          - "@docs/conventions.md#file-uris-go-through-fileurltopath"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/command/example.ts
+              code: |
+                const file = fileURLToPath(result.locations[0].uri)
+            - path: packages/rulecast/src/core/repos/example.ts
+              code: |
+                const parsed = new URL(url)
+          bad:
+            - path: packages/rulecast/src/detectors/command/example.ts
+              code: |
+                const file = new URL(uri).pathname
+            - path: packages/rulecast/scripts/example.ts
+              code: |
+                const here = new URL(".", import.meta.url).pathname
+
+      # ── errors ──────────────────────────────────────────────────────────────────────────────
+
+      - id: errors/is-not-found
+        name: Detect a missing file with isNotFound
+        files: '^packages/rulecast/src/.*\.ts$'
+        exclude: '^packages/rulecast/src/core/errors\.ts$'
+        detect:
+          regex:
+            pattern: '["''`]ENOENT["''`]'
+        message: "{{file}}:{{line}} compares ENOENT inline. Use `isNotFound(error)` from core/errors.ts: one definition of \"the file is gone\"."
+        context:
+          - "@docs/conventions.md#use-the-helpers-in-coreerrorsts"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (isNotFound(error)) return null
+            - path: packages/rulecast/src/core/session/lock.ts
+              code: |
+                if ((error as NodeJS.ErrnoException).code === "EEXIST") return false
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+            - path: packages/rulecast/src/core/git.ts
+              code: |
+                if (failure.code === 'ENOENT') throw new Error("git is not installed")
+
+      - id: errors/error-message
+        name: Get error text with errorMessage
+        files: '^packages/rulecast/src/.*\.ts$'
+        exclude: '^packages/rulecast/src/core/errors\.ts$'
+        detect:
+          regex:
+            pattern: '\binstanceof Error \? \w+\.message : String\('
+        message: "{{file}}:{{line}} spells out errorMessage. Call `errorMessage(error)` from core/errors.ts."
+        context:
+          - "@docs/conventions.md#use-the-helpers-in-coreerrorsts"
+        examples:
+          good:
+            - path: packages/rulecast/src/init/plan.ts
+              code: |
+                throw new PlanError(`${file}: ${errorMessage(error)}`)
+            - path: packages/rulecast/src/commands/hook.ts
+              code: |
+                log(`hook: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+          bad:
+            - path: packages/rulecast/src/init/plan.ts
+              code: |
+                throw new PlanError(`${file}: ${error instanceof Error ? error.message : String(error)}`)
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const text = err instanceof Error ? err.message : String(err)
+
+      - id: errors/no-message-matching
+        name: Match errors by type, never by message text
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\b(error|err|e|failure)\??\.message\??\.(includes|startsWith|endsWith|match|test)\(|\b(error|err|e|failure)\??\.message\s*[!=]==?'
+        message: "{{file}}:{{line}} recognises an error by its message. Give the failure its own `Error` subclass and test `instanceof`: messages get edited for readability, types do not."
+        context:
+          - "@docs/conventions.md#throw-typed-errors-and-match-them-with-instanceof"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (error instanceof LockTimeoutError) return degraded()
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                notices.push(error.message)
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (error.message.includes("timed out")) return degraded()
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (err.message === "corrupt store") return reset()
+
+      - id: errors/lowercase-fragments
+        name: Error messages are lowercase fragments
+        files: '^packages/rulecast/src/.*\.ts$'
+        severity: warning
+        detect:
+          regex:
+            pattern: '\bnew \w*Error\(\s*["''`][A-Z][a-z]|\bnew \w*Error\(\s*["''`][^"''`\n]*\.["''`]\s*\)'
+        message: "{{file}}:{{line}} capitalises an error message or ends it with a period. Messages are composed into `rulecast: …` and `… failed for x: …`: write a lowercase fragment."
+        context:
+          - "@docs/conventions.md#error-messages-are-lowercase-fragments"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                throw new Error(`no merge base with ${ref}`)
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                throw new UsageError("SARIF output needs --all-files")
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                throw new Error("Could not find the config")
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                throw new Error("no config found.")
+
+      # ── state and stores ────────────────────────────────────────────────────────────────────
+
+      - id: state/no-module-let
+        name: No module-level mutable state
+        files: '^packages/rulecast/src/.*\.ts$'
+        # The native module's registration is process-global whether we like it or not (plan 5a).
+        exclude: '^packages/rulecast/src/detectors/ast-grep/load\.ts$'
+        detect:
+          ast-grep:
+            language: typescript
+            rule:
+              any:
+                - kind: lexical_declaration
+                  regex: '^let\b'
+                - kind: variable_declaration
               inside:
-                kind: program
-              regex: '^let\b'
-        message: "{{file}}:{{line}} declares mutable state at module level. Pass it in instead: every hook is a fresh process, so this caches nothing and leaks between rules and tests."
+                any:
+                  - kind: program
+                  - kind: export_statement
+                    inside:
+                      kind: program
+        message: "{{file}}:{{line}} declares mutable state at module level. Pass it in: every hook is a fresh process, so this caches nothing and leaks between rules and tests."
         context:
           - "@docs/conventions.md#no-module-level-mutable-state"
         examples:
@@ -57,10 +652,13 @@ repos:
             - path: packages/rulecast/src/core/example.ts
               code: |
                 const LIMIT = 10
-                export function run(cache: Cache) {
+                export function run() {
                   let seen = 0
                   return seen + LIMIT
                 }
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export const DEFAULTS = { timeout: 2000 }
           bad:
             - path: packages/rulecast/src/core/example.ts
               code: |
@@ -68,33 +666,1082 @@ repos:
                 export function run() {
                   return cached
                 }
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export let registry = new Map()
+
+      - id: stores/append-through-jsonl
+        name: Stores are appended only through jsonl.ts
+        files: '^packages/rulecast/src/core/(session|baseline)/.*\.ts$'
+        # lock.ts writes the lock file, which is not a store.
+        exclude: '^packages/rulecast/src/core/session/lock\.ts$'
+        detect:
+          regex:
+            pattern: '\b(writeFile|appendFile|createWriteStream)(Sync)?\(|\bopen(Sync)?\([^)]*["'']a'
+        message: "{{file}}:{{line}} writes a store file itself. Append through `appendRecords` in core/jsonl.ts: one O_APPEND write per event, which concurrent hooks cannot interleave."
+        context:
+          - "@docs/conventions.md#stores-are-appended-only-through-jsonlts"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/session/session.ts
+              code: |
+                await appendRecords(file, records)
+            - path: packages/rulecast/src/core/baseline/store.ts
+              code: |
+                const records = await readRecords(file)
+          bad:
+            - path: packages/rulecast/src/core/session/session.ts
+              code: |
+                await appendFile(file, `${JSON.stringify(record)}\n`)
+            - path: packages/rulecast/src/core/baseline/store.ts
+              code: |
+                await writeFile(file, lines.join("\n"))
+
+      - id: stores/lock-only-in-commit
+        name: The session lock is taken only in commitSession
+        files: '^packages/rulecast/src/core/(session|baseline)/.*\.ts$'
+        exclude: '^packages/rulecast/src/core/session/(session|lock)\.ts$'
+        detect:
+          regex:
+            pattern: '\bwithLock\('
+        message: "{{file}}:{{line}} takes the session lock. Only `commitSession` does: detection, change sets and baseline appends stay lock-free, and the lock times out at 2 seconds."
+        context:
+          - "@docs/conventions.md#stores-are-appended-only-through-jsonlts"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/baseline/stage.ts
+              code: |
+                await appendRecords(file, fingerprints)
+            - path: packages/rulecast/src/core/session/decide.ts
+              code: |
+                // withLock guards only the session commit
+          bad:
+            - path: packages/rulecast/src/core/baseline/stage.ts
+              code: |
+                await withLock(dir, () => appendRecords(file, fingerprints))
+            - path: packages/rulecast/src/core/session/tree.ts
+              code: |
+                return withLock(stateDir, async () => snapshot(files))
+
+      # ── delivery and output ─────────────────────────────────────────────────────────────────
+
+      - id: output/no-locale
+        name: Output order never depends on locale
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\blocaleCompare\(|\bIntl\.'
+        message: "{{file}}:{{line}} uses the machine's locale. Break ties by code unit (`a < b ? -1 : a > b ? 1 : 0`): output and the llm cache key must not change between machines."
+        context:
+          - "@docs/conventions.md#output-depends-on-neither-clock-nor-locale"
+        examples:
+          good:
+            - path: packages/rulecast/src/adapters/cli/backlog.ts
+              code: |
+                rows.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const total = count.toString()
+          bad:
+            - path: packages/rulecast/src/adapters/cli/backlog.ts
+              code: |
+                rows.sort((a, b) => a.file.localeCompare(b.file))
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const total = new Intl.NumberFormat().format(count)
+
+      - id: output/no-clock-in-render
+        name: Rendered output carries no wall-clock time
+        files: '^packages/rulecast/src/(core/delivery/render-agent|core/session/decide|adapters/.*)\.ts$'
+        detect:
+          regex:
+            pattern: '\bDate\.now\(|\bnew Date\(|\.toISOString\(|\.toLocale\w*String\('
+        message: "{{file}}:{{line}} reads the clock where output is rendered. `format` must be deterministic (adapter contract) and the goldens pin the text: take an injected `now` if you need a time."
+        context:
+          - "@docs/conventions.md#output-depends-on-neither-clock-nor-locale"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/delivery/render-agent.ts
+              code: |
+                lines.push(`${finding.file}:${finding.line} ${finding.message}`)
+            - path: packages/rulecast/src/adapters/cli/format.ts
+              code: |
+                const stamp = options.now.toISOString
+          bad:
+            - path: packages/rulecast/src/core/delivery/render-agent.ts
+              code: |
+                lines.push(`checked at ${new Date().toISOString()}`)
+            - path: packages/rulecast/src/adapters/cli/format.ts
+              code: |
+                const elapsed = Date.now() - started
+
+      # ── data and types ──────────────────────────────────────────────────────────────────────
+
+      - id: data/safe-parse
+        name: Validate external input with safeParse
+        files: '^packages/rulecast/src/.*\.ts$'
+        # schema.ts parses its own default value, which cannot fail.
+        exclude: '^packages/rulecast/src/core/config/schema\.ts$'
+        detect:
+          regex:
+            pattern: '\b\w*[Ss]chema\.parse(Async)?\('
+        message: "{{file}}:{{line}} validates with `.parse`, which throws. Use `safeParse` and turn the issues into a diagnostic: a throw in a hook fails open and hides the reason."
+        context:
+          - "@docs/conventions.md#validate-external-input-with-safeparse"
+        examples:
+          good:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                const result = payloadSchema.safeParse(input)
+            - path: packages/rulecast/src/core/config/load.ts
+              code: |
+                const parsed = await configSchema.safeParseAsync(data)
+          bad:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                const payload = payloadSchema.parse(input)
+            - path: packages/rulecast/src/detectors/llm/example.ts
+              code: |
+                const answer = await answerSchema.parseAsync(json)
+
+      - id: data/no-json-cast
+        name: Narrow untrusted JSON, never cast it
+        files: '^packages/rulecast/src/(detectors|adapters|commands|init)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bJSON\.parse\([^()]*(\([^()]*\))?[^()]*\)\s+as\s+(?!unknown\b)'
+        message: "{{file}}:{{line}} casts parsed JSON. Treat it as `unknown` and narrow it with a guard or a zod schema: a misconfigured tool must become a rule error, not a crash later."
+        context:
+          - "@docs/conventions.md#narrow-untrusted-json-never-cast-it"
+        examples:
+          good:
+            - path: packages/rulecast/src/detectors/command/results.ts
+              code: |
+                const parsed: unknown = JSON.parse(stdout)
+            - path: packages/rulecast/src/detectors/linter/tools.ts
+              code: |
+                const raw = JSON.parse(stdout) as unknown
+          bad:
+            - path: packages/rulecast/src/detectors/command/results.ts
+              code: |
+                const results = JSON.parse(stdout) as CommandResult[]
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                const payload = JSON.parse(await readStdin()) as HookPayload
+
+      - id: data/no-undefined-fields
+        name: Omit optional fields, never set them to undefined
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '[{,]\s*\w+:\s*undefined\s*[,}]'
+        message: "{{file}}:{{line}} sets a field to undefined. Spread it in conditionally — `...(x === undefined ? {} : { x })`: strict deep equality and JSONL round trips tell `{ x: undefined }` from `{}`."
+        context:
+          - "@docs/conventions.md#omit-optional-fields-never-set-them-to-undefined"
+        examples:
+          good:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                return { kind: "edit", files, ...(intent === undefined ? {} : { intent }) }
+            - path: packages/rulecast/src/core/types.ts
+              code: |
+                export interface Finding { endLine?: number }
+          bad:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                return { kind: "edit", files, intent: undefined }
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const finding = { file, line, column: undefined }
+
+      - id: style/no-js-suffix
+        name: Relative imports carry no .js suffix
+        files: '^packages/rulecast/(src|test|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: 'from "\.{1,2}/[^"]*\.js"'
+        message: "{{file}}:{{line}} imports with a `.js` suffix. This package resolves as Bundler: write the path without it, as every other import does."
+        context:
+          - "@docs/conventions.md#module-style"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { errorMessage } from "./errors"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { parse } from "yaml"
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { errorMessage } from "./errors.js"
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                import { createRepo } from "../helpers/git.js"
+
+      - id: style/node-prefix
+        name: Built-ins use the node prefix
+        files: '^packages/rulecast/(src|test|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: 'from "(fs|path|os|child_process|crypto|url|util|stream|events|vm|assert|http|https|net|readline|zlib)(/[a-z]+)?"'
+        message: "{{file}}:{{line}} imports a built-in without `node:`. Write `from \"node:…\"`, as the rest of the package does."
+        context:
+          - "@docs/conventions.md#module-style"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import path from "node:path"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { readFile } from "node:fs/promises"
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import path from "path"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                import { readFile } from "fs/promises"
+
+      - id: style/no-default-export-or-enum
+        name: No default exports and no enums
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '^export default\b|^\s*(export\s+)?(declare\s+)?(const\s+)?enum\s+\w+'
+            flags: m
+        message: "{{file}}:{{line}} uses a default export or an enum. Export by name, and use a string-literal union for a closed set."
+        context:
+          - "@docs/conventions.md#module-style"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export type Stage = "touch" | "edit" | "verify"
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export const regexDetector = { kind: "regex" }
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export enum Stage { Touch, Edit, Verify }
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                export default function compile() {}
+
+      - id: style/no-ts-ignore
+        name: No ts-ignore
+        files: '^packages/rulecast/(src|test|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '@ts-(ignore|nocheck)\b'
+        message: "{{file}}:{{line}} silences the type checker. Fix the type, or narrow it; `@ts-expect-error` with a reason is the most a test may do."
+        context:
+          - "@docs/conventions.md#module-style"
+        examples:
+          good:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                // @ts-expect-error: the schema must reject a number here
+                parse({ files: 1 })
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const value: unknown = input
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                // @ts-ignore
+                const value = input.field
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                // @ts-nocheck
+
+      - id: config/file-constant
+        name: Build config paths from the constants
+        files: '^packages/rulecast/src/.*\.ts$'
+        exclude: '^packages/rulecast/src/core/config/load\.ts$'
+        detect:
+          regex:
+            pattern: '\b(join|resolve|existsSync|access|readFile\w*|writeFile\w*|stat\w*)\([^)\n]*["''`]\.rulecast-(config|rules)\.yaml["''`]|[!=]==?\s*["''`]\.rulecast-(config|rules)\.yaml["''`]'
+        message: "{{file}}:{{line}} spells out a config file name in code. Use `CONFIG_FILE` or `MANIFEST_FILE` from core/config/load.ts."
+        context:
+          - "@docs/conventions.md#name-the-config-files-by-constant"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const config = path.join(root, CONFIG_FILE)
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                throw new Error(`no .rulecast-config.yaml in ${root} (run rulecast init)`)
+          bad:
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                const config = path.join(root, ".rulecast-config.yaml")
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                if (name === ".rulecast-rules.yaml") return true
+
+      - id: perf/group-in-place
+        name: Group by appending in place
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\.set\(([^,()]+),\s*\[\s*\.\.\.\(?\s*[\w.]+\.get\(\1\)'
+        message: "{{file}}:{{line}} regroups by copying the whole group per item. Use `get` then `push`: this was quadratic over findings once (62,000 matches, 5.9 s)."
+        context:
+          - "@docs/conventions.md#group-by-appending-in-place"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const group = byFile.get(match.file)
+                if (group) group.push(match)
+                else byFile.set(match.file, [match])
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                byFile.set(file, [...matches])
+          bad:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                byFile.set(match.file, [...(byFile.get(match.file) ?? []), match])
+            - path: packages/rulecast/src/detectors/example.ts
+              code: |
+                groups.set(key, [...groups.get(key)!, rule])
+
+      # ── rule format, hooks, adapters ────────────────────────────────────────────────────────
+
+      - id: hooks/never-fetch
+        name: Hooks never fetch
+        files: '^packages/rulecast/src/commands/(hook|warm)\.ts$'
+        detect:
+          regex:
+            pattern: '\bfetchingRepos\b|\bfetch\('
+        message: "{{file}}:{{line}} can fetch from a hook. Compile with `cachedRepos`: a hook has 350 ms and no network promise, and the CLI is what fetches."
+        context:
+          - "@docs/conventions.md#hooks-never-fetch"
+        examples:
+          good:
+            - path: packages/rulecast/src/commands/hook.ts
+              code: |
+                const compileProject = () => compile({ root, registry, repos: cachedRepos(home) })
+            - path: packages/rulecast/src/commands/warm.ts
+              code: |
+                const repos = cachedRepos(home)
+          bad:
+            - path: packages/rulecast/src/commands/hook.ts
+              code: |
+                const compileProject = () => compile({ root, registry, repos: fetchingRepos(home) })
+            - path: packages/rulecast/src/commands/warm.ts
+              code: |
+                const response = await fetch(url)
+
+      - id: adapters/parse-never-throws
+        name: Adapter parse returns null, never throws
+        files: '^packages/rulecast/src/adapters/[^/]+/parse\.ts$'
+        detect:
+          regex:
+            pattern: '\bthrow\b|\.parse\('
+        message: "{{file}}:{{line}} can throw from `parse`. Return null for input the adapter does not handle; the contract feeds it null, \"\", [] and {}."
+        context:
+          - "@docs/conventions.md#adapter-parse-returns-null-never-throws"
+        examples:
+          good:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                if (!result.success) return null
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                const result = payloadSchema.safeParse(input)
+          bad:
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                if (!result.success) throw new Error("unknown payload")
+            - path: packages/rulecast/src/adapters/claude-code/parse.ts
+              code: |
+                const payload = payloadSchema.parse(input)
+
+      - id: adapters/no-default-over-events
+        name: No default branch over the event union
+        files: '^packages/rulecast/src/.*\.ts$'
+        severity: warning
+        scope: container
+        detect:
+          ast-grep:
+            language: typescript
+            rule:
+              kind: switch_statement
+              has:
+                field: value
+                regex: '\.kind\b'
+              all:
+                - has:
+                    kind: switch_body
+                    has:
+                      kind: switch_default
+        message: "{{file}}:{{line}} switches over a `.kind` with a default branch. Drop the default so a new member of the union fails the type-check instead of vanishing."
+        context:
+          - "@docs/conventions.md#switch-over-internal-unions-without-a-default"
+        examples:
+          good:
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                switch (event.kind) {
+                  case "edit":
+                    return edit(event)
+                  case "verify":
+                    return verify(event)
+                }
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                switch (command) {
+                  case "run":
+                    return run()
+                  default:
+                    throw new UsageError(command)
+                }
+          bad:
+            - path: packages/rulecast/src/adapters/claude-code/adapter.ts
+              code: |
+                switch (delivery.kind) {
+                  case "edit":
+                    return edit(delivery)
+                  default:
+                    return NONE
+                }
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                switch (record.kind) {
+                  case "touch":
+                    break
+                  default:
+                    break
+                }
+
+      # ── tests ───────────────────────────────────────────────────────────────────────────────
 
       - id: tests/no-sockets
         name: Tests never reach the network
         files: '^packages/rulecast/test/.*\.ts$'
         # The helpers own the exceptions: a local http server and a stub agent CLI.
         exclude: '^packages/rulecast/test/helpers/'
-        severity: error
         detect:
           regex:
-            pattern: 'from "node:(http|https|net|tls)"'
-        message: "{{file}}:{{line}} opens a socket. No test in `pnpm test` may reach the network: use test/helpers/llm-server.ts or the stub agent CLI in test/helpers/llm.ts."
+            pattern: 'from "(node:)?(http|https|net|tls|dgram)"|from "undici"'
+        message: "{{file}}:{{line}} opens a socket. No test in `pnpm test` may reach the network: use `fakeApi` from test/helpers/llm-server.ts or `stubAgentCli` from test/helpers/llm.ts."
         context:
           - "@docs/conventions.md#tests-never-reach-the-network"
         examples:
           good:
             - path: packages/rulecast/test/detectors/llm/example.test.ts
               code: |
-                import { llmServer } from "../../helpers/llm-server"
+                import { fakeApi } from "../../helpers/llm-server"
+            - path: packages/rulecast/test/detectors/llm/example.test.ts
+              code: |
+                import { stubAgentCli } from "../../helpers/llm"
           bad:
             - path: packages/rulecast/test/detectors/llm/example.test.ts
               code: |
                 import { createServer } from "node:http"
+            - path: packages/rulecast/test/detectors/llm/example.test.ts
+              code: |
+                import { connect } from "node:net"
 
-      - id: format/rule-keys
-        name: A rule key is four changes, not one
-        description: Delivers the checklist the first time an agent works on the rule schema or its compiler.
+      - id: tests/no-real-home
+        name: Every test gets its own cache home
+        files: '^packages/rulecast/(src|test)/.*\.ts$'
+        # home.ts owns the real lookup; home.test.ts tests it.
+        exclude: '^packages/rulecast/(src/core/home\.ts|test/core/home\.test\.ts)$'
+        detect:
+          regex:
+            pattern: '\bhomedir\(\)|\bos\.homedir\b'
+        message: "{{file}}:{{line}} reaches for the real home directory. Pass `testEnv` from test/helpers/home.ts (or a mkdtemp home) as RULECAST_HOME; in src/, only core/home.ts asks for homedir()."
+        context:
+          - "@docs/conventions.md#every-test-gets-its-own-cache-home"
+        examples:
+          good:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                const io = captureIo(root, { env: testEnv })
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                const env = { ...testEnv, RULECAST_HOME: await mkdtemp(path.join(tmpdir(), "home-")) }
+          bad:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                const cache = path.join(homedir(), ".cache", "rulecast")
+            - path: packages/rulecast/src/core/example.ts
+              code: |
+                const home = os.homedir
+      - id: tests/no-chdir
+        name: Never chdir
+        files: '^packages/rulecast/(src|test|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bprocess\.chdir\('
+        message: "{{file}}:{{line}} changes the process directory. Pass `cwd` explicitly: vitest shares a worker between a file's tests, so this moves every other test too."
+        context:
+          - "@docs/conventions.md#tests-never-chdir-and-never-write-inside-the-repository"
+        examples:
+          good:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                const io = captureIo(root)
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                await main(["run"], { ...io, cwd: root })
+          bad:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                process.chdir(root)
+            - path: packages/rulecast/src/commands/example.ts
+              code: |
+                process.chdir(project.root)
+
+      - id: tests/stub-env
+        name: Stub env vars instead of assigning them
+        files: '^packages/rulecast/test/.*\.ts$'
+        # Both exercise the real inheritance path, and snapshot and restore process.env themselves.
+        exclude: '^packages/rulecast/test/(core/git\.test\.ts|helpers/git-isolation\.test\.ts)$'
+        detect:
+          regex:
+            pattern: '\bprocess\.env(\.\w+|\[[^\]]+\])\s*=(?!=)|\bdelete process\.env\b'
+        message: "{{file}}:{{line}} assigns process.env. Use `vi.stubEnv` with `vi.unstubAllEnvs()` in afterEach: vitest.config.ts does not unstub, so this leaks into every later test in the file."
+        context:
+          - "@docs/conventions.md#stub-env-vars-and-restore-what-you-assign"
+        examples:
+          good:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                vi.stubEnv("PATH", "/usr/bin:/bin")
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                if (process.env.RULECAST_LLM === "1") run()
+          bad:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                process.env.PATH = "/usr/bin:/bin"
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                delete process.env.ANTHROPIC_API_KEY
+
+      - id: tests/no-skip
+        name: No skipped tests
+        files: '^packages/rulecast/test/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\b(test|it|describe)\.(skip|todo)\b|\b(xit|xtest|xdescribe)\('
+        message: "{{file}}:{{line}} skips a test. Fix it, or gate it on a named condition with `describe.runIf`/`skipIf` and say why: a skipped test is a red suite made green."
+        context:
+          - "@docs/conventions.md#no-skipped-tests"
+        examples:
+          good:
+            - path: packages/rulecast/test/detectors/llm/live.test.ts
+              code: |
+                describe.runIf(process.env.RULECAST_LLM === "1")("live providers", () => {})
+            - path: packages/rulecast/test/binary.test.ts
+              code: |
+                describe.skipIf(!hasBun)("standalone binary", () => {})
+          bad:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                test.skip("flaky on CI", async () => {})
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                describe.todo("budget edge cases")
+
+      - id: tests/no-mocks
+        name: No mocks
+        files: '^packages/rulecast/test/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\bvi\.(mock|doMock|spyOn|useFakeTimers|stubGlobal)\('
+        message: "{{file}}:{{line}} mocks. Use a temp project, the stub agent CLI, `fakeApi`, or `captureIo` injection: a mock tests the mock."
+        context:
+          - "@docs/conventions.md#no-mocks"
+        examples:
+          good:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                await stubAgentCli(root, { answer: "[]" })
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                vi.stubEnv("PATH", "/usr/bin:/bin")
+          bad:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                vi.mock("node:child_process")
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                vi.useFakeTimers()
+
+      - id: tests/no-raised-timeout
+        name: Never raise a timeout to make a test pass
+        files: '^packages/rulecast/test/.*\.ts$'
+        # Build, binary, stress and live work are the documented reasons for a longer timeout.
+        exclude: '^packages/rulecast/test/(build|binary)\.test\.ts$|live\.test\.ts$|stress'
+        severity: warning
+        detect:
+          regex:
+            pattern: '\}\s*,\s*[0-9][0-9_]{3,}\s*\)|\btimeout:\s*[0-9][0-9_]{3,}\b'
+        message: "{{file}}:{{line}} sets its own timeout. The global 20 s already leaves an order of magnitude of headroom; a slow test is a finding, and a higher timeout turns a hang into a slow pass."
+        context:
+          - "@docs/conventions.md#never-raise-a-timeout-to-make-a-test-pass"
+        examples:
+          good:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                test("compiles", async () => {
+                  expect(await compile(root)).toEqual([])
+                })
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const limit = { maxBytes: 10_000 }
+          bad:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                test("compiles", async () => {
+                  expect(await compile(root)).toEqual([])
+                }, 60_000)
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                test("compiles", { timeout: 30000 }, async () => {})
+
+      - id: tests/test-not-it
+        name: Write test, not it
+        files: '^packages/rulecast/test/.*\.ts$'
+        detect:
+          regex:
+            pattern: '^[ \t]*it(\.\w+)?\('
+            flags: m
+        message: "{{file}}:{{line}} uses `it`. Write `test(\"<the behaviour, as a sentence>\", …)`, as the rest of the suite does."
+        context:
+          - "@docs/conventions.md#write-test-not-it"
+        examples:
+          good:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                test("a fixture does not run the repository's hooks", async () => {})
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const it = items[0]
+          bad:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                it("should not run hooks", async () => {})
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                  it.each(cases)("parses %s", (input) => {})
+
+      - id: tests/no-snapshots
+        name: Goldens are written by hand
+        files: '^packages/rulecast/(test|scripts)/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\btoMatch(Inline|File)?Snapshot\(|\btoThrowErrorMatchingSnapshot\(|goldens/[^"''`]*["''`][^\n]*\b(writeFile|writeFileSync)\b|\b(writeFile|writeFileSync)\([^)\n]*goldens/'
+        message: "{{file}}:{{line}} records an expectation from the implementation. Goldens are written by hand or copied from a run someone read: an expectation the code generated proves nothing."
+        context:
+          - "@docs/conventions.md#goldens-are-written-by-hand"
+        examples:
+          good:
+            - path: packages/rulecast/test/core/delivery/example.test.ts
+              code: |
+                expect(render(delivery)).toBe(await readFile(path.join(GOLDENS, "expected.txt"), "utf8"))
+            - path: packages/rulecast/test/core/delivery/example.test.ts
+              code: |
+                expect(text).toBe("src/a.ts:3 imports the client\n")
+          bad:
+            - path: packages/rulecast/test/core/delivery/example.test.ts
+              code: |
+                expect(render(delivery)).toMatchSnapshot()
+            - path: packages/rulecast/test/core/delivery/example.test.ts
+              code: |
+                await writeFile(path.join("test/goldens/delivery", name, "expected.txt"), text)
+
+      - id: tests/no-system-paths
+        name: Tests never touch real system paths
+        files: '^packages/rulecast/test/.*\.ts$'
+        detect:
+          regex:
+            pattern: '["''`]/(proc|sys|private|etc|root|var/folders)(/|["''`]|\$\{)'
+        message: "{{file}}:{{line}} uses a real system path. Make an unwritable path a path under a regular file: `/proc/nonexistent` hung vitest on Linux, and with it CI and the release."
+        context:
+          - "@docs/conventions.md#tests-are-platform-neutral"
+        examples:
+          good:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const unwritable = path.join(await writeFileAt(root, "file"), "child")
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const fake = "/project/src/a.ts"
+          bad:
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                const unwritable = "/proc/nonexistent"
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                expect(real).toBe(`/private${dir}`)
+
+      - id: tests/derive-version
+        name: Tests derive the version
+        files: '^packages/rulecast/test/.*\.ts$'
+        detect:
+          regex:
+            pattern: '\brunning\s+v?\d+\.\d+\.\d+\b'
+        message: "{{file}}:{{line}} hard-codes rulecast's version. Import `VERSION`: a literal broke the 0.1.0 bump inside the release job."
+        context:
+          - "@docs/conventions.md#tests-derive-the-version"
+        examples:
+          good:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                expect(io.out).toContain(`running ${VERSION}`)
+            - path: packages/rulecast/test/core/example.test.ts
+              code: |
+                expect(sarif.version).toBe("2.1.0")
+          bad:
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                expect(io.out).toContain("running 0.5.0")
+            - path: packages/rulecast/test/commands/example.test.ts
+              code: |
+                expect(io.err).toContain("(running 0.5.0)")
+
+      - id: testing/no-test-framework
+        name: The contract suites import no test framework
+        files: '^packages/rulecast/src/.*\.ts$'
+        detect:
+          regex:
+            pattern: 'from "(vitest[^"]*|node:test|@jest/globals|jest|mocha)"'
+        message: "{{file}}:{{line}} imports a test framework into src/. The contract suites ship to plugin authors: assert with node:assert/strict and take `test` as an argument."
+        context:
+          - "@docs/conventions.md#the-contract-suites-import-no-test-framework"
+        examples:
+          good:
+            - path: packages/rulecast/src/testing/detector-contract.ts
+              code: |
+                import assert from "node:assert/strict"
+            - path: packages/rulecast/src/testing/adapter-contract.ts
+              code: |
+                export function adapterContract(test: TestFn, fixture: AdapterFixture) {}
+          bad:
+            - path: packages/rulecast/src/testing/detector-contract.ts
+              code: |
+                import { expect, test } from "vitest"
+            - path: packages/rulecast/src/testing/adapter-contract.ts
+              code: |
+                import { describe } from "node:test"
+
+      # ── catalog, docs, release ──────────────────────────────────────────────────────────────
+
+      - id: catalog/no-id-prefix
+        name: Catalog rule ids carry no package prefix
+        files: '^packages/rules-[^/]+/rules\.yaml$'
+        detect:
+          regex:
+            pattern: '^[ \t]*-?[ \t]*id:[ \t]*["'']?(python|react|general)/'
+            flags: m
+        message: "{{file}}:{{line}} prefixes a catalog id. The manifest adds the package prefix; written here it publishes as python/python/…"
+        context:
+          - "@docs/conventions.md#catalog-rule-ids-carry-no-package-prefix"
+        examples:
+          good:
+            - path: packages/rules-python/rules.yaml
+              code: |
+                - id: thin-routes
+            - path: packages/rules-react/rules.yaml
+              code: |
+                - id: no-inline-style
+                  name: Styles live in CSS modules
+          bad:
+            - path: packages/rules-python/rules.yaml
+              code: |
+                - id: python/thin-routes
+            - path: packages/rules-react/rules.yaml
+              code: |
+                  - id: "react/no-inline-style"
+
+      - id: catalog/package-relative-context
+        name: Catalog context paths are relative to the package
+        files: '^packages/rules-[^/]+/rules\.yaml$'
+        detect:
+          regex:
+            pattern: '"@(packages/|docs/|\.\./|/)'
+        message: "{{file}}:{{line}} writes a context path from the wrong root. Write it relative to the package (`@errors.md#…`): the manifest prepends packages/<dir>/."
+        context:
+          - "@docs/conventions.md#catalog-rule-ids-carry-no-package-prefix"
+        examples:
+          good:
+            - path: packages/rules-python/rules.yaml
+              code: |
+                context: ["@errors.md#swallowed-exceptions"]
+            - path: packages/rules-general/rules.yaml
+              code: |
+                context:
+                  - "@generated.md"
+          bad:
+            - path: packages/rules-python/rules.yaml
+              code: |
+                context: ["@packages/rules-python/errors.md#swallowed-exceptions"]
+            - path: packages/rules-react/rules.yaml
+              code: |
+                context:
+                  - "@docs/conventions.md#styles"
+
+      - id: docs/tag-pinned-urls
+        name: Pin rulecast URLs to a tag
+        files: '^(README\.md|agents/.*\.md|packages/rulecast/src/.*\.ts)$'
+        detect:
+          regex:
+            pattern: 'syv-ai/rulecast/(blob/|tree/|raw/)?(main|master|HEAD)\b'
+        message: "{{file}}:{{line}} links rulecast at a branch. Pin it to a tag (`vX.Y.Z`) or a placeholder: a tag resolves to the same file forever, `main` changes under every user holding the link."
+        context:
+          - "@docs/conventions.md#pin-rulecast-urls-to-a-tag"
+        examples:
+          good:
+            - path: agents/SETUP.md
+              code: |
+                https://raw.githubusercontent.com/syv-ai/rulecast/v0.5.0/agents/DRAFT-RULES.md
+            - path: packages/rulecast/src/init/prompt.ts
+              code: |
+                const url = `https://raw.githubusercontent.com/syv-ai/rulecast/${tag}/agents/DRAFT-RULES.md`
+          bad:
+            - path: agents/SETUP.md
+              code: |
+                https://raw.githubusercontent.com/syv-ai/rulecast/main/agents/DRAFT-RULES.md
+            - path: README.md
+              code: |
+                See [the format](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md).
+
+      # Touch rules, not refuse_write: an agent that regenerates these with `pnpm manifest` through
+      # Bash would be told the file is protected and to revert it — the remedy reported as the
+      # violation (docs/evidence/2026-10-11-self-conventions.md). Back to refuse_write once a rule
+      # can name the commands that may write the file.
+      - id: generated/no-hand-edit
+        name: Generated files are regenerated, never hand-edited
+        files: '^(\.rulecast-rules\.yaml|packages/rulecast/(README\.md|LICENSE|src/core/version\.ts|CHANGELOG\.md))$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#generated-files-are-regenerated-never-hand-edited"
+          - "@docs/conventions.md#release-through-a-changeset"
+
+      - id: site/no-generated-pages
+        name: The site's synced pages are build output
+        files: '^packages/site/src/content/docs/((guides|reference|agents)/.*|getting-started\.md)$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#readme-sections-are-mapped-by-the-site"
+
+      - id: ci/called-not-triggered
+        name: Workflows that follow a release are called
+        files: '^\.github/workflows/.*\.ya?ml$'
+        detect:
+          regex:
+            pattern: '^on:[ \t]*\n(?:(?:[ \t].*)?\n)*?[ \t]+(release|create|workflow_run|registry_package):|^on:[ \t]*\[?[^\n]*\b(release|create|workflow_run)\b'
+            flags: m
+        message: "{{file}}:{{line}} triggers on an event GITHUB_TOKEN raises, which starts no workflow. Make it `workflow_call` and call it from release.yml: v0.2.0 and v0.3.0 shipped with no binaries this way."
+        context:
+          - "@docs/conventions.md#workflows-that-follow-a-release-are-called"
+        examples:
+          good:
+            - path: .github/workflows/binaries.yml
+              code: |
+                on:
+                  workflow_call:
+                    inputs:
+                      tag:
+                        type: string
+            - path: .github/workflows/release.yml
+              code: |
+                on:
+                  push:
+                    branches: [main]
+                jobs:
+                  release:
+                    runs-on: ubuntu-latest
+          bad:
+            - path: .github/workflows/binaries.yml
+              code: |
+                on:
+                  release:
+                    types: [published]
+            - path: .github/workflows/pages.yml
+              code: |
+                on: [workflow_run]
+
+      - id: ci/no-continue-on-error
+        name: No step continues on error
+        files: '^\.github/workflows/.*\.ya?ml$'
+        detect:
+          regex:
+            pattern: '^[ \t]*continue-on-error:[ \t]*(true|\$\{\{)'
+            flags: m
+        message: "{{file}}:{{line}} lets a step fail green. A fake green is worse than no signal: let it fail, or gate it with `if:`."
+        context:
+          - "@docs/conventions.md#workflows-that-follow-a-release-are-called"
+        examples:
+          good:
+            - path: .github/workflows/ci.yml
+              code: |
+                - run: pnpm test
+            - path: .github/workflows/ci.yml
+              code: |
+                - run: pnpm test:linux
+                  if: runner.os == 'Linux'
+          bad:
+            - path: .github/workflows/ci.yml
+              code: |
+                - run: pnpm test
+                  continue-on-error: true
+            - path: .github/workflows/ci.yml
+              code: |
+                    continue-on-error: ${{ matrix.experimental }}
+
+      # ── touch rules: what no pattern can see, delivered once per area ───────────────────────
+
+      - id: touch/hook-path
+        name: The hook path fails open
+        files: '^packages/rulecast/src/(commands/hook|core/pipeline|core/guard)\.ts$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#hooks-fail-open"
+          - "@docs/conventions.md#narrow-every-catch"
+          - "@docs/conventions.md#hooks-never-fetch"
+
+      - id: touch/detectors
+        name: Detector conventions
+        files: '^packages/rulecast/src/detectors/'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#one-bad-rule-is-a-rule-error-not-a-run-error"
+          - "@docs/conventions.md#bound-synchronous-work-by-size-not-by-a-timer"
+          - "@docs/conventions.md#detectors-never-classify"
+          - "@docs/conventions.md#read-an-external-programs-answer-from-its-source-of-truth"
+          - "@docs/conventions.md#cache-keys-include-every-input-that-chooses-the-answer"
+
+      - id: touch/detection-core
+        name: Detection core conventions
+        files: '^packages/rulecast/src/core/(detection/|baseline/record)'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#never-run-a-metered-detector-as-a-side-effect"
+          - "@docs/conventions.md#bound-synchronous-work-by-size-not-by-a-timer"
+          - "@docs/conventions.md#cache-keys-include-every-input-that-chooses-the-answer"
+
+      - id: touch/subprocesses
+        name: Subprocess conventions
+        files: '^packages/rulecast/src/(core/(git|which|detection/tool)|commands/spawn|init/clipboard|detectors/llm/providers/cli|detectors/linter/tools)\.ts$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#pass-the-signal-to-everything-you-await"
+          - "@docs/conventions.md#pass-file-arguments-after-a-double-dash"
+          - "@docs/conventions.md#read-an-external-programs-answer-from-its-source-of-truth"
+
+      - id: touch/paths
+        name: Path conventions
+        files: '^packages/rulecast/src/(core/detection/paths|commands/project|core/delivery/persist|core/repos/layout)\.ts$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#repo-relative-paths-use-forward-slashes"
+          - "@docs/conventions.md#files-the-agent-must-read-live-under-the-project"
+          - "@docs/conventions.md#path-segments-from-a-payload-go-through-safesegment"
+
+      - id: touch/session-store
+        name: Session and baseline conventions
+        files: '^packages/rulecast/src/core/(session/(session|tree|lock|state)|baseline/|jsonl)'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#change-detection-compares-content-not-mtime"
+          - "@docs/conventions.md#a-missing-baseline-means-new"
+          - "@docs/conventions.md#path-segments-from-a-payload-go-through-safesegment"
+
+      - id: touch/delivery
+        name: Delivery and budget conventions
+        files: '^packages/rulecast/src/core/(delivery/|session/decide|template)'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#the-renderer-prices-its-own-output-a-line-at-a-time"
+          - "@docs/conventions.md#decisions-read-what-was-found-not-what-fitted"
+          - "@docs/conventions.md#finding-text-goes-through-rendertemplate"
+          - "@docs/conventions.md#count-the-unit-you-print"
+          - "@docs/conventions.md#notices-go-to-the-developer-not-the-model"
+
+      - id: touch/adapters
+        name: Adapter conventions
+        files: '^packages/rulecast/src/adapters/'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#map-every-variant-of-an-agent-event-explicitly"
+          - "@docs/conventions.md#upgrade-installed-hooks-in-place"
+          - "@docs/conventions.md#notices-go-to-the-developer-not-the-model"
+          - "@docs/conventions.md#hooks-fail-open"
+
+      - id: touch/rule-format
+        name: A rule key is four changes
         files: '^packages/rulecast/src/core/(config/schema|compile/rule)\.ts$'
         stages: [touch]
         context:
           - "@docs/conventions.md#a-rule-key-is-four-changes-not-one"
+          - "@docs/conventions.md#validate-external-input-with-safeparse"
+
+      - id: touch/commands
+        name: Command conventions
+        files: '^packages/rulecast/src/commands/'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#count-the-unit-you-print"
+          - "@docs/conventions.md#never-run-a-metered-detector-as-a-side-effect"
+          - "@docs/conventions.md#narrow-every-catch"
+
+      - id: touch/tests
+        name: Test conventions
+        files: '^packages/rulecast/test/.*\.test\.ts$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#a-changed-test-is-a-finding"
+          - "@docs/conventions.md#every-assertion-must-be-able-to-fail"
+          - "@docs/conventions.md#keep-path-stubbed-where-a-tool-could-run"
+          - "@docs/conventions.md#tests-are-platform-neutral"
+          - "@docs/conventions.md#tests-never-chdir-and-never-write-inside-the-repository"
+
+      - id: touch/goldens-and-payloads
+        name: Goldens and recordings
+        files: '^packages/rulecast/test/(goldens|payloads)/'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#goldens-are-written-by-hand"
+          - "@docs/conventions.md#recorded-payloads-are-recordings"
+
+      - id: touch/catalog
+        name: Catalog conventions
+        files: '^packages/(rules-[^/]+/|rulecast/test/catalog\.test\.ts$|rulecast/scripts/manifest\.ts$)'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#a-new-catalog-rule-is-registered-and-tested"
+          - "@docs/conventions.md#generated-files-are-regenerated-never-hand-edited"
+
+      - id: touch/agent-docs
+        name: Agent docs conventions
+        files: '^agents/'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#agent-docs-link-relatively-and-stay-put"
+          - "@docs/conventions.md#pin-rulecast-urls-to-a-tag"
+
+      - id: touch/readme
+        name: The README feeds the npm page and the site
+        files: '^README\.md$'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#readme-sections-are-mapped-by-the-site"
+          - "@docs/conventions.md#generated-files-are-regenerated-never-hand-edited"
+
+      - id: touch/release
+        name: Release conventions
+        files: '^(\.changeset/|\.github/workflows/|packages/rulecast/package\.json$|package\.json$)'
+        stages: [touch]
+        context:
+          - "@docs/conventions.md#release-through-a-changeset"
+          - "@docs/conventions.md#workflows-that-follow-a-release-are-called"
