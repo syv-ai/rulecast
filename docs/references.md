@@ -55,3 +55,6 @@
 - **Core:** Khorikov, *Unit Testing Principles, Practices, and Patterns* (2020). It's where the debate about mocks lives.
 - **Core:** OWASP (Top 10, ASVS, Cheat Sheet Series)
 - *Supplementary:* the anti-patterns coding agents produce most: the families in the `improve-code-design` skill
+
+## 11. Laws of software engineering
+- **Core:** Milanović, *Laws of Software Engineering* (lawsofsoftwareengineering.com, free online). 56 named laws (Conway, Hyrum, Gall, Postel, Kernighan and others), each with an overview, examples, origins and further reading. Its pages have no counterpoints, so a lens built from one takes its counter-view from another source.
