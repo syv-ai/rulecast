@@ -158,3 +158,56 @@ Six fresh agents ran the same brief on the same six codebases. They were not tol
    - 401 against 403 semantics;
    - one environment flag that switches on several risky behaviours;
    - a methodology for a project that already has a numbered spec it cites from code.
+
+## Round three: six codebases the catalog never saw
+
+Between rounds:
+- the catalog was decontaminated, so no entry names a specific codebase, and a validator rejects one that does;
+- the starter lists were curated by hand per kind, capped at 25, with related kinds checked against each other;
+- the 30 agent-prone tells were measured on a twelve-repository corpus (`docs/evidence/2026-10-13-tells-on-a-corpus.md`).
+
+Six fresh agents then ran the same brief on six repositories that played no part in shaping the catalog.
+
+| Codebase | Kind, language | Methodology chosen | Most useful entry |
+|---|---|---|---|
+| httpie | CLI with plugins, Python | contract-led + refactoring to patterns | `fail-open-vs-fail-closed` |
+| umami | full-stack analytics, TypeScript (Next.js) | framework idiom + contract-led | `injection` (its counter-view) |
+| lazygit | TUI, Go | refactoring to patterns + contract-led | `functional-core-imperative-shell` |
+| bat | CLI and library, Rust | contract-led + refactoring to patterns | `parse-dont-validate` |
+| mealie | multi-tenant web app, Python and Vue | framework idiom + refactoring to patterns | `mass-assignment` |
+| jasontaylordev/CleanArchitecture | solution template, C# | exemplar + framework idiom | `domain-event` |
+
+### What held on unseen code
+
+- **Every most useful entry came from the coverage pass**, and each led to a likely real problem:
+  - httpie: installing one formatter plugin silently drops the built-in formatters.
+  - bat: `--terminal-width` is checked as `i32` and read again as `i16`, so a large value passes and is ignored; and the library calls `process::exit` on a broken pipe.
+  - CleanArchitecture: domain events are published before the save commits, and no handler checks who owns the record.
+  - umami: SQL that is safe only because route schemas happen to filter two interpolated values.
+  - mealie: a non-admin user appears able to change their own `auth_method`, and two endpoints write to disk before checking permission.
+- **The methodologies fit without stretching.** Contract-led was chosen as primary twice and as secondary three times; framework idiom was primary twice; refactoring to patterns was primary once, for a codebase halfway out of a god struct. Every agent stated what the project already enforces before choosing.
+- **The counter-views kept doing their job.** `injection` stopped an agent flagging every raw query whose values were bound safely. `mass-assignment` and `fail-open-vs-fail-closed` turned a reflexive flag into a finding.
+
+### What failed
+
+1. **Defects introduced by the build,** hit by every agent:
+   - every kind page rendered its interview section as `undefined`, a generator bug since fixed;
+   - the rewritten `swallowed-errors` tell still carried the tester's notes;
+   - `applies_to` restrictions contradicted `matters_most_for`, scoping `dry`, `magic-number` and `generic-repository` away from code they plainly fit;
+   - principle entries showed forces under "Why people fall into it";
+   - the brief still said "four methodologies".
+2. **Missing lenses:**
+   - multi-tenancy and tenant isolation ("tenant" didn't appear in the index), and running the authorisation check before any side effect: mealie's two most serious findings;
+   - concurrency and keeping work on the UI thread, the main design concern in a TUI;
+   - keeping parallel variants in step: the Postgres and ClickHouse versions of each query, the root of most duplication in umami;
+   - Cargo features that change the shape of public types;
+   - escaping text before writing it to a terminal;
+   - idempotency, which the starter-list curators also found missing.
+3. **Methodology gaps:**
+   - no methodology starts from decision records or a numbered spec the project already has (CleanArchitecture's ADRs; rulecast's spec in round two);
+   - none frames a written house architecture that is mid-migration;
+   - quality attributes names only performance and distribution, not security or tenant isolation.
+4. **Language coverage:**
+   - the measured tells gave nothing for Rust;
+   - C# guidance is stale for .NET 10: minimal-API validation, the throw-and-map error style, mediator written up as a GUI pattern.
+5. **Facts:** RFC 7807 was credited to Dalal, who co-wrote only RFC 9457 (two agents caught it), and one MediatR licence claim was overstated.
