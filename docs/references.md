@@ -58,3 +58,11 @@
 
 ## 11. Laws of software engineering
 - **Core:** Milanović, *Laws of Software Engineering* (lawsofsoftwareengineering.com, free online). 56 named laws (Conway, Hyrum, Gall, Postel, Kernighan and others), each with an overview, examples, origins and further reading. Its pages have no counterpoints, so a lens built from one takes its counter-view from another source.
+
+## 12. Anti-patterns and smells
+- **Core:** INNOQ, *Architecture Antipatterns* (architecture-antipatterns.tech, CC BY 4.0), with its case studies
+- **Core:** Refactoring.Guru's code smells catalog (refactoring.guru/refactoring/smells)
+- **Core:** Meszaros, *xUnit Test Patterns* (2007), its test smells (xunitpatterns.com, free online)
+- **Core:** Foote & Yoder, "Big Ball of Mud" (1997, laputan.org/mud, free online)
+- *Supplementary:* Brown, Malveau, McCormick & Mowbray, *AntiPatterns* (1998). The source of the Blob, Lava Flow, Poltergeists and Golden Hammer.
+- *Supplementary:* Kerievsky, *Refactoring to Patterns* (2004), the move from smell to pattern

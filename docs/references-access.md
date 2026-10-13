@@ -43,10 +43,16 @@ A background agent checked each source in `docs/references.md` for what can legi
 | 35 | Khorikov, Unit Testing | partial | liveBook excerpt, free articles | livebook.manning.com/book/unit-testing | Manning terms | — |
 | 36 | OWASP | full text | Top 10 (2025), ASVS 5.0.0, Cheat Sheet Series | owasp.org/Top10/; cheatsheetseries.owasp.org | CC BY-SA 4.0 | — |
 | 37 | Laws of Software Engineering (Milanović) | full text | 56 laws in 7 categories (architecture, teams, planning, quality, design, scale, decisions); each page has takeaways, an overview, examples, origins, further reading and related laws | lawsofsoftwareengineering.com | CC BY-NC-ND 4.0 | added 2026-10-13; no counterpoints on its pages; a book is promoted separately |
+| 38 | INNOQ, Architecture Antipatterns | full text | 11 antipatterns and 12 case studies | architecture-antipatterns.tech | CC BY 4.0 | added 2026-10-13 |
+| 39 | Refactoring.Guru code smells | full text | 23 smells in 5 groups | refactoring.guru/refactoring/smells | all rights reserved | added 2026-10-13 |
+| 40 | Meszaros, xUnit Test Patterns (test smells) | full text | test smell catalog | xunitpatterns.com/Test%20Smells.html | © Meszaros, free online | added 2026-10-13 |
+| 41 | Foote & Yoder, Big Ball of Mud | full text | the 1997 paper | laputan.org/mud/ | author-hosted | added 2026-10-13 |
+| 42 | Brown et al., AntiPatterns (1998) | none checked | — | — | — | named recall |
+| 43 | Kerievsky, Refactoring to Patterns (2004) | none checked | — | — | — | named recall |
 
 ## Summary
 
-- **Full text: 17** (4, 6, 12, 13, 14, 17, 23, 26, 27, 28, 29, 31, 32, 33, 34, 36, 37), plus the free parts of 8 (the debate) and 19 (the DDD Reference).
+- **Full text: 21** (4, 6, 12, 13, 14, 17, 23, 26, 27, 28, 29, 31, 32, 33, 34, 36, 37, 38, 39, 40, 41), plus the free parts of 8 (the debate) and 19 (the DDD Reference).
 - **Partial: 17** (1, 2, 3, 5, 8, 9, 10, 11, 15, 16, 18, 19, 20, 22, 24, 30, 35).
 - **Catalog only: 2** (21, 25). **Video only: 1** (7).
 - **Core sources without full text:** 1, 2, 5, 9, 15, 16, 18, 20, 22. Only excerpts, previews or catalogs are available for them, and for 2, 18, 20 and 22 even the preview is unverified.
