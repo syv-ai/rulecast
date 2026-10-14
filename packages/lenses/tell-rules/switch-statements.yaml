@@ -1,0 +1,240 @@
+# Tell for the lens `switch-statements`. Verdict: keep. 8 of 9 sampled hits real (9 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/switch-statements-ts
+        name: switch-statements (TypeScript)
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)generated/|\.gen\.tsx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright)/|\.(test|spec)\.tsx?$
+        severity: warning
+        detect:
+          ast-grep:
+            language: tsx
+            utils:
+              fn:
+                any:
+                  - kind: function_declaration
+                  - kind: generator_function_declaration
+                  - kind: function_expression
+                  - kind: arrow_function
+                  - kind: method_definition
+            rule:
+              all:
+                - pattern: switch ($V) { $$$ }
+                - inside:
+                    stopBy: end
+                    matches: fn
+                - inside:
+                    stopBy: end
+                    not:
+                      kind: program
+                    any:
+                      - matches: fn
+                      - has:
+                          stopBy: end
+                          matches: fn
+                    follows:
+                      stopBy: end
+                      has:
+                        stopBy: end
+                        pattern: switch ($V) { $$$ }
+                        inside:
+                          stopBy: end
+                          matches: fn
+        message: "{{file}}:{{line}} switches on `{{V}}` again; another function in this file already does. Move the behaviour to the type it switches on (a lookup table, a strategy, or one function that owns the switch)."
+        examples:
+          good:
+            - path: src/g0.ts
+              code: |
+                export function price(plan: Plan) {
+                  switch (plan.kind) {
+                    case "free": return 0;
+                    default: return 12;
+                  }
+                }
+                export function limit(plan: Plan) {
+                  switch (plan.tier) {
+                    case "free": return 3;
+                    default: return 50;
+                  }
+                }
+            - path: src/g1.ts
+              code: |
+                export function step(state: State, ev: Ev) {
+                  switch (ev.type) {
+                    case "a": break;
+                  }
+                  switch (ev.type) {
+                    case "b": break;
+                  }
+                }
+          bad:
+            - path: src/b0.ts
+              code: |
+                export function price(plan: Plan) {
+                  switch (plan.kind) {
+                    case "free": return 0;
+                    default: return 12;
+                  }
+                }
+                export function limit(plan: Plan) {
+                  switch (plan.kind) {
+                    case "free": return 3;
+                    default: return 50;
+                  }
+                }
+            - path: src/b1.tsx
+              code: |
+                class Plans {
+                  price(account: Account) {
+                    switch (account.plan) {
+                      case "free": return 0;
+                    }
+                  }
+                  limit = (account: Account) => {
+                    switch (account.plan) {
+                      case "free": return 3;
+                    }
+                  };
+                }
+      - id: lens/switch-statements-java
+        name: switch-statements (Java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$|(^|/)generated/
+        severity: warning
+        detect:
+          regex:
+            pattern: \bswitch\s*\(\s*(?<V>[\w.]+(?:\(\))?)\s*\)(?=[\s\S]*?\n[ \t]+(?:(?:public|private|protected|static|final|synchronized|abstract)[ \t]+)+[^;=\n(]*\([^;\n]*\)[^;\n]*$[\s\S]*?\bswitch\s*\(\s*\k<V>\s*\))
+            flags: m
+        message: "{{file}}:{{line}} switches on `{{V}}`, and a later method in this file switches on it again. Move the behaviour to the type it switches on (an enum method, a strategy, or one method that owns the switch)."
+        examples:
+          good:
+            - path: src/main/java/a/G0.java
+              code: |
+                class G0 {
+                    public int price(Plan plan) {
+                        switch (plan.kind()) {
+                            case FREE: return 0;
+                            default: return 12;
+                        }
+                    }
+                    public int limit(Plan plan) {
+                        switch (plan.tier()) {
+                            case FREE: return 3;
+                            default: return 50;
+                        }
+                    }
+                }
+            - path: src/main/java/a/G1.java
+              code: |
+                class G1 {
+                    public void step(Event ev) {
+                        switch (ev.type) {
+                            case A: break;
+                        }
+                        switch (ev.type) {
+                            case B: break;
+                        }
+                    }
+                }
+          bad:
+            - path: src/main/java/a/B0.java
+              code: |
+                class B0 {
+                    public int price(Plan plan) {
+                        switch (plan.kind()) {
+                            case FREE: return 0;
+                            default: return 12;
+                        }
+                    }
+                    public int limit(Plan plan) {
+                        switch (plan.kind()) {
+                            case FREE: return 3;
+                            default: return 50;
+                        }
+                    }
+                }
+            - path: src/main/java/a/B1.java
+              code: |
+                class B1 {
+                    private String label(Account account) {
+                        switch (account.plan) {
+                            case "free": return "Free";
+                        }
+                        return "";
+                    }
+
+                    static int seats(Account account) {
+                        switch (account.plan) {
+                            case "free": return 3;
+                        }
+                        return 0;
+                    }
+                }
+      - id: lens/switch-statements-cs
+        name: switch-statements (C#)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|\.Tests?/|(^|/)Migrations/|\.Designer\.cs$|\.g\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: (?<![\w.])(?<V>[\w.]+(?:\(\))?)(?:(?<=\bswitch\s*\(\s*[\w.]+(?:\(\))?)\s*\)|\s+switch\s*\{)(?=[\s\S]*?\n[ \t]+(?:(?:public|private|protected|internal|static|async|override|virtual|sealed)[ \t]+)+[^;=\n(]*\([^;\n]*\)[^;\n]*$[\s\S]*?(?:\bswitch\s*\(\s*\k<V>\s*\)|(?<![\w.])\k<V>\s+switch\s*\{))
+            flags: m
+        message: "{{file}}:{{line}} switches on `{{V}}`, and a later method in this file switches on it again. Move the behaviour to the type it switches on (a smart enum, a strategy, or one method that owns the switch)."
+        examples:
+          good:
+            - path: src/App/G0.cs
+              code: |
+                public class Pricing
+                {
+                    public int Price(Plan plan)
+                    {
+                        return plan.Kind switch { PlanKind.Free => 0, _ => 12 };
+                    }
+                    public int Limit(Plan plan)
+                    {
+                        return plan.Tier switch { Tier.Free => 3, _ => 50 };
+                    }
+                }
+            - path: src/App/G1.cs
+              code: |
+                public class Steps
+                {
+                    public void Step(Event ev)
+                    {
+                        switch (ev.Type) { case EvType.A: break; }
+                        switch (ev.Type) { case EvType.B: break; }
+                    }
+                }
+          bad:
+            - path: src/App/B0.cs
+              code: |
+                public class Pricing
+                {
+                    public int Price(Plan plan)
+                    {
+                        return plan.Kind switch { PlanKind.Free => 0, _ => 12 };
+                    }
+                    public int Limit(Plan plan)
+                    {
+                        return plan.Kind switch { PlanKind.Free => 3, _ => 50 };
+                    }
+                }
+            - path: src/App/B1.cs
+              code: |
+                public class Pricing
+                {
+                    public int Price(Account account)
+                    {
+                        switch (account.Plan) { case "free": return 0; default: return 12; }
+                    }
+                    private static int Seats(Account account)
+                    {
+                        switch (account.Plan) { case "free": return 3; default: return 50; }
+                    }
+                }

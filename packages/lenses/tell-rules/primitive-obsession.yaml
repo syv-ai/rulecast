@@ -1,0 +1,269 @@
+# Tell for the lens `primitive-obsession`. Verdict: keep. 4 of 4 sampled hits real (4 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/primitive-obsession-py
+        name: primitive-obsession (Python)
+        files: \.py$
+        exclude: (^|/)alembic/versions/|(^|/)migrations/\d{4}_[^/]*\.py$|(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            constraints:
+              V:
+                any:
+                  - kind: identifier
+                  - kind: attribute
+                regex: (?i)(status|role|type|kind)$
+            rule:
+              all:
+                - &a1
+                  kind: comparison_operator
+                  any:
+                    - pattern: $V == $_A
+                    - pattern: $V != $_A
+                  has:
+                    nthChild:
+                      position: 1
+                      reverse: true
+                    any:
+                      - kind: string
+                      - kind: integer
+                - any:
+                    - precedes: &a4
+                        stopBy: end
+                        any:
+                          - &a3
+                            all:
+                              - *a1
+                              - any:
+                                  - precedes: &a2
+                                      stopBy: end
+                                      any:
+                                        - *a1
+                                        - has:
+                                            stopBy: end
+                                            all:
+                                              - *a1
+                                  - inside:
+                                      stopBy: end
+                                      not:
+                                        kind: module
+                                      precedes: *a2
+                          - has:
+                              stopBy: end
+                              all:
+                                - *a3
+                    - inside:
+                        stopBy: end
+                        not:
+                          kind: module
+                        precedes: *a4
+                - not:
+                    any:
+                      - follows: &a5
+                          stopBy: end
+                          any:
+                            - *a1
+                            - has:
+                                stopBy: end
+                                all:
+                                  - *a1
+                      - inside:
+                          stopBy: end
+                          not:
+                            kind: module
+                          follows: *a5
+        message: "{{file}}:{{line}} compares `{{V}}` against a literal here and in two or more other places in this file. Replace the coded value with an Enum (or a small type) so its cases live in one place."
+        examples:
+          good:
+            - path: app/g0.py
+              code: |
+                def price(plan):
+                    if plan.kind is PlanKind.FREE:
+                        return 0
+                    if plan.kind is PlanKind.TEAM:
+                        return 12
+                    if plan.kind is PlanKind.ENTERPRISE:
+                        return 99
+            - path: app/g1.py
+              code: |
+                def handle(resp, account):
+                    if account.status == "active":
+                        return 1
+                    if account.role == "admin":
+                        return 2
+                    if account.plan == "team":
+                        return 3
+          bad:
+            - path: app/b0.py
+              code: |
+                def monthly_price(account):
+                    if account.plan_type == "free":
+                        return 0
+                    elif account.plan_type == "team":
+                        return 12
+
+                def seat_limit(account):
+                    if account.plan_type != "enterprise":
+                        return 3
+            - path: app/b1.py
+              code: |
+                def visible(user, status):
+                    return status == "published" or status == "scheduled" or (user and status == "draft")
+      - id: lens/primitive-obsession-go
+        name: primitive-obsession (Go)
+        files: \.go$
+        exclude: _test\.go$|(^|/)integration/
+        severity: warning
+        detect:
+          regex:
+            pattern: (?<![\w.])(?<V>(?:[A-Za-z_]\w*(?:\(\))?\.)*\w*(?:[Ss]tatus|[Rr]ole|[Tt]ype|[Kk]ind)(?:\(\))?)\s*[!=]=\s*(?:"|-?\d)(?:[\s\S]*?(?<![\w.])\k<V>\s*[!=]=\s*(?:"|-?\d)){2}
+        message: "{{file}}:{{line}} compares `{{V}}` against literals in three or more places in this file. Give the coded value a named type with constants (type Status string) so its cases live in one place."
+        examples:
+          good:
+            - path: pkg/g0.go
+              code: |
+                func price(p Plan) int {
+                	if p.Kind == KindFree {
+                		return 0
+                	}
+                	if p.Kind == KindTeam {
+                		return 12
+                	}
+                	if p.Kind == KindEnterprise {
+                		return 99
+                	}
+                	return 1
+                }
+            - path: pkg/g1.go
+              code: |
+                func check(f File) bool {
+                	return f.ShortStatus == "AA" || f.Name == "x"
+                }
+          bad:
+            - path: pkg/b0.go
+              code: |
+                func conflicted(f File) bool {
+                	return f.ShortStatus == "DU" || f.ShortStatus == "AA" || f.ShortStatus == "UU"
+                }
+            - path: pkg/b1.go
+              code: |
+                func price(p Plan) int {
+                	if p.planType == "free" {
+                		return 0
+                	}
+                	return 1
+                }
+
+                func seats(p Plan) int {
+                	if p.planType == "team" {
+                		return 50
+                	} else if p.planType != "enterprise" {
+                		return 3
+                	}
+                	return 0
+                }
+      - id: lens/primitive-obsession-java
+        name: primitive-obsession (Java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$|(^|/)generated/
+        severity: warning
+        detect:
+          regex:
+            pattern: (?<![\w.])(?<V>(?:[A-Za-z_]\w*(?:\(\))?\.)*\w*(?:[Ss]tatus|[Rr]ole|[Tt]ype|[Kk]ind)(?:\(\))?)(?:\s*[!=]=\s*-?\d|\.equals(?:IgnoreCase)?\(\s*"|\s*\)(?<="[^"\n]*"\.equals(?:IgnoreCase)?\(\s*[\w.()]+\s*\)))(?:[\s\S]*?(?<![\w.])\k<V>(?:\s*[!=]=\s*-?\d|\.equals(?:IgnoreCase)?\(\s*"|\s*\)(?<="[^"\n]*"\.equals(?:IgnoreCase)?\(\s*[\w.()]+\s*\)))){2}
+        message: "{{file}}:{{line}} compares `{{V}}` against literals in three or more places in this file. Replace the coded value with an enum so its cases live in one place."
+        examples:
+          good:
+            - path: src/main/java/a/G0.java
+              code: |
+                class G0 {
+                    int price(Plan plan) {
+                        if (plan.getKind() == Kind.FREE) return 0;
+                        if (plan.getKind() == Kind.TEAM) return 12;
+                        if (plan.getKind() == Kind.ENTERPRISE) return 99;
+                        return 1;
+                    }
+                }
+            - path: src/main/java/a/G1.java
+              code: |
+                class G1 {
+                    boolean check(Pet pet) {
+                        return pet.getType().equals("cat") || pet.getName().equals("x");
+                    }
+                }
+          bad:
+            - path: src/main/java/a/B0.java
+              code: |
+                class B0 {
+                    int price(Account account) {
+                        if (account.getPlanType().equals("free")) return 0;
+                        if ("team".equals(account.getPlanType())) return 12;
+                        if (account.getPlanType().equalsIgnoreCase("enterprise")) return 99;
+                        return 1;
+                    }
+                }
+            - path: src/main/java/a/B1.java
+              code: |
+                class B1 {
+                    String label(Order o) {
+                        if (o.status == 1) return "new";
+                        if (o.status == 2) return "paid";
+                        if (o.status != 3) return "?";
+                        return "shipped";
+                    }
+                }
+      - id: lens/primitive-obsession-cs
+        name: primitive-obsession (C#)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|\.Tests?/|(^|/)Migrations/|\.Designer\.cs$|\.g\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: (?<![\w.])(?<V>(?:[A-Za-z_]\w*(?:\(\))?\??\.)*\w*(?:[Ss]tatus|[Rr]ole|[Tt]ype|[Kk]ind)(?:\(\))?)(?:\s*[!=]=\s*(?:"|-?\d)|\.Equals\(\s*")(?:[\s\S]*?(?<![\w.])\k<V>(?:\s*[!=]=\s*(?:"|-?\d)|\.Equals\(\s*")){2}
+        message: "{{file}}:{{line}} compares `{{V}}` against literals in three or more places in this file. Replace the coded value with an enum (or a smart-enum type) so its cases live in one place."
+        examples:
+          good:
+            - path: src/App/G0.cs
+              code: |
+                public class Pricing
+                {
+                    public int Price(Plan plan)
+                    {
+                        if (plan.Kind == PlanKind.Free) return 0;
+                        if (plan.Kind == PlanKind.Team) return 12;
+                        if (plan.Kind == PlanKind.Enterprise) return 99;
+                        return 1;
+                    }
+                }
+            - path: src/App/G1.cs
+              code: |
+                public class Checks
+                {
+                    public bool Check(Order o) => o.Status == "paid" || o.Name == "x";
+                }
+          bad:
+            - path: src/App/B0.cs
+              code: |
+                public class Pricing
+                {
+                    public int Price(Account a)
+                    {
+                        if (a.PlanType == "free") return 0;
+                        if (a.PlanType == "team") return 12;
+                        if (a.PlanType != "enterprise") return 3;
+                        return 99;
+                    }
+                }
+            - path: src/App/B1.cs
+              code: |
+                public class Labels
+                {
+                    public string Label(Order order) => order.Status == 1 ? "new" : order.Status == 2 ? "paid" : order.Status == 3 ? "shipped" : "?";
+                }

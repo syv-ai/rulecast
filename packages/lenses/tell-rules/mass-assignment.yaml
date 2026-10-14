@@ -1,0 +1,183 @@
+# Tell for the lens `mass-assignment`. Verdict: keep, but unmeasured. No hits, so precision could not be measured.
+# Detectors: linter, ast-grep; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|syntax-tests|benchmarks|fixtures|testdata|snapshots)/|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/mass-assignment-py-django
+        name: ModelForm does not bind every field (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        description: "linter ruff DJ007 (__all__ in a ModelForm's fields): an existing lint rule for the Django form part of the tell. The DRF serializer and request-body forms have no lint rule and are in lens/mass-assignment-py."
+        detect:
+          linter:
+            tool: ruff
+            rules:
+              - DJ007
+        message: "{{file}}:{{line}} {{message}}. List the editable fields."
+        examples:
+          good:
+            - path: x/app/forms.py
+              code: |
+                from django import forms
+                class PostForm(forms.ModelForm):
+                    class Meta:
+                        model = Post
+                        fields = ["title", "body"]
+            - path: x/app/forms2.py
+              code: |
+                from django import forms
+                class NoteForm(forms.Form):
+                    title = forms.CharField()
+          bad:
+            - path: x/app/forms.py
+              code: |
+                from django import forms
+                class PostForm(forms.ModelForm):
+                    class Meta:
+                        model = Post
+                        fields = "__all__"
+            - path: x/app/forms2.py
+              code: |
+                from django.forms import ModelForm
+                class UserForm(ModelForm):
+                    class Meta:
+                        model = User
+                        fields = "__all__"
+      - id: lens/mass-assignment-py
+        name: Request bodies are not bound onto models wholesale (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        description: no ruff rule for request-body splats, setattr loops or DRF __all__; ast-grep on the raw request body splatted into a call, a setattr loop over request.<attr>.items(), and fields = '__all__' in a Serializer's Meta.
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              any:
+                - kind: dictionary_splat
+                  regex: ^\*\*\s*\(?\s*(await\s+)?request\.(json\(\)|get_json\(\)|data|form|POST|json)\s*\)?$
+                  inside:
+                    kind: argument_list
+                - kind: for_statement
+                  all:
+                    - has:
+                        field: right
+                        regex: ^(await\s+)?request\.\w+(\(\))?(\.items\(\))?$
+                    - has:
+                        kind: call
+                        stopBy: end
+                        regex: ^setattr\(
+                - kind: expression_statement
+                  regex: ^fields\s*=\s*["']__all__["']$
+                  inside:
+                    kind: class_definition
+                    stopBy: end
+                    has:
+                      field: name
+                      regex: ^Meta$
+                    inside:
+                      kind: class_definition
+                      stopBy: end
+                      has:
+                        field: superclasses
+                        regex: Serializer
+        message: "{{file}}:{{line}} binds every field of the request onto a model. Bind to a schema with only the editable fields, or copy named fields."
+        examples:
+          good:
+            - path: x/app/views.py
+              code: |
+                def create(request):
+                    data = PostCreate.model_validate(request.json())
+                    post = Post(title=data.title, body=data.body)
+            - path: x/app/serializers.py
+              code: |
+                class PostSerializer(serializers.ModelSerializer):
+                    class Meta:
+                        model = Post
+                        fields = ["title", "body"]
+                payload = decode(token)
+                user = TokenData(**payload)
+          bad:
+            - path: x/app/views.py
+              code: |
+                async def create(request):
+                    user = User(**await request.json())
+            - path: x/app/views2.py
+              code: |
+                def update(request, user):
+                    for key, value in request.form.items():
+                        setattr(user, key, value)
+                class UserSerializer(serializers.ModelSerializer):
+                    class Meta:
+                        model = User
+                        fields = "__all__"
+      - id: lens/mass-assignment-ts
+        name: Request bodies are not bound onto models wholesale (ts)
+        files: \.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$
+        exclude: \.(test|spec)\.[cm]?[jt]sx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/
+        severity: warning
+        description: "no oxlint rule matches; ast-grep on the raw request body passed to new Model(), Object.assign, a data: property or a spread."
+        detect:
+          ast-grep:
+            language: tsx
+            rule:
+              any:
+                - kind: new_expression
+                  has:
+                    field: arguments
+                    has:
+                      matches: BODY
+                - kind: call_expression
+                  all:
+                    - has:
+                        field: function
+                        regex: ^Object\.assign$
+                    - has:
+                        field: arguments
+                        has:
+                          matches: BODY
+                - kind: pair
+                  all:
+                    - has:
+                        field: key
+                        regex: ^data$
+                    - has:
+                        field: value
+                        matches: BODY
+                - kind: spread_element
+                  has:
+                    matches: BODY
+            utils:
+              BODY:
+                any:
+                  - kind: member_expression
+                    regex: ^(req|request|ctx\.request|c\.req)\.body$
+                  - kind: await_expression
+                    regex: ^await\s+(req|request|c\.req)\.json\(\)$
+                  - kind: parenthesized_expression
+                    regex: ^\(\s*await\s+(req|request|c\.req)\.json\(\)\s*\)$
+        message: "{{file}}:{{line}} binds every field of the request body onto a model. Parse the body with a schema that lists only the editable fields, or copy named fields."
+        examples:
+          good:
+            - path: x/src/routes.ts
+              code: |
+                const input = UserInput.parse(req.body);
+                const user = new User({ name: input.name });
+            - path: x/src/routes2.ts
+              code: |
+                const { data } = await parseRequest(request, schema);
+                await prisma.user.update({ where: { id }, data });
+          bad:
+            - path: x/src/routes.ts
+              code: |
+                const user = new User(req.body);
+                Object.assign(user, req.body);
+            - path: x/src/routes2.ts
+              code: |
+                await prisma.user.update({ where: { id }, data: await request.json() });
+                const u = { ...(await request.json()), id };

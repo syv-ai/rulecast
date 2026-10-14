@@ -1,0 +1,77 @@
+# Tell for the lens `duplicate-code`. Verdict: keep. 6 of 7 sampled hits real (7 hits in all).
+# Detectors: regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/duplicate-code-go
+        name: Duplicated block in one Go file
+        files: \.go$
+        exclude: _test\.go$|(^|/)(tests?|integration)/|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\s\S]*)(?<blk>(?:[ \t]*(?![{}()\[\]]+[,;]?[ \t]*\n)\S[^\n]*\n){6})[\s\S]*?^\k<blk>
+            flags: m
+        message: "{{file}}:{{line}} starts a run of six or more lines repeated later in this file. Extract the shared logic."
+        description: "regex fallback: no Go duplication linter (dupl via golangci-lint) is installed. Six identical non-blank lines that are not braces only, repeated later in a non-test, non-generated file."
+        examples:
+          good:
+            - path: pkg/x.go
+              code: |
+                func A(x int) int {
+                	return x + 1
+                }
+            - path: pkg/x.go
+              code: |
+                func A(x int) int {
+                	if x > 0 {
+                		return 1
+                	}
+                	return 0
+                }
+                func B(x int) int {
+                	if x > 0 {
+                		return 2
+                	}
+                	return 0
+                }
+          bad:
+            - path: pkg/x.go
+              code: |
+                func Room(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	metrics.Observe(total)
+                	return math.Round(total)
+                }
+                func Extras(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	metrics.Observe(total)
+                	return math.Round(total)
+                }
+            - path: pkg/y.go
+              code: |
+                func A(s *State) {
+                	s.Lock()
+                	s.items = nil
+                	s.cursor = 0
+                	s.dirty = true
+                	s.Unlock()
+                	s.Save()
+                }
+                func B(s *State) {
+                	s.Lock()
+                	s.items = nil
+                	s.cursor = 0
+                	s.dirty = true
+                	s.Unlock()
+                	s.Save()
+                }

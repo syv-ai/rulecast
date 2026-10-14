@@ -1,0 +1,2783 @@
+# rulecast lens catalog: smells. Distilled 2026-10-13; see docs/references.md.
+# Own words throughout; sources cited per entry (how: read | recalled).
+- id: obscure-test
+  name: Obscure Test
+  family: smell
+  group: testing
+  says: You can't tell at a glance what behaviour a test checks, either because it hides what matters (Mystery
+    Guest) or buries it under detail (Eager Test, General Fixture, Irrelevant Information, Hard-Coded Test
+    Data, Indirect Testing). Also called Long Test, Complex Test or Verbose Test.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - long test functions that build far more fixture than the assertions use
+    - tests that load a fixture file or database row by a literal name, so the input never shows in the test
+    - a shared setup helper with a generic name (setup_standard_data) called by tests that need very different
+      data
+    - magic literals in both the arrange and assert steps with no visible link between them
+    - a test that reaches the code under test through some other object instead of calling it directly
+  forces:
+    - writing everything inline because it's the quickest way to get the test green
+    - copying a big setup from a neighbouring test rather than working out the minimal one
+    - test code treated as second-class, so it never gets refactored
+  overuse:
+    - hiding so much behind helpers and builders that the test is a one-liner whose meaning lives in three
+      other files, which is a Mystery Guest of its own
+    - banning shared fixtures outright even where building fresh data is slow and the shared data is immutable
+  remedy: Build a fresh, minimal fixture inline, push irrelevant detail into well-named Creation Methods, split
+    Eager Tests into single-condition tests, and give literals names that show cause and effect.
+  counter: >
+    End-to-end and customer-facing tests are longer by nature, and that's fine as long as each step reads
+    clearly. Some data really is too big to inline (a sample PDF, a recorded payload), so a named fixture file
+    is the right call; the smell is when its name says nothing about what's in it. Golden-file or snapshot
+    tests trade readability of the test for coverage of the whole output on purpose.
+  in: {}
+  related:
+    - assertion-roulette
+    - test-code-duplication
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_overdue_fine():
+          library = load_library("fixtures/library_2.json")
+          member = library.find_member(17)
+          loan = member.loans[2]
+          ...
+          assert fines.calculate(loan, today=date(2024, 3, 9)) == 1.50
+    after: |
+      fn test_overdue_fine_is_fifty_cents_per_day():
+          loan = a_loan(due=date(2024, 3, 6))
+          fine = fines.calculate(loan, today=date(2024, 3, 9))
+          assert fine == 3 * 0.50
+    note: The fixture the result depends on is now in the test, so the reader can see why the fine is what it is.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Obscure Test
+      url: http://xunitpatterns.com/Obscure%20Test.html
+      how: read
+  matters_most_for: []
+- id: conditional-test-logic
+  name: Conditional Test Logic
+  family: smell
+  group: testing
+  says: A test contains branches or loops, so you can't be sure which path runs or whether it checks anything at
+    all. Also called Indented Test Code; its causes include Flexible Test, Conditional Verification Logic,
+    Production Logic in Test and Complex Teardown.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - if, for or while statements in the body of a test function
+    - an if guarding the assertions, so the test passes quietly when the result is missing
+    - expected values computed in the test with the same formula the production code uses
+    - tests that build different expected results depending on the time, platform or environment
+    - teardown code full of checks for whether each resource was actually created
+  forces:
+    - wanting one test to cover many input combinations without a parameterised-test feature to hand
+    - not being able to control a dependency like the clock, so the test adapts to it instead
+    - guarding against a null result to avoid a confusing crash in the assertion
+  overuse:
+    - unrolling a loop over a known collection into dozens of copy-pasted assertions instead of one collection
+      equality check
+  remedy: Use a Guard Assertion instead of an if, compare against an Expected Object, move loops into a tested
+    Custom Assertion, turn case tables into a Parameterized Test, and inject the dependency that made the test
+    flexible.
+  counter: >
+    A loop in a property-based test or a table-driven test is the whole point of the technique, not a smell,
+    as long as each case reports itself on failure. Go's table-driven style puts a for loop in nearly every
+    test and is idiomatic there. Waiting loops in integration tests against an async system are sometimes
+    unavoidable; put them in a named helper with a timeout.
+  in:
+    go: >
+      Table-driven tests with a for loop over cases and t.Run per case are the norm and don't count. Ifs that
+      decide whether to assert still do.
+  related:
+    - obscure-test
+    - erratic-test
+    - assertion-free-test
+  tell: "Python only: an assert statement (or a self.assert* or assert_* call) inside an if, elif or else branch
+    within a test_* function. Asserts inside loops don't count."
+  interview_only: false
+  agent_prone: true
+  example:
+    before: |
+      fn test_shipping_rates():
+          for weight in [0.5, 2, 10, 30]:
+              rate = shipping.rate_for(weight)
+              if weight <= 1:
+                  assert rate == 4.00
+              else:
+                  assert rate == 4.00 + (weight - 1) * 1.20
+    after: |
+      cases = [
+          (0.5, 4.00),
+          (2, 5.20),
+          (30, 38.80),
+      ]
+      fn test_shipping_rate(weight, expected):   # run once per case
+          assert shipping.rate_for(weight) == expected
+    note: Pre-computed expected values replace the formula copied from production, and each case fails on its own.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Conditional Test Logic
+      url: http://xunitpatterns.com/Conditional%20Test%20Logic.html
+      how: read
+  matters_most_for: []
+- id: hard-to-test-code
+  name: Hard-to-Test Code
+  family: smell
+  group: testing
+  says: The code resists being tested in isolation because it is tightly coupled, asynchronous, hides what a
+    test needs to reach, or can't be constructed without half the system.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - classes that create their own database connections, HTTP clients or clocks inside methods or constructors
+    - business logic inside UI handlers, threads or process entry points
+    - constructors that are private or need many collaborators to call
+    - module-level singletons and global state read from deep inside functions
+    - tests that need sleeps or spin up a real process to reach the logic
+  forces:
+    - wiring a dependency in place is the smallest change that works
+    - frameworks that put logic in controllers or callbacks by default
+    - code written before any tests, then tests retrofitted later
+  overuse:
+    - injecting every collaborator, including pure value objects and stable standard-library helpers, so
+      constructors grow long parameter lists for no gain
+    - adding interfaces with a single implementation only so something can be mocked
+  remedy: Break the coupling with dependency injection and test doubles, separate logic from its async or UI
+    shell with Humble Object, and use Feathers' seams (Working Effectively with Legacy Code) for legacy code.
+  counter: >
+    "Make it testable" can drive design damage when it means seams nobody needs; DHH's "test-induced design
+    damage" argument is the known critique. Some code is thin glue that is better covered by an integration
+    test than reshaped for unit tests. Testability is a good design pressure, but it isn't the only one.
+  in: {}
+  related:
+    - singleton
+    - test-logic-in-production
+    - mock-everything
+    - fragile-test
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class DailyDigest:
+          fn send():
+              db = Database.connect(PROD_URL)
+              orders = db.query("... where day = ?", today())
+              text = format_digest(orders)
+              SmtpClient("mail.internal").send(text)
+    after: |
+      class DailyDigest:
+          fn init(orders: OrderSource, mailer: Mailer, clock: Clock): ...
+          fn send():
+              orders = this.orders.for_day(this.clock.today())
+              this.mailer.send(format_digest(orders))
+    note: The database, mail server and clock come in from outside, so a test can give it known inputs and see the
+      output.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Hard-to-Test Code
+      url: http://xunitpatterns.com/Hard%20to%20Test%20Code.html
+      how: read
+    - cite: Feathers, Working Effectively with Legacy Code
+      url: null
+      how: recalled
+  matters_most_for:
+    - embedded
+    - games
+    - desktop
+    - mobile
+    - serverless
+    - event-driven
+    - tui
+- id: test-code-duplication
+  name: Test Code Duplication
+  family: smell
+  group: testing
+  says: The same setup, exercise or verification code is copied across many tests, so one change to the code
+    under test means editing them all. Usually Cut-and-Paste Code Reuse or Reinventing the Wheel.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - several tests opening with the same block of construction code
+    - the same group of assertions repeated across tests on one object's fields
+    - near-identical tests that differ by one literal
+    - a commit that changes a constructor signature and touches dozens of test files
+  forces:
+    - copying the last test is the fastest way to write the next one
+    - not knowing that a helper already exists elsewhere in the suite
+    - the belief that tests should be fully self-contained, with no helpers at all
+  overuse:
+    - a deep test-helper hierarchy or base class that every test inherits, turning into a General Fixture and
+      a Mystery Guest
+    - extracting helpers so eagerly that each test reads as calls into code you have to go and look up
+  remedy: Extract Method into Test Utility Methods (Creation Methods for setup, Custom Assertions for checks),
+    Introduce Parameter for the bits that vary, or turn near-duplicates into a Parameterized Test.
+  counter: >
+    Many practitioners prefer DAMP (descriptive and meaningful phrases) over DRY in tests: some repetition
+    keeps each test readable on its own, and Google's testing guidance says as much. Duplication that makes a
+    test clearer is worth keeping; duplication that has to be updated in lockstep is the real problem.
+  in: {}
+  related:
+    - duplicate-code
+    - obscure-test
+  tell: null
+  interview_only: false
+  agent_prone: true
+  example:
+    before: |
+      fn test_signup_sends_welcome_email():
+          repo = InMemoryUsers()
+          mailer = RecordingMailer()
+          service = Signup(repo, mailer, Clock.fixed("2024-05-01"))
+          service.register("ana@example.org", "pw")
+          ...
+      fn test_signup_rejects_duplicate_email():
+          repo = InMemoryUsers()
+          mailer = RecordingMailer()
+          service = Signup(repo, mailer, Clock.fixed("2024-05-01"))
+          ...
+    after: |
+      fn a_signup_service(repo = InMemoryUsers(), mailer = RecordingMailer()):
+          return Signup(repo, mailer, Clock.fixed("2024-05-01"))
+
+      fn test_signup_sends_welcome_email():
+          mailer = RecordingMailer()
+          a_signup_service(mailer = mailer).register("ana@example.org", "pw")
+          ...
+      fn test_signup_rejects_duplicate_email():
+          service = a_signup_service()
+          ...
+    note: One Creation Method now owns how the service is built, so a new constructor argument changes one place.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Test Code Duplication
+      url: http://xunitpatterns.com/Test%20Code%20Duplication.html
+      how: read
+  matters_most_for: []
+- id: test-logic-in-production
+  name: Test Logic in Production
+  family: smell
+  group: testing
+  says: Production code contains logic that exists only for tests, such as a Test Hook that switches behaviour
+    when testing, methods For Tests Only, a dependency on test code, or Equality Pollution.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - branches on a test flag or environment, such as checking whether the test runner is loaded or the
+      environment is "test"
+    - methods only ever called from test files, or fields made public just so tests can read them
+    - production modules importing from test packages, even just for types
+    - an equals method written to suit a test's comparison rather than the domain
+  forces:
+    - a dependency that can't run in the test environment and no seam to replace it
+    - wanting deterministic results quickly, so a hard-coded value goes in behind a flag
+    - retrofitting tests on legacy code that hides the state the test needs
+  overuse:
+    - refusing any test-visible hook, then reaching for reflection or monkey-patching private internals, which
+      is worse
+  remedy: Move the varying behaviour behind a substitutable dependency (a Strategy, defaulting to a Null
+    Object), expose internals through a Test-Specific Subclass, and use Custom Assertions instead of changing
+    equals.
+  counter: >
+    Some test support in production code is normal and fine: a constructor that accepts a clock, a
+    package-private or internal-visible member, a health or debug endpoint behind auth. Rust's cfg(test) and
+    Go's export_test.go keep test-only code out of the release build by design. The danger is behaviour that
+    differs at runtime between test and production, not code that merely makes testing possible.
+  in:
+    rust: |
+      Code under cfg(test) is compiled out of release builds, so test-only helpers there don't count.
+    go: |
+      export_test.go files expose internals to tests in the same package without leaking into the build.
+  related:
+    - hard-to-test-code
+    - mock-everything
+  tell: Non-test, non-configuration code that branches on whether it is running under a test (an environment
+    value equal to "test", a TESTING flag, or a check for the test runner's module) and returns or skips
+    something different on that branch.
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      class CardPayments:
+          fn charge(card, amount):
+              if env("APP_MODE") == "test":
+                  return Receipt(id = "TEST-1", ok = true)
+              return this.gateway_client.charge(card, amount)
+    after: |
+      interface PaymentGateway:
+          fn charge(card, amount) -> Receipt
+
+      class CardPayments:
+          fn init(gateway: PaymentGateway): ...
+          fn charge(card, amount):
+              return this.gateway.charge(card, amount)
+      # tests pass in a FakeGateway; production passes the real one
+    note: The test path no longer exists in production, so a misconfigured flag can't skip real charges.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Test Logic in Production
+      url: http://xunitpatterns.com/Test%20Logic%20in%20Production.html
+      how: read
+  matters_most_for:
+    - web-api
+    - fullstack-web
+    - serverless
+    - platforms
+- id: assertion-roulette
+  name: Assertion Roulette
+  family: smell
+  group: testing
+  says: A test has several assertions and when it fails you can't tell which one, usually because it is an Eager
+    Test or the assertions have no messages.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - a long run of bare boolean assertions with no messages in one test
+    - a test that calls the code under test several times with setup and assertions interleaved
+    - CI failure output that shows only "expected true, got false"
+  forces:
+    - minimising the number of tests, the way manual test scripts chain steps
+    - automating long customer workflows in a unit-test framework
+  overuse:
+    - a strict one-assert-per-test rule that splits a single logical check (all fields of one result) into
+      many tests with duplicated setup
+  remedy: Split Eager Tests into Single Condition Tests, add assertion messages, or replace a run of field
+    checks with one equality assertion on an expected object.
+  counter: >
+    Modern runners report the failing line and diff the values, so much of the original pain is gone. Several
+    assertions that check one logical outcome are fine and widely accepted; Roy Osherove and others argue for
+    "one concept per test", not one assert. Soft-assertion features also report every failure at once.
+  in: {}
+  related:
+    - obscure-test
+    - frequent-debugging
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_parse_sensor_frame():
+          frame = parse_frame(bytes_from_hex("01 2A 00 FF 19"))
+          assert frame.valid
+          assert frame.sensor_id == 1
+          assert frame.celsius == 4.2
+          frame = parse_frame(bytes_from_hex("01 2A"))
+          assert not frame.valid
+    after: |
+      fn test_parses_a_complete_frame():
+          frame = parse_frame(bytes_from_hex("01 2A 00 FF 19"))
+          assert frame == Frame(valid = true, sensor_id = 1, celsius = 4.2)
+
+      fn test_rejects_a_truncated_frame():
+          assert not parse_frame(bytes_from_hex("01 2A")).valid
+    note: Two conditions become two tests, and one equality check on the whole frame shows every wrong field in
+      its diff.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Assertion Roulette
+      url: http://xunitpatterns.com/Assertion%20Roulette.html
+      how: read
+  matters_most_for: []
+- id: erratic-test
+  name: Erratic Test
+  family: smell
+  group: testing
+  says: A test passes sometimes and fails other times with no code change, today usually called a flaky test.
+    Causes include Interacting Tests, Test Run War, Unrepeatable Test, Resource Leakage, Resource Optimism and
+    Nondeterministic Test.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - tests reading the real clock, random values without a seed, or environment-specific paths
+    - shared mutable fixtures, static state or a shared database that tests write to
+    - fixed sleeps waiting for background work
+    - tests that pass alone and fail in the full suite, or the other way round
+    - retry or rerun-on-failure settings in the CI config, and skip markers labelled flaky
+  forces:
+    - a shared fixture adopted to make slow tests faster
+    - not being able to control time, randomness or concurrency in the code under test
+    - pressure to keep the build green, which leads to retries rather than fixes
+  overuse:
+    - removing all randomness, including property-based and fuzz tests that find real bugs, instead of seeding
+      and logging it
+  remedy: Use a Fresh Fixture per test, inject the clock and random source, replace sleeps with waiting on a
+    condition or testing the logic synchronously, give each runner its own sandbox, and quarantine a flaky
+    test while you fix the cause.
+  counter: >
+    Some nondeterminism is the point: fuzzing, property-based tests and chaos tests explore inputs on purpose.
+    Record the seed so a failure can be replayed. At large scale some flakiness in end-to-end tests is
+    accepted and managed with quarantine and statistics (Google has written about this), rather than driven to
+    zero.
+  in: {}
+  related:
+    - slow-tests
+    - fragile-test
+    - hard-to-test-code
+    - conditional-test-logic
+  tell: A test body that reads the real current time, calls random without a seed, or sleeps for a fixed duration.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_coupon_is_still_valid():
+          coupon = Coupon(code = "SPRING", expires = now() + hours(1))
+          assert coupon.is_valid()
+          # fails near midnight when expiry rounds to the day
+    after: |
+      fn test_coupon_is_valid_until_its_expiry_day_ends():
+          clock = FixedClock("2024-04-10T23:30")
+          coupon = Coupon(code = "SPRING", expires = date(2024, 4, 10))
+          assert coupon.is_valid(clock)
+    note: A fixed clock makes the test repeatable and pins the edge case the real clock only hit sometimes.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Erratic Test
+      url: http://xunitpatterns.com/Erratic%20Test.html
+      how: read
+  matters_most_for:
+    - distributed
+    - event-driven
+    - web-frontend
+    - mobile
+    - databases-storage
+    - tui
+- id: fragile-test
+  name: Fragile Test
+  family: smell
+  group: testing
+  says: Tests break when the code changes in ways that don't affect what they're testing, through one of four
+    sensitivities (interface, behaviour, data, context), Overspecified Software, Sensitive Equality or a
+    Fragile Fixture.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - many tests changing in a refactoring commit that didn't change behaviour
+    - assertions on the string or repr of an object rather than its values
+    - tests that verify the exact sequence of calls to collaborators
+    - many tests depending on one standard fixture or seed dataset
+    - UI tests that locate elements by position or generated class names
+  forces:
+    - testing through whatever interface was easiest at the time, including private methods
+    - mock frameworks that make it easy to verify every call with exact arguments
+    - one shared fixture that each new test bends a little
+  overuse:
+    - testing only at the top through the UI or HTTP to avoid coupling, which brings Slow Tests and Frequent
+      Debugging
+  remedy: Test through the public interface (Use the Front Door First), encapsulate the code's API behind
+    Creation Methods and Custom Assertions, compare values rather than strings, give tests their own minimal
+    fixtures, and control context like time with test doubles.
+  counter: >
+    A test that fails when the behaviour it pins changes is doing its job; that isn't fragility. Golden-file
+    and snapshot tests are deliberately sensitive to output and are right when the output is the contract (a
+    renderer, a CLI's text, a serialiser), as long as updating them is a reviewed step. Public APIs used by
+    unknown clients sometimes need tests that pin the interface exactly.
+  in: {}
+  related:
+    - mock-everything
+    - obscure-test
+    - hard-to-test-code
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_invoice_total():
+          invoice = Invoice(lines = [Line("hosting", 40.00), Line("support", 10.00)])
+          invoice.apply_tax(rate = 0.25)
+          assert to_string(invoice) == "Invoice(lines=2, net=50.0, tax=12.5, total=62.5)"
+    after: |
+      fn test_invoice_total_includes_tax():
+          invoice = Invoice(lines = [Line("hosting", 40.00), Line("support", 10.00)])
+          invoice.apply_tax(rate = 0.25)
+          assert invoice.total == 62.50
+    note: The test checks the value it cares about, so changing how invoices print no longer breaks it.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Fragile Test
+      url: http://xunitpatterns.com/Fragile%20Test.html
+      how: read
+  matters_most_for:
+    - web-frontend
+    - fullstack-web
+    - compilers-tooling
+    - cli-devtool
+    - tui
+- id: frequent-debugging
+  name: Frequent Debugging
+  family: smell
+  group: testing
+  says: Most test failures need a debugger or print statements to find the cause, because the suite lacks defect
+    localization. Also called Manual Debugging.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - only high-level or end-to-end tests for an area, with no unit tests for the classes inside it
+    - leftover debug prints and commented-out breakpoints in commit history
+    - mocked collaborators whose behaviour in tests doesn't match their own unit tests
+  forces:
+    - writing high-level tests first and skipping the smaller ones
+    - running tests rarely, so many changes land between runs
+  overuse:
+    - chasing defect localization with a unit test per method, which pins implementation and makes tests
+      fragile
+  remedy: Fill in unit and component tests where failures are hard to place, run tests after every small change,
+    and write a failing test that reproduces each bug before fixing it.
+  counter: >
+    Some debugging is normal, especially for concurrency and integration problems no unit test would catch.
+    The smell is when it's the usual way to understand a red test. Teams that favour broad integration tests
+    (Kent C. Dodds' testing trophy, for example) accept a bit more debugging in return for less coupling.
+  in: {}
+  related:
+    - assertion-roulette
+    - slow-tests
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example: null
+  example_reason: About how a whole suite localises failures over time, not about the shape of one test.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Frequent Debugging
+      url: http://xunitpatterns.com/Frequent%20Debugging.html
+      how: read
+  matters_most_for:
+    - distributed
+    - embedded
+- id: manual-intervention
+  name: Manual Intervention
+  family: smell
+  group: testing
+  says: A test needs a person to do something each run, whether setting up the environment, injecting an event
+    or checking the result by eye.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a README step to start servers or load data before the tests will pass
+    - tests that print output for someone to read instead of asserting on it
+    - tests that wait for input or are skipped unless a person sets something up
+    - test suites that can't run in CI
+  forces:
+    - events that are hard to trigger from code, like a dropped connection or a hardware button
+    - coupling that keeps most of the system from running in a dev environment
+    - automating the exercise step first and leaving the checking "for later"
+  overuse:
+    - forcing full automation on exploratory or usability checks that need human judgement
+  remedy: Automate fixture setup, make every test self-checking with assertions, and simulate hard-to-trigger
+    events by calling the handler directly or stubbing the dependency that reports them.
+  counter: >
+    Exploratory testing, usability testing and some hardware-in-the-loop checks are manual by nature and
+    valuable. Visual review of UI changes is often a person looking at a diff, helped by screenshot tooling.
+    The smell is in the automated suite, not in manual testing as a practice.
+  in: {}
+  related:
+    - assertion-free-test
+    - slow-tests
+  tell: A test that prints or logs results for a person to read and has no assertion.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_export_members_csv():
+          rows = export_members(sample_club())
+          print(rows)
+          # check the output looks right
+    after: |
+      fn test_export_members_csv():
+          club = club_with(Member("Ana", joined = 2021))
+          rows = export_members(club)
+          assert rows == ["name,joined", "Ana,2021"]
+    note: The expected output is written down, so the test checks itself and can run unattended in CI.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Manual Intervention
+      url: http://xunitpatterns.com/Manual%20Intervention.html
+      how: read
+  matters_most_for:
+    - embedded
+    - mobile
+    - desktop
+    - games
+    - iac
+- id: slow-tests
+  name: Slow Tests
+  family: smell
+  group: testing
+  says: The tests take so long that people stop running them on every change. Causes include Slow Component
+    Usage (usually the database), a General Fixture, Asynchronous Test and Too Many Tests.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - fixed sleeps in test bodies waiting for threads, processes or queues
+    - unit tests that write to and read from a real database or network service
+    - a big fixture built fresh for every test
+    - a full suite that runs on every commit when a targeted subset would do
+  forces:
+    - code with no seam for the slow component
+    - async code where waiting looks like the only way to see the result
+    - the quick fix of a shared fixture, which trades speed for Erratic Tests
+  overuse:
+    - faking every slow component, so nothing ever runs against the real database and integration bugs ship
+  remedy: Replace slow components with fakes in unit tests, build a minimal fixture, test async logic
+    synchronously via Humble Object, wait on conditions instead of sleeping, and split the suite into fast and
+    slow tiers.
+  counter: >
+    Some slow tests are worth their cost: integration tests against a real database container catch what fakes
+    hide, and many teams (the test pyramid's critics among them) prefer those over heavy faking. The fix is
+    usually to run them at a different cadence, not to delete or fake them away.
+  in: {}
+  related:
+    - erratic-test
+    - frequent-debugging
+    - hard-to-test-code
+  tell: A test body that sleeps for a fixed duration.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn test_job_is_processed():
+          queue = JobQueue(worker_threads = 2)
+          queue.submit(ResizeImage("cat.png", width = 200))
+          sleep(seconds(3))
+          assert queue.completed_count() == 1
+    after: |
+      fn test_resize_job_produces_thumbnail():
+          result = ResizeImage("cat.png", width = 200).run(InMemoryImages())
+          assert result.width == 200
+
+      fn test_queue_runs_submitted_jobs():
+          queue = JobQueue(executor = RunImmediately())
+          ...
+    note: The job's logic is tested directly and the queue runs synchronously in tests, so nothing waits on a
+      timer.
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Slow Tests
+      url: http://xunitpatterns.com/Slow%20Tests.html
+      how: read
+  matters_most_for:
+    - fullstack-web
+    - databases-storage
+    - data-pipeline
+    - ml-training
+- id: alternative-classes-with-different-interfaces
+  name: Alternative Classes with Different Interfaces
+  family: smell
+  group: design
+  says: "Two classes do the same job behind different method names and signatures, so callers can't swap one for
+    the other and nobody notices they are duplicates. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Two classes with near-identical responsibilities whose methods differ only in name or argument order
+      (send vs dispatch, fetch vs load).
+    - Call sites that branch on which of the two they hold, just to call the right-named method.
+    - A second utility or client written for something the codebase already had, often in a different package.
+  forces:
+    - The author didn't know the first class existed, or couldn't find it under the name they searched for.
+    - Two teams or two features grew their own version in parallel.
+    - Copying and renaming felt safer than changing a class someone else owns.
+  remedy: >
+    Rename Method until the names match, then Move Method, Add Parameter or Parameterize Method until the
+    signatures match. Extract Superclass (or a shared interface) when only part overlaps. Once they line up,
+    delete one.
+  overuse:
+    - Forcing a shared interface on two classes that only look alike today and serve different callers with
+      different futures.
+    - Merging classes from two third-party libraries that you don't control.
+  counter: >
+    Leave it when the two classes come from different libraries or vendors, or when wrapping them in one
+    interface would cost more than the duplication. Two classes that look similar but answer to different
+    requirements may be coincidental duplication, and unifying them couples things that should drift apart
+    (Sandi Metz's point that the wrong abstraction costs more than duplication).
+  in: {}
+  related:
+    - duplicate-code
+    - adapter
+    - dry
+    - wrong-abstraction
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      class SmsAlerter:
+          fn dispatch(phone: str, body: str): ...
+
+      class PushAlerter:
+          fn notify(body: str, device_token: str): ...
+
+      fn alert_on_call(engineer, msg):
+          if engineer.prefers_sms:
+              SmsAlerter().dispatch(engineer.phone, msg)
+          else:
+              PushAlerter().notify(msg, engineer.device_token)
+    after: |
+      interface Alerter:
+          fn send(engineer, body: str)
+
+      class SmsAlerter implements Alerter:
+          fn send(engineer, body): ... uses engineer.phone
+
+      class PushAlerter implements Alerter:
+          fn send(engineer, body): ... uses engineer.device_token
+
+      fn alert_on_call(engineer, msg):
+          engineer.alerter.send(engineer, msg)
+    note: Aligning the names and signatures lets the caller treat both as one thing and drops the branch.
+  sources:
+    - cite: Refactoring.Guru, Alternative Classes with Different Interfaces
+      url: https://refactoring.guru/smells/alternative-classes-with-different-interfaces
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - library-sdk
+    - platforms
+- id: comments
+  name: Comments
+  family: smell
+  group: code
+  says: "A method needs comments to explain what its code does, which usually means the code itself could be
+    clearer. Fowler calls such comments a deodorant. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - Comments that restate the next line or block in English.
+    - Section-header comments inside one long function (step 1, validate, now save).
+    - A comment explaining what a variable or expression means, where a better name would say it.
+    - Comments describing a precondition the code never checks.
+  forces:
+    - The code was hard to write, so the author explains it instead of reshaping it.
+    - Reviews or style guides that reward "well-commented" code by volume.
+    - A deadline that leaves time to annotate but not to extract and rename.
+  remedy: >
+    Extract Variable for a hard expression, Extract Method for a commented block (name it after the comment),
+    Rename Method when the name is the problem, and Introduce Assertion for a rule the code relies on.
+  overuse:
+    - Stripping comments that explain why, such as a workaround for a vendor bug, a performance trade-off or a
+      rejected simpler approach.
+    - Extracting one-line methods purely to avoid writing a single helpful comment.
+    - Treating docstrings on a public API as a smell.
+  counter: >
+    Only what-comments are the smell. Comments that explain why, record a trade-off, cite a bug or spec, or
+    document a hard algorithm are valuable. John Ousterhout (A Philosophy of Software Design) argues the "good
+    code is self-documenting" line is overstated and that interface comments carry abstractions names can't.
+    Public library APIs need documentation regardless.
+  in: {}
+  related:
+    - long-method
+    - kiss
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn adjust(reading: float, sensor) -> float:
+          # subtract the factory offset
+          r = reading - sensor.cfg[0]
+          # scale by gain, which is stored as percent
+          r = r * (sensor.cfg[1] / 100)
+          # clamp to the sensor's physical range
+          if r < -40: r = -40
+          if r > 125: r = 125
+          return r
+    after: |
+      fn adjust(reading: float, sensor) -> float:
+          corrected = reading - sensor.factory_offset
+          scaled = corrected * sensor.gain_fraction()
+          return clamp_to_range(scaled, sensor.min_celsius, sensor.max_celsius)
+    note: Each comment became a name, so the comments have nothing left to say.
+  sources:
+    - cite: Refactoring.Guru, Comments
+      url: https://refactoring.guru/smells/comments
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: John Ousterhout, A Philosophy of Software Design, ch. 12-13
+      url: https://web.stanford.edu/~ouster/cgi-bin/book.php
+      how: recalled
+  names: His 2nd edition also adds Mysterious Name, the closely related smell where a name fails to say what a
+    thing does.
+  matters_most_for: []
+- id: data-class
+  name: Data Class
+  family: smell
+  group: design
+  says: "A class holds only fields and accessors, while the logic that works on that data lives in the classes
+    that use it. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - A class of public fields or getter/setter pairs with no other methods.
+    - Several client functions computing the same thing from that class's fields.
+    - Setters used freely from outside after construction.
+  forces:
+    - It is the natural first shape of a new class, and nobody went back to move the behaviour in.
+    - ORMs, serializers and frameworks that generate or expect plain field bags.
+    - A layered style that puts all logic in services and keeps entities anemic.
+  remedy: >
+    Encapsulate Field and Encapsulate Collection, then find the client logic that uses the fields and bring it
+    in with Extract Method and Move Method. Once behaviour lives there, Remove Setting Method and Hide Method
+    to narrow the surface.
+  overuse:
+    - Pushing behaviour into DTOs, messages and records whose job is to cross a boundary.
+    - Giving a value type methods that depend on services, databases or I/O.
+  counter: >
+    Plain data is right at boundaries: API payloads, events, config, rows read from a database, and immutable
+    records passed through a pipeline. Functional and data-oriented styles deliberately separate data from
+    functions, and Fowler himself says immutable records from a split phase are fine. It is the anemic domain
+    model, where core business entities are mere bags, that the smell is aimed at.
+  in:
+    python: >
+      A dataclass or NamedTuple is not a smell on its own. Look at whether functions elsewhere keep reaching
+      into its fields to compute the same thing.
+    java: |
+      Records are meant to be data carriers. The smell is mutable beans whose logic sits in a service layer.
+  related:
+    - feature-envy
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Loan:
+          book_id: str
+          due_date: Date
+          returned_on: Date | None
+
+      fn overdue_fee(loan: Loan, today: Date) -> int:
+          end = loan.returned_on or today
+          days = (end - loan.due_date).days
+          return max(days, 0) * 25
+    after: |
+      class Loan:
+          book_id: str
+          due_date: Date
+          returned_on: Date | None
+
+          fn days_overdue(today: Date) -> int:
+              end = self.returned_on or today
+              return max((end - self.due_date).days, 0)
+
+          fn overdue_fee(today: Date) -> int:
+              return self.days_overdue(today) * 25
+    note: The fee logic moved next to the dates it reads, so every caller gets the same rule.
+  sources:
+    - cite: Refactoring.Guru, Data Class
+      url: https://refactoring.guru/smells/data-class
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: Martin Fowler, AnemicDomainModel (bliki)
+      url: https://martinfowler.com/bliki/AnemicDomainModel.html
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - web-api
+- id: data-clumps
+  name: Data Clumps
+  family: smell
+  group: code
+  says: "The same few values travel together through fields and parameter lists in several places, which says
+    they are one concept that has no name yet. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Three or more parameters with the same names appearing together in several signatures.
+    - The same group of fields repeated across classes.
+    - Validation of the group (start before end, all set or none set) copied at each site.
+  forces:
+    - Adding one more parameter is the smallest change each time.
+    - Copy-paste of a function signature into a new function.
+    - Fear that a new small class is over-engineering.
+  remedy: >
+    Extract Class for repeated fields, Introduce Parameter Object for repeated parameters, and Preserve Whole
+    Object where a caller unpacks an object only to pass its parts. Then move the logic that works on the
+    group into the new class.
+  overuse:
+    - Bundling values that merely happen to sit side by side and have no shared meaning or rules.
+    - Passing a whole object to a function that needs one of its fields, which creates a dependency it didn't
+      have.
+  counter: >
+    Fowler's test is to delete one value: if the rest still make sense on their own, it isn't a clump. Passing
+    a whole object instead of its parts can couple a low-level function to a high-level type, so at module
+    boundaries plain values are sometimes the better choice.
+  in: {}
+  related:
+    - long-parameter-list
+    - primitive-obsession
+  tell: |
+    The same three or more parameter names appear together in the signatures of several functions in one file.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn tiles_in(min_lat: float, min_lon: float, max_lat: float, max_lon: float, zoom: int): ...
+
+      fn label_density(min_lat: float, min_lon: float, max_lat: float, max_lon: float): ...
+
+      fn is_visible(poi, min_lat, min_lon, max_lat, max_lon) -> bool:
+          return min_lat <= poi.lat <= max_lat and min_lon <= poi.lon <= max_lon
+    after: |
+      class BoundingBox:
+          min_lat: float
+          min_lon: float
+          max_lat: float
+          max_lon: float
+
+          fn contains(lat: float, lon: float) -> bool:
+              return self.min_lat <= lat <= self.max_lat and self.min_lon <= lon <= self.max_lon
+
+      fn tiles_in(box: BoundingBox, zoom: int): ...
+      fn label_density(box: BoundingBox): ...
+      fn is_visible(poi, box: BoundingBox) -> bool:
+          return box.contains(poi.lat, poi.lon)
+    note: The four coordinates were always one thing; naming it gave the containment check a home.
+  sources:
+    - cite: Refactoring.Guru, Data Clumps
+      url: https://refactoring.guru/smells/data-clumps
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - scientific
+    - games
+- id: dead-code
+  name: Dead Code
+  family: smell
+  group: code
+  says: "Code that nothing runs or uses any more: variables, parameters, branches, functions, classes or whole
+    files left behind after requirements changed. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Functions, classes or exports with no callers.
+    - Commented-out code blocks.
+    - Statements after an unconditional return or raise, or branches whose condition can't be true.
+    - Parameters the body never reads, and feature flags that have been on everywhere for months.
+    - An old version of a function kept next to its replacement (process_v1, legacy_export).
+  forces:
+    - Deleting feels risky, and nobody is sure whether some caller still exists.
+    - The new path was added beside the old one, and cleanup was meant to follow.
+    - A conditional grew complicated enough that a branch became unreachable without anyone noticing.
+  remedy: >
+    Delete it; version control keeps the history. Use Remove Parameter for unused parameters, and Inline Class
+    or Collapse Hierarchy when a class in a hierarchy no longer pulls its weight.
+  overuse:
+    - Deleting a library's public API because nothing in this repository calls it.
+    - Removing code reached only by reflection, plugins, config or a scheduled job that static search doesn't
+      see.
+  counter: >
+    "No callers here" isn't the same as dead in a library, a plugin host, or code entered through reflection,
+    routing tables, serialization or cron. Check before deleting. A deprecation period is the right move for
+    public APIs. Otherwise there is little argument for keeping it.
+  in: {}
+  related:
+    - speculative-generality
+    - yagni
+    - boy-scout-rule
+  tell: >
+    Commented-out code blocks, statements after an unconditional return or raise, and branches guarded by a
+    literal false.
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn net_pay(employee, period) -> Money:
+          gross = employee.salary_for(period)
+          # old_tax = legacy_tax_table(gross, employee.region)
+          tax = tax_for(gross, employee.region)
+          if USE_LEGACY_ROUNDING:          # set to False in 2023
+              return round_legacy(gross - tax)
+          return round_half_even(gross - tax)
+
+      fn legacy_tax_table(gross, region): ...
+      fn round_legacy(amount): ...
+    after: |
+      fn net_pay(employee, period) -> Money:
+          gross = employee.salary_for(period)
+          tax = tax_for(gross, employee.region)
+          return round_half_even(gross - tax)
+    note: The commented line, the dead flag branch and the two helpers only it used are gone.
+  sources:
+    - cite: Refactoring.Guru, Dead Code
+      url: https://refactoring.guru/smells/dead-code
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), Remove Dead Code
+      url: https://refactoring.com/catalog/removeDeadCode.html
+      how: recalled
+  names: Fowler's chapter 3 doesn't list it as a smell; his 2nd edition covers it as the refactoring Remove Dead
+    Code.
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+- id: divergent-change
+  name: Divergent Change
+  family: smell
+  group: code
+  says: "One class keeps getting edited for unrelated reasons, so changes about different concerns all land in
+    the same place. It is the mirror image of Shotgun Surgery. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Git history where one file is touched by commits about many unrelated topics (pricing, formatting,
+      storage).
+    - A class whose methods split into clusters that use disjoint fields and imports.
+    - Adding one kind of thing (a new product type, a new database) requires editing several unrelated methods
+      in the same class.
+  forces:
+    - New behaviour gets added where related-looking code already lives.
+    - A class named after a domain noun attracts every feature that mentions that noun.
+    - Splitting a class needs a design decision, adding a method doesn't.
+  remedy: >
+    Extract Class to give each concern its own home. If the concerns form variants of one behaviour, Extract
+    Superclass or Extract Subclass. At module scale, separate phases (parse, then compute, then render) so
+    each changes on its own.
+  overuse:
+    - Splitting so finely that one change now has to touch many small classes, which is Shotgun Surgery.
+    - Splitting along concerns that in practice always change together.
+  counter: >
+    Two kinds of change that always ship together are one reason to change, not two. Judge by the actual
+    history, not by imagined future changes, and don't split a small, stable class because its methods could
+    in principle change for different reasons. It sits in tension with Shotgun Surgery: the goal is one place
+    per kind of change, not the smallest possible classes.
+  in: {}
+  related:
+    - shotgun-surgery
+    - large-class
+    - solid
+    - god-object
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Course:
+          fn tuition(student) -> Money:
+              ... discounts, residency rules, scholarships
+
+          fn transcript_line() -> str:
+              ... formatting, grade symbols, padding
+
+          fn save(db):
+              ... columns, upsert, migration quirks
+    after: |
+      class TuitionPolicy:
+          fn tuition(course, student) -> Money: ...
+
+      class TranscriptFormatter:
+          fn line(course) -> str: ...
+
+      class CourseRepository:
+          fn save(course): ...
+    note: Fee rules, transcript layout and storage change for different reasons and now change in different places.
+  sources:
+    - cite: Refactoring.Guru, Divergent Change
+      url: https://refactoring.guru/smells/divergent-change
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - web-api
+- id: duplicate-code
+  name: Duplicate Code
+  family: smell
+  group: code
+  says: The same logic appears in more than one place, so every fix or change has to be made in each copy and
+    the copies drift. Fowler calls it Duplicated Code.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Near-identical blocks in two functions, often with renamed variables.
+    - Sibling subclasses with the same method bodies.
+    - Code that looks different but computes the same thing (two ways to normalise an email, two date parsers).
+    - The same conditional repeated before several calls, or the same lines at the end of every branch.
+  forces:
+    - Copying working code is faster and feels safer than changing a shared function.
+    - The author didn't know a helper already existed elsewhere in the codebase.
+    - Two people solved the same problem at the same time.
+  remedy: >
+    Extract Method within one class. Pull Up Method, Pull Up Field or Pull Up Constructor Body across
+    siblings, and Form Template Method when they differ in steps. Substitute Algorithm when two different
+    algorithms do the same job. Extract Class or Extract Superclass across unrelated classes. Consolidate
+    Conditional Expression and Consolidate Duplicate Conditional Fragments for repeated conditionals.
+  overuse:
+    - Merging code that looks alike but serves different requirements, then threading flags through the shared
+      function as they diverge.
+    - Extracting after the second occurrence when the shape isn't clear yet.
+    - Sharing test setup until each test is unreadable on its own.
+  counter: >
+    Duplication of knowledge is the problem, not duplication of text. Sandi Metz argues that duplication is
+    cheaper than the wrong abstraction, and many teams wait for the third occurrence (the rule of three (Don
+    Roberts, via Fowler)) before extracting. Copies that belong to different bounded contexts or services are
+    often meant to evolve separately. In tests, repetition that keeps each test readable is usually the better
+    trade.
+  in: {}
+  related:
+    - dry
+    - wrong-abstraction
+    - alternative-classes-with-different-interfaces
+    - shotgun-surgery
+  tell: "Go only: a run of six or more identical, non-blank, non-brace lines that appears twice in one non-test,
+    non-generated file."
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn register(form) -> Account:
+          email = form.email.strip().lower()
+          if not email or "@" not in email:
+              raise InvalidEmail(form.email)
+          ...
+
+      fn invite(team, raw_email: str):
+          email = raw_email.strip().lower()
+          if not email or "@" not in email:
+              raise InvalidEmail(raw_email)
+          ...
+    after: |
+      fn normalize_email(raw: str) -> str:
+          email = raw.strip().lower()
+          if not email or "@" not in email:
+              raise InvalidEmail(raw)
+          return email
+
+      fn register(form) -> Account:
+          email = normalize_email(form.email)
+          ...
+
+      fn invite(team, raw_email: str):
+          email = normalize_email(raw_email)
+          ...
+    note: One rule for what counts as an email, so a fix to it lands everywhere.
+  sources:
+    - cite: Refactoring.Guru, Duplicate Code
+      url: https://refactoring.guru/smells/duplicate-code
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: Sandi Metz, The Wrong Abstraction (2016)
+      url: https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction
+      how: recalled
+  names: It headed his 1st edition's list and comes second, after Mysterious Name, in the 2nd.
+  matters_most_for:
+    - iac
+    - data-pipeline
+    - scientific
+    - web-frontend
+- id: feature-envy
+  name: Feature Envy
+  family: smell
+  group: design
+  says: "A method uses another object's data more than its own, which suggests it lives in the wrong class. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A method that reads several fields or getters of one other object and few or none of its own.
+    - The same computation on another class's data repeated in several callers.
+    - Behaviour left behind in a service after the data moved into its own class.
+  forces:
+    - The method was written where the caller happened to be.
+    - Data was split into its own class and the code using it wasn't moved along.
+    - A layered style that keeps logic in services and data in entities.
+  remedy: >
+    Move Method to the class whose data it uses. If only part of the method is envious, Extract Method first
+    and move that part. When it uses several classes, move it to the one holding most of the data, or split
+    it.
+  overuse:
+    - Moving behaviour into an entity that then depends on infrastructure (databases, HTTP, clocks).
+    - Pulling apart a deliberate Strategy or Visitor, which keeps behaviour away from data on purpose.
+  counter: >
+    Strategy and Visitor put behaviour outside the data on purpose so it can vary or be added without touching
+    the data classes. Functional and data-oriented designs do the same by choice. Code that formats or
+    persists an object often reads only that object's fields and still belongs outside it, so the object
+    doesn't learn about every output format.
+  in: {}
+  related:
+    - data-class
+    - law-of-demeter
+    - strategy
+    - visitor
+    - inappropriate-intimacy
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class ParkingTicket:
+          entered_at: Time
+          garage: Garage
+
+          fn fee(left_at: Time) -> Money:
+              hours = ceil((left_at - self.entered_at).hours)
+              if hours <= self.garage.free_hours:
+                  return Money(0)
+              billable = min(hours - self.garage.free_hours, self.garage.daily_cap_hours)
+              return self.garage.hourly_rate * billable
+    after: |
+      class Garage:
+          fn fee_for(hours: int) -> Money:
+              if hours <= self.free_hours:
+                  return Money(0)
+              billable = min(hours - self.free_hours, self.daily_cap_hours)
+              return self.hourly_rate * billable
+
+      class ParkingTicket:
+          fn fee(left_at: Time) -> Money:
+              return self.garage.fee_for(ceil((left_at - self.entered_at).hours))
+    note: The tariff logic moved to the garage that owns the rates; the ticket only knows its own times.
+  sources:
+    - cite: Refactoring.Guru, Feature Envy
+      url: https://refactoring.guru/smells/feature-envy
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - web-api
+- id: inappropriate-intimacy
+  name: Inappropriate Intimacy
+  family: smell
+  group: design
+  says: "Two classes reach into each other's private fields and methods, so neither can change without the
+    other. Inappropriate Intimacy is the name most developers know, and Insider Trading is the current one. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Access to another object's underscore-prefixed or otherwise private members.
+    - Two classes holding references to each other and calling back and forth.
+    - A subclass relying on its parent's internal state rather than its interface.
+    - Friend declarations or package-private access used to share internals between unrelated classes.
+  forces:
+    - The two classes were designed together and their boundary was never made explicit.
+    - Reaching into a field is quicker than adding a method to the other class.
+    - Inheritance used for code sharing, giving the subclass a view of everything.
+  remedy: Move Method and Move Field to whichever side really uses them. Extract Class for the shared part and
+    Hide Delegate to make the relationship explicit. Change Bidirectional Association to Unidirectional. When
+    a subclass knows too much about its parent, Replace Inheritance with Delegation (Replace Superclass with
+    Delegate or Replace Subclass with Delegate in the 2nd edition).
+  overuse:
+    - Hiding everything behind getters that expose the same internals by another name.
+    - Separating two classes that are really one concept and would be clearer merged.
+  counter: >
+    Some pairs are meant to be close: a class and its builder, an iterator and its collection, a test and the
+    module under test, or nested types in one file. Languages give this explicit forms (friend, internal,
+    package-private) for that reason. The smell is unplanned intimacy across a boundary that is supposed to
+    hold.
+  in:
+    python: >
+      Privacy is only a naming convention, so reaching for another object's underscore names is the visible
+      sign.
+  related:
+    - feature-envy
+    - message-chains
+    - law-of-demeter
+  tell: Access to an underscore-prefixed attribute on an object of a different class than the enclosing one
+    (Python, JavaScript, TypeScript), excluding cls, the other operand in comparison or copy methods, and
+    namedtuple's documented _replace, _asdict and _fields.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Playlist:
+          _tracks: list
+          _total_seconds: int
+
+      class Track:
+          fn add_to(playlist: Playlist):
+              playlist._tracks.append(self)
+              playlist._total_seconds = playlist._total_seconds + self.seconds
+    after: |
+      class Playlist:
+          _tracks: list
+          _total_seconds: int
+
+          fn add(track: Track):
+              self._tracks.append(track)
+              self._total_seconds = self._total_seconds + track.seconds
+
+      class Track:
+          ...
+    note: The playlist keeps its own running total; the track no longer knows how the playlist stores it.
+  sources:
+    - cite: Refactoring.Guru, Inappropriate Intimacy
+      url: https://refactoring.guru/smells/inappropriate-intimacy
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3, Insider Trading
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: Fowler's 2nd edition renames it Insider Trading, so the two names are one smell.
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+    - plugin-host
+- id: incomplete-library-class
+  name: Incomplete Library Class
+  family: smell
+  group: design
+  says: "A library you depend on is missing something you need and you can't change its source, so the extra
+    behaviour ends up scattered across callers. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - The same helper computation on a library type copied in several modules.
+    - Monkey-patching new methods onto a third-party class or module.
+    - Utility modules full of functions whose first parameter is always one library type.
+  forces:
+    - The library's authors never added the feature or declined to.
+    - Forking or contributing upstream is slow.
+    - Patching the class at runtime looks like the shortest path.
+  remedy: >
+    Introduce Foreign Method for one or two missing operations (a function in your code that takes the library
+    object as its first argument). Introduce Local Extension (a wrapper or subclass you own) when you need
+    more. Contributing upstream is the long-term fix.
+  overuse:
+    - Wrapping a whole library in your own layer to add one function, and then maintaining that wrapper
+      forever.
+    - Building a local extension when the next release of the library already adds the method.
+  counter: If the extension would cost more than it saves, a small utility function is enough. Languages with
+    extension methods or traits (C#, Kotlin, Rust, Swift) make the smell mostly disappear, since you can add
+    the method without a wrapper. Fowler dropped it from the 2nd edition's list, along with the two
+    refactorings that treated it.
+  in:
+    csharp: |
+      Extension methods are the idiomatic Introduce Foreign Method.
+    rust: |
+      An extension trait implemented for the foreign type does the same job, within the orphan rule.
+    python: >
+      Monkey-patching a library class is the shortcut to avoid; a module of functions or a thin wrapper is the
+      usual fix.
+  related:
+    - adapter
+    - decorator
+    - facade
+  tell: |
+    Assignments onto attributes of an imported third-party class or module (monkey-patching).
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      import datelib
+
+      fn settlement_date(trade_date: datelib.Date) -> datelib.Date:
+          d = trade_date.add_days(1)
+          while d.weekday() >= 5 or d in HOLIDAYS:
+              d = d.add_days(1)
+          return d
+
+      fn invoice_due(issued: datelib.Date) -> datelib.Date:
+          d = issued.add_days(1)
+          while d.weekday() >= 5 or d in HOLIDAYS:
+              d = d.add_days(1)
+          ...
+    after: |
+      import datelib
+
+      # foreign method: datelib.Date has no business-day support
+      fn next_business_day(d: datelib.Date) -> datelib.Date:
+          d = d.add_days(1)
+          while d.weekday() >= 5 or d in HOLIDAYS:
+              d = d.add_days(1)
+          return d
+
+      fn settlement_date(trade_date) -> datelib.Date:
+          return next_business_day(trade_date)
+    note: The missing operation lives in one function of your own, labelled as such, instead of in every caller.
+  sources:
+    - cite: Refactoring.Guru, Incomplete Library Class
+      url: https://refactoring.guru/smells/incomplete-library-class
+      how: read
+    - cite: Martin Fowler, Refactoring (1st ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: Fowler dropped it from the 2nd edition's list.
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+- id: large-class
+  name: Large Class
+  family: smell
+  group: code
+  says: "A class has grown too many fields, methods or lines because new features kept landing there. Taken to
+    the extreme it becomes a God Object. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A class with dozens of methods or fields, or a file that dominates the module by size.
+    - Groups of fields sharing a prefix or used only by a subset of methods.
+    - A class name ending in Manager, Service, Helper or Handler that every feature touches.
+    - Most commits in the area modify this one file.
+  forces:
+    - Adding a method to an existing class is less effort than creating a new one.
+    - The class is where the related data already lives.
+    - Splitting needs a decision about boundaries that nobody had time to make.
+  remedy: >
+    Extract Class for a coherent group of fields and methods, Extract Subclass for behaviour only some
+    instances need, and Extract Interface to define what each kind of client uses. For UI classes, move data
+    and behaviour into a domain object.
+  overuse:
+    - Breaking a class into many tiny classes connected by delegation, so one feature is spread across them
+      (Shotgun Surgery, Middle Man).
+    - Splitting by size alone when the class has one reason to change.
+  counter: >
+    Size alone isn't the problem. A class that does one cohesive thing with many small methods, a generated
+    client, or a thin composition root that wires many parts together can be large and fine. Ousterhout argues
+    for deep modules, a lot of functionality behind a small interface, which a mechanical split can make
+    worse. Judge by how many reasons it has to change.
+  in: {}
+  related:
+    - god-object
+    - divergent-change
+    - long-method
+    - solid
+  tell: "Python and C#: a class body over 500 lines, excluding generated code."
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      class AppointmentManager:
+          fn book(patient, slot): ...
+          fn cancel(appointment): ...
+          fn find_free_slots(doctor, day): ...
+          fn bill_insurer(appointment): ...
+          fn apply_copay(appointment): ...
+          fn send_reminder_sms(appointment): ...
+          fn send_reminder_email(appointment): ...
+          ... 30 more
+    after: |
+      class Scheduler:
+          fn book(patient, slot): ...
+          fn cancel(appointment): ...
+          fn find_free_slots(doctor, day): ...
+
+      class AppointmentBilling:
+          fn bill_insurer(appointment): ...
+          fn apply_copay(appointment): ...
+
+      class Reminders:
+          fn send(appointment, channel): ...
+    note: Scheduling, billing and reminders were three groups of methods sharing one name; each is now its own
+      class.
+  sources:
+    - cite: Refactoring.Guru, Large Class
+      url: https://refactoring.guru/smells/large-class
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - desktop
+    - mobile
+    - games
+- id: lazy-class
+  name: Lazy Class
+  family: smell
+  group: design
+  says: "A class does too little to be worth understanding and maintaining. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A class with one trivial method, used from one place.
+    - A subclass that adds or overrides almost nothing.
+    - A wrapper whose only method calls a single built-in or library function.
+  forces:
+    - Refactoring moved its behaviour elsewhere and left the shell.
+    - It was created for planned work that never came.
+    - A belief that every concept needs its own class.
+  remedy: >
+    Inline Class to fold it into its caller, or Collapse Hierarchy for a near-empty subclass. In the 2nd
+    edition, Inline Function for a lazy function.
+  overuse:
+    - Inlining a small value type that gives a domain concept a name and a place for its rules, such as an id
+      or a unit.
+    - Removing a small class that marks a real seam (a port to an external system) because it is thin today.
+  counter: >
+    Small isn't the same as lazy. A tiny value object that carries a name and enforces an invariant earns its
+    place, and it is the cure for Primitive Obsession. A thin adapter at a system boundary keeps the rest of
+    the code independent of the outside. The page itself allows a small class that marks intended future work,
+    though YAGNI pulls the other way.
+  in: {}
+  related:
+    - speculative-generality
+    - middle-man
+    - primitive-obsession
+    - yagni
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class JobIdFormatter:
+          fn format(job_id: int) -> str:
+              return "job-" + str(job_id)
+
+      fn enqueue(queue, job):
+          key = JobIdFormatter().format(job.id)
+          queue.push(key, job.payload)
+    after: |
+      fn enqueue(queue, job):
+          key = "job-" + str(job.id)
+          queue.push(key, job.payload)
+
+      # JobIdFormatter deleted
+    note: The class added a name and an allocation but no rule worth isolating, so it was inlined.
+  sources:
+    - cite: Refactoring.Guru, Lazy Class
+      url: https://refactoring.guru/smells/lazy-class
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3, Lazy Element
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: Fowler's 2nd edition widens it to Lazy Element, which covers functions too.
+  matters_most_for: []
+- id: long-method
+  name: Long Method
+  family: smell
+  group: code
+  says: "A function has grown long enough that you have to read all of it to understand any of it. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - A function body that runs past a screen, with blank-line-separated phases.
+    - Comments labelling the phases inside the function.
+    - Deep nesting of conditionals and loops.
+    - Many local variables, some reassigned across phases.
+  forces:
+    - Adding a few lines to an existing function is always the smallest change.
+    - Local variables shared across the body make extraction look hard.
+    - Worry that extra function calls cost performance.
+  remedy: >
+    Extract Method, naming each piece after what it does (a block that needs a comment is a candidate).
+    Replace Temp with Query, Introduce Parameter Object or Preserve Whole Object when locals get in the way.
+    Decompose Conditional for complex conditions. Replace Method with Method Object when nothing else works.
+  overuse:
+    - Splitting into many tiny functions called once each, so the reader has to jump around to follow one flow.
+    - Extracting by line count rather than by meaning, creating helpers with vague names (process_part2).
+  counter: >
+    Refactoring.Guru's ten-line threshold is far stricter than most practitioners use. Ousterhout argues that
+    splitting into many shallow functions hides more than it shows, and John Carmack has made the case for
+    inlining long sequential code so the order of effects stays visible. A long function that does one linear
+    thing, like a state machine, a parser case table or a test, can be clearer whole. Split by meaning, not
+    length.
+  in: {}
+  related:
+    - comments
+    - large-class
+    - kiss
+    - duplicate-code
+  tell: "Python only: a function over 60 lines, excluding tests and generated migrations."
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn import_statement(path: str, account) -> int:
+          rows = read_csv(path)
+          parsed = []
+          for row in rows:
+              if row["Amount"] == "": continue
+              amount = parse_decimal(row["Amount"].replace(",", "."))
+              date = parse_date(row["Booked"], "DD.MM.YYYY")
+              parsed.append(Txn(date, amount, row["Text"].strip()))
+          existing = account.transaction_keys()
+          new = []
+          for t in parsed:
+              if t.key() not in existing: new.append(t)
+          account.add_all(new)
+          return len(new)
+    after: |
+      fn import_statement(path: str, account) -> int:
+          parsed = parse_rows(read_csv(path))
+          new = without_known(parsed, account.transaction_keys())
+          account.add_all(new)
+          return len(new)
+
+      fn parse_rows(rows) -> list: ...
+      fn without_known(txns, known_keys) -> list: ...
+    note: The top function now reads as the three steps it performs; each step can be tested on its own.
+  sources:
+    - cite: Refactoring.Guru, Long Method
+      url: https://refactoring.guru/smells/long-method
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3, Long Function and Loops
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: John Ousterhout, A Philosophy of Software Design, ch. 9
+      url: https://web.stanford.edu/~ouster/cgi-bin/book.php
+      how: recalled
+  names: Fowler's 2nd edition calls it Long Function and adds Loops as a separate smell, preferring pipeline
+    operations over hand-written loops.
+  matters_most_for:
+    - data-pipeline
+    - scientific
+    - ml-training
+    - compilers-tooling
+    - tui
+- id: long-parameter-list
+  name: Long Parameter List
+  family: smell
+  group: code
+  says: "A function takes so many parameters that calls are hard to read and easy to get wrong. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Signatures with more than four or five parameters.
+    - Boolean flag parameters that switch which path the function takes.
+    - Call sites passing several values pulled from the same object.
+    - Positional calls full of literals where nobody can tell which is which.
+  forces:
+    - Several algorithms were merged into one function, with flags to choose between them.
+    - Dependencies were moved out to be passed in, one parameter at a time.
+    - Adding a parameter is the smallest change that makes the new case work.
+  remedy: >
+    Replace Parameter with Method Call (Replace Parameter with Query) when the function can get a value
+    itself, Preserve Whole Object when several values come from one object, and Introduce Parameter Object for
+    values that belong together. Split flag-driven functions with Remove Flag Argument (Replace Parameter with
+    Explicit Methods).
+  overuse:
+    - Wrapping unrelated parameters in an options object just to shorten the signature, which hides what the
+      function needs.
+    - Passing a whole object to avoid a parameter, coupling a low-level function to a high-level type.
+  counter: >
+    Explicit parameters make dependencies visible, which is often better than reaching for global state or a
+    big context object. Pure functions and constructors used for dependency injection often have many
+    parameters on purpose. Languages with keyword arguments make long lists much less error-prone. Don't
+    remove a parameter if it means creating a dependency the function didn't have.
+  in:
+    python: >
+      Keyword-only parameters (after a bare star) take most of the readability cost away, but a long list of
+      them still says the function does too much.
+  related:
+    - data-clumps
+    - primitive-obsession
+    - builder
+  tell: A function with more than five parameters, or with two or more boolean parameters, not counting
+    constructors that take their dependencies. In Python, count only positional parameters that have no
+    default and come before any * or *args, not self or cls.
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn render_chart(series, title: str, width: int, height: int,
+                      show_legend: bool, log_scale: bool, dark: bool,
+                      x_label: str, y_label: str): ...
+
+      render_chart(data, "Latency", 800, 400, True, False, True, "time", "ms")
+    after: |-
+      class ChartSize:
+          width: int
+          height: int
+
+      class Axes:
+          x_label: str
+          y_label: str
+          log_scale: bool
+
+      class Style:
+          theme: Theme
+          show_legend: bool
+
+      fn render_chart(series, title: str, size: ChartSize, axes: Axes, style: Style): ...
+      render_chart(data, "Latency", ChartSize(800, 400), Axes("time", "ms", False), Style(DARK, True))
+    note: Values that travel together became small types, and the call no longer depends on remembering positions.
+  sources:
+    - cite: Refactoring.Guru, Long Parameter List
+      url: https://refactoring.guru/smells/long-parameter-list
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - scientific
+    - ml-training
+    - library-sdk
+- id: message-chains
+  name: Message Chains
+  family: smell
+  group: design
+  says: "A client walks a chain of objects to reach the one it wants, so it depends on the whole path between
+    them. This is what the Law of Demeter forbids. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Calls like a.b().c().d() where each step returns a different object.
+    - The same navigation path repeated at several call sites.
+    - Temporary variables that each hold the next object along a path.
+  forces:
+    - The data the client needs sits several objects away, and navigating is the obvious way to reach it.
+    - Getters on every object make any path reachable.
+    - Adding a method to the start of the chain means deciding who owns the question.
+  remedy: >
+    Hide Delegate so the client talks to its immediate neighbour. Better, ask why the client needs the end
+    object, Extract Method for what it does with it, and Move Method that to the start of the chain.
+  overuse:
+    - Adding a forwarding method at every hop, until the classes are mostly delegation (Middle Man).
+    - Treating fluent builders, query builders and pipelines as chains; they return the same kind of object at
+      each step.
+  counter: >
+    Chains over the same type, such as builders, stream or query APIs, and string operations, are not this
+    smell. Navigating plain data structures (a parsed JSON document, a config tree) is often fine because the
+    structure is the published contract. Hiding every delegate trades this smell for Middle Man.
+  in: {}
+  related:
+    - law-of-demeter
+    - middle-man
+    - inappropriate-intimacy
+  tell: The same navigation path of three or more getter calls or attribute hops through objects (a.b().c().d())
+    repeated at three or more call sites in one file, ignoring module and package paths.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      fn print_header(ticket):
+          city = ticket.event().venue().address().city
+          tz = ticket.event().venue().timezone()
+          print(city + " " + ticket.event().starts_at.local(tz))
+    after: |
+      class Event:
+          fn location_line() -> str:
+              return self.venue.city() + " " + self.starts_at.local(self.venue.timezone())
+
+      fn print_header(ticket):
+          print(ticket.event().location_line())
+    note: The event answers the question about its own venue, so the printer no longer depends on venue and
+      address.
+  sources:
+    - cite: Refactoring.Guru, Message Chains
+      url: https://refactoring.guru/smells/message-chains
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for: []
+- id: middle-man
+  name: Middle Man
+  family: smell
+  group: design
+  says: "A class mostly forwards calls to another class and adds nothing of its own. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Most methods are one line that calls the same method on the same field.
+    - A wrapper or service whose signature is as complicated as what it wraps.
+    - Callers that could use the delegate directly, and sometimes do.
+  forces:
+    - Message chains were removed by adding forwarding methods everywhere.
+    - Logic migrated out of the class over time, leaving the delegation.
+    - A habit of wrapping every dependency "in case it changes".
+  remedy: >
+    Remove Middle Man so callers use the delegate directly. Inline Method for the few forwarders worth keeping
+    in callers. If the class must stay, give it real behaviour or make it a subclass of the delegate (Replace
+    Delegation with Inheritance in the 1st edition).
+  overuse:
+    - Removing a deliberate Proxy, Decorator, Adapter or Facade that controls access or decouples callers from
+      a third-party API.
+    - Exposing a deep internal object to all callers to save a few forwarding lines.
+  counter: >
+    Keep it when it reduces dependencies, for example by keeping the rest of the code from importing a vendor
+    SDK, or when it's a Proxy, Decorator or Adapter by design. Ousterhout's shallow module critique covers the
+    bad case: if a caller has to understand as much as the wrapper does for them, the wrapper is noise.
+  in: {}
+  related:
+    - message-chains
+    - lazy-class
+    - proxy
+    - decorator
+    - facade
+    - adapter
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      class Room:
+          thermostat: Thermostat
+
+          fn target() -> float: return self.thermostat.target()
+          fn set_target(c: float): self.thermostat.set_target(c)
+          fn mode() -> str: return self.thermostat.mode()
+          fn set_mode(m: str): self.thermostat.set_mode(m)
+
+      room.set_target(21.5)
+    after: |
+      class Room:
+          thermostat: Thermostat
+
+      room.thermostat.set_target(21.5)
+    note: Room added nothing to the thermostat's own interface, so callers talk to the thermostat.
+  sources:
+    - cite: Refactoring.Guru, Middle Man
+      url: https://refactoring.guru/smells/middle-man
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - library-sdk
+- id: parallel-inheritance-hierarchies
+  name: Parallel Inheritance Hierarchies
+  family: smell
+  group: design
+  says: "Every time you add a subclass in one hierarchy you have to add a matching subclass in another. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Two class trees whose subclass names share prefixes (AutoClaim and AutoClaimValidator, HomeClaim and
+      HomeClaimValidator).
+    - Commits that add one subclass to each of two hierarchies together.
+    - A factory or map pairing each class in one tree with its twin in the other.
+  forces:
+    - Separating concerns (validation, rendering, persistence) into their own classes, each mirroring the
+      model.
+    - Frameworks that expect one handler, serializer or view per model class.
+    - It works while each tree has two or three members.
+  remedy: >
+    Make instances of one hierarchy refer to instances of the other, then Move Method and Move Field until the
+    second hierarchy is empty and can be removed.
+  overuse:
+    - Folding presentation or persistence concerns into domain classes to remove the twin tree, which
+      reintroduces Divergent Change.
+    - Merging when the mirrored structure isolates a dependency (a UI toolkit, a database) that the domain
+      shouldn't know.
+  counter: >
+    Sometimes the parallel tree is the price of keeping a concern out of the model, and merging would be
+    worse. The page itself says to revert if merging makes the code messier. Visitor and Bridge accept a
+    related kind of pairing on purpose. In languages with sum types and pattern matching, one function per
+    concern that matches on the variants often removes the second tree without merging concerns.
+  in: {}
+  related:
+    - shotgun-surgery
+    - divergent-change
+    - visitor
+    - bridge
+  tell: null
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Claim: ...
+      class AutoClaim extends Claim: ...
+      class HomeClaim extends Claim: ...
+
+      class ClaimValidator: fn validate(claim): ...
+      class AutoClaimValidator extends ClaimValidator: fn validate(claim): ... checks vin
+      class HomeClaimValidator extends ClaimValidator: fn validate(claim): ... checks address
+
+      # adding TravelClaim means adding TravelClaimValidator too
+    after: |
+      class Claim:
+          fn validate(): ...
+
+      class AutoClaim extends Claim:
+          fn validate(): ... checks vin
+
+      class HomeClaim extends Claim:
+          fn validate(): ... checks address
+    note: Validation moved onto the claim types, so a new claim type is one class, not two.
+  sources:
+    - cite: Refactoring.Guru, Parallel Inheritance Hierarchies
+      url: https://refactoring.guru/smells/parallel-inheritance-hierarchies
+      how: read
+    - cite: Martin Fowler, Refactoring (1st ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: It is a special case of Shotgun Surgery, and Fowler dropped it from the 2nd edition's list.
+  matters_most_for:
+    - compilers-tooling
+    - desktop
+- id: primitive-obsession
+  name: Primitive Obsession
+  family: smell
+  group: code
+  says: "Domain concepts such as money, ranges, ids, phone numbers and statuses are passed around as bare
+    strings and numbers, so their rules are repeated wherever they are used. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Amounts as floats with a separate currency string next to them.
+    - Integer or string constants standing for roles, states or types, compared in many places.
+    - Dicts or arrays with string keys used as records.
+    - The same format check (email, postcode, ISO code) repeated at each entry point.
+    - Function signatures of several str or int parameters that are easy to pass in the wrong order.
+  forces:
+    - Adding a field is quicker than creating a type.
+    - Values arrive as strings and numbers from JSON, forms and databases, and are passed on as they came.
+    - Small types look like over-engineering until the bugs pile up.
+  remedy: >
+    Replace Data Value with Object (Replace Primitive with Object in the 2nd edition). Replace Type Code with
+    Class, Subclasses or State/Strategy for coded values. Introduce Parameter Object or Preserve Whole Object
+    for groups of primitives in signatures. Replace Array with Object for arrays of mixed values. Parse once
+    at the boundary into the type.
+  overuse:
+    - Wrapping every string and int, including values with no rules and one use, into its own class.
+    - Value types so heavy (with factories, interfaces and mappers) that nobody wants to add a new one.
+  counter: >
+    Primitives are fine for values with no rules and no ambiguity, inside a small scope, or in throwaway
+    scripts. Wrapper types have a cost in languages where they allocate or need serialization code. The modern
+    form of the advice is "parse, don't validate" (Alexis King): convert at the boundary into a type that
+    can't hold invalid values, rather than wrapping everything everywhere.
+  in:
+    python: |
+      NewType, small frozen dataclasses and Enum cover most cases cheaply.
+    typescript: |
+      Branded types and string-literal unions give the safety without a runtime wrapper.
+    rust: |
+      Newtypes are zero-cost and idiomatic.
+    go: |
+      Named types over primitives (type UserID string) are idiomatic and cheap.
+  related:
+    - data-clumps
+    - long-parameter-list
+    - switch-statements
+    - lazy-class
+  tell: "Go, Python, Java and C#, not TypeScript: a field or variable named like status, role, type or kind
+    compared against string or number literals in three or more places in one file."
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn pledge(project, amount: float, currency: str):
+          if currency not in ("EUR", "USD"): raise BadCurrency(currency)
+          if amount <= 0: raise BadAmount(amount)
+          project.total = project.total + convert(amount, currency, project.currency)
+
+      fn refund(backer, amount: float, currency: str):
+          if currency not in ("EUR", "USD"): raise BadCurrency(currency)
+          ...
+    after: |-
+      class Money:
+          cents: int
+          currency: Currency
+
+          fn positive(cents: int, code: str) -> Money:
+              if cents <= 0: raise BadAmount(cents)
+              return Money(cents, Currency.parse(code))
+
+      fn pledge(project, amount: Money):
+          project.total = project.total.plus(amount.converted_to(project.currency))
+
+      fn refund(backer, amount: Money): ...
+    note: The amount and its currency became one value checked once on creation, and floats stopped carrying money.
+  sources:
+    - cite: Refactoring.Guru, Primitive Obsession
+      url: https://refactoring.guru/smells/primitive-obsession
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: Alexis King, Parse, don't validate (2019)
+      url: https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/
+      how: recalled
+  matters_most_for:
+    - web-api
+    - platforms
+    - fullstack-web
+    - databases-storage
+- id: refused-bequest
+  name: Refused Bequest
+  family: smell
+  group: design
+  says: "A subclass inherits methods and fields it doesn't want, ignoring them or overriding them to throw,
+    which means the inheritance was chosen for code reuse rather than because the subclass really is a kind of
+    its parent. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - An override whose body only raises "not supported" or does nothing.
+    - A subclass that uses a small part of a large parent.
+    - Callers that check the concrete type before calling an inherited method.
+  forces:
+    - Inheriting was the fastest way to reuse a few methods.
+    - The two classes looked similar at the time.
+    - A framework base class that brings far more than the subclass needs.
+  remedy: >
+    Replace Inheritance with Delegation (Replace Superclass with Delegate in the 2nd edition) when the classes
+    aren't really related. If they are, push the unwanted members down (Push Down Method, Push Down Field) or
+    Extract Superclass with only what both share.
+  overuse:
+    - Rebuilding a hierarchy because a subclass leaves one harmless inherited helper unused.
+    - Replacing all inheritance with delegation, including where the subclass genuinely is a kind of its
+      parent.
+  counter: >
+    Fowler says the smell is faint when a subclass merely doesn't use some inherited implementation. It's
+    strong when the subclass refuses the interface, because then it breaks the Liskov Substitution Principle
+    and callers can't trust the parent type. Some standard libraries accept optional operations on purpose
+    (Java's unmodifiable collections throwing on add), and that is a known, debated trade-off.
+  in:
+    java: >
+      UnsupportedOperationException in an override is the classic sign, used deliberately in the collections
+      framework.
+  related:
+    - parallel-inheritance-hierarchies
+  tell: |
+    An overriding method whose entire body raises a not-supported or not-implemented error.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Folder:
+          fn list() -> list: ...
+          fn write(name, data): ...
+          fn delete(name): ...
+
+      class Archive extends Folder:
+          fn write(name, data): raise Unsupported("archive is read-only")
+          fn delete(name): raise Unsupported("archive is read-only")
+    after: |
+      interface Readable:
+          fn list() -> list
+
+      class Folder implements Readable:
+          fn list() -> list: ...
+          fn write(name, data): ...
+          fn delete(name): ...
+
+      class Archive implements Readable:
+          fn list() -> list: ...
+    note: The archive only promises what it can do, so no caller can be handed one and told it can write.
+  sources:
+    - cite: Refactoring.Guru, Refused Bequest
+      url: https://refactoring.guru/smells/refused-bequest
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+    - desktop
+- id: shotgun-surgery
+  name: Shotgun Surgery
+  family: smell
+  group: design
+  says: "One change forces many small edits across many classes or files, because one responsibility is spread
+    across them. It is the mirror image of Divergent Change, and it is easy to miss on a file-by-file read
+    since it only shows across files and history. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Commits for one small feature that touch many files with a few lines in each.
+    - Files in different packages that keep changing together in git history (change coupling).
+    - The same rule, constant, string or mapping repeated in several modules (a rate, a status list, a field
+      name).
+    - A checklist in docs or a PR template saying "when you add X, also update A, B, C and D".
+    - Bugs where one copy of a rule was updated and another wasn't.
+    - Adding a new case means editing a switch or map in several layers.
+  forces:
+    - A rule was copied into each place that needed it instead of given one home.
+    - The code is organised by technical layer (controller, service, repository, view), so every feature cuts
+      through all of them.
+    - Over-splitting to cure Divergent Change or to follow the single-responsibility principle too literally,
+      so one concern ended up in many tiny classes.
+    - Each edit was made by someone who saw only the file in front of them.
+  remedy: Pick, or create, the class that should own the responsibility, and pull the scattered pieces into it
+    with Move Method and Move Field. Any class left nearly empty goes with Inline Class. At module scale,
+    group code by feature or by the kind of change rather than by technical layer, and give each repeated rule
+    or mapping one source of truth (one table, one enum, one function).
+  overuse:
+    - Pulling everything a change touches into one class, which creates a Large Class with Divergent Change.
+    - Centralising things that only look alike and change for different reasons, which couples them.
+    - Trying to remove inherent amplification, such as a new field that must go from the database through the
+      API to the UI, which touches each layer however the code is organised.
+  counter: >
+    Some spread is inherent. A new field that crosses storage, API and UI touches each layer by nature, so
+    only flag it when a different decomposition would really reduce the edits, and name that decomposition.
+    Cross-cutting concerns (logging, auth, metrics) are better handled by middleware or wrappers than by
+    gathering them in one class. Separate teams may own separate modules on purpose (Conway's law), and some
+    duplication between them is the cost of independence. The cure for this smell and the cure for Divergent
+    Change pull in opposite directions; aim for one place per kind of change, not the fewest or the smallest
+    classes.
+  in: {}
+  related:
+    - divergent-change
+    - duplicate-code
+    - parallel-inheritance-hierarchies
+    - dry
+    - solid
+    - switch-statements
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      # order_view.py
+      fn status_label(order) -> str:
+          if order.status == "held": return "On hold"
+          if order.status == "paid": return "Paid"
+          ...
+      # fulfilment.py
+      fn can_ship(order) -> bool:
+          return order.status == "paid" or order.status == "packed"
+      # export.py
+      fn status_code(order) -> str:
+          return EXPORT_CODES[order.status]     # {"held": "H", "paid": "P", ...}
+
+      # adding a "backordered" status edits all three files; miss one and it fails quietly
+    after: |
+      # order_status.py
+      class OrderStatus:
+          name: str
+          label: str
+          export_code: str
+          shippable: bool
+
+      HELD = OrderStatus("held", "On hold", "H", False)
+      PAID = OrderStatus("paid", "Paid", "P", True)
+      ...
+
+      # order_view.py, fulfilment.py, export.py
+      return order.status.label
+      return order.status.shippable
+      return order.status.export_code
+    note: Everything a status means now lives in one place, so a new status is one edit, not three that can drift
+      apart.
+  sources:
+    - cite: Refactoring.Guru, Shotgun Surgery
+      url: https://refactoring.guru/smells/shotgun-surgery
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: Adam Tornhill, Your Code as a Crime Scene, change coupling
+      url: https://pragprog.com/titles/atcrime2/your-code-as-a-crime-scene-second-edition/
+      how: recalled
+  matters_most_for:
+    - web-api
+    - fullstack-web
+    - platforms
+    - distributed
+- id: speculative-generality
+  name: Speculative Generality
+  family: smell
+  group: design
+  says: "Hooks, parameters, abstract classes and extension points were added for needs that might come someday
+    and never did. It is YAGNI seen in the code. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - An interface or abstract base class with exactly one implementation.
+    - Parameters, options or config keys that every caller passes the same value for, or none use.
+    - Factories, registries or plugin systems with one registered thing.
+    - Methods or classes whose only callers are tests.
+    - Names like Generic, Base, Abstract or Manager around code with one concrete use.
+  forces:
+    - A request for "clean", "flexible" or "future-proof" code without saying flexible how.
+    - Patterns read as good practice in themselves.
+    - The belief that adding the seam later will be harder than adding it now.
+  remedy: >
+    Collapse Hierarchy for an abstract class with one child, Inline Class for needless delegation, Inline
+    Method (Inline Function) for unused indirection, Remove Parameter for unused parameters, and delete unused
+    fields. Add the abstraction back when the second case actually arrives.
+  overuse:
+    - Removing extension points in a framework or library whose users rely on them, even if this repository
+      doesn't.
+    - Deleting a seam that exists so tests can substitute a slow or external dependency.
+    - Refusing all abstraction until the third copy, even when the variation is known and imminent.
+  counter: >
+    Libraries and frameworks need some generality their own code doesn't use, because their users do. An
+    interface with one production implementation can be justified by a test fake, or by a second
+    implementation already in progress. Ask before flagging. Check whether tests depend on the hooks before
+    deleting them.
+  in: {}
+  related:
+    - yagni
+    - dead-code
+    - lazy-class
+    - kiss
+    - second-system-effect
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      interface PhotoStore:
+          fn put(key: str, data: bytes, compression: str, replicas: int)
+
+      class LocalDiskStore implements PhotoStore:
+          fn put(key, data, compression, replicas):
+              # compression and replicas are ignored
+              write_file(PHOTO_DIR + key, data)
+
+      class PhotoStoreFactory:
+          fn create(kind: str) -> PhotoStore:
+              return LocalDiskStore()
+    after: |
+      class LocalDiskStore:
+          fn put(key: str, data: bytes):
+              write_file(PHOTO_DIR + key, data)
+
+      store = LocalDiskStore()
+    note: One store, no compression, no replication; the interface, factory and unused parameters go until a
+      second store is real.
+  sources:
+    - cite: Refactoring.Guru, Speculative Generality
+      url: https://refactoring.guru/smells/speculative-generality
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+    - platforms
+    - cli-devtool
+    - plugin-host
+- id: switch-statements
+  name: Switch Statements
+  family: smell
+  group: code
+  says: A switch or if-else chain on the same type code shows up in several places, so adding a case means
+    finding and editing every copy.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - The same variable (type, kind, plan, status) switched on in several functions.
+    - Long if-elif chains comparing one value against many literals.
+    - A switch whose cases each call the same method with different arguments.
+    - A null check repeated before each use of an optional collaborator.
+  forces:
+    - Adding another branch is the smallest change that handles the new case.
+    - Behaviour depends on a type code read from the database or an API.
+    - Polymorphism means designing a hierarchy, and a deadline doesn't allow it.
+  remedy: >
+    Extract Method and Move Method so the switch lives with the data it switches on. Replace Type Code with
+    Subclasses or with State/Strategy, then Replace Conditional with Polymorphism. Replace Parameter with
+    Explicit Methods when every case calls one method with a different argument. Introduce Null Object for a
+    null case.
+  overuse:
+    - Turning a single, simple switch into a class hierarchy.
+    - Replacing a switch in a factory, which is where choosing a class belongs.
+    - Splitting behaviour across subclasses when the set of variants is fixed but the set of operations keeps
+      growing.
+  counter: >
+    One switch in one place, especially in a factory or at a parsing boundary, is normal. The expression
+    problem cuts both ways: polymorphism makes new types cheap and new operations expensive, while a switch
+    makes new operations cheap. In languages with sum types and exhaustive matching, the compiler finds every
+    switch that misses a new case, which removes most of the risk the smell is about. Data-oriented and
+    functional programmers often prefer the switch.
+  in:
+    rust: Exhaustive match on an enum is idiomatic, and within the crate that defines the enum the compiler flags
+      every match when a variant is added. That guarantee stops at `#[non_exhaustive]` enums from other
+      crates, which require a wildcard arm. A wildcard that panics or quietly does nothing is then where new
+      variants go to hide, so handle the unknown case deliberately.
+    typescript: |
+      A discriminated union with an exhaustiveness check (assigning to never) gives the same safety.
+  related:
+    - strategy
+    - state
+    - primitive-obsession
+    - shotgun-surgery
+    - factory-method
+  tell: "TypeScript, Java and C#, excluding generated code: a switch on the same expression in two or more
+    functions of one file."
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      fn monthly_price(account) -> Money:
+          if account.plan == "free": return Money(0)
+          elif account.plan == "team": return Money(12) * account.seats
+          elif account.plan == "enterprise": return account.contract_price
+
+      fn seat_limit(account) -> int:
+          if account.plan == "free": return 3
+          elif account.plan == "team": return 50
+          elif account.plan == "enterprise": return account.contract_seats
+    after: |
+      interface Plan:
+          fn monthly_price(account) -> Money
+          fn seat_limit(account) -> int
+
+      class FreePlan implements Plan:
+          fn monthly_price(account): return Money(0)
+          fn seat_limit(account): return 3
+
+      class TeamPlan implements Plan: ...
+      class EnterprisePlan implements Plan: ...
+    note: A new plan is one new class rather than another branch in every function that asks about plans.
+  sources:
+    - cite: Refactoring.Guru, Switch Statements
+      url: https://refactoring.guru/smells/switch-statements
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3, Repeated Switches
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: Fowler's 2nd edition renames it Repeated Switches and aims it at the duplicated switch rather than at
+    every conditional.
+  matters_most_for:
+    - compilers-tooling
+    - platforms
+    - tui
+- id: temporary-field
+  name: Temporary Field
+  family: smell
+  group: code
+  says: "Some of an object's fields hold values only while one algorithm runs and are empty the rest of the
+    time, which confuses anyone reading the class. "
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Fields initialised to null in the constructor and assigned only inside one method.
+    - Methods that check whether a field is set before using it.
+    - Fields cleared again at the end of a method.
+  forces:
+    - An algorithm needed many intermediate values, and storing them on the object avoided passing a long
+      parameter list.
+    - Helper methods split out of a long method needed shared state.
+  remedy: Move the temporary fields and the code that uses them into a class of their own with Extract Class.
+    That new class is a method object, built for one run and holding its values for its whole life. Replace
+    the checks for unset fields with Introduce Null Object (Introduce Special Case in the 2nd edition).
+  overuse:
+    - Turning lazily computed caches, which are legitimately empty until first used, into separate classes.
+    - Extracting a method object for two intermediate values that could simply be local variables.
+  counter: >
+    Lazy initialisation and memoised values are deliberately empty at first and are not this smell, as long as
+    they are clearly named. Objects with a real lifecycle (a connection that is open or closed) may hold
+    fields that are only set in some states; that's better modelled with the State pattern or separate types,
+    but it is a different problem.
+  in: {}
+  related:
+    - long-parameter-list
+    - long-method
+    - state
+  tell: A field initialised to null or None in the constructor that is assigned and read only inside one method
+    (and the helpers it calls), excluding fields read back by a getter that fills them on first use.
+  agent_prone: false
+  interview_only: false
+  example:
+    before: |
+      class Grader:
+          _curve_mean: float | None = None
+          _curve_spread: float | None = None
+
+          fn grade(exam) -> str: ...
+
+          fn curved_grade(exam, cohort) -> str:
+              self._curve_mean = mean(cohort.scores)
+              self._curve_spread = stddev(cohort.scores)
+              z = (exam.score - self._curve_mean) / self._curve_spread
+              return letter_for_z(z)
+    after: |
+      class Curve:
+          mean: float
+          spread: float
+
+          fn from_cohort(cohort) -> Curve:
+              return Curve(mean(cohort.scores), stddev(cohort.scores))
+
+          fn letter_for(score: float) -> str:
+              return letter_for_z((score - self.mean) / self.spread)
+
+      class Grader:
+          fn grade(exam) -> str: ...
+          fn curved_grade(exam, cohort) -> str:
+              return Curve.from_cohort(cohort).letter_for(exam.score)
+    note: The curve values now live in an object that always has them, and the grader holds no half-set state.
+  sources:
+    - cite: Refactoring.Guru, Temporary Field
+      url: https://refactoring.guru/smells/temporary-field
+      how: read
+    - cite: Martin Fowler, Refactoring (2nd ed.), ch. 3
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+  names: Fowler's 2nd edition keeps the name, and adds the related state smells Mutable Data and Global Data,
+    which have no entries of their own here.
+  matters_most_for: []
+- id: n-plus-one-queries
+  name: N+1 Queries
+  family: smell
+  group: code
+  says: >
+    Code fetches a list with one query and then runs one more query per item to load something related, so a
+    page of 100 rows costs 101 round trips; usually hidden by an ORM's lazy loading.
+  names: >
+    Also called the N+1 selects problem. The name grew up around Hibernate and Rails in the mid-2000s and has
+    no single coiner; Fowler's Lazy Load pattern (PoEAA, 2002) describes the mechanism that causes it and
+    warns about this ripple of loads.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A loop over query results that touches a relation (order.customer.name) or calls a repository per item.
+    - Query logs or traces showing the same SELECT repeated with different ids in one request.
+    - Endpoints whose latency grows with the page size.
+    - GraphQL resolvers that load a field per parent object without a batching loader.
+  forces:
+    - ORM lazy loading makes a related object look like a plain field access.
+    - Code is written and tested against tiny datasets where the cost doesn't show.
+    - Gateway or repository methods are per-record, so composing them in a loop is the obvious move.
+    - Serialisers or templates touch relations nobody loaded on purpose.
+  remedy: >
+    Load the relation with the list: eager loading or a join (select_related or prefetch_related, selectinload
+    or joinedload, JOIN FETCH or entity graphs, Include, Prisma include), or batch the second query with WHERE
+    id IN (...) and stitch in memory (a DataLoader in GraphQL). Add a test or a query-count assertion for hot
+    endpoints.
+  overuse:
+    - Eager-loading every relation everywhere, which produces huge joins, cartesian blow-ups and loads data
+      that is never used.
+    - Hand-writing one giant query per screen, losing the reuse and readability of simpler queries.
+  counter: >
+    With a handful of items, a fast local database or a cached lookup, the extra queries cost nothing worth
+    the complexity, so measure before rewriting. Sometimes N small indexed queries beat one large join that
+    multiplies rows. Batch jobs that stream records one at a time may do per-item queries on purpose to bound
+    memory.
+  in:
+    python: >
+      Django: select_related for foreign keys, prefetch_related for many-to-many and reverse relations;
+      django-debug-toolbar or nplusone show it. SQLAlchemy: selectinload or joinedload options, and
+      lazy="raise" to make accidental lazy loads fail loudly.
+    java: "JPA and Hibernate: JOIN FETCH, @EntityGraph or batch fetching (@BatchSize). JPA's default EAGER
+      fetching on @ManyToOne and @OneToOne triggers a select per row for JPQL and Spring Data queries, so mark
+      them LAZY and fetch explicitly; lazy collections touched in loops, and open-session-in-view (on by
+      default in Spring Boot), then make it easy to hit in controllers and serializers."
+    csharp: >
+      EF Core: Include and ThenInclude, or projection with Select; lazy-loading proxies are off by default,
+      which prevents most cases. AsSplitQuery avoids cartesian blow-ups.
+    typescript: >
+      TypeORM relations with leftJoinAndSelect, Prisma include or select (Prisma batches findUnique calls in a
+      tick); DataLoader is standard for GraphQL resolvers.
+    go: >
+      No lazy loading, so it shows as an explicit query call inside a for loop over rows; fix with a join or
+      WHERE id = ANY($1) and a map.
+    rust: >
+      Same as Go with sqlx or Diesel: a query inside a loop over rows; Diesel's belonging_to with grouped_by
+      loads children for many parents in one query.
+  related:
+    - premature-optimization
+    - law-of-leaky-abstractions
+    - table-data-gateway
+    - repository
+    - data-mapper
+  tell: null
+  agent_prone: true
+  interview_only: false
+  sources:
+    - cite: Martin Fowler, Patterns of Enterprise Application Architecture, Lazy Load (catalog summary)
+      url: https://martinfowler.com/eaaCatalog/lazyLoad.html
+      how: read
+    - cite: Django documentation, QuerySet select_related and prefetch_related
+      url: https://docs.djangoproject.com/en/stable/ref/models/querysets/
+      how: recalled
+    - cite: Hibernate ORM documentation, Fetching
+      url: https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#fetching
+      how: recalled
+  example:
+    before: |
+      fn playlist_page(playlist_id):
+          tracks = db.query("SELECT * FROM playlist_tracks WHERE playlist_id = ?", playlist_id)
+          rows = []
+          for t in tracks:
+              artist = db.query_one("SELECT name FROM artists WHERE id = ?", t.artist_id)
+              rows.append((t.title, artist.name))
+          return rows
+          # 1 query for the tracks, then 1 per track
+    after: |
+      fn playlist_page(playlist_id):
+          tracks = db.query("SELECT * FROM playlist_tracks WHERE playlist_id = ?", playlist_id)
+          ids = unique(map(tracks, fn(t): t.artist_id))
+          artists = index_by_id(db.query("SELECT id, name FROM artists WHERE id IN (?)", ids))
+          return map(tracks, fn(t): (t.title, artists[t.artist_id].name))
+          # 2 queries, whatever the playlist length
+    note: The per-item lookups become one batched query, so the cost no longer grows with the number of rows.
+  matters_most_for:
+    - web-api
+    - fullstack-web
+    - databases-storage
+- id: validation-drift
+  name: Validation drift
+  family: smell
+  group: design
+  says: >
+    The same input rules are written separately in the front end and the back end (or in a client and a
+    server, or two services), and the copies drift apart, so the form accepts what the API rejects or the API
+    accepts what the form never would.
+  names: >
+    A plain practitioners' name with no single coiner. Hunt and Thomas, The Pragmatic Programmer (2nd ed.,
+    2019), call the general case representational duplication and recommend generating both sides from one
+    schema. OWASP's Input Validation Cheat Sheet sets the server as the authority and client-side checks as a
+    convenience.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - The same length limit, pattern or allowed list written in a form schema (zod, Yup, a form library) and
+      in a server model (Pydantic, Bean Validation, DataAnnotations).
+    - A limit enforced on one side only, such as a maximum the server checks and the form never does.
+    - Different error messages, or different limits, for what is meant to be one rule.
+    - Users who pass the form and then get a generic error from the API.
+    - Hand-written client types for API payloads next to a server that publishes an OpenAPI or JSON Schema
+      document nobody generates from.
+  forces:
+    - The UI needs instant feedback, so the rule is written there first, then again on the server.
+    - Front end and back end are in different languages, so the code can't simply be shared.
+    - Separate people or teams own each side and change them at different times.
+    - Setting up schema generation feels heavier than copying a regex.
+  remedy: >
+    Make the back end the authority and keep one source for the rules: generate the client's schema and types
+    from the server's (OpenAPI or JSON Schema), share one schema module where both sides use the same
+    language, and map the server's validation errors back to form fields so the server's answer is what the
+    user sees. Where rules can't be shared, run one set of test cases against both validators.
+  overuse:
+    - Removing client-side validation to avoid the copy, so every typo costs a round trip.
+    - Forcing rules that only one side can check (uniqueness, permissions, rate limits) into the shared schema.
+    - Shipping the server's full models to the browser bundle to share them, leaking internal fields.
+  counter: >
+    Some rules belong to one side only: uniqueness needs the database, and a password-strength meter is a UI
+    concern. A client may be looser on purpose and leave the final word to the server, which is fine as long
+    as the server checks everything. Generated schemas don't express every rule (cross-field and
+    database-dependent checks), so sharing covers the simple rules and the rest still needs server-side
+    handling. For a small app with a handful of fields, two short copies may cost less than a code-generation
+    step, as long as the server's copy is complete.
+  in:
+    python: >
+      FastAPI publishes an OpenAPI document from Pydantic models, including length and pattern constraints;
+      client generators (openapi-typescript, Orval, hey-api) turn it into typed clients and, with some, into
+      zod schemas.
+    typescript: In a TypeScript monorepo the same zod schema can be imported by the server and the form. Zod 4's
+      z.toJSONSchema(), or zod-to-openapi, publishes it for clients in other languages.
+    java: >
+      springdoc-openapi carries Bean Validation annotations (@Size, @Pattern, @NotNull) into the OpenAPI
+      document, so clients can be generated from it.
+    csharp: The OpenAPI generators read DataAnnotations ([Required], [StringLength], [Range], [RegularExpression])
+      into the document. That covers both Microsoft.AspNetCore.OpenApi, the default since .NET 9, and
+      Swashbuckle. FluentValidation rules don't appear there without an extra integration package, so they
+      drift more easily.
+  related:
+    - trusting-client-input
+    - validate-at-the-boundary
+    - duplicate-code
+    - dry
+    - shotgun-surgery
+    - parse-dont-validate
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      # server: booking.py
+      class BookingRequest:
+          party_size: int    # between 1 and 12
+          notes: str         # at most 500 characters
+
+      # client: booking_form.ts
+      party_size: number, min 1, max 10      # copied once, then the server limit changed
+      notes: string                          # no maximum here
+
+      # a 600-character note passes the form and fails with a generic 422
+    after: |
+      # server: booking.py is the source of truth
+      class BookingRequest:
+          party_size: int    # between 1 and 12
+          notes: str         # at most 500 characters
+      # published as OpenAPI by the server build
+
+      # client: booking_form.ts
+      schema = generated.BookingRequest      # regenerated in CI from the OpenAPI document
+      on_submit_error(err): show_field_errors(err.fields)
+    note: The client's rules are generated from the server's, and the server's errors are shown per field, so the
+      two can't disagree for long and the server keeps the final word.
+  sources:
+    - cite: OWASP Cheat Sheet Series, Input Validation Cheat Sheet
+      url: https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+      how: recalled
+    - cite: Andrew Hunt and David Thomas, The Pragmatic Programmer (2nd ed., 2019), Topic 9, DRY (representational
+        duplication)
+      url: https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/
+      how: recalled
+    - cite: OpenAPI Specification
+      url: https://spec.openapis.org/oas/latest.html
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - web-frontend
+    - mobile
+    - web-api
+- id: variant-drift
+  name: Variant drift (parallel implementations out of step)
+  family: smell
+  group: design
+  says: >
+    Several implementations of the same thing that must change together, such as one query module per database
+    dialect, one renderer per platform or one code path per product edition, and a change made to one variant
+    alone leaves the others behind.
+  names: >
+    A plain practitioners' name; no single coiner. Teams also say "feature parity" or "dialect drift".
+    Fowler's Shotgun Surgery and Parallel Inheritance Hierarchies (Refactoring, 1999) describe the same
+    edit-in-many-places shape, but their remedy is to merge, which doesn't fit variants that differ for real
+    reasons. The established remedy is a conformance suite run against every variant: Java's TCKs, and the
+    shared test suites that SQLAlchemy and Django run against each database backend.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Modules with the same exported names side by side (postgres_store and sqlite_store, ios and android
+      renderers), each hundreds of lines long.
+    - An operation present in one variant and missing, or different, in another.
+    - Bug-fix commits that touch one variant when the bug applies to all of them.
+    - Tests that cover one variant well and the others thinly, or a CI job that runs only the default one.
+    - An edition or mode flag (cloud versus self-hosted) read in many files, each with its own branch.
+  forces:
+    - The variants differ for real reasons (SQL dialects, platform APIs), so they can't simply be merged.
+    - The second variant was made by copying the first, with no shared interface to keep them aligned.
+    - Developers run one variant locally, so the others only fail in CI or in production.
+    - In dynamically typed code nothing says a variant is missing an operation until it is called.
+    - Each edit is made by someone, or an agent, looking only at the variant in front of them.
+  remedy: >
+    Give every variant one interface, so a missing operation fails at compile or load time. Run one shared
+    test suite against every variant (a contract test, parametrised over the implementations), and run it for
+    all of them in CI. Keep logic that doesn't depend on the variant in shared code, and push only the real
+    differences into the variants (Strategy, Template Method).
+  overuse:
+    - Merging the variants into one module that branches on the dialect or platform everywhere (Switch
+      Statements).
+    - A lowest-common-denominator interface that forbids using any variant's strengths.
+    - Demanding identical behaviour where variants legitimately differ, such as result order, float precision
+      or platform look and feel.
+  counter: >
+    Some variants are meant to diverge: a paid edition with extra features, or a platform version that follows
+    its own platform's conventions, needs parity only on the shared contract. A variant that is experimental
+    or being retired isn't worth holding to parity. With two variants that rarely change, a shared suite may
+    cost more than the occasional drift it catches. Where most of the code turns out to be the same, Shotgun
+    Surgery's remedy (give the shared part one home) comes before any test suite.
+  in:
+    python: >
+      A typing.Protocol checked by a type checker, or an abstract base class that fails at instantiation,
+      catches a missing operation; a pytest fixture parametrised over the backends runs the same tests against
+      each.
+    typescript: >
+      Typing each dialect module's export object against one interface (satisfies StoreQueries) makes a
+      missing or mismatched function a compile error.
+    go: >
+      A compile-time assertion such as var _ Store = (*pgStore)(nil) checks each variant against the
+      interface; a table of implementations in one test runs the same cases on each.
+    rust: |
+      One trait per contract, and a generic test function or macro instantiated for each implementation.
+    java: >
+      An abstract test class with the shared cases and one subclass per implementation is the classic form,
+      and a TCK is the published version.
+    csharp: >
+      An abstract test class, or xUnit's [Theory] with one data row per implementation, runs the shared cases
+      against each.
+  related:
+    - shotgun-surgery
+    - parallel-inheritance-hierarchies
+    - contract-test
+    - duplicate-code
+    - dry
+    - liskov-substitution-principle
+    - strategy
+  tell: null
+  agent_prone: true
+  interview_only: false
+  example:
+    before: |
+      # postgres_store.py
+      fn low_stock(db, threshold) -> list:
+          return db.query("SELECT sku FROM items
+                           WHERE qty < $1 AND archived = false", threshold)
+      # sqlite_store.py
+      fn low_stock(db, threshold) -> list:
+          return db.query("SELECT sku FROM items WHERE qty < ?", threshold)
+          # the archived fix went into postgres_store only
+
+      # test_postgres_store.py tests low_stock; nothing tests sqlite_store
+    after: |
+      interface StockQueries:
+          fn low_stock(threshold) -> list
+          ...
+
+      # test_stock_queries.py, run once per implementation
+      for store in [PostgresStore(test_pg), SqliteStore(test_sqlite)]:
+          add_item(store, "A1", qty = 2, archived = true)
+          add_item(store, "B2", qty = 2, archived = false)
+          assert store.low_stock(5) == ["B2"]
+    note: Each dialect keeps its own SQL, but both answer to one interface and one suite, so a fix to one that the
+      other lacks fails a test.
+  sources:
+    - cite: Martin Fowler, Refactoring (1st ed., 1999), ch. 3, Shotgun Surgery and Parallel Inheritance Hierarchies
+      url: https://martinfowler.com/books/refactoring.html
+      how: recalled
+    - cite: Martin Fowler, bliki, ContractTest
+      url: https://martinfowler.com/bliki/ContractTest.html
+      how: recalled
+    - cite: SQLAlchemy documentation, the dialect test suite for third-party dialects (sqlalchemy.testing.suite)
+      url: https://github.com/sqlalchemy/sqlalchemy/blob/main/README.dialects.rst
+      how: recalled
+  matters_most_for:
+    - databases-storage
+    - mobile
+    - desktop
+    - platforms
+    - fullstack-web

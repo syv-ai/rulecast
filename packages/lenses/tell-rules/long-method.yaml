@@ -1,0 +1,207 @@
+# Tell for the lens `long-method`. Verdict: keep. 11 of 15 sampled hits real (45 hits in all).
+# Detectors: ast-grep; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/long-method-py
+        name: long-method (Python)
+        files: \.py$
+        exclude: (^|/)alembic/versions/|(^|/)migrations/\d{4}_[^/]*\.py$|(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        scope: container
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              kind: function_definition
+              regex: ^(?:[^\n]*\n){60}
+        message: "{{file}}:{{line}} starts a function over 60 lines long. Split it by meaning, one well-named helper per phase, not by line count."
+        examples:
+          good:
+            - path: app/services/g0.py
+              code: |
+                def import_statement(path, account):
+                    parsed = parse_rows(read_csv(path))
+                    new = without_known(parsed, account.transaction_keys())
+                    account.add_all(new)
+                    return len(new)
+            - path: app/services/g1.py
+              code: |
+                def build(rows):
+                    x0 = rows[0]
+                    x1 = rows[1]
+                    x2 = rows[2]
+                    x3 = rows[3]
+                    x4 = rows[4]
+                    x5 = rows[5]
+                    x6 = rows[6]
+                    x7 = rows[7]
+                    x8 = rows[8]
+                    x9 = rows[9]
+                    x10 = rows[10]
+                    x11 = rows[11]
+                    x12 = rows[12]
+                    x13 = rows[13]
+                    x14 = rows[14]
+                    x15 = rows[15]
+                    x16 = rows[16]
+                    x17 = rows[17]
+                    x18 = rows[18]
+                    x19 = rows[19]
+                    x20 = rows[20]
+                    x21 = rows[21]
+                    x22 = rows[22]
+                    x23 = rows[23]
+                    x24 = rows[24]
+                    x25 = rows[25]
+                    x26 = rows[26]
+                    x27 = rows[27]
+                    x28 = rows[28]
+                    x29 = rows[29]
+                    x30 = rows[30]
+                    x31 = rows[31]
+                    x32 = rows[32]
+                    x33 = rows[33]
+                    x34 = rows[34]
+                    x35 = rows[35]
+                    x36 = rows[36]
+                    x37 = rows[37]
+                    x38 = rows[38]
+                    x39 = rows[39]
+                    return x0
+          bad:
+            - path: app/services/b0.py
+              code: |
+                def import_statement(path, account):
+                    rows = read_csv(path)
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    x = 1
+                    return rows
+            - path: app/b1.py
+              code: |
+                class Importer:
+                    async def run(self, rows):
+                        out = []
+                        for row in rows:
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                            out.append(row)
+                        return out

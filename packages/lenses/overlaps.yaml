@@ -1,0 +1,158 @@
+# rulecast lens catalog: overlapping lenses. Each group covers one concern from different angles; `pick` says
+# which to start from and what the others add. Written after the 2026-10-13 field test, where agents had to read
+# every entry in a group to choose.
+- ids:
+    - dry
+    - duplicate-code
+    - copy-and-paste-programming
+    - wrong-abstraction
+  pick: >
+    Start from dry: it says what counts, duplicated knowledge rather than duplicated text. duplicate-code is
+    how it shows in code, copy-and-paste-programming is the habit that produces it, and wrong-abstraction is
+    what an eager merge of copies that only look alike produces.
+- ids:
+    - yagni
+    - speculative-generality
+    - over-engineering
+  pick: >
+    yagni is the principle. speculative-generality is the symptom inside a class or module (hooks, parameters
+    and abstractions nothing uses), and over-engineering is the same thing at system scale.
+- ids:
+    - dead-code
+    - lava-flow
+  pick: >
+    dead-code is the code that does nothing. lava-flow is why it stays: nobody dares remove it. Use lava-flow
+    when the question is history and ownership, dead-code when it is the code itself.
+- ids:
+    - law-of-demeter
+    - message-chains
+    - middle-man
+  pick: >
+    law-of-demeter is the principle, message-chains is how a break shows, and middle-man is what over-applying
+    it produces. Read all three before recommending either direction.
+- ids:
+    - god-object
+    - large-class
+    - interface-bloat
+  pick: >
+    god-object is the design failure (one class owns too much of the control), large-class the visible
+    symptom, and interface-bloat the failure seen from the clients that depend on it.
+- ids:
+    - cargo-cult-programming
+    - golden-hammer
+    - dogma-over-pragma
+  pick: >
+    All four are practice without reasons. cargo-cult-programming is the code-level form,
+    blind-pattern-following the architecture and process form, golden-hammer one tool used for everything, and
+    dogma-over-pragma a rule kept where its reason doesn't apply.
+- ids:
+    - big-ball-of-mud
+    - spaghetti-code
+  pick: >
+    big-ball-of-mud is the whole system; spaghetti-code is tangled control flow inside a module. A codebase
+    can have either without the other.
+- ids:
+    - mock-everything
+    - fragile-test
+    - assertion-free-test
+  pick: >
+    mock-everything is over-mocking until a test checks nothing real, assertion-free-test is a test that
+    checks nothing at all, and fragile-test is the symptom both often produce: tests that break on refactors
+    that change no behaviour.
+- ids:
+    - kiss
+    - occams-razor
+  pick: >
+    kiss is the one to use for code. occams-razor is the general form, for choosing between explanations, such
+    as when debugging.
+- ids:
+    - global-state
+    - singleton
+  pick: >
+    global-state is the problem. singleton is one way to produce it, and the pattern entry covers when a
+    single instance is still right.
+- ids:
+    - switch-statements
+    - state
+    - strategy
+  pick: >
+    switch-statements is the smell, and state and strategy are the two usual remedies: state when the switch
+    is on an object's lifecycle, strategy when it chooses an algorithm. Exhaustive matching on a closed set is
+    often better than either.
+- ids:
+    - anemic-domain-model
+    - data-class
+    - domain-model
+    - transaction-script
+  pick: >
+    Decide domain-model or transaction-script first: it is a choice per subdomain, not a ranking. Only then is
+    anemic-domain-model a fault, when rich rules were wanted and ended up in services. data-class is the smell
+    on one class, and is fine on boundary types.
+- ids:
+    - repository
+    - generic-repository
+    - data-mapper
+    - active-record
+  pick: >
+    active-record or data-mapper is the persistence choice. repository sits on a data mapper and speaks the
+    domain's language; generic-repository is a repository that just re-exposes the ORM.
+- ids:
+    - ports-and-adapters
+    - dependency-rule
+    - layered-architecture
+  pick: >
+    dependency-rule is the principle (dependencies point toward policy). ports-and-adapters is the
+    architecture built on it, and layered-architecture the older style it corrects, where the domain depends
+    on persistence.
+- ids:
+    - postels-law
+    - tolerant-reader
+  pick: >
+    postels-law is the general (and contested) principle; tolerant-reader is the narrow, safe version: a
+    consumer reads only the fields it needs and ignores the rest, while still rejecting what breaks the
+    contract.
+- ids:
+    - hyrums-law
+    - breaking-change-surface
+    - semantic-versioning-discipline
+    - deprecation-policy
+  pick: >
+    hyrums-law explains why every observable behaviour is API. breaking-change-surface lists those surfaces,
+    semantic-versioning-discipline says how to signal changes to them, and deprecation-policy how to retire
+    them.
+- ids:
+    - test-double-taxonomy
+    - mock-everything
+    - fake-over-mock
+  pick: >
+    test-double-taxonomy gives the words. mock-everything is the failure (mocking until nothing real is
+    tested), and fake-over-mock the contested preference for in-memory fakes of owned stateful collaborators.
+- ids:
+    - golden-master-test
+    - fragile-test
+  pick: >
+    golden-master-test is right when the output is the contract. fragile-test is what snapshots of incidental
+    output turn into.
+- ids:
+    - validate-at-the-boundary
+    - parse-dont-validate
+    - trusting-client-input
+  pick: >
+    validate-at-the-boundary says where checks belong, parse-dont-validate how to make them stick (turn input
+    into a type that can't be invalid), and trusting-client-input is the failure of checking only on the
+    client.
+- ids:
+    - secure-by-default
+    - fail-open-vs-fail-closed
+    - least-privilege
+  pick: >
+    secure-by-default and least-privilege set what is allowed without asking. fail-open-vs-fail-closed is the
+    separate decision of what happens when a check itself fails; tooling and security often answer it
+    differently.
+- ids:
+    - swallowed-errors
+    - error-handling-policy
+    - exceptions-for-control-flow
+  pick: >
+    Start from error-handling-policy, which decides how errors travel in this codebase. swallowed-errors and
+    exceptions-for-control-flow are the two common ways code breaks that policy.

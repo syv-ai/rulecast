@@ -1,0 +1,2441 @@
+# Tell for the lens `large-class`. Verdict: keep. 5 of 5 sampled hits real (5 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/large-class-py
+        name: large-class (Python)
+        files: \.py$
+        exclude: (^|/)alembic/versions/|(^|/)migrations/\d{4}_[^/]*\.py$|(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$|_pb2\.py$|(^|/)generated/
+        scope: container
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              kind: class_definition
+              regex: ^(?:[^\n]*\n){500}
+        message: "{{file}}:{{line}} starts a class over 500 lines long. Find the groups of methods that change for different reasons and extract each into its own class."
+        examples:
+          good:
+            - path: app/services/g0.py
+              code: |
+                class Scheduler:
+                    def m0(self, x):
+                        return x + 0
+
+                    def m1(self, x):
+                        return x + 1
+
+                    def m2(self, x):
+                        return x + 2
+
+                    def m3(self, x):
+                        return x + 3
+
+                    def m4(self, x):
+                        return x + 4
+
+                    def m5(self, x):
+                        return x + 5
+
+                    def m6(self, x):
+                        return x + 6
+
+                    def m7(self, x):
+                        return x + 7
+
+                    def m8(self, x):
+                        return x + 8
+
+                    def m9(self, x):
+                        return x + 9
+
+                    def m10(self, x):
+                        return x + 10
+
+                    def m11(self, x):
+                        return x + 11
+
+                    def m12(self, x):
+                        return x + 12
+
+                    def m13(self, x):
+                        return x + 13
+
+                    def m14(self, x):
+                        return x + 14
+
+                    def m15(self, x):
+                        return x + 15
+
+                    def m16(self, x):
+                        return x + 16
+
+                    def m17(self, x):
+                        return x + 17
+
+                    def m18(self, x):
+                        return x + 18
+
+                    def m19(self, x):
+                        return x + 19
+
+                    def m20(self, x):
+                        return x + 20
+
+                    def m21(self, x):
+                        return x + 21
+
+                    def m22(self, x):
+                        return x + 22
+
+                    def m23(self, x):
+                        return x + 23
+
+                    def m24(self, x):
+                        return x + 24
+
+                    def m25(self, x):
+                        return x + 25
+
+                    def m26(self, x):
+                        return x + 26
+
+                    def m27(self, x):
+                        return x + 27
+
+                    def m28(self, x):
+                        return x + 28
+
+                    def m29(self, x):
+                        return x + 29
+
+                    def m30(self, x):
+                        return x + 30
+
+                    def m31(self, x):
+                        return x + 31
+
+                    def m32(self, x):
+                        return x + 32
+
+                    def m33(self, x):
+                        return x + 33
+
+                    def m34(self, x):
+                        return x + 34
+
+                    def m35(self, x):
+                        return x + 35
+
+                    def m36(self, x):
+                        return x + 36
+
+                    def m37(self, x):
+                        return x + 37
+
+                    def m38(self, x):
+                        return x + 38
+
+                    def m39(self, x):
+                        return x + 39
+            - path: app/services/g1.py
+              code: |
+                class A:
+                    pass
+
+
+                class B:
+                    def f(self):
+                        return 1
+          bad:
+            - path: app/services/b0.py
+              code: |
+                class AppointmentManager:
+                    def m0(self, x):
+                        y = x + 0
+                        return y
+
+                    def m1(self, x):
+                        y = x + 1
+                        return y
+
+                    def m2(self, x):
+                        y = x + 2
+                        return y
+
+                    def m3(self, x):
+                        y = x + 3
+                        return y
+
+                    def m4(self, x):
+                        y = x + 4
+                        return y
+
+                    def m5(self, x):
+                        y = x + 5
+                        return y
+
+                    def m6(self, x):
+                        y = x + 6
+                        return y
+
+                    def m7(self, x):
+                        y = x + 7
+                        return y
+
+                    def m8(self, x):
+                        y = x + 8
+                        return y
+
+                    def m9(self, x):
+                        y = x + 9
+                        return y
+
+                    def m10(self, x):
+                        y = x + 10
+                        return y
+
+                    def m11(self, x):
+                        y = x + 11
+                        return y
+
+                    def m12(self, x):
+                        y = x + 12
+                        return y
+
+                    def m13(self, x):
+                        y = x + 13
+                        return y
+
+                    def m14(self, x):
+                        y = x + 14
+                        return y
+
+                    def m15(self, x):
+                        y = x + 15
+                        return y
+
+                    def m16(self, x):
+                        y = x + 16
+                        return y
+
+                    def m17(self, x):
+                        y = x + 17
+                        return y
+
+                    def m18(self, x):
+                        y = x + 18
+                        return y
+
+                    def m19(self, x):
+                        y = x + 19
+                        return y
+
+                    def m20(self, x):
+                        y = x + 20
+                        return y
+
+                    def m21(self, x):
+                        y = x + 21
+                        return y
+
+                    def m22(self, x):
+                        y = x + 22
+                        return y
+
+                    def m23(self, x):
+                        y = x + 23
+                        return y
+
+                    def m24(self, x):
+                        y = x + 24
+                        return y
+
+                    def m25(self, x):
+                        y = x + 25
+                        return y
+
+                    def m26(self, x):
+                        y = x + 26
+                        return y
+
+                    def m27(self, x):
+                        y = x + 27
+                        return y
+
+                    def m28(self, x):
+                        y = x + 28
+                        return y
+
+                    def m29(self, x):
+                        y = x + 29
+                        return y
+
+                    def m30(self, x):
+                        y = x + 30
+                        return y
+
+                    def m31(self, x):
+                        y = x + 31
+                        return y
+
+                    def m32(self, x):
+                        y = x + 32
+                        return y
+
+                    def m33(self, x):
+                        y = x + 33
+                        return y
+
+                    def m34(self, x):
+                        y = x + 34
+                        return y
+
+                    def m35(self, x):
+                        y = x + 35
+                        return y
+
+                    def m36(self, x):
+                        y = x + 36
+                        return y
+
+                    def m37(self, x):
+                        y = x + 37
+                        return y
+
+                    def m38(self, x):
+                        y = x + 38
+                        return y
+
+                    def m39(self, x):
+                        y = x + 39
+                        return y
+
+                    def m40(self, x):
+                        y = x + 40
+                        return y
+
+                    def m41(self, x):
+                        y = x + 41
+                        return y
+
+                    def m42(self, x):
+                        y = x + 42
+                        return y
+
+                    def m43(self, x):
+                        y = x + 43
+                        return y
+
+                    def m44(self, x):
+                        y = x + 44
+                        return y
+
+                    def m45(self, x):
+                        y = x + 45
+                        return y
+
+                    def m46(self, x):
+                        y = x + 46
+                        return y
+
+                    def m47(self, x):
+                        y = x + 47
+                        return y
+
+                    def m48(self, x):
+                        y = x + 48
+                        return y
+
+                    def m49(self, x):
+                        y = x + 49
+                        return y
+
+                    def m50(self, x):
+                        y = x + 50
+                        return y
+
+                    def m51(self, x):
+                        y = x + 51
+                        return y
+
+                    def m52(self, x):
+                        y = x + 52
+                        return y
+
+                    def m53(self, x):
+                        y = x + 53
+                        return y
+
+                    def m54(self, x):
+                        y = x + 54
+                        return y
+
+                    def m55(self, x):
+                        y = x + 55
+                        return y
+
+                    def m56(self, x):
+                        y = x + 56
+                        return y
+
+                    def m57(self, x):
+                        y = x + 57
+                        return y
+
+                    def m58(self, x):
+                        y = x + 58
+                        return y
+
+                    def m59(self, x):
+                        y = x + 59
+                        return y
+
+                    def m60(self, x):
+                        y = x + 60
+                        return y
+
+                    def m61(self, x):
+                        y = x + 61
+                        return y
+
+                    def m62(self, x):
+                        y = x + 62
+                        return y
+
+                    def m63(self, x):
+                        y = x + 63
+                        return y
+
+                    def m64(self, x):
+                        y = x + 64
+                        return y
+
+                    def m65(self, x):
+                        y = x + 65
+                        return y
+
+                    def m66(self, x):
+                        y = x + 66
+                        return y
+
+                    def m67(self, x):
+                        y = x + 67
+                        return y
+
+                    def m68(self, x):
+                        y = x + 68
+                        return y
+
+                    def m69(self, x):
+                        y = x + 69
+                        return y
+
+                    def m70(self, x):
+                        y = x + 70
+                        return y
+
+                    def m71(self, x):
+                        y = x + 71
+                        return y
+
+                    def m72(self, x):
+                        y = x + 72
+                        return y
+
+                    def m73(self, x):
+                        y = x + 73
+                        return y
+
+                    def m74(self, x):
+                        y = x + 74
+                        return y
+
+                    def m75(self, x):
+                        y = x + 75
+                        return y
+
+                    def m76(self, x):
+                        y = x + 76
+                        return y
+
+                    def m77(self, x):
+                        y = x + 77
+                        return y
+
+                    def m78(self, x):
+                        y = x + 78
+                        return y
+
+                    def m79(self, x):
+                        y = x + 79
+                        return y
+
+                    def m80(self, x):
+                        y = x + 80
+                        return y
+
+                    def m81(self, x):
+                        y = x + 81
+                        return y
+
+                    def m82(self, x):
+                        y = x + 82
+                        return y
+
+                    def m83(self, x):
+                        y = x + 83
+                        return y
+
+                    def m84(self, x):
+                        y = x + 84
+                        return y
+
+                    def m85(self, x):
+                        y = x + 85
+                        return y
+
+                    def m86(self, x):
+                        y = x + 86
+                        return y
+
+                    def m87(self, x):
+                        y = x + 87
+                        return y
+
+                    def m88(self, x):
+                        y = x + 88
+                        return y
+
+                    def m89(self, x):
+                        y = x + 89
+                        return y
+
+                    def m90(self, x):
+                        y = x + 90
+                        return y
+
+                    def m91(self, x):
+                        y = x + 91
+                        return y
+
+                    def m92(self, x):
+                        y = x + 92
+                        return y
+
+                    def m93(self, x):
+                        y = x + 93
+                        return y
+
+                    def m94(self, x):
+                        y = x + 94
+                        return y
+
+                    def m95(self, x):
+                        y = x + 95
+                        return y
+
+                    def m96(self, x):
+                        y = x + 96
+                        return y
+
+                    def m97(self, x):
+                        y = x + 97
+                        return y
+
+                    def m98(self, x):
+                        y = x + 98
+                        return y
+
+                    def m99(self, x):
+                        y = x + 99
+                        return y
+
+                    def m100(self, x):
+                        y = x + 100
+                        return y
+
+                    def m101(self, x):
+                        y = x + 101
+                        return y
+
+                    def m102(self, x):
+                        y = x + 102
+                        return y
+
+                    def m103(self, x):
+                        y = x + 103
+                        return y
+
+                    def m104(self, x):
+                        y = x + 104
+                        return y
+
+                    def m105(self, x):
+                        y = x + 105
+                        return y
+
+                    def m106(self, x):
+                        y = x + 106
+                        return y
+
+                    def m107(self, x):
+                        y = x + 107
+                        return y
+
+                    def m108(self, x):
+                        y = x + 108
+                        return y
+
+                    def m109(self, x):
+                        y = x + 109
+                        return y
+
+                    def m110(self, x):
+                        y = x + 110
+                        return y
+
+                    def m111(self, x):
+                        y = x + 111
+                        return y
+
+                    def m112(self, x):
+                        y = x + 112
+                        return y
+
+                    def m113(self, x):
+                        y = x + 113
+                        return y
+
+                    def m114(self, x):
+                        y = x + 114
+                        return y
+
+                    def m115(self, x):
+                        y = x + 115
+                        return y
+
+                    def m116(self, x):
+                        y = x + 116
+                        return y
+
+                    def m117(self, x):
+                        y = x + 117
+                        return y
+
+                    def m118(self, x):
+                        y = x + 118
+                        return y
+
+                    def m119(self, x):
+                        y = x + 119
+                        return y
+
+                    def m120(self, x):
+                        y = x + 120
+                        return y
+
+                    def m121(self, x):
+                        y = x + 121
+                        return y
+
+                    def m122(self, x):
+                        y = x + 122
+                        return y
+
+                    def m123(self, x):
+                        y = x + 123
+                        return y
+
+                    def m124(self, x):
+                        y = x + 124
+                        return y
+
+                    def m125(self, x):
+                        y = x + 125
+                        return y
+
+                    def m126(self, x):
+                        y = x + 126
+                        return y
+
+                    def m127(self, x):
+                        y = x + 127
+                        return y
+
+                    def m128(self, x):
+                        y = x + 128
+                        return y
+
+                    def m129(self, x):
+                        y = x + 129
+                        return y
+            - path: app/services/b1.py
+              code: |
+                def outer():
+                    class Inner:
+                        def m0(self):
+                            a = 0
+                            return a
+
+                        def m1(self):
+                            a = 1
+                            return a
+
+                        def m2(self):
+                            a = 2
+                            return a
+
+                        def m3(self):
+                            a = 3
+                            return a
+
+                        def m4(self):
+                            a = 4
+                            return a
+
+                        def m5(self):
+                            a = 5
+                            return a
+
+                        def m6(self):
+                            a = 6
+                            return a
+
+                        def m7(self):
+                            a = 7
+                            return a
+
+                        def m8(self):
+                            a = 8
+                            return a
+
+                        def m9(self):
+                            a = 9
+                            return a
+
+                        def m10(self):
+                            a = 10
+                            return a
+
+                        def m11(self):
+                            a = 11
+                            return a
+
+                        def m12(self):
+                            a = 12
+                            return a
+
+                        def m13(self):
+                            a = 13
+                            return a
+
+                        def m14(self):
+                            a = 14
+                            return a
+
+                        def m15(self):
+                            a = 15
+                            return a
+
+                        def m16(self):
+                            a = 16
+                            return a
+
+                        def m17(self):
+                            a = 17
+                            return a
+
+                        def m18(self):
+                            a = 18
+                            return a
+
+                        def m19(self):
+                            a = 19
+                            return a
+
+                        def m20(self):
+                            a = 20
+                            return a
+
+                        def m21(self):
+                            a = 21
+                            return a
+
+                        def m22(self):
+                            a = 22
+                            return a
+
+                        def m23(self):
+                            a = 23
+                            return a
+
+                        def m24(self):
+                            a = 24
+                            return a
+
+                        def m25(self):
+                            a = 25
+                            return a
+
+                        def m26(self):
+                            a = 26
+                            return a
+
+                        def m27(self):
+                            a = 27
+                            return a
+
+                        def m28(self):
+                            a = 28
+                            return a
+
+                        def m29(self):
+                            a = 29
+                            return a
+
+                        def m30(self):
+                            a = 30
+                            return a
+
+                        def m31(self):
+                            a = 31
+                            return a
+
+                        def m32(self):
+                            a = 32
+                            return a
+
+                        def m33(self):
+                            a = 33
+                            return a
+
+                        def m34(self):
+                            a = 34
+                            return a
+
+                        def m35(self):
+                            a = 35
+                            return a
+
+                        def m36(self):
+                            a = 36
+                            return a
+
+                        def m37(self):
+                            a = 37
+                            return a
+
+                        def m38(self):
+                            a = 38
+                            return a
+
+                        def m39(self):
+                            a = 39
+                            return a
+
+                        def m40(self):
+                            a = 40
+                            return a
+
+                        def m41(self):
+                            a = 41
+                            return a
+
+                        def m42(self):
+                            a = 42
+                            return a
+
+                        def m43(self):
+                            a = 43
+                            return a
+
+                        def m44(self):
+                            a = 44
+                            return a
+
+                        def m45(self):
+                            a = 45
+                            return a
+
+                        def m46(self):
+                            a = 46
+                            return a
+
+                        def m47(self):
+                            a = 47
+                            return a
+
+                        def m48(self):
+                            a = 48
+                            return a
+
+                        def m49(self):
+                            a = 49
+                            return a
+
+                        def m50(self):
+                            a = 50
+                            return a
+
+                        def m51(self):
+                            a = 51
+                            return a
+
+                        def m52(self):
+                            a = 52
+                            return a
+
+                        def m53(self):
+                            a = 53
+                            return a
+
+                        def m54(self):
+                            a = 54
+                            return a
+
+                        def m55(self):
+                            a = 55
+                            return a
+
+                        def m56(self):
+                            a = 56
+                            return a
+
+                        def m57(self):
+                            a = 57
+                            return a
+
+                        def m58(self):
+                            a = 58
+                            return a
+
+                        def m59(self):
+                            a = 59
+                            return a
+
+                        def m60(self):
+                            a = 60
+                            return a
+
+                        def m61(self):
+                            a = 61
+                            return a
+
+                        def m62(self):
+                            a = 62
+                            return a
+
+                        def m63(self):
+                            a = 63
+                            return a
+
+                        def m64(self):
+                            a = 64
+                            return a
+
+                        def m65(self):
+                            a = 65
+                            return a
+
+                        def m66(self):
+                            a = 66
+                            return a
+
+                        def m67(self):
+                            a = 67
+                            return a
+
+                        def m68(self):
+                            a = 68
+                            return a
+
+                        def m69(self):
+                            a = 69
+                            return a
+
+                        def m70(self):
+                            a = 70
+                            return a
+
+                        def m71(self):
+                            a = 71
+                            return a
+
+                        def m72(self):
+                            a = 72
+                            return a
+
+                        def m73(self):
+                            a = 73
+                            return a
+
+                        def m74(self):
+                            a = 74
+                            return a
+
+                        def m75(self):
+                            a = 75
+                            return a
+
+                        def m76(self):
+                            a = 76
+                            return a
+
+                        def m77(self):
+                            a = 77
+                            return a
+
+                        def m78(self):
+                            a = 78
+                            return a
+
+                        def m79(self):
+                            a = 79
+                            return a
+
+                        def m80(self):
+                            a = 80
+                            return a
+
+                        def m81(self):
+                            a = 81
+                            return a
+
+                        def m82(self):
+                            a = 82
+                            return a
+
+                        def m83(self):
+                            a = 83
+                            return a
+
+                        def m84(self):
+                            a = 84
+                            return a
+
+                        def m85(self):
+                            a = 85
+                            return a
+
+                        def m86(self):
+                            a = 86
+                            return a
+
+                        def m87(self):
+                            a = 87
+                            return a
+
+                        def m88(self):
+                            a = 88
+                            return a
+
+                        def m89(self):
+                            a = 89
+                            return a
+
+                        def m90(self):
+                            a = 90
+                            return a
+
+                        def m91(self):
+                            a = 91
+                            return a
+
+                        def m92(self):
+                            a = 92
+                            return a
+
+                        def m93(self):
+                            a = 93
+                            return a
+
+                        def m94(self):
+                            a = 94
+                            return a
+
+                        def m95(self):
+                            a = 95
+                            return a
+
+                        def m96(self):
+                            a = 96
+                            return a
+
+                        def m97(self):
+                            a = 97
+                            return a
+
+                        def m98(self):
+                            a = 98
+                            return a
+
+                        def m99(self):
+                            a = 99
+                            return a
+
+                        def m100(self):
+                            a = 100
+                            return a
+
+                        def m101(self):
+                            a = 101
+                            return a
+
+                        def m102(self):
+                            a = 102
+                            return a
+
+                        def m103(self):
+                            a = 103
+                            return a
+
+                        def m104(self):
+                            a = 104
+                            return a
+
+                        def m105(self):
+                            a = 105
+                            return a
+
+                        def m106(self):
+                            a = 106
+                            return a
+
+                        def m107(self):
+                            a = 107
+                            return a
+
+                        def m108(self):
+                            a = 108
+                            return a
+
+                        def m109(self):
+                            a = 109
+                            return a
+
+                        def m110(self):
+                            a = 110
+                            return a
+
+                        def m111(self):
+                            a = 111
+                            return a
+
+                        def m112(self):
+                            a = 112
+                            return a
+
+                        def m113(self):
+                            a = 113
+                            return a
+
+                        def m114(self):
+                            a = 114
+                            return a
+
+                        def m115(self):
+                            a = 115
+                            return a
+
+                        def m116(self):
+                            a = 116
+                            return a
+
+                        def m117(self):
+                            a = 117
+                            return a
+
+                        def m118(self):
+                            a = 118
+                            return a
+
+                        def m119(self):
+                            a = 119
+                            return a
+
+                        def m120(self):
+                            a = 120
+                            return a
+
+                        def m121(self):
+                            a = 121
+                            return a
+
+                        def m122(self):
+                            a = 122
+                            return a
+
+                        def m123(self):
+                            a = 123
+                            return a
+
+                        def m124(self):
+                            a = 124
+                            return a
+
+                        def m125(self):
+                            a = 125
+                            return a
+
+                        def m126(self):
+                            a = 126
+                            return a
+
+                        def m127(self):
+                            a = 127
+                            return a
+
+                        def m128(self):
+                            a = 128
+                            return a
+
+                        def m129(self):
+                            a = 129
+                            return a
+
+                    return Inner
+      - id: lens/large-class-cs
+        name: large-class (C#)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|\.Tests?/|(^|/)Migrations/|\.Designer\.cs$|\.g\.cs$|\.g\.i\.cs$|(^|/)Generated/
+        scope: container
+        severity: warning
+        detect:
+          regex:
+            pattern: ^(?<ind>[ \t]*)(?:(?:public|private|protected|internal|static|sealed|abstract|partial|file)[ \t]+)*(?:class|record|struct)[ \t]+\w+[^;{]*(?:\{|\n\k<ind>\{)[ \t]*\n(?:(?:\k<ind>[ \t][^\n]*)?\n){500}
+            flags: m
+        message: "{{file}}:{{line}} declares a class over 500 lines long. Find the groups of members that change for different reasons and extract each into its own class."
+        examples:
+          good:
+            - path: src/App/G0.cs
+              code: |
+                namespace App;
+
+                public class Scheduler
+                {
+                    public int M0(int x) => x + 0;
+                    public int M1(int x) => x + 1;
+                    public int M2(int x) => x + 2;
+                    public int M3(int x) => x + 3;
+                    public int M4(int x) => x + 4;
+                    public int M5(int x) => x + 5;
+                    public int M6(int x) => x + 6;
+                    public int M7(int x) => x + 7;
+                    public int M8(int x) => x + 8;
+                    public int M9(int x) => x + 9;
+                    public int M10(int x) => x + 10;
+                    public int M11(int x) => x + 11;
+                    public int M12(int x) => x + 12;
+                    public int M13(int x) => x + 13;
+                    public int M14(int x) => x + 14;
+                    public int M15(int x) => x + 15;
+                    public int M16(int x) => x + 16;
+                    public int M17(int x) => x + 17;
+                    public int M18(int x) => x + 18;
+                    public int M19(int x) => x + 19;
+                    public int M20(int x) => x + 20;
+                    public int M21(int x) => x + 21;
+                    public int M22(int x) => x + 22;
+                    public int M23(int x) => x + 23;
+                    public int M24(int x) => x + 24;
+                    public int M25(int x) => x + 25;
+                    public int M26(int x) => x + 26;
+                    public int M27(int x) => x + 27;
+                    public int M28(int x) => x + 28;
+                    public int M29(int x) => x + 29;
+                    public int M30(int x) => x + 30;
+                    public int M31(int x) => x + 31;
+                    public int M32(int x) => x + 32;
+                    public int M33(int x) => x + 33;
+                    public int M34(int x) => x + 34;
+                    public int M35(int x) => x + 35;
+                    public int M36(int x) => x + 36;
+                    public int M37(int x) => x + 37;
+                    public int M38(int x) => x + 38;
+                    public int M39(int x) => x + 39;
+                    public int M40(int x) => x + 40;
+                    public int M41(int x) => x + 41;
+                    public int M42(int x) => x + 42;
+                    public int M43(int x) => x + 43;
+                    public int M44(int x) => x + 44;
+                    public int M45(int x) => x + 45;
+                    public int M46(int x) => x + 46;
+                    public int M47(int x) => x + 47;
+                    public int M48(int x) => x + 48;
+                    public int M49(int x) => x + 49;
+                    public int M50(int x) => x + 50;
+                    public int M51(int x) => x + 51;
+                    public int M52(int x) => x + 52;
+                    public int M53(int x) => x + 53;
+                    public int M54(int x) => x + 54;
+                    public int M55(int x) => x + 55;
+                    public int M56(int x) => x + 56;
+                    public int M57(int x) => x + 57;
+                    public int M58(int x) => x + 58;
+                    public int M59(int x) => x + 59;
+                }
+            - path: src/App/G1.cs
+              code: |
+                namespace App;
+
+                public class A
+                {
+                    public int X { get; set; }
+                }
+
+                public class B
+                {
+                    public int M0(int x) => x + 0;
+                    public int M1(int x) => x + 1;
+                    public int M2(int x) => x + 2;
+                    public int M3(int x) => x + 3;
+                    public int M4(int x) => x + 4;
+                    public int M5(int x) => x + 5;
+                    public int M6(int x) => x + 6;
+                    public int M7(int x) => x + 7;
+                    public int M8(int x) => x + 8;
+                    public int M9(int x) => x + 9;
+                    public int M10(int x) => x + 10;
+                    public int M11(int x) => x + 11;
+                    public int M12(int x) => x + 12;
+                    public int M13(int x) => x + 13;
+                    public int M14(int x) => x + 14;
+                    public int M15(int x) => x + 15;
+                    public int M16(int x) => x + 16;
+                    public int M17(int x) => x + 17;
+                    public int M18(int x) => x + 18;
+                    public int M19(int x) => x + 19;
+                    public int M20(int x) => x + 20;
+                    public int M21(int x) => x + 21;
+                    public int M22(int x) => x + 22;
+                    public int M23(int x) => x + 23;
+                    public int M24(int x) => x + 24;
+                    public int M25(int x) => x + 25;
+                    public int M26(int x) => x + 26;
+                    public int M27(int x) => x + 27;
+                    public int M28(int x) => x + 28;
+                    public int M29(int x) => x + 29;
+                }
+          bad:
+            - path: src/App/B0.cs
+              code: |
+                namespace App;
+
+                public class OrderManager
+                {
+                    public int M0(int x)
+                    {
+                        return x + 0;
+                    }
+
+                    public int M1(int x)
+                    {
+                        return x + 1;
+                    }
+
+                    public int M2(int x)
+                    {
+                        return x + 2;
+                    }
+
+                    public int M3(int x)
+                    {
+                        return x + 3;
+                    }
+
+                    public int M4(int x)
+                    {
+                        return x + 4;
+                    }
+
+                    public int M5(int x)
+                    {
+                        return x + 5;
+                    }
+
+                    public int M6(int x)
+                    {
+                        return x + 6;
+                    }
+
+                    public int M7(int x)
+                    {
+                        return x + 7;
+                    }
+
+                    public int M8(int x)
+                    {
+                        return x + 8;
+                    }
+
+                    public int M9(int x)
+                    {
+                        return x + 9;
+                    }
+
+                    public int M10(int x)
+                    {
+                        return x + 10;
+                    }
+
+                    public int M11(int x)
+                    {
+                        return x + 11;
+                    }
+
+                    public int M12(int x)
+                    {
+                        return x + 12;
+                    }
+
+                    public int M13(int x)
+                    {
+                        return x + 13;
+                    }
+
+                    public int M14(int x)
+                    {
+                        return x + 14;
+                    }
+
+                    public int M15(int x)
+                    {
+                        return x + 15;
+                    }
+
+                    public int M16(int x)
+                    {
+                        return x + 16;
+                    }
+
+                    public int M17(int x)
+                    {
+                        return x + 17;
+                    }
+
+                    public int M18(int x)
+                    {
+                        return x + 18;
+                    }
+
+                    public int M19(int x)
+                    {
+                        return x + 19;
+                    }
+
+                    public int M20(int x)
+                    {
+                        return x + 20;
+                    }
+
+                    public int M21(int x)
+                    {
+                        return x + 21;
+                    }
+
+                    public int M22(int x)
+                    {
+                        return x + 22;
+                    }
+
+                    public int M23(int x)
+                    {
+                        return x + 23;
+                    }
+
+                    public int M24(int x)
+                    {
+                        return x + 24;
+                    }
+
+                    public int M25(int x)
+                    {
+                        return x + 25;
+                    }
+
+                    public int M26(int x)
+                    {
+                        return x + 26;
+                    }
+
+                    public int M27(int x)
+                    {
+                        return x + 27;
+                    }
+
+                    public int M28(int x)
+                    {
+                        return x + 28;
+                    }
+
+                    public int M29(int x)
+                    {
+                        return x + 29;
+                    }
+
+                    public int M30(int x)
+                    {
+                        return x + 30;
+                    }
+
+                    public int M31(int x)
+                    {
+                        return x + 31;
+                    }
+
+                    public int M32(int x)
+                    {
+                        return x + 32;
+                    }
+
+                    public int M33(int x)
+                    {
+                        return x + 33;
+                    }
+
+                    public int M34(int x)
+                    {
+                        return x + 34;
+                    }
+
+                    public int M35(int x)
+                    {
+                        return x + 35;
+                    }
+
+                    public int M36(int x)
+                    {
+                        return x + 36;
+                    }
+
+                    public int M37(int x)
+                    {
+                        return x + 37;
+                    }
+
+                    public int M38(int x)
+                    {
+                        return x + 38;
+                    }
+
+                    public int M39(int x)
+                    {
+                        return x + 39;
+                    }
+
+                    public int M40(int x)
+                    {
+                        return x + 40;
+                    }
+
+                    public int M41(int x)
+                    {
+                        return x + 41;
+                    }
+
+                    public int M42(int x)
+                    {
+                        return x + 42;
+                    }
+
+                    public int M43(int x)
+                    {
+                        return x + 43;
+                    }
+
+                    public int M44(int x)
+                    {
+                        return x + 44;
+                    }
+
+                    public int M45(int x)
+                    {
+                        return x + 45;
+                    }
+
+                    public int M46(int x)
+                    {
+                        return x + 46;
+                    }
+
+                    public int M47(int x)
+                    {
+                        return x + 47;
+                    }
+
+                    public int M48(int x)
+                    {
+                        return x + 48;
+                    }
+
+                    public int M49(int x)
+                    {
+                        return x + 49;
+                    }
+
+                    public int M50(int x)
+                    {
+                        return x + 50;
+                    }
+
+                    public int M51(int x)
+                    {
+                        return x + 51;
+                    }
+
+                    public int M52(int x)
+                    {
+                        return x + 52;
+                    }
+
+                    public int M53(int x)
+                    {
+                        return x + 53;
+                    }
+
+                    public int M54(int x)
+                    {
+                        return x + 54;
+                    }
+
+                    public int M55(int x)
+                    {
+                        return x + 55;
+                    }
+
+                    public int M56(int x)
+                    {
+                        return x + 56;
+                    }
+
+                    public int M57(int x)
+                    {
+                        return x + 57;
+                    }
+
+                    public int M58(int x)
+                    {
+                        return x + 58;
+                    }
+
+                    public int M59(int x)
+                    {
+                        return x + 59;
+                    }
+
+                    public int M60(int x)
+                    {
+                        return x + 60;
+                    }
+
+                    public int M61(int x)
+                    {
+                        return x + 61;
+                    }
+
+                    public int M62(int x)
+                    {
+                        return x + 62;
+                    }
+
+                    public int M63(int x)
+                    {
+                        return x + 63;
+                    }
+
+                    public int M64(int x)
+                    {
+                        return x + 64;
+                    }
+
+                    public int M65(int x)
+                    {
+                        return x + 65;
+                    }
+
+                    public int M66(int x)
+                    {
+                        return x + 66;
+                    }
+
+                    public int M67(int x)
+                    {
+                        return x + 67;
+                    }
+
+                    public int M68(int x)
+                    {
+                        return x + 68;
+                    }
+
+                    public int M69(int x)
+                    {
+                        return x + 69;
+                    }
+
+                    public int M70(int x)
+                    {
+                        return x + 70;
+                    }
+
+                    public int M71(int x)
+                    {
+                        return x + 71;
+                    }
+
+                    public int M72(int x)
+                    {
+                        return x + 72;
+                    }
+
+                    public int M73(int x)
+                    {
+                        return x + 73;
+                    }
+
+                    public int M74(int x)
+                    {
+                        return x + 74;
+                    }
+
+                    public int M75(int x)
+                    {
+                        return x + 75;
+                    }
+
+                    public int M76(int x)
+                    {
+                        return x + 76;
+                    }
+
+                    public int M77(int x)
+                    {
+                        return x + 77;
+                    }
+
+                    public int M78(int x)
+                    {
+                        return x + 78;
+                    }
+
+                    public int M79(int x)
+                    {
+                        return x + 79;
+                    }
+
+                    public int M80(int x)
+                    {
+                        return x + 80;
+                    }
+
+                    public int M81(int x)
+                    {
+                        return x + 81;
+                    }
+
+                    public int M82(int x)
+                    {
+                        return x + 82;
+                    }
+
+                    public int M83(int x)
+                    {
+                        return x + 83;
+                    }
+
+                    public int M84(int x)
+                    {
+                        return x + 84;
+                    }
+
+                    public int M85(int x)
+                    {
+                        return x + 85;
+                    }
+
+                    public int M86(int x)
+                    {
+                        return x + 86;
+                    }
+
+                    public int M87(int x)
+                    {
+                        return x + 87;
+                    }
+
+                    public int M88(int x)
+                    {
+                        return x + 88;
+                    }
+
+                    public int M89(int x)
+                    {
+                        return x + 89;
+                    }
+
+                    public int M90(int x)
+                    {
+                        return x + 90;
+                    }
+
+                    public int M91(int x)
+                    {
+                        return x + 91;
+                    }
+
+                    public int M92(int x)
+                    {
+                        return x + 92;
+                    }
+
+                    public int M93(int x)
+                    {
+                        return x + 93;
+                    }
+
+                    public int M94(int x)
+                    {
+                        return x + 94;
+                    }
+
+                    public int M95(int x)
+                    {
+                        return x + 95;
+                    }
+
+                    public int M96(int x)
+                    {
+                        return x + 96;
+                    }
+
+                    public int M97(int x)
+                    {
+                        return x + 97;
+                    }
+
+                    public int M98(int x)
+                    {
+                        return x + 98;
+                    }
+
+                    public int M99(int x)
+                    {
+                        return x + 99;
+                    }
+
+                    public int M100(int x)
+                    {
+                        return x + 100;
+                    }
+
+                    public int M101(int x)
+                    {
+                        return x + 101;
+                    }
+
+                    public int M102(int x)
+                    {
+                        return x + 102;
+                    }
+
+                    public int M103(int x)
+                    {
+                        return x + 103;
+                    }
+
+                    public int M104(int x)
+                    {
+                        return x + 104;
+                    }
+
+                    public int M105(int x)
+                    {
+                        return x + 105;
+                    }
+
+                    public int M106(int x)
+                    {
+                        return x + 106;
+                    }
+
+                    public int M107(int x)
+                    {
+                        return x + 107;
+                    }
+
+                    public int M108(int x)
+                    {
+                        return x + 108;
+                    }
+
+                    public int M109(int x)
+                    {
+                        return x + 109;
+                    }
+
+                }
+            - path: src/App/B1.cs
+              code: |
+                namespace App
+                {
+                    internal sealed partial class BasketService : IBasketService
+                    {
+                        public int M0(int x)
+                        {
+                            return x + 0;
+                        }
+
+                        public int M1(int x)
+                        {
+                            return x + 1;
+                        }
+
+                        public int M2(int x)
+                        {
+                            return x + 2;
+                        }
+
+                        public int M3(int x)
+                        {
+                            return x + 3;
+                        }
+
+                        public int M4(int x)
+                        {
+                            return x + 4;
+                        }
+
+                        public int M5(int x)
+                        {
+                            return x + 5;
+                        }
+
+                        public int M6(int x)
+                        {
+                            return x + 6;
+                        }
+
+                        public int M7(int x)
+                        {
+                            return x + 7;
+                        }
+
+                        public int M8(int x)
+                        {
+                            return x + 8;
+                        }
+
+                        public int M9(int x)
+                        {
+                            return x + 9;
+                        }
+
+                        public int M10(int x)
+                        {
+                            return x + 10;
+                        }
+
+                        public int M11(int x)
+                        {
+                            return x + 11;
+                        }
+
+                        public int M12(int x)
+                        {
+                            return x + 12;
+                        }
+
+                        public int M13(int x)
+                        {
+                            return x + 13;
+                        }
+
+                        public int M14(int x)
+                        {
+                            return x + 14;
+                        }
+
+                        public int M15(int x)
+                        {
+                            return x + 15;
+                        }
+
+                        public int M16(int x)
+                        {
+                            return x + 16;
+                        }
+
+                        public int M17(int x)
+                        {
+                            return x + 17;
+                        }
+
+                        public int M18(int x)
+                        {
+                            return x + 18;
+                        }
+
+                        public int M19(int x)
+                        {
+                            return x + 19;
+                        }
+
+                        public int M20(int x)
+                        {
+                            return x + 20;
+                        }
+
+                        public int M21(int x)
+                        {
+                            return x + 21;
+                        }
+
+                        public int M22(int x)
+                        {
+                            return x + 22;
+                        }
+
+                        public int M23(int x)
+                        {
+                            return x + 23;
+                        }
+
+                        public int M24(int x)
+                        {
+                            return x + 24;
+                        }
+
+                        public int M25(int x)
+                        {
+                            return x + 25;
+                        }
+
+                        public int M26(int x)
+                        {
+                            return x + 26;
+                        }
+
+                        public int M27(int x)
+                        {
+                            return x + 27;
+                        }
+
+                        public int M28(int x)
+                        {
+                            return x + 28;
+                        }
+
+                        public int M29(int x)
+                        {
+                            return x + 29;
+                        }
+
+                        public int M30(int x)
+                        {
+                            return x + 30;
+                        }
+
+                        public int M31(int x)
+                        {
+                            return x + 31;
+                        }
+
+                        public int M32(int x)
+                        {
+                            return x + 32;
+                        }
+
+                        public int M33(int x)
+                        {
+                            return x + 33;
+                        }
+
+                        public int M34(int x)
+                        {
+                            return x + 34;
+                        }
+
+                        public int M35(int x)
+                        {
+                            return x + 35;
+                        }
+
+                        public int M36(int x)
+                        {
+                            return x + 36;
+                        }
+
+                        public int M37(int x)
+                        {
+                            return x + 37;
+                        }
+
+                        public int M38(int x)
+                        {
+                            return x + 38;
+                        }
+
+                        public int M39(int x)
+                        {
+                            return x + 39;
+                        }
+
+                        public int M40(int x)
+                        {
+                            return x + 40;
+                        }
+
+                        public int M41(int x)
+                        {
+                            return x + 41;
+                        }
+
+                        public int M42(int x)
+                        {
+                            return x + 42;
+                        }
+
+                        public int M43(int x)
+                        {
+                            return x + 43;
+                        }
+
+                        public int M44(int x)
+                        {
+                            return x + 44;
+                        }
+
+                        public int M45(int x)
+                        {
+                            return x + 45;
+                        }
+
+                        public int M46(int x)
+                        {
+                            return x + 46;
+                        }
+
+                        public int M47(int x)
+                        {
+                            return x + 47;
+                        }
+
+                        public int M48(int x)
+                        {
+                            return x + 48;
+                        }
+
+                        public int M49(int x)
+                        {
+                            return x + 49;
+                        }
+
+                        public int M50(int x)
+                        {
+                            return x + 50;
+                        }
+
+                        public int M51(int x)
+                        {
+                            return x + 51;
+                        }
+
+                        public int M52(int x)
+                        {
+                            return x + 52;
+                        }
+
+                        public int M53(int x)
+                        {
+                            return x + 53;
+                        }
+
+                        public int M54(int x)
+                        {
+                            return x + 54;
+                        }
+
+                        public int M55(int x)
+                        {
+                            return x + 55;
+                        }
+
+                        public int M56(int x)
+                        {
+                            return x + 56;
+                        }
+
+                        public int M57(int x)
+                        {
+                            return x + 57;
+                        }
+
+                        public int M58(int x)
+                        {
+                            return x + 58;
+                        }
+
+                        public int M59(int x)
+                        {
+                            return x + 59;
+                        }
+
+                        public int M60(int x)
+                        {
+                            return x + 60;
+                        }
+
+                        public int M61(int x)
+                        {
+                            return x + 61;
+                        }
+
+                        public int M62(int x)
+                        {
+                            return x + 62;
+                        }
+
+                        public int M63(int x)
+                        {
+                            return x + 63;
+                        }
+
+                        public int M64(int x)
+                        {
+                            return x + 64;
+                        }
+
+                        public int M65(int x)
+                        {
+                            return x + 65;
+                        }
+
+                        public int M66(int x)
+                        {
+                            return x + 66;
+                        }
+
+                        public int M67(int x)
+                        {
+                            return x + 67;
+                        }
+
+                        public int M68(int x)
+                        {
+                            return x + 68;
+                        }
+
+                        public int M69(int x)
+                        {
+                            return x + 69;
+                        }
+
+                        public int M70(int x)
+                        {
+                            return x + 70;
+                        }
+
+                        public int M71(int x)
+                        {
+                            return x + 71;
+                        }
+
+                        public int M72(int x)
+                        {
+                            return x + 72;
+                        }
+
+                        public int M73(int x)
+                        {
+                            return x + 73;
+                        }
+
+                        public int M74(int x)
+                        {
+                            return x + 74;
+                        }
+
+                        public int M75(int x)
+                        {
+                            return x + 75;
+                        }
+
+                        public int M76(int x)
+                        {
+                            return x + 76;
+                        }
+
+                        public int M77(int x)
+                        {
+                            return x + 77;
+                        }
+
+                        public int M78(int x)
+                        {
+                            return x + 78;
+                        }
+
+                        public int M79(int x)
+                        {
+                            return x + 79;
+                        }
+
+                        public int M80(int x)
+                        {
+                            return x + 80;
+                        }
+
+                        public int M81(int x)
+                        {
+                            return x + 81;
+                        }
+
+                        public int M82(int x)
+                        {
+                            return x + 82;
+                        }
+
+                        public int M83(int x)
+                        {
+                            return x + 83;
+                        }
+
+                        public int M84(int x)
+                        {
+                            return x + 84;
+                        }
+
+                        public int M85(int x)
+                        {
+                            return x + 85;
+                        }
+
+                        public int M86(int x)
+                        {
+                            return x + 86;
+                        }
+
+                        public int M87(int x)
+                        {
+                            return x + 87;
+                        }
+
+                        public int M88(int x)
+                        {
+                            return x + 88;
+                        }
+
+                        public int M89(int x)
+                        {
+                            return x + 89;
+                        }
+
+                        public int M90(int x)
+                        {
+                            return x + 90;
+                        }
+
+                        public int M91(int x)
+                        {
+                            return x + 91;
+                        }
+
+                        public int M92(int x)
+                        {
+                            return x + 92;
+                        }
+
+                        public int M93(int x)
+                        {
+                            return x + 93;
+                        }
+
+                        public int M94(int x)
+                        {
+                            return x + 94;
+                        }
+
+                        public int M95(int x)
+                        {
+                            return x + 95;
+                        }
+
+                        public int M96(int x)
+                        {
+                            return x + 96;
+                        }
+
+                        public int M97(int x)
+                        {
+                            return x + 97;
+                        }
+
+                        public int M98(int x)
+                        {
+                            return x + 98;
+                        }
+
+                        public int M99(int x)
+                        {
+                            return x + 99;
+                        }
+
+                        public int M100(int x)
+                        {
+                            return x + 100;
+                        }
+
+                        public int M101(int x)
+                        {
+                            return x + 101;
+                        }
+
+                        public int M102(int x)
+                        {
+                            return x + 102;
+                        }
+
+                        public int M103(int x)
+                        {
+                            return x + 103;
+                        }
+
+                        public int M104(int x)
+                        {
+                            return x + 104;
+                        }
+
+                        public int M105(int x)
+                        {
+                            return x + 105;
+                        }
+
+                        public int M106(int x)
+                        {
+                            return x + 106;
+                        }
+
+                        public int M107(int x)
+                        {
+                            return x + 107;
+                        }
+
+                        public int M108(int x)
+                        {
+                            return x + 108;
+                        }
+
+                        public int M109(int x)
+                        {
+                            return x + 109;
+                        }
+
+                    }
+                }

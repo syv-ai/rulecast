@@ -1,0 +1,272 @@
+# Tell for the lens `sensitive-data-in-logs`. Verdict: rewrite: the lens's tell text now says what these rules
+# measured. 3 of 3 sampled hits real (3 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|syntax-tests|benchmarks|fixtures|testdata|snapshots)/|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/sensitive-data-in-logs-py
+        name: No secrets or whole requests in log calls (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        description: no ruff rule matches (G and T20 are about format and print, not content); ast-grep on a log or print call whose arguments or f-string interpolations hold a credential-named identifier or the whole request, its headers or body. Words inside plain string text are not identifiers, so they never match.
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              kind: call
+              all:
+                - has:
+                    field: function
+                    regex: ^(print|(\w+\.)*_?\w*(log|logger|logging|LOG|LOGGER)\.(debug|info|warning|warn|error|exception|critical|fatal|log))$
+                - has:
+                    field: arguments
+                    has:
+                      stopBy: end
+                      any:
+                        - kind: identifier
+                          regex: (?i)^(\w*(password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token|jwt)$
+                          not:
+                            any:
+                              - regex: (?i)(dir|path|file|name|url|len|length|count|header|field)s?$
+                              - inside:
+                                  kind: keyword_argument
+                                  field: name
+                              - inside:
+                                  kind: call
+                                  field: function
+                              - inside:
+                                  kind: attribute
+                                  field: attribute
+                                  inside:
+                                    kind: call
+                                    field: function
+                              - inside:
+                                  kind: attribute
+                                  field: object
+                        - kind: identifier
+                          regex: ^(request|req)$
+                          not:
+                            any:
+                              - inside:
+                                  kind: keyword_argument
+                                  field: name
+                              - inside:
+                                  kind: attribute
+                                  field: object
+                              - inside:
+                                  kind: call
+                                  field: function
+                        - kind: attribute
+                          regex: ^(request|req)\.(headers|body|cookies)$
+                          not:
+                            any:
+                              - inside:
+                                  kind: attribute
+                                  field: object
+                              - inside:
+                                  kind: call
+                                  field: function
+        message: "{{file}}:{{line}} logs a secret or the whole request. Log the event and the fields worth keeping, not credentials, headers or bodies."
+        examples:
+          good:
+            - path: x/app/auth.py
+              code: |
+                logger.info("login for user %s, invalid password", user.id)
+                logger.warning(f"token refreshed for {user.id} via {request.url}")
+            - path: x/app/auth2.py
+              code: |
+                print("request done", request.method, request.headers.get("user-agent"))
+                logger.debug("hash", password_hasher=get_password_hasher(), path=secrets_dir)
+          bad:
+            - path: x/app/auth.py
+              code: |
+                logger.debug("login %s %s", username, password)
+            - path: x/app/hook.py
+              code: |
+                logger.info(f"received {request.headers} with {settings.SECRET_KEY}")
+      - id: lens/sensitive-data-in-logs-ts
+        name: No secrets or whole requests in log calls (ts)
+        files: \.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$
+        exclude: \.(test|spec)\.[cm]?[jt]sx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/
+        severity: warning
+        description: no oxlint rule matches; ast-grep on a console or logger call whose arguments or template substitutions hold a credential-named identifier or property, or the whole request, its headers or body.
+        detect:
+          ast-grep:
+            language: tsx
+            rule:
+              kind: call_expression
+              all:
+                - has:
+                    field: function
+                    regex: ^(console\.(log|debug|info|warn|error|trace)|(this\.)?#?_?\w*([Ll]ogger|[Ll]og)\.(debug|info|warn|error|trace|fatal|log))$
+                - has:
+                    field: arguments
+                    has:
+                      stopBy: end
+                      any:
+                        - any:
+                            - kind: identifier
+                            - kind: property_identifier
+                            - kind: shorthand_property_identifier
+                          regex: (?i)^(\w*(password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token|jwt)$
+                          not:
+                            any:
+                              - regex: (?i)(dir|path|file|name|url|len|length|count|header|field)s?$
+                              - inside:
+                                  kind: call_expression
+                                  field: function
+                              - inside:
+                                  kind: member_expression
+                                  field: property
+                                  inside:
+                                    kind: call_expression
+                                    field: function
+                              - inside:
+                                  kind: member_expression
+                                  field: object
+                        - kind: identifier
+                          regex: ^(request|req)$
+                          not:
+                            any:
+                              - inside:
+                                  kind: member_expression
+                                  field: object
+                              - inside:
+                                  kind: call_expression
+                                  field: function
+                        - kind: member_expression
+                          regex: ^(request|req)\.(headers|body|cookies)$
+                          not:
+                            any:
+                              - inside:
+                                  kind: member_expression
+                                  field: object
+                              - inside:
+                                  kind: call_expression
+                                  field: function
+        message: "{{file}}:{{line}} logs a secret or the whole request. Log the event and the fields worth keeping, not credentials, headers or bodies."
+        examples:
+          good:
+            - path: x/src/auth.ts
+              code: |
+                console.log("invalid password for", user.id);
+                logger.info(`request ${req.method} ${req.url}`);
+            - path: x/src/auth2.ts
+              code: |
+                console.error("token refreshed", req.headers.get("user-agent"), getSecretName());
+          bad:
+            - path: x/src/auth.ts
+              code: |
+                console.log("login", username, password);
+            - path: x/src/auth2.ts
+              code: |
+                logger.info(`headers ${req.headers}`, { accessToken });
+      - id: lens/sensitive-data-in-logs-java
+        name: No secrets or whole requests in log calls (java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$
+        severity: warning
+        description: "fallback: no Java analyzer installed; regex on a log or System.out call whose arguments, outside string literals, name a credential or the whole request."
+        detect:
+          regex:
+            pattern: \b(?:(?:log|logger|LOG|LOGGER)\.(?:trace|debug|info|warn|error)|System\.(?:out|err)\.print(?:ln|f)?)\((?:[^"();]|\([^()"]*\)|"(?:[^"\\\n]|\\.)*")*?\b(?<name>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token\b|jwt\b|(?:req|request)\b(?:\.(?:getHeaders?\(\)|getBody\(\)|getCookies\(\)))?(?![\w.(\[]))
+            flags: i
+        message: "{{file}}:{{line}} logs {{name}}. Log the event and the fields worth keeping, not secrets or the whole request."
+        examples:
+          good:
+            - path: x/src/main/java/a/A.java
+              code: |
+                log.info("Invalid password for user {}", user.getId());
+            - path: x/src/main/java/a/B.java
+              code: |
+                logger.debug("request to {}", request.getRequestURI());
+          bad:
+            - path: x/src/main/java/a/A.java
+              code: |
+                log.info("login {} {}", username, password);
+            - path: x/src/main/java/a/B.java
+              code: |
+                logger.debug("got {}", request);
+      - id: lens/sensitive-data-in-logs-cs
+        name: No secrets or whole requests in log calls (cs)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|(^|/)[^/]*\.(Unit|Functional|Integration)?Tests?/
+        severity: warning
+        description: "fallback: no .NET analyzer installed; regex on a logger or Console call whose arguments, or {...}/{@...} placeholders and $-string interpolations, name a credential or the whole request."
+        detect:
+          regex:
+            pattern: \b(?:_?\w*[Ll]ogger\w*\.(?:Log\w*|Information|Debug|Warning|Error|Verbose|Fatal|Critical)|Log\.\w+|Console\.Write(?:Line)?)\((?:[^"();]|\([^()"]*\)|\$?@?"(?:[^"\\\n]|\\.)*")*?(?:\b(?<name>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token\b|jwt\b|(?:req|request)\b(?:\.(?:Headers|Body|Cookies))?(?![\w.(\[]))|\$?@?"[^"\n]*?\{@?(?:\w+\.)*(?<iname>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token|jwt|req|request)(?:\.(?:Headers|Body|Cookies))?[}:,])
+            flags: i
+        message: "{{file}}:{{line}} logs {{name}}{{iname}}. Log the event and the fields worth keeping, not secrets or the whole request."
+        examples:
+          good:
+            - path: x/src/App/A.cs
+              code: |
+                _logger.LogInformation("Request: {Name} {@UserId}", requestName, userId);
+            - path: x/src/App/B.cs
+              code: |
+                _logger.LogWarning("Invalid password for {UserId}", user.Id);
+          bad:
+            - path: x/src/App/A.cs
+              code: |
+                _logger.LogInformation("Request: {Name} {@Request}", requestName, request);
+            - path: x/src/App/B.cs
+              code: |
+                Console.WriteLine($"login {user.Password}");
+      - id: lens/sensitive-data-in-logs-go
+        name: No secrets or whole requests in log calls (go)
+        files: \.go$
+        exclude: _test\.go$
+        severity: warning
+        description: "fallback: golangci-lint not installed (and it has no such rule); regex on a log, slog or fmt print call whose arguments, outside string literals, name a credential or the whole request."
+        detect:
+          regex:
+            pattern: \b(?:\w*(?:[Ll]og|[Ll]ogger)\.(?:Print\w*|Fatal\w*|Panic\w*|Debug\w*|Info\w*|Warn\w*|Error\w*|Trace\w*|With\w*)|slog\.\w+|fmt\.F?[Pp]rint\w*)\((?:[^"`();]|\([^()"`]*\)|"(?:[^"\\\n]|\\.)*"|`[^`]*`)*?\b(?<name>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token\b|jwt\b|req(?:uest)?\b(?:\.(?:Header|Body))?(?![\w.(\[])|r\.Header\b(?![\w.(\[]))
+            flags: i
+        message: "{{file}}:{{line}} logs {{name}}. Log the event and the fields worth keeping, not secrets or the whole request."
+        examples:
+          good:
+            - path: x/pkg/a.go
+              code: |
+                log.Printf("invalid password for %s", user.ID)
+            - path: x/pkg/b.go
+              code: |
+                slog.Info("request", "method", req.Method, "url", req.URL)
+          bad:
+            - path: x/pkg/a.go
+              code: |
+                log.Printf("login %s %s", username, password)
+            - path: x/pkg/b.go
+              code: |
+                logger.Debugf("headers %v", r.Header)
+      - id: lens/sensitive-data-in-logs-rs
+        name: No secrets or whole requests in log calls (rs)
+        files: \.rs$
+        exclude: (^|/)tests?/|(^|/)benches/
+        severity: warning
+        description: "fallback: clippy has no such lint; regex on a print or log macro whose arguments, or inline {name} format placeholders, name a credential or the whole request."
+        detect:
+          regex:
+            pattern: \b(?:e?print(?:ln)?|(?:log::|tracing::)?(?:trace|debug|info|warn|error))!\((?:[^"();]|\([^()"]*\)|"(?:[^"\\\n]|\\.)*")*?(?:\b(?<name>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token\b|jwt\b|req(?:uest)?\b(?:\.(?:headers\(\)|body\(\)))?(?![\w.(\[]))|"[^"\n]*?\{(?:\w+\.)*(?<iname>\w*(?:password|passwd|secret|api_?key|apikey|authorization|cookie|card_?number|cvv)\w*|\w*(?:access|refresh|auth|bearer|session|csrf|api|id|jwt)_?token|jwt|req|request)[}:])
+            flags: i
+        message: "{{file}}:{{line}} logs {{name}}{{iname}}. Log the event and the fields worth keeping, not secrets or the whole request."
+        examples:
+          good:
+            - path: x/src/a.rs
+              code: |
+                info!("invalid password for {}", user.id);
+            - path: x/src/b.rs
+              code: |
+                trace!("next token {:?}", token);
+          bad:
+            - path: x/src/a.rs
+              code: |
+                debug!("config {:?} {}", cfg, api_key);
+            - path: x/src/b.rs
+              code: |
+                println!("login with {password}");

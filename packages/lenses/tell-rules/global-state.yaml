@@ -1,0 +1,349 @@
+# Tell for the lens `global-state`. Verdict: keep. 15 of 15 sampled hits real (35 hits in all).
+# Detectors: ast-grep; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/global-state-ts
+        name: global-state (TypeScript)
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)scripts/|\.config\.[mc]?ts$|(^|/)generated/|\.gen\.tsx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/|\.(test|spec)\.tsx?$
+        severity: warning
+        detect:
+          ast-grep:
+            language: tsx
+            utils:
+              fn:
+                any:
+                  - kind: function_declaration
+                  - kind: generator_function_declaration
+                  - kind: function_expression
+                  - kind: generator_function
+                  - kind: arrow_function
+                  - kind: method_definition
+            rule:
+              all:
+                - any:
+                    - all:
+                        - any:
+                            - kind: assignment_expression
+                              has:
+                                field: left
+                                kind: identifier
+                                pattern: $N
+                            - kind: augmented_assignment_expression
+                              has:
+                                field: left
+                                kind: identifier
+                                pattern: $N
+                            - kind: update_expression
+                              has:
+                                field: argument
+                                kind: identifier
+                                pattern: $N
+                        - inside:
+                            stopBy: end
+                            kind: program
+                            has:
+                              any:
+                                - &a1
+                                  kind: lexical_declaration
+                                  regex: ^let\b
+                                  has:
+                                    kind: variable_declarator
+                                    has:
+                                      field: name
+                                      pattern: $N
+                                - kind: export_statement
+                                  has: *a1
+                    - all:
+                        - any:
+                            - any:
+                                - kind: assignment_expression
+                                - kind: augmented_assignment_expression
+                              has:
+                                field: left
+                                any:
+                                  - kind: member_expression
+                                  - kind: subscript_expression
+                                has:
+                                  field: object
+                                  kind: identifier
+                                  pattern: $N
+                            - kind: call_expression
+                              has:
+                                field: function
+                                kind: member_expression
+                                all:
+                                  - has:
+                                      field: object
+                                      kind: identifier
+                                      pattern: $N
+                                  - has:
+                                      field: property
+                                      regex: ^(set|push|add|delete|clear|splice|unshift|pop|shift)$
+                            - kind: unary_expression
+                              regex: ^delete\b
+                              has:
+                                any:
+                                  - kind: member_expression
+                                  - kind: subscript_expression
+                                has:
+                                  field: object
+                                  kind: identifier
+                                  pattern: $N
+                        - inside:
+                            stopBy: end
+                            kind: program
+                            has:
+                              any:
+                                - &a2
+                                  kind: lexical_declaration
+                                  has:
+                                    kind: variable_declarator
+                                    all:
+                                      - has:
+                                          field: name
+                                          pattern: $N
+                                      - has:
+                                          field: value
+                                          any:
+                                            - kind: object
+                                            - kind: array
+                                            - kind: new_expression
+                                              has:
+                                                field: constructor
+                                                regex: ^(Map|Set|WeakMap|WeakSet)$
+                                - kind: export_statement
+                                  has: *a2
+                - inside:
+                    stopBy: end
+                    matches: fn
+                - not:
+                    inside:
+                      stopBy: end
+                      matches: fn
+                      any:
+                        - has:
+                            field: parameters
+                            has:
+                              stopBy: end
+                              kind: identifier
+                              pattern: $N
+                        - has:
+                            field: parameter
+                            pattern: $N
+                        - has:
+                            field: body
+                            has:
+                              stopBy: end
+                              kind: variable_declarator
+                              has:
+                                field: name
+                                pattern: $N
+        message: "{{file}}:{{line}} changes module-level `{{N}}` from inside a function, so callers depend on hidden shared state. Create the value where it is needed and pass it in, or keep module-level values immutable."
+        examples:
+          good:
+            - path: src/lib/g0.ts
+              code: |
+                const DEFAULTS = { theme: "light" };
+                let counter = 0;
+                export function next(counter: number) {
+                  counter += 1;
+                  return { ...DEFAULTS, counter };
+                }
+            - path: src/lib/g1.ts
+              code: |
+                const cache = new Map<string, number>();
+                export function lookup(key: string) {
+                  const cache = new Map<string, number>();
+                  cache.set(key, 1);
+                  return cache.get(key);
+                }
+          bad:
+            - path: src/lib/b0.ts
+              code: |
+                let currentTenant: Tenant | null = null;
+                export function handleRequest(req: Request) {
+                  currentTenant = lookupTenant(req.host);
+                  return listProjects();
+                }
+            - path: src/lib/b1.tsx
+              code: |
+                const seen: Record<string, boolean> = {};
+                export const markSeen = (id: string) => {
+                  seen[id] = true;
+                };
+      - id: lens/global-state-js
+        name: global-state (JavaScript)
+        files: \.(js|jsx|mjs|cjs)$
+        exclude: (^|/)scripts/|\.config\.[mc]?js$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/|\.(test|spec)\.[cm]?jsx?$
+        severity: warning
+        detect:
+          ast-grep:
+            language: javascript
+            utils:
+              fn:
+                any:
+                  - kind: function_declaration
+                  - kind: generator_function_declaration
+                  - kind: function_expression
+                  - kind: generator_function
+                  - kind: arrow_function
+                  - kind: method_definition
+            rule:
+              all:
+                - any:
+                    - all:
+                        - any:
+                            - kind: assignment_expression
+                              has:
+                                field: left
+                                kind: identifier
+                                pattern: $N
+                            - kind: augmented_assignment_expression
+                              has:
+                                field: left
+                                kind: identifier
+                                pattern: $N
+                            - kind: update_expression
+                              has:
+                                field: argument
+                                kind: identifier
+                                pattern: $N
+                        - inside:
+                            stopBy: end
+                            kind: program
+                            has:
+                              any:
+                                - &a3
+                                  kind: lexical_declaration
+                                  regex: ^let\b
+                                  has:
+                                    kind: variable_declarator
+                                    has:
+                                      field: name
+                                      pattern: $N
+                                - kind: export_statement
+                                  has: *a3
+                    - all:
+                        - any:
+                            - any:
+                                - kind: assignment_expression
+                                - kind: augmented_assignment_expression
+                              has:
+                                field: left
+                                any:
+                                  - kind: member_expression
+                                  - kind: subscript_expression
+                                has:
+                                  field: object
+                                  kind: identifier
+                                  pattern: $N
+                            - kind: call_expression
+                              has:
+                                field: function
+                                kind: member_expression
+                                all:
+                                  - has:
+                                      field: object
+                                      kind: identifier
+                                      pattern: $N
+                                  - has:
+                                      field: property
+                                      regex: ^(set|push|add|delete|clear|splice|unshift|pop|shift)$
+                            - kind: unary_expression
+                              regex: ^delete\b
+                              has:
+                                any:
+                                  - kind: member_expression
+                                  - kind: subscript_expression
+                                has:
+                                  field: object
+                                  kind: identifier
+                                  pattern: $N
+                        - inside:
+                            stopBy: end
+                            kind: program
+                            has:
+                              any:
+                                - &a4
+                                  kind: lexical_declaration
+                                  has:
+                                    kind: variable_declarator
+                                    all:
+                                      - has:
+                                          field: name
+                                          pattern: $N
+                                      - has:
+                                          field: value
+                                          any:
+                                            - kind: object
+                                            - kind: array
+                                            - kind: new_expression
+                                              has:
+                                                field: constructor
+                                                regex: ^(Map|Set|WeakMap|WeakSet)$
+                                - kind: export_statement
+                                  has: *a4
+                - inside:
+                    stopBy: end
+                    matches: fn
+                - not:
+                    inside:
+                      stopBy: end
+                      matches: fn
+                      any:
+                        - has:
+                            field: parameters
+                            has:
+                              stopBy: end
+                              kind: identifier
+                              pattern: $N
+                        - has:
+                            field: parameter
+                            pattern: $N
+                        - has:
+                            field: body
+                            has:
+                              stopBy: end
+                              kind: variable_declarator
+                              has:
+                                field: name
+                                pattern: $N
+        message: "{{file}}:{{line}} changes module-level `{{N}}` from inside a function, so callers depend on hidden shared state. Create the value where it is needed and pass it in, or keep module-level values immutable."
+        examples:
+          good:
+            - path: src/lib/g0.js
+              code: |
+                const DEFAULTS = { theme: "light" };
+                let counter = 0;
+                export function next(counter) {
+                  counter += 1;
+                  return { ...DEFAULTS, counter };
+                }
+            - path: src/lib/g1.js
+              code: |
+                const cache = new Map();
+                export function lookup(key) {
+                  const cache = new Map();
+                  cache.set(key, 1);
+                  return cache.get(key);
+                }
+          bad:
+            - path: src/lib/b0.js
+              code: |
+                let currentTenant = null;
+                export function handleRequest(req) {
+                  currentTenant = lookupTenant(req.host);
+                  return listProjects();
+                }
+            - path: src/lib/b1.jsx
+              code: |
+                const seen = {};
+                export const markSeen = (id) => {
+                  seen[id] = true;
+                };

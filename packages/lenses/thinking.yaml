@@ -1,0 +1,392 @@
+# rulecast lens catalog: stances for the interview. How the agent thinks about any project while it interviews the
+# developer. Each stance carries named laws forward as something to do or ask; `lenses` are the catalog entries it bears
+# on. Replaces the interview-only lenses (2026-10-14). Kind-specific probes are in starters.yaml.
+- id: find-first
+  stance: >
+    Never ask the developer what the repository can tell you. Look first, in the code, docs, git history, CI
+    and config, then ask only what it can't: what they intend, which way things should go, which
+    inconsistencies are deliberate exceptions, and what counts as a promise. Arrive with the evidence and a
+    recommendation, so the developer corrects a finding instead of recalling a fact. Where the findings
+    already answer the question, say what you found in one line and ask only whether it should hold going
+    forward.
+  ask: <N> routes check auth in middleware and <M> in the handler. Is that split deliberate? I'd do it in
+    middleware for new routes so no handler can forget.
+  but: >
+    The code shows what the project does, not what it wants. Mid-migration, inherited or rushed code is a poor
+    guide to intent, so a consistent pattern there is still a question, not an answer. Some things never show
+    up in a repo: bugs users hit, who owns what outside it, consumers you can't see. Ask those plainly, with
+    whatever evidence there is. And don't spend an hour of exploring to save the developer a ten-second
+    answer.
+  grounded_in:
+    - The map is not the territory
+    - Cunningham's law
+  lenses: []
+  method: true
+  sources:
+    - cite: "Developer decision: probes find in the repository first and ask only what it can't tell,
+        2026-10-14"
+      how: developer
+    - cite: Milanović, Laws of Software Engineering, The Map Is Not the Territory
+      url: https://lawsofsoftwareengineering.com/laws/map-is-not-the-territory/
+      how: read
+    - cite: Milanović, Laws of Software Engineering, Cunningham's Law
+      url: https://lawsofsoftwareengineering.com/laws/cunninghams-law/
+      how: read
+- id: propose-a-draft
+  stance: >
+    Put a concrete draft convention in front of the developer, with your recommendation and the evidence from
+    the code, rather than asking how they'd like something done. People correct a specific proposal faster and
+    more precisely than they answer an open question.
+  but: >
+    A confident draft anchors the conversation. Where the evidence is thin or the call is contested, say it's
+    a strawman and lay out the alternatives side by side instead of leading with one. Never present a guess as
+    something you found in the code.
+  grounded_in:
+    - Cunningham's law
+  lenses: []
+  method: true
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Cunningham's Law
+      url: https://lawsofsoftwareengineering.com/laws/cunninghams-law/
+      how: read
+    - cite: Steven McGeady, reader comment on Schott's Vocab, The New York Times, May 2010, which named the law
+        after Ward Cunningham; Cunningham has called it a misquote and says he never advised posting wrong
+        answers
+      url: null
+      how: recalled
+- id: check-the-draft-against-the-code
+  stance: >
+    Before proposing a convention, count where the code already breaks it and what an enforced rule would flag
+    on day one. Where the docs, a diagram or a decision record say one thing and the code another, show both
+    and ask which is wrong. You'll tend to notice the files that confirm the rule you already have in mind, so
+    look for the ones that don't.
+  ask: The design notes say handlers never touch the database directly, but I found a dozen that do. Is the note
+    out of date, or are those the bugs?
+  but: >
+    Not every gap is drift. A precise, checked model (types, schemas, a generated client) is close to the
+    truth, and a handful of counterexamples can be deliberate exceptions worth writing down rather than a sign
+    the rule is wrong. Don't check every low-stakes draft this hard.
+  grounded_in:
+    - Confirmation bias
+    - The map is not the territory
+  lenses:
+    - law-of-unintended-consequences
+    - lehmans-laws
+    - drifting-terminology
+  method: true
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Confirmation Bias
+      url: https://lawsofsoftwareengineering.com/laws/confirmation-bias/
+      how: read
+    - cite: Raymond S. Nickerson, Confirmation Bias, a Ubiquitous Phenomenon in Many Guises, Review of General
+        Psychology 2(2), 1998
+      url: https://doi.org/10.1037/1089-2680.2.2.175
+      how: recalled
+    - cite: Milanović, Laws of Software Engineering, The Map Is Not the Territory
+      url: https://lawsofsoftwareengineering.com/laws/map-is-not-the-territory/
+      how: read
+    - cite: Alfred Korzybski, Science and Sanity (1933)
+      url: null
+      how: recalled
+- id: ask-the-history-first
+  stance: >
+    When something looks odd or inconsistent, ask why it is that way before calling it a violation. Odd code
+    usually has a reason: an old constraint, an incident, a workaround for a dependency. The answer decides
+    whether the convention protects it, records it as an exception, or removes it.
+  ask: These two modules handle retries differently. Is there a story behind that, or did they just drift apart?
+  but: >
+    Sometimes there is no reason and nobody remembers. Once the developer says so, stop digging and propose
+    the convention. In security-sensitive code, an inconsistency can also be a real hole, so flag it as one
+    rather than assuming it was meant.
+  grounded_in:
+    - Chesterton's fence
+  lenses:
+    - lava-flow
+    - dogma-over-pragma
+  method: true
+  sources:
+    - cite: G. K. Chesterton, The Thing (1929), the chapter "The Drift from Domesticity"
+      url: null
+      how: recalled
+- id: ownership-before-boundaries
+  stance: >
+    Before proposing conventions about modules, layers or services, ask who owns which parts and who must
+    agree to a change. Boundaries tend to follow the people who build them. A boundary that cuts across teams,
+    or teams split by technical layer, shows up as changes that need several owners to coordinate.
+  ask: Who owns which parts of this, and does a typical feature need more than one of them to sign off?
+  but: >
+    A solo developer or one small team has a single communication path, so this says little about their code.
+    Layers inside one codebase owned by one team are fine; the problem is layers as team boundaries. A
+    platform team serving many product teams is a horizontal split that often works well.
+  grounded_in:
+    - Conway's law
+    - Horizontalism
+  lenses:
+    - bounded-context
+    - context-map
+    - drifting-terminology
+    - under-modularization
+    - distributed-monolith
+    - shotgun-surgery
+    - layered-architecture
+  method: false
+  sources:
+    - cite: Melvin E. Conway, How Do Committees Invent?, Datamation, April 1968
+      url: https://www.melconway.com/Home/Committees_Paper.html
+      how: recalled
+    - cite: Milanović, Laws of Software Engineering, Conway's Law
+      url: https://lawsofsoftwareengineering.com/laws/conways-law/
+      how: read
+    - cite: INNOQ, Architecture Antipatterns, Horizontalism
+      url: https://architecture-antipatterns.tech/patterns/horizontalism.html
+      how: read
+- id: find-where-changes-concentrate
+  stance: Spend the interview where the work is. Look at the history for the few modules that change most and
+    break most, and for the files almost every change has to touch (a central registry, a shared types file,
+    one big routes file). Conventions pay off there. Files everyone must edit at once also hold up parallel
+    work, by people or by several agents running side by side. Adding more people or agents won't speed up
+    work that all has to pass through those files; it adds coordination instead.
+  ask: Which files does nearly every change touch, and which modules do most of your bugs come from?
+  but: >
+    Churn alone doesn't make code bad: a config table or a changelog changes constantly by design, and a
+    single registry can be the clearest place to look things up. On a young or solo project the history is too
+    short to say much.
+  grounded_in:
+    - Pareto principle
+    - Brooks's law
+  lenses:
+    - pareto-principle
+    - amdahls-law
+    - shotgun-surgery
+    - divergent-change
+    - god-object
+  method: false
+  sources:
+    - cite: Joseph M. Juran, who named the Pareto principle in quality management, after Vilfredo Pareto
+      url: null
+      how: recalled
+    - cite: Frederick P. Brooks Jr., The Mythical Man-Month (1975)
+      url: null
+      how: recalled
+    - cite: Milanović, Laws of Software Engineering, Brooks's Law
+      url: https://lawsofsoftwareengineering.com/laws/brooks-law/
+      how: read
+- id: start-from-failure
+  stance: >
+    Ask what would hurt most if it went wrong, and work back to the conventions that stop it. The worst
+    failure a project can have (a data leak, a corrupted file, a bricked device, a wrong published number)
+    ranks the conventions better than a list of good practices does.
+  ask: What's the worst thing this code could do to a user, and what stops it today?
+  but: >
+    Listing failures can turn into defensive overbuilding. Keep to the failures the developer says are real
+    for this project, and pair this with what the project is for, since avoiding failure isn't the same as
+    reaching the goal.
+  grounded_in:
+    - Inversion
+  lenses:
+    - murphys-law
+    - fail-open-vs-fail-closed
+    - fail-fast
+    - defense-in-depth
+  method: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Inversion
+      url: https://lawsofsoftwareengineering.com/laws/inversion/
+      how: read
+    - cite: Charlie Munger, who popularised Carl Jacobi's "invert, always invert" as a habit of thought
+      url: null
+      how: recalled
+    - cite: Gary Klein, Performing a Project Premortem, Harvard Business Review, September 2007
+      url: https://hbr.org/2007/09/performing-a-project-premortem
+      how: recalled
+- id: reasons-not-precedent
+  stance: >
+    For each heavyweight pattern, framework or architecture in the code, ask what problem it solves in this
+    project. A choice whose only justification is that a well-known project uses it is a candidate for a
+    stated exception or a rethink, not a convention to spread further.
+  ask: What did splitting this into services (or adding this event bus, this mediator layer) solve for you that
+    the simpler setup didn't?
+  but: >
+    Copying a proven, boring default you understand is usually better than inventing one, and exemplar code is
+    meant to be copied. If the developer adopted it knowingly and it fits, the precedent is a fine reason.
+    Don't make them defend every library.
+  grounded_in:
+    - Blind Pattern Following
+    - First principles thinking
+  lenses:
+    - dogma-over-pragma
+    - cargo-cult-programming
+    - golden-hammer
+    - over-modularization
+    - distributed-monolith
+    - over-engineering
+  method: false
+  sources:
+    - cite: INNOQ, Architecture Antipatterns, Blind Pattern Following
+      url: https://architecture-antipatterns.tech/patterns/cargo_culting.html
+      how: read
+    - cite: Milanović, Laws of Software Engineering, First Principles Thinking
+      url: https://lawsofsoftwareengineering.com/laws/first-principles-thinking/
+      how: read
+- id: kept-for-what-it-does
+  stance: >
+    When the project keeps a home-grown framework, an in-house replacement for a standard tool, or an old
+    component everyone works around, ask whether it stays because it still does the job best or because of
+    what it cost and who built it. The answer decides whether conventions protect it or steer new code away
+    from it.
+  ask: If you were starting today, would you build this yourself again, or use what's out there?
+  but: >
+    Past investment often stands for real knowledge and working code, so switching isn't free. Building
+    in-house can be right for what makes the product different, and for a library a small copy can beat a new
+    dependency. Re-evaluating isn't a verdict on whoever built it; say so.
+  grounded_in:
+    - Sunk cost fallacy
+    - Emotional Attachment
+    - Not Invented Here
+  lenses:
+    - second-system-effect
+    - boat-anchor
+    - reinventing-the-wheel
+    - inner-platform-effect
+    - lindy-effect
+  method: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Sunk Cost Fallacy
+      url: https://lawsofsoftwareengineering.com/laws/sunk-cost-fallacy/
+      how: read
+    - cite: INNOQ, Architecture Antipatterns, Emotional Attachment
+      url: https://architecture-antipatterns.tech/patterns/emotional_misattachment.html
+      how: read
+    - cite: Ralph Katz and Thomas J. Allen, Investigating the Not Invented Here (NIH) syndrome, R&D Management
+        12(1), 1982
+      url: null
+      how: recalled
+    - cite: Joel Spolsky, In Defense of Not-Invented-Here Syndrome (2001)
+      url: https://www.joelonsoftware.com/2001/10/14/in-defense-of-not-invented-here-syndrome/
+      how: read
+- id: frozen-code-gets-its-own-rule
+  stance: >
+    Find the parts nobody touches and the parts only one person understands, and ask which is which. Frozen,
+    feared code needs different conventions from the rest: characterisation tests before any change, small
+    changes shipped often, no drive-by refactoring, and no new wrappers around it. Code only one person knows
+    is where written conventions do the most good.
+  ask: Which parts does nobody touch, and is that because they're finished or because they're scary?
+  but: >
+    Some code is genuinely done, certified or tied to hardware, and leaving it alone is the right call. On a
+    solo project a bus factor of one is just the situation; the useful question is what's written down, not
+    who else knows it.
+  grounded_in:
+    - Never Change a Running System
+    - Bus factor
+  lenses:
+    - strangler-fig
+    - golden-master-test
+    - lava-flow
+    - technical-debt
+    - boy-scout-rule
+  method: false
+  sources:
+    - cite: INNOQ, Architecture Antipatterns, Never change a running system
+      url: https://architecture-antipatterns.tech/patterns/never_change_a_running_system.html
+      how: read
+    - cite: Milanović, Laws of Software Engineering, Bus Factor
+      url: https://lawsofsoftwareengineering.com/laws/bus-factor/
+      how: read
+- id: numbers-are-signals
+  stance: >
+    When a convention would be enforced through a number (coverage, complexity, line or file length, a lint
+    count), ask what the number stands for and how code could meet it without meeting the goal. An agent
+    working in a loop will satisfy the letter of a rule, so name the cheap way to pass it before it becomes
+    one.
+  ask: If a coverage floor is the rule, what would stop tests that run the code without checking anything?
+  but: >
+    A rough number is still better than none for something that matters, and some targets are hard to game and
+    close to the goal, such as a latency budget measured in a test. Don't let the risk of gaming become a
+    reason to measure nothing.
+  grounded_in:
+    - Goodhart's law
+    - Gilb's law
+    - Cobra effect
+  lenses:
+    - dogma-over-pragma
+    - assertion-free-test
+    - testing-pyramid
+  method: false
+  sources:
+    - cite: Charles Goodhart, Problems of Monetary Management, the U.K. Experience (1975)
+      url: null
+      how: recalled
+    - cite: "Marilyn Strathern, Improving ratings: audit in the British University system, European Review 5(3),
+        1997 (source of the common wording)"
+      url: null
+      how: recalled
+    - cite: Tom DeMarco and Timothy Lister, Peopleware (1987), the section "Gilb's Law", which names Tom Gilb's
+        measurement principle
+      url: null
+      how: recalled
+    - cite: Milanović, Laws of Software Engineering, Gilb's Law
+      url: https://lawsofsoftwareengineering.com/laws/gilbs-law/
+      how: read
+    - cite: Milanović, Laws of Software Engineering, Goodhart's Law
+      url: https://lawsofsoftwareengineering.com/laws/goodharts-law/
+      how: read
+    - cite: Horst Siebert, Der Kobra-Effekt (2001)
+      url: null
+      how: recalled
+- id: tests-by-what-escaped
+  stance: >
+    Ask about the bugs that got past the tests, not about coverage. Where recent bugs escaped, and whether
+    tests fail when the code is broken, decides which test conventions matter. If the team writes few tests,
+    find out why (no time, code that is hard to test, a painful setup) before proposing a rule.
+  ask: When a bug last reached users, was there a test that should have caught it, and why didn't it?
+  but: >
+    No suite catches everything; some bugs only show under real load, data or users, and that's what
+    monitoring and staged rollouts are for. Prototypes, spikes and one-off scripts often don't earn tests at
+    all.
+  grounded_in:
+    - Production Bugs
+    - Buggy Tests
+    - Developers Not Writing Tests
+  lenses:
+    - assertion-free-test
+    - obscure-test
+    - conditional-test-logic
+    - frequent-debugging
+    - manual-intervention
+    - slow-tests
+    - erratic-test
+    - hard-to-test-code
+  method: false
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, Production Bugs
+      url: http://xunitpatterns.com/Production%20Bugs.html
+      how: read
+    - cite: Meszaros, xUnit Test Patterns, Buggy Tests
+      url: http://xunitpatterns.com/Buggy%20Tests.html
+      how: read
+    - cite: Meszaros, xUnit Test Patterns, Developers Not Writing Tests
+      url: http://xunitpatterns.com/Developers%20Not%20Writing%20Tests.html
+      how: read
+- id: tests-by-what-they-cost
+  stance: >
+    Ask which tests break when nothing they cover changed. A suite that needs fixing after every small change
+    points to over-mocking, tests tied to implementation detail, and copied setup, and the conventions worth
+    proposing are the ones that cut that cost.
+  ask: Which tests do you end up fixing when you change something they shouldn't care about?
+  but: >
+    Some test churn is the honest cost of changing behaviour, and a suite that never needs touching may not
+    check much. Weigh the upkeep against the bugs the tests catch before proposing to loosen or delete them.
+  grounded_in:
+    - High Test Maintenance Cost
+  lenses:
+    - fake-over-mock
+    - mock-everything
+    - fragile-test
+    - obscure-test
+    - test-code-duplication
+    - test-data-builder
+  method: false
+  sources:
+    - cite: Meszaros, xUnit Test Patterns, High Test Maintenance Cost
+      url: http://xunitpatterns.com/High%20Test%20Maintenance%20Cost.html
+      how: read

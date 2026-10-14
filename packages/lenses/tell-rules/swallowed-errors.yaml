@@ -1,0 +1,48 @@
+# Tell for the lens `swallowed-errors`. Verdict: keep. 2 of 2 sampled hits real (2 hits in all).
+# Detectors: linter; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/swallowed-errors-py
+        name: Broad except that only passes
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$
+        severity: warning
+        detect:
+          linter:
+            tool: ruff
+            rules:
+              - S110
+        message: "{{file}}:{{line}} catches a broad exception and does nothing. Catch the specific error, or log or re-raise it."
+        description: "linter ruff S110 (try-except-pass): it flags bare, Exception and BaseException handlers whose body is pass, which is the tell. S110 does not flag a body of '...'."
+        examples:
+          good:
+            - path: app/services/sync.py
+              code: |
+                try:
+                    os.remove(tmp)
+                except FileNotFoundError:
+                    pass
+            - path: app/services/load.py
+              code: |
+                try:
+                    data = load(path)
+                except Exception:
+                    log.exception("load failed")
+                    raise
+          bad:
+            - path: app/services/sync.py
+              code: |
+                try:
+                    sync()
+                except Exception:
+                    pass
+            - path: app/services/load.py
+              code: |
+                try:
+                    data = load(path)
+                except:
+                    pass

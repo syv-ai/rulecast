@@ -1,0 +1,225 @@
+# Tell for the lens `test-logic-in-production`. Verdict: keep. 5 of 5 sampled hits real (5 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|syntax-tests|benchmarks|fixtures|testdata|snapshots)/|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/test-logic-in-production-py
+        name: Production code does not branch on being under test (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)(conftest|settings|config)\.py$|(^|/)settings/
+        severity: warning
+        description: no ruff rule matches; ast-grep on an if, elif or conditional expression whose condition reads a TESTING-style flag, a PYTEST_* or TESTING env key, compares an env/mode value with 'test', or checks for pytest in sys.modules. Configuration modules (config.py, settings.py, settings/) are excluded as the tell says.
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              any:
+                - kind: if_statement
+                  has:
+                    field: condition
+                    matches: TESTCHECK
+                - kind: elif_clause
+                  has:
+                    field: condition
+                    matches: TESTCHECK
+                - kind: conditional_expression
+                  has:
+                    matches: TESTCHECK
+            utils:
+              TESTATOM:
+                any:
+                  - kind: identifier
+                    regex: ^(TESTING|testing|is_testing|IS_TESTING|is_test|IS_TEST|test_mode|TEST_MODE|in_tests?|IN_TESTS?|running_tests?|RUNNING_TESTS?|under_test|UNDER_TEST)$
+                  - kind: string
+                    regex: ^["'](PYTEST_CURRENT_TEST|PYTEST_\w+|TESTING|TEST_MODE)["']$
+                  - kind: comparison_operator
+                    regex: (?i)(env|environment|mode|stage|profile)\w*\s*[!=]=\s*["'](test|testing)["']|["'](test|testing)["']\s*[!=]=\s*[\w.\[\]"']*(env|environment|mode|stage)
+                  - kind: comparison_operator
+                    regex: "[\"'](pytest|unittest)[\"']\\s+(not\\s+)?in\\s+sys\\.modules"
+              TESTCHECK:
+                any:
+                  - matches: TESTATOM
+                  - has:
+                      stopBy: end
+                      matches: TESTATOM
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/app/hasher.py
+              code: |
+                def get_hasher(settings):
+                    return settings.hasher_factory()
+            - path: x/app/mode.py
+              code: |
+                if settings.PRODUCTION:
+                    mount_frontend(app)
+                testing_dir = Path("testing")
+          bad:
+            - path: x/app/hasher.py
+              code: |
+                def get_hasher():
+                    if settings.TESTING:
+                        return FakeHasher()
+                    return BcryptHasher()
+            - path: x/app/db.py
+              code: |
+                import os, sys
+                pool = 1 if "pytest" in sys.modules else 20
+                if os.environ.get("APP_ENV") == "test":
+                    skip_migrations()
+      - id: lens/test-logic-in-production-ts
+        name: Production code does not branch on being under test (ts)
+        files: \.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$
+        exclude: \.(test|spec)\.[cm]?[jt]sx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/|\.config\.[cm]?[jt]s$|(^|/)(jest|vitest)\.setup\.[cm]?[jt]s$
+        severity: warning
+        description: no oxlint rule matches; ast-grep on an if or ternary whose condition compares NODE_ENV/MODE with 'test', reads JEST_WORKER_ID or VITEST, or reads an isTest-style flag. Config files are excluded.
+        detect:
+          ast-grep:
+            language: tsx
+            rule:
+              any:
+                - kind: if_statement
+                  has:
+                    field: condition
+                    matches: TESTCHECK
+                - kind: ternary_expression
+                  has:
+                    field: condition
+                    matches: TESTCHECK
+            utils:
+              TESTATOM:
+                any:
+                  - kind: member_expression
+                    regex: ^(process\.env|import\.meta\.env)\.(JEST_WORKER_ID|VITEST\w*|TESTING|TEST_MODE|IS_TEST)$
+                  - kind: binary_expression
+                    regex: (NODE_ENV|MODE|env|ENV|environment|mode)\S*\s*[!=]==?\s*["'`]test(ing)?["'`]|["'`]test(ing)?["'`]\s*[!=]==?\s*\S*(NODE_ENV|MODE|env|ENV|environment|mode)
+                  - kind: identifier
+                    regex: ^(isTest|IS_TEST|isTesting|IS_TESTING|isTestEnv|inTest|TESTING|testMode|TEST_MODE)$
+              TESTCHECK:
+                any:
+                  - matches: TESTATOM
+                  - has:
+                      stopBy: end
+                      matches: TESTATOM
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/src/a.ts
+              code: |
+                if (process.env.NODE_ENV === 'production') { enableCache(); }
+            - path: x/src/b.ts
+              code: |
+                const url = process.env.NODE_ENV !== 'development' ? prodUrl : devUrl;
+          bad:
+            - path: x/src/a.ts
+              code: |
+                if (process.env.NODE_ENV === 'test') { return mockUser; }
+            - path: x/src/b.ts
+              code: |
+                const delay = process.env.JEST_WORKER_ID ? 0 : 500;
+      - id: lens/test-logic-in-production-java
+        name: Production code does not branch on being under test (java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$
+        severity: warning
+        description: 'fallback: no Java analyzer installed; regex on an if or ternary condition that compares a profile/env/mode with "test" or reads an isTest/TESTING flag.'
+        detect:
+          regex:
+            pattern: (?:\bif\s*\(|\?)?[^\n;{]*?(?:(?:[Pp]rofile|[Ee]nv|[Ee]nvironment|[Mm]ode)\w*[^\n;{]*"test(?:ing)?"|"test(?:ing)?"\s*\.equals\w*\(\s*\w*(?:[Pp]rofile|[Ee]nv|[Mm]ode)|\b(?:isTest\w*|IS_TEST\w*|TESTING)\b)[^\n;{]*\)\s*(?:\{|\?|return)
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/src/main/java/a/A.java
+              code: |
+                if (env.acceptsProfiles(Profiles.of("prod"))) {
+            - path: x/src/main/java/a/B.java
+              code: |
+                @Profile("test")
+                class TestConfig {}
+          bad:
+            - path: x/src/main/java/a/A.java
+              code: |
+                if (env.acceptsProfiles(Profiles.of("test"))) {
+            - path: x/src/main/java/a/B.java
+              code: |
+                if (isTestMode) return stub;
+      - id: lens/test-logic-in-production-cs
+        name: Production code does not branch on being under test (cs)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|(^|/)[^/]*\.(Unit|Functional|Integration)?Tests?/
+        severity: warning
+        description: 'fallback: no .NET analyzer installed; regex on an if condition that checks IsEnvironment("Test..."), compares EnvironmentName with "Test..." or reads an IsTest/TESTING flag.'
+        detect:
+          regex:
+            pattern: \bif\s*\([^\n{]*?(?:IsEnvironment\(\s*"Test\w*"\s*\)|Environment\w*\s*[!=]=\s*"Test\w*"|"Test\w*"\s*[!=]=\s*\S*Environment\w*|\bIsTest\w*\b|\bTESTING\b)
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/src/Web/Program.cs
+              code: |
+                if (app.Environment.IsDevelopment()) { app.UseDeveloperExceptionPage(); }
+            - path: x/src/Web/A.cs
+              code: |
+                var testName = "TestCatalog";
+          bad:
+            - path: x/src/Web/Program.cs
+              code: |
+                if (app.Environment.IsEnvironment("Testing")) { return; }
+            - path: x/src/Web/A.cs
+              code: |
+                if (builder.Environment.EnvironmentName == "Test") { UseInMemoryDb(); }
+      - id: lens/test-logic-in-production-go
+        name: Production code does not branch on being under test (go)
+        files: \.go$
+        exclude: _test\.go$
+        severity: warning
+        description: "fallback: golangci-lint not installed (and has no such rule); regex on an if condition calling testing.Testing(), looking up the test.v flag, checking os.Args[0] for .test, or reading a *TEST* env var."
+        detect:
+          regex:
+            pattern: \bif\s[^\n{]*?(?:testing\.Testing\(\)|flag\.Lookup\("test\.\w+"\)|strings\.HasSuffix\(os\.Args\[0\],\s*"\.test"\)|os\.(?:Getenv|LookupEnv)\("\w*TEST\w*"\))
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/pkg/a.go
+              code: |
+                if os.Getenv("DEBUG") != "" {
+            - path: x/pkg/b.go
+              code: |
+                if cfg.Testing == nil {
+          bad:
+            - path: x/pkg/a.go
+              code: |
+                if testing.Testing() {
+            - path: x/pkg/b.go
+              code: |
+                if os.Getenv("APP_TEST_MODE") == "1" {
+      - id: lens/test-logic-in-production-rs
+        name: Production code does not branch on being under test (rs)
+        files: \.rs$
+        exclude: (^|/)tests?/|(^|/)benches/
+        severity: warning
+        description: "fallback: clippy has no such lint; regex on an if condition that tests cfg!(test) or reads a *TEST* env var. #[cfg(test)] items are compiled out and not matched."
+        detect:
+          regex:
+            pattern: \bif\s[^\n{]*?(?:cfg!\(test\)|env::var(?:_os)?\("\w*TEST\w*"\))
+        message: "{{file}}:{{line}} behaves differently under test. Put the varying behaviour behind a dependency the test substitutes."
+        examples:
+          good:
+            - path: x/src/a.rs
+              code: |
+                #[cfg(test)]
+                mod tests {}
+            - path: x/src/b.rs
+              code: |
+                if std::env::var("NO_COLOR").is_ok() {}
+          bad:
+            - path: x/src/a.rs
+              code: |
+                if cfg!(test) { return Ok(()); }
+            - path: x/src/b.rs
+              code: |
+                if std::env::var("MY_APP_TESTING").is_ok() { return; }

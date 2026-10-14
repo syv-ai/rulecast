@@ -1,0 +1,105 @@
+# Tell for the lens `init-time-side-effects`. Verdict: keep. 7 of 7 sampled hits real (7 hits in all).
+# Detectors: regex, ast-grep; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|syntax-tests|benchmarks|fixtures|testdata|snapshots)/|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/init-time-side-effects-go
+        name: func init does no I/O (go)
+        files: \.go$
+        exclude: _test\.go$
+        severity: warning
+        description: "fallback: golangci-lint (gochecknoinits flags every init, not I/O in one) is not installed; regex on an os.Getenv, os.LookupEnv, os.Open, os.ReadFile, flag., sql.Open or http. call inside the body of func init()."
+        detect:
+          regex:
+            pattern: ^func init\(\)\s*\{(?:(?!\n\})[\s\S])*?\b(?<call>os\.(?:Getenv|LookupEnv|Open|ReadFile)|flag\.\w+|sql\.Open|http\.\w+)\(
+            flags: m
+        message: "{{file}}:{{line}} calls {{call}} in func init. Do the work in an explicit setup step called from main."
+        examples:
+          good:
+            - path: x/pkg/a.go
+              code: |
+                func init() {
+                	sql.Register("mydriver", &Driver{})
+                }
+            - path: x/pkg/b.go
+              code: |
+                func setup() {
+                	path := os.Getenv("LOG_PATH")
+                }
+          bad:
+            - path: x/pkg/a.go
+              code: |
+                func init() {
+                	path := os.Getenv("LOG_PATH")
+                	f, _ := os.Open(path)
+                }
+            - path: x/pkg/b.go
+              code: |
+                func init() {
+                	db, _ = sql.Open("postgres", dsn)
+                }
+      - id: lens/init-time-side-effects-py
+        name: Importing a module does no I/O (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        description: no ruff rule matches; ast-grep on an os.environ[...], os.environ.get, os.getenv, open, connect or requests.<fn> call outside any function or lambda (so it runs on import), in a file with no if __name__ == '__main__' block.
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              any:
+                - kind: call
+                  has:
+                    field: function
+                    regex: ^(os\.environ\.get|os\.getenv|open|requests\.\w+|(\w+\.)*connect)$
+                - kind: subscript
+                  has:
+                    field: value
+                    regex: ^os\.environ$
+              not:
+                any:
+                  - inside:
+                      stopBy: end
+                      kind: function_definition
+                  - inside:
+                      stopBy: end
+                      kind: lambda
+              inside:
+                stopBy: end
+                kind: module
+                not:
+                  has:
+                    kind: if_statement
+                    regex: ^if\s+__name__\s*==\s*["']__main__["']
+        message: "{{file}}:{{line}} does I/O when the module is imported. Move it into a function, an app factory or a startup hook, or cache it lazily."
+        examples:
+          good:
+            - path: x/app/config.py
+              code: |
+                import os
+                from functools import cache
+                @cache
+                def settings():
+                    return Settings(db=os.environ["DB_URL"])
+            - path: x/app/tool.py
+              code: |
+                import os
+                TOKEN = os.getenv("TOKEN")
+                if __name__ == "__main__":
+                    main()
+          bad:
+            - path: x/app/config.py
+              code: |
+                import os
+                DB_URL = os.environ["DB_URL"]
+            - path: x/app/db.py
+              code: |
+                import sqlite3
+                conn = sqlite3.connect("app.db")
+                class Cfg:
+                    debug = os.getenv("DEBUG")

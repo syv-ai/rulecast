@@ -1,0 +1,1629 @@
+# rulecast lens catalog: laws. Distilled 2026-10-13; see docs/references.md.
+# Own words throughout; sources cited per entry (how: read | recalled).
+- id: amdahls-law
+  name: Amdahl's Law
+  family: law
+  group: scale
+  says: The part of the work that has to run in sequence caps how much faster you can get by adding parallel
+    workers.
+  contested: false
+  looks_like:
+    - a global lock, mutex or single-writer queue that every worker goes through
+    - a parallel pipeline with one serial stage, such as a single reducer or a final merge step
+    - many stateless app servers in front of one database instance or one shared auth or billing service
+  forces: []
+  overuse: []
+  remedy: Profile to find the serial fraction and shrink it before adding cores, machines or replicas.
+  counter: >
+    It assumes a fixed problem size. When the workload grows with the hardware, Gustafson's view fits better
+    and the ceiling is much less gloomy. The page also stretches it to teams and decision-making; that is an
+    analogy, not the law, and the maths doesn't carry over cleanly. For I/O-bound work, latency and contention
+    usually matter more than the serial fraction.
+  in: {}
+  related:
+    - gustafsons-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Amdahl's Law
+      url: https://lawsofsoftwareengineering.com/laws/amdahls-law/
+      how: read
+  example:
+    before: |
+      lock = Mutex()
+      results = []
+
+      fn make_thumbnail(photo: Photo):
+          lock.acquire()
+          image = decode(photo.bytes)
+          small = resize(image, 256, 256)
+          results.append(encode_jpeg(small))
+          lock.release()
+
+      pool.run(make_thumbnail, photos, workers=32)
+    after: |
+      lock = Mutex()
+      results = []
+
+      fn make_thumbnail(photo: Photo):
+          image = decode(photo.bytes)
+          small = resize(image, 256, 256)
+          data = encode_jpeg(small)
+          lock.acquire()
+          results.append(data)
+          lock.release()
+
+      pool.run(make_thumbnail, photos, workers=32)
+    note: The lock held the whole job, so 32 workers ran one at a time; now only the shared append runs in
+      sequence, and that serial part is what limits the speedup.
+  matters_most_for:
+    - distributed
+    - data-pipeline
+    - scientific
+    - ml-training
+    - databases-storage
+- id: boy-scout-rule
+  name: The Boy Scout Rule
+  family: law
+  group: quality
+  says: Leave the code a little cleaner than you found it each time you touch it.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - feature or bugfix commits that also rename a confusing symbol, drop dead code or add a missing test
+      nearby
+    - commented-out blocks and stale TODOs in files that are edited often, which suggests the rule isn't being
+      followed
+  forces: []
+  overuse: []
+  remedy: Make a small, local cleanup in the area you're already changing, ideally as its own commit.
+  counter: >
+    Drive-by cleanups mixed into a feature diff make review and bisecting harder and can cause merge conflicts
+    on busy files. Many teams want tidy-ups in a separate commit or PR (Kent Beck's "tidy first" and Fowler's
+    preparatory refactoring both keep structure changes apart from behaviour changes). It is also no excuse to
+    wander off and polish code unrelated to the task, and it doesn't replace planned work on large debt.
+  in: {}
+  related:
+    - broken-windows-theory
+    - technical-debt
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, The Boy Scout Rule
+      url: https://lawsofsoftwareengineering.com/laws/boy-scout-rule/
+      how: read
+  matters_most_for: []
+- id: broken-windows-theory
+  name: Broken Windows Theory
+  family: law
+  group: quality
+  says: Small signs of neglect left unfixed tell everyone that quality doesn't matter here, so the mess grows;
+    also called software entropy.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - TODO or FIXME "hack" comments that have sat in the code for a long time
+    - piles of lint-suppression comments or skipped and disabled tests
+    - a CI pipeline where failing or flaky checks are routinely ignored or marked optional
+  forces: []
+  overuse: []
+  remedy: Fix small problems while they're small, or at least board them up with a tracked issue, and keep the
+    build green.
+  counter: >
+    The original criminology theory (Wilson and Kelling) is heavily disputed, and its use to justify
+    aggressive policing is widely criticised. In software the evidence is mostly anecdotal. Chasing every tiny
+    blemish can also turn into perfectionism that blocks delivery. Some old code is ugly but stable and rarely
+    touched, and leaving it alone is the right call.
+  in: {}
+  related:
+    - boy-scout-rule
+    - technical-debt
+  tell: A lint-disable or type-ignore comment with no reason or issue link next to it.
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Broken Windows Theory
+      url: https://lawsofsoftwareengineering.com/laws/broken-windows-theory/
+      how: read
+  example:
+    before: |
+      fn tax_rate(region: str) -> float:
+          # lint-disable: no-bare-except
+          try:
+              return RATES[region]
+          except:
+              return 0.0
+
+      # skip
+      fn test_tax_rate_for_overseas_territories():
+          ...
+    after: |
+      fn tax_rate(region: str) -> float:
+          if region not in RATES:
+              raise UnknownRegion(region)
+          return RATES[region]
+
+      # skip: territory rates need a product decision, see ISSUE-412
+      fn test_tax_rate_for_overseas_territories():
+          ...
+    note: The unexplained suppression is fixed outright, and the skip that can't be fixed yet is boarded up with a
+      reason and a tracked issue.
+  matters_most_for: []
+- id: cap-theorem
+  name: CAP Theorem
+  family: law
+  group: architecture
+  says: When a network partition splits a distributed data store, it has to choose between staying consistent
+    and staying available; also called Brewer's theorem.
+  applies_to:
+    kinds:
+      - distributed
+      - databases-storage
+    languages: []
+  contested: false
+  looks_like:
+    - replicated data stores or caches where the code doesn't say what happens when replicas disagree
+    - read and write calls with no stated consistency level, quorum or conflict-resolution choice
+  forces: []
+  overuse: []
+  remedy: Decide per operation whether to fail or serve possibly stale data during a partition, and make that
+    choice explicit in configuration and code.
+  counter: >
+    The "pick two of three" framing is misleading: partitions aren't optional, so the real choice only shows
+    up during one. Martin Kleppmann argues its definitions are too narrow and ambiguous to guide design, and
+    Brewer's own 2012 follow-up softened it. PACELC (Daniel Abadi) adds the latency versus consistency
+    trade-off that matters when there is no partition. Labelling whole databases CP or AP, as the page does
+    with MongoDB and Cassandra, oversimplifies: both behave differently depending on configuration.
+  in: {}
+  related:
+    - fallacies-of-distributed-computing
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, CAP Theorem
+      url: https://lawsofsoftwareengineering.com/laws/cap-theorem/
+      how: read
+  example:
+    before: |
+      fn points_balance(member_id: str) -> int:
+          return replicas.any().get("points", member_id)
+
+      fn redeem(member_id: str, cost: int):
+          balance = replicas.any().get("points", member_id)
+          if balance >= cost:
+              replicas.any().put("points", member_id, balance - cost)
+    after: |
+      fn points_balance(member_id: str) -> int:
+          # shown on the dashboard: a stale number is fine, stay available
+          return replicas.any().get("points", member_id)
+
+      fn redeem(member_id: str, cost: int):
+          # spends points: refuse during a partition rather than spend from a stale balance
+          balance = replicas.quorum().get("points", member_id)
+          if balance >= cost:
+              replicas.quorum().put("points", member_id, balance - cost)
+    note: Each operation now states what it gives up when replicas can't reach each other, availability for
+      redeeming and consistency for display.
+  matters_most_for:
+    - distributed
+    - databases-storage
+- id: dry
+  name: DRY (Don't Repeat Yourself)
+  family: law
+  group: design
+  says: "Each piece of knowledge, such as a business rule, constant or config value, should live in exactly one
+    authoritative place. It is about knowledge, not text: two identical lines that encode different decisions
+    are not duplication."
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - the same business rule, formula or validation written out in several modules
+    - one config value such as a URL, host or limit hard-coded in many files
+    - near-identical functions copied between packages that get bug fixes in only one copy
+  forces: []
+  overuse: []
+  remedy: Extract the shared knowledge into one function, constant, schema or config entry that every use reads from.
+  counter: >
+    It is about duplicated knowledge, not code that merely looks alike. Merging two similar snippets that
+    change for different reasons couples them and produces the wrong abstraction; Sandi Metz's point that
+    duplication is far cheaper than the wrong abstraction, and the rule of three, push back on early
+    extraction. Tests often read better with some repetition, and sharing code across services creates
+    coupling that can cost more than the copy.
+  in: {}
+  related:
+    - kiss
+    - yagni
+    - wrong-abstraction
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, DRY (Don't Repeat Yourself)
+      url: https://lawsofsoftwareengineering.com/laws/dry-principle/
+      how: read
+    - cite: Hunt & Thomas, The Pragmatic Programmer (1999; 20th anniversary ed. 2019), DRY
+      url: https://media.pragprog.com/titles/tpp20/dry.pdf
+      how: read
+  example:
+    before: |
+      # in checkout.py
+      fn fee_on_return(loan: Loan) -> Money:
+          days = max(0, loan.returned_on - loan.due_on)
+          return min(days * 0.25, 10.00)
+
+      # in reminders.py
+      fn fee_so_far(loan: Loan, today: Date) -> Money:
+          days = max(0, today - loan.due_on)
+          return min(days * 0.25, 10.00)
+    after: |
+      # in fees.py
+      fn late_fee(due_on: Date, as_of: Date) -> Money:
+          days = max(0, as_of - due_on)
+          return min(days * DAILY_LATE_FEE, MAX_LATE_FEE)
+
+      # in checkout.py
+      fn fee_on_return(loan: Loan) -> Money:
+          return late_fee(loan.due_on, loan.returned_on)
+
+      # in reminders.py
+      fn fee_so_far(loan: Loan, today: Date) -> Money:
+          return late_fee(loan.due_on, today)
+    note: The library's fee rule lives in one place, so a change to the daily rate or the cap can't reach one
+      module and miss the other.
+  names: Coined by Hunt and Thomas in The Pragmatic Programmer (1999). Often equated with Once and Only Once
+    from Extreme Programming, which is about duplicated code rather than duplicated knowledge.
+  matters_most_for:
+    - iac
+- id: fallacies-of-distributed-computing
+  name: Fallacies of Distributed Computing
+  family: law
+  group: architecture
+  says: Eight false assumptions about networks, such as that they are reliable, fast, secure and unchanging,
+    that lead to fragile distributed systems.
+  contested: false
+  looks_like:
+    - remote calls with no timeout, retry policy or error handling
+    - chatty loops that make one network call per item
+    - service-to-service traffic sent unencrypted or unauthenticated because it is internal
+    - hard-coded hostnames or IPs instead of discovery or configuration
+  forces: []
+  overuse: []
+  remedy: Treat every remote call as slow and fallible; add timeouts, bounded retries with backoff, idempotency,
+    batching, authentication and configurable endpoints.
+  counter: >
+    Not every call needs the full resilience kit. A script or internal tool can accept a crash on network
+    failure, and piling on retries without idempotency or backoff can cause duplicate writes and retry storms.
+    Pick the defences that match what failure actually costs.
+  in:
+    python: |
+      requests and urllib3 have no default timeout, so a call without one can hang forever.
+  related:
+    - cap-theorem
+    - law-of-leaky-abstractions
+  tell: |
+    An HTTP or RPC client call with no timeout argument, such as requests.get without timeout=.
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Fallacies of Distributed Computing
+      url: https://lawsofsoftwareengineering.com/laws/fallacies-of-distributed-computing/
+      how: read
+  example:
+    before: |
+      fn latest_readings(station_ids: list) -> list:
+          readings = []
+          for id in station_ids:
+              resp = http.get("http://10.0.4.17/stations/" + id + "/latest")
+              readings.append(parse(resp.body))
+          return readings
+    after: |
+      fn latest_readings(station_ids: list) -> list:
+          resp = retry(
+              fn(): http.get(
+                  config.weather_api_url + "/stations/latest",
+                  query={"ids": join(station_ids, ",")},
+                  timeout=5.0,
+                  auth=config.weather_api_token,
+              ),
+              attempts=3, backoff=exponential(0.5),
+          )
+          if resp.status != 200:
+              raise WeatherApiError(resp.status)
+          return parse_all(resp.body)
+    note: One batched, authenticated call with a timeout and bounded retries replaces a call per station to a
+      hard-coded host that assumed the network never fails or slows down.
+  matters_most_for:
+    - distributed
+    - web-api
+    - event-driven
+    - serverless
+    - mobile
+- id: galls-law
+  name: Gall's Law
+  family: law
+  group: architecture
+  says: Complex systems that work grew out of simple systems that worked; designing one from scratch rarely does.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a young repository with many services, plugin points or layers but little working functionality
+    - framework or infrastructure code that has no callers yet
+  forces: []
+  overuse: []
+  remedy: Build a simple version that works end to end, then grow it in small steps that each still work.
+  counter: >
+    Some constraints are hard to retrofit: security, data models, regulatory requirements and public API
+    shapes can be very costly to change later, so some upfront design pays off. The "monolith first" advice it
+    is often tied to (Fowler) has critics too, such as Stefan Tilkov, who argues that splitting a grown
+    monolith is harder than starting with clear service boundaries.
+  in: {}
+  related:
+    - kiss
+    - yagni
+    - second-system-effect
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Gall's Law
+      url: https://lawsofsoftwareengineering.com/laws/galls-law/
+      how: read
+  matters_most_for:
+    - distributed
+    - platforms
+    - plugins-extensions
+- id: gustafsons-law
+  name: Gustafson's Law
+  family: law
+  group: scale
+  says: If the problem grows with the hardware, parallel speedup can stay close to linear, because the serial
+    part stays roughly fixed while the parallel part grows.
+  contested: false
+  looks_like:
+    - jobs that partition data by a configurable shard or partition count tied to the number of workers
+    - a fixed partition count hard-coded so extra nodes sit idle
+  forces: []
+  overuse: []
+  remedy: Design work to scale out by partitioning the data so added machines take on more of it.
+  counter: >
+    It only helps when you actually want to process more, not when you need the same job done faster, such as
+    lowering latency for a single request; there Amdahl's limit still holds. Communication and coordination
+    costs often grow with the cluster, so near-linear scaled speedup is an ideal.
+  in: {}
+  related:
+    - amdahls-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Gustafson's Law
+      url: https://lawsofsoftwareengineering.com/laws/gustafsons-law/
+      how: read
+  example:
+    before: |
+      PARTITIONS = 8
+
+      fn index_logs(day: Date, cluster: Cluster):
+          chunks = split_by_hash(log_files(day), PARTITIONS)
+          for chunk in chunks:
+              cluster.submit(build_index, chunk)
+    after: |
+      fn index_logs(day: Date, cluster: Cluster):
+          partitions = cluster.worker_count() * config.partitions_per_worker
+          chunks = split_by_hash(log_files(day), partitions)
+          for chunk in chunks:
+              cluster.submit(build_index, chunk)
+    note: The partition count follows the cluster size, so added workers take on more of the growing log volume
+      instead of sitting idle past the eighth.
+  matters_most_for:
+    - distributed
+    - data-pipeline
+    - scientific
+    - ml-training
+- id: hyrums-law
+  name: Hyrum's Law
+  family: law
+  group: architecture
+  says: With enough users, every observable behaviour of an API ends up depended on by someone, whatever the
+    docs promise.
+  contested: false
+  looks_like:
+    - public functions returning collections whose order happens to be stable but isn't documented
+    - error messages, timing or field order that callers parse or compare against
+    - changelogs full of "fixed" behaviour later reverted for compatibility
+  forces: []
+  overuse: []
+  remedy: Keep the observable surface small, randomise or hide what you don't promise (such as map order), and
+    treat any behaviour change as a potentially breaking one.
+  counter: >
+    Freezing every quirk makes a system impossible to evolve. Large projects like Go deliberately randomise
+    map iteration order, or break undocumented behaviour on purpose, to keep users honest. For internal code
+    with a few callers you can just change both sides.
+  in: {}
+  related:
+    - law-of-leaky-abstractions
+    - postels-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Hyrum's Law
+      url: https://lawsofsoftwareengineering.com/laws/hyrums-law/
+      how: read
+    - cite: Winters, Manshreck & Wright, Software Engineering at Google (2020), ch. 1
+      url: https://abseil.io/resources/swe-book/html/ch01.html
+      how: read
+  example:
+    before: |
+      fn upload(account: Account, file: File):
+          if account.used + file.size > account.quota:
+              raise UploadError("quota exceeded: " + str(account.used) + "/" + str(account.quota))
+          ...
+
+      # in a client somewhere
+      except UploadError as e:
+          used = int(e.message.split(": ")[1].split("/")[0])
+    after: |
+      fn upload(account: Account, file: File):
+          if account.used + file.size > account.quota:
+              raise QuotaExceeded(used=account.used, quota=account.quota)
+          ...
+
+      # in a client somewhere
+      except QuotaExceeded as e:
+          used = e.used
+    note: >
+      Callers were parsing the message text because nothing better was offered; the values they need are now a
+      stated part of the API, so they can stop depending on the wording, though rewording it is still a change
+      to announce.
+  names: Named after Hyrum Wright at Google, who stated it; it is also discussed in Software Engineering at
+    Google (2020), ch. 1.
+  matters_most_for:
+    - library-sdk
+    - web-api
+    - platforms
+    - plugins-extensions
+    - cli-devtool
+    - plugin-host
+- id: kernighans-law
+  name: Kernighan's Law
+  family: law
+  group: quality
+  says: Debugging is twice as hard as writing code, so code written as cleverly as you can manage is code you
+    can't debug.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - dense one-liners that chain many operations or nest conditional expressions
+    - clever bit tricks or metaprogramming where plain code would do
+  forces: []
+  overuse: []
+  remedy: Write the plain, readable version, and keep cleverness for proven hot paths with a comment explaining it.
+  counter: >
+    "Twice as hard" is a quip, not a measured ratio. Some idioms that look clever to a newcomer are ordinary
+    and clear to people fluent in the language, and hot paths sometimes need tricky code that is worth it when
+    it's tested and explained.
+  in: {}
+  related:
+    - kiss
+  tell: Nested ternary or conditional expressions.
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Kernighan's Law
+      url: https://lawsofsoftwareengineering.com/laws/kernighans-law/
+      how: read
+  example:
+    before: |
+      fn parking_fee(minutes: int, is_resident: bool) -> int:
+          return (0 if minutes < 15
+                  else (200 if is_resident else 400) if minutes < 120
+                  else floor(minutes / 60) * (100 if is_resident else 250))
+    after: |
+      fn parking_fee(minutes: int, is_resident: bool) -> int:
+          if minutes < 15:
+              return 0
+          if minutes < 120:
+              if is_resident:
+                  return 200
+              return 400
+          hourly = 250
+          if is_resident:
+              hourly = 100
+          return floor(minutes / 60) * hourly
+    note: The nested conditional expression becomes plain branches, each of which you can read, step through and
+      set a breakpoint on.
+  matters_most_for: []
+- id: kiss
+  name: KISS (Keep It Simple, Stupid)
+  family: law
+  group: design
+  says: Pick the simplest design that meets the actual requirement.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - plugin systems, generic frameworks or abstract base classes with a single implementation
+    - configuration options and extension points that nothing uses
+  forces: []
+  overuse: []
+  remedy: Remove indirection and generality that no current requirement needs.
+  counter: >
+    "Simple" is in the eye of the beholder: a shorter solution can be harder to follow, and pushing complexity
+    out of the code can just move it to callers or operations. Rich Hickey's distinction between simple (not
+    tangled) and easy (familiar) is useful here. Some problems are genuinely complex and need a design that
+    matches.
+  in: {}
+  related:
+    - yagni
+    - galls-law
+    - kernighans-law
+    - dry
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, KISS (Keep It Simple, Stupid)
+      url: https://lawsofsoftwareengineering.com/laws/kiss-principle/
+      how: read
+  example:
+    before: |
+      interface ResetChannel:
+          fn send(user: User, link: str)
+
+      class EmailResetChannel implements ResetChannel:
+          fn send(user: User, link: str):
+              mailer.send(user.email, "Reset your password", link)
+
+      CHANNELS = {"email": EmailResetChannel()}
+
+      fn request_reset(user: User, channel: str = "email"):
+          CHANNELS[channel].send(user, make_reset_link(user))
+    after: |
+      fn request_reset(user: User):
+          link = make_reset_link(user)
+          mailer.send(user.email, "Reset your password", link)
+
+      # the only call
+      request_reset(user)
+    note: The only requirement is reset by email, so the channel interface, registry and parameter come out until
+      a second channel is actually needed.
+  matters_most_for: []
+- id: law-of-demeter
+  name: Law of Demeter
+  family: law
+  group: design
+  says: A unit should only talk to its direct collaborators, not reach through them to their internals; also
+    called the principle of least knowledge or "don't talk to strangers".
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - call chains that walk an object graph, such as order.customer.address.zip
+    - callers that break when an intermediate class changes its fields
+  forces: []
+  overuse: []
+  remedy: Tell, don't ask; give the nearby object a method that does the work or returns what the caller needs.
+  counter: "Applied mechanically it bloats classes with pass-through wrapper methods, the \"middle man\" smell.
+    Counting dots is a poor test: fluent builders, query chains and plain data structures chain calls without
+    coupling to anyone's internals. Martin Fowler has said he'd prefer it be called \"the Occasionally Useful
+    Suggestion of Demeter\". It targets objects with behaviour, not records or DTOs."
+  in: {}
+  related:
+    - law-of-leaky-abstractions
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Law of Demeter
+      url: https://lawsofsoftwareengineering.com/laws/law-of-demeter/
+      how: read
+  example:
+    before: |
+      fn checkout_amount(appt: Appointment) -> Money:
+          plan = appt.patient.insurance.plan
+          if plan.copays.has(appt.visit_type):
+              return plan.copays.get(appt.visit_type)
+          return appt.list_price
+    after: |
+      class Patient:
+          fn copay_for(visit_type: VisitType) -> Money | None:
+              return self.insurance.copay_for(visit_type)
+
+      fn checkout_amount(appt: Appointment) -> Money:
+          copay = appt.patient.copay_for(appt.visit_type)
+          if copay is not None:
+              return copay
+          return appt.list_price
+    note: Billing asks the patient for the copay instead of walking through insurance and plan internals, so a
+      change to how plans store copays stays inside insurance.
+  matters_most_for:
+    - fullstack-web
+- id: law-of-leaky-abstractions
+  name: The Law of Leaky Abstractions
+  family: law
+  group: architecture
+  says: Every non-trivial abstraction lets some of the underlying details through, so you still need to
+    understand what it hides.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - ORM code issuing a query per item in a loop (the N+1 problem)
+    - wrappers that catch and re-throw the underlying library's errors without translating them
+    - raw SQL or low-level escape hatches scattered through code that otherwise uses a high-level layer
+  forces: []
+  overuse: []
+  remedy: Learn the layer under the abstraction you rely on, document where yours leaks, and give callers a
+    deliberate escape hatch.
+  counter: >
+    It isn't an argument against abstractions; most of the time they work and the leak never matters. Treating
+    every abstraction with suspicion and dropping to the lowest level produces more code and more bugs. Know
+    where yours leaks; don't avoid them.
+  in: {}
+  related:
+    - fallacies-of-distributed-computing
+    - hyrums-law
+    - law-of-demeter
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, The Law of Leaky Abstractions
+      url: https://lawsofsoftwareengineering.com/laws/law-of-leaky-abstractions/
+      how: read
+    - cite: Spolsky, "The Law of Leaky Abstractions" (2002)
+      url: https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/
+      how: recalled
+  example:
+    before: |
+      fn front_page() -> list:
+          cards = []
+          for post in Post.query().latest(20):
+              cards.append(Card(post.title, post.author.name))
+          return cards
+    after: |
+      fn front_page() -> list:
+          # author is loaded lazily; without the join this runs one query per post
+          posts = Post.query().latest(20).join_load("author")
+          cards = []
+          for post in posts:
+              cards.append(Card(post.title, post.author.name))
+          return cards
+    note: Reading post.author looks like a field access but is a database query; the code now accounts for what
+      the ORM hides and says why.
+  names: Coined by Joel Spolsky in 2002.
+  matters_most_for:
+    - fullstack-web
+    - databases-storage
+    - library-sdk
+    - iac
+    - plugin-host
+- id: law-of-unintended-consequences
+  name: Law of Unintended Consequences
+  family: law
+  group: architecture
+  says: Any real change to a complex system will have effects nobody planned for, good, bad, or the opposite of
+    what was meant.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a fix in one module followed shortly by a regression fix in a module that had no obvious link to it
+    - commits that revert or patch a change days after it shipped, with messages like "side effect of"
+    - a new logging, caching or retry feature followed by incidents about disk, memory or load
+  forces: []
+  overuse: []
+  remedy: Ship changes in small steps behind flags or staged rollouts, watch real metrics after each step, and
+    keep a fast rollback path.
+  counter: >
+    It explains surprises after the fact but tells you little about which ones to expect, so it can turn into
+    a general excuse for not changing anything. In small, well-tested, loosely coupled code the surprises are
+    rare, and treating every edit as dangerous just slows the team down.
+  in: {}
+  related:
+    - hyrums-law
+    - murphys-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Law of Unintended Consequences
+      url: https://lawsofsoftwareengineering.com/laws/law-of-unintended-consequences/
+      how: read
+  matters_most_for:
+    - platforms
+    - distributed
+    - iac
+- id: lehmans-laws
+  name: Lehman's Laws of Software Evolution
+  family: law
+  group: quality
+  says: A system used in the real world has to keep changing to stay useful, and each change adds complexity
+    unless someone works to remove it.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a long git history where features take more and more commits and touched files over time
+    - growing file and function sizes in the oldest modules with little refactoring activity
+    - periodic large "cleanup" or "restructure" commits after long stretches of feature work
+  forces: []
+  overuse: []
+  remedy: Budget regular refactoring alongside feature work so complexity is paid down continuously rather than
+    in rare rewrites.
+  counter: >
+    The laws come from large, long-lived systems like OS/360 and apply to what Lehman called E-type software.
+    A small tool with a fixed spec, a one-off script or a library that is deliberately finished does not have
+    to keep evolving. The later laws (self-regulation, conservation of familiarity) rest on thin and dated
+    data, and some researchers found open-source systems that grew faster than the laws predict.
+  in: {}
+  related:
+    - technical-debt
+    - zawinskis-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Lehman's Laws of Software Evolution
+      url: https://lawsofsoftwareengineering.com/laws/lehmans-laws/
+      how: read
+  matters_most_for:
+    - fullstack-web
+    - platforms
+    - desktop
+- id: lindy-effect
+  name: Lindy Effect
+  family: law
+  group: decisions
+  says: The longer a technology has already been in use, the longer it is likely to stay in use, which favours
+    proven, "boring" choices.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - dependency manifests full of young, fast-moving packages where a mature standard tool would do
+    - several overlapping frameworks for the same job, each added during a different trend
+  forces: []
+  overuse: []
+  remedy: Prefer mature, widely used tools and the standard library; spend novelty only where it buys something real.
+  counter: >
+    It is a heuristic about survival, not quality. Old tools persist partly through lock-in, and new ones
+    sometimes are better (memory-safe languages, modern build tools). Applied rigidly it blocks any adoption.
+    The source page's figure that most financial transactions run on COBOL is a widely repeated estimate with
+    weak sourcing.
+  in: {}
+  related:
+    - occams-razor
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, The Lindy Effect
+      url: https://lawsofsoftwareengineering.com/laws/lindy-effect/
+      how: read
+  matters_most_for:
+    - web-frontend
+    - embedded
+- id: murphys-law
+  name: Murphy's Law
+  family: law
+  group: quality
+  says: Anything that can go wrong eventually will, so handle the failure cases instead of assuming them away.
+    Also called Sod's Law.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - file, network or parse calls with no error handling around them
+    - no timeouts or retries on outbound calls
+    - tests that cover only the happy path for code that reads external input
+  forces: []
+  overuse: []
+  remedy: Validate input at boundaries, handle errors explicitly, set timeouts, and test the edge cases and
+    failure paths.
+  counter: >
+    Taken too far it produces defensive clutter: null checks on values that cannot be null and catch blocks
+    that hide real bugs. Fail-fast advocates (and Erlang's "let it crash") prefer to guard the boundaries and
+    let internal invariant violations crash loudly rather than defend against everything everywhere.
+  in: {}
+  related:
+    - law-of-unintended-consequences
+    - postels-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Murphy's Law / Sod's Law
+      url: https://lawsofsoftwareengineering.com/laws/murphys-law/
+      how: read
+  example:
+    before: |
+      fn import_statement(path: str) -> list:
+          rows = csv.read(open(path))
+          txns = []
+          for row in rows:
+              txns.append(Transaction(date=parse_date(row[0]), amount=float(row[2])))
+          return txns
+    after: |
+      fn import_statement(path: str) -> list:
+          rows = csv.read(open(path))
+          txns = []
+          line_no = 0
+          for row in rows:
+              line_no = line_no + 1
+              if len(row) < 3:
+                  raise StatementError(path, line_no, "expected at least 3 columns")
+              try:
+                  txns.append(Transaction(date=parse_date(row[0]), amount=parse_decimal(row[2])))
+              except ParseError as e:
+                  raise StatementError(path, line_no, e.message)
+          return txns
+    note: Bank files arrive short, malformed and oddly formatted, so the import checks the input at the boundary
+      and reports where it went wrong instead of crashing deep inside or storing garbage.
+  matters_most_for:
+    - embedded
+    - data-pipeline
+    - event-driven
+    - mobile
+- id: occams-razor
+  name: Occam's Razor
+  family: law
+  group: decisions
+  says: Among options that do the job, prefer the one with the fewest moving parts and assumptions, in design
+    and in debugging.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - several services, queues or databases where one process and one store would carry the load
+    - layers of indirection that each only forward a call
+  forces: []
+  overuse: []
+  remedy: Remove the part and see whether anything needed breaks; when debugging, rule out the simple causes first.
+  counter: >
+    Simpler is not always right: some problems carry essential complexity (Brooks), and the simplest-looking
+    design can just push it elsewhere (Tesler). "Simplest" is also in the eye of the beholder, so the razor
+    settles fewer arguments than people hope.
+  in: {}
+  related:
+    - kiss
+    - yagni
+    - teslers-law
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Occam's Razor
+      url: https://lawsofsoftwareengineering.com/laws/occams-razor/
+      how: read
+  example:
+    before: |
+      class RecipeController:
+          fn save(recipe: Recipe):
+              self.service.save(recipe)
+
+      class RecipeService:
+          fn save(recipe: Recipe):
+              self.manager.save(recipe)
+
+      class RecipeManager:
+          fn save(recipe: Recipe):
+              self.repository.save(recipe)
+    after: |
+      class RecipeController:
+          fn __init__(repository: RecipeRepository):
+              self.repository = repository
+
+          fn save(recipe: Recipe):
+              self.repository.save(recipe)
+    note: Two layers that only forwarded the call are removed; nothing that was needed broke, so they were moving
+      parts with no job.
+  matters_most_for:
+    - distributed
+    - serverless
+- id: pareto-principle
+  name: Pareto Principle
+  family: law
+  group: decisions
+  says: A small share of causes produces most of the effect, so find the vital few (hot code, crashing bugs,
+    used features) and spend effort there. Also called the 80/20 rule.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a few files that appear in most bug-fix commits and change far more often than the rest
+    - optimisation effort spread evenly instead of guided by profiling
+  forces: []
+  overuse: []
+  remedy: Measure first (profilers, crash reports, churn and incident data), then focus on the top hotspots.
+  counter: >
+    The ratio is not a law of nature and is often quoted without data. Some work cannot be triaged by
+    frequency: security, accessibility and correctness on rare paths matter even when they touch few users or
+    little runtime.
+  in: {}
+  related:
+    - premature-optimization
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Pareto Principle (80/20 Rule)
+      url: https://lawsofsoftwareengineering.com/laws/pareto-principle/
+      how: read
+  matters_most_for:
+    - games
+    - scientific
+- id: pesticide-paradox
+  name: Pesticide Paradox
+  family: law
+  group: quality
+  says: Running the same tests over and over finds fewer and fewer new bugs, so the suite has to grow and change
+    with the code.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - new features or modules landing with no matching test files
+    - a test directory that has barely changed while the source tree grew
+    - bug fixes merged without a regression test
+  forces: []
+  overuse: []
+  remedy: Add a test for every escaped bug, cover new features as they land, and vary inputs with
+    property-based, fuzz or exploratory testing.
+  counter: >
+    A stable regression suite is still doing its job when it stays green: it guards behaviour that already
+    works. The paradox is about finding new defects, not a reason to churn existing tests for its own sake.
+  in: {}
+  related:
+    - testing-pyramid
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Pesticide Paradox
+      url: https://lawsofsoftwareengineering.com/laws/pesticide-paradox/
+      how: read
+  example:
+    before: |
+      fn test_parse_duration():
+          assert parse_duration("1h30m") == 90
+          assert parse_duration("45m") == 45
+          assert parse_duration("2h") == 120
+    after: |
+      fn test_parse_duration():
+          assert parse_duration("1h30m") == 90
+          assert parse_duration("45m") == 45
+          assert parse_duration("2h") == 120
+
+      fn test_parse_duration_minutes_over_sixty():
+          # escaped bug: "0h75m" was read as 15
+          assert parse_duration("0h75m") == 75
+
+      fn test_parse_duration_round_trips():
+          for minutes in random_ints(0, 10000, count=500):
+              assert parse_duration(format_duration(minutes)) == minutes
+    note: The same three inputs kept passing while a bug got past them; the suite now gains a regression test for
+      that bug and varied inputs that can find the next one.
+  matters_most_for:
+    - compilers-tooling
+    - databases-storage
+    - library-sdk
+- id: postels-law
+  name: Postel's Law
+  family: law
+  group: quality
+  says: Be strict in what you send and tolerant in what you accept. Also called the Robustness Principle.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - parsers or API handlers that silently guess at malformed input (default time zones, coerced types,
+      dropped fields)
+    - output serialised loosely while input is validated strictly, or the other way round
+  forces: []
+  overuse: []
+  remedy: null
+  counter: >
+    Liberal acceptance entrenches broken input: producers never fix their bugs, every consumer has to copy the
+    same quirks, and lenient parsing opens security holes (request smuggling, parser differentials). Eric
+    Allman's "The Robustness Principle Reconsidered" and RFC 9413 by Martin Thomson and David Schinazi argue
+    for strict, well-specified handling instead. For a new protocol or an internal API, rejecting bad input
+    clearly is usually the better default.
+  in: {}
+  related:
+    - murphys-law
+    - principle-of-least-astonishment
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Postel's Law
+      url: https://lawsofsoftwareengineering.com/laws/postels-law/
+      how: read
+    - cite: "Thomson and Schinazi, RFC 9413: Maintaining Robust Protocols"
+      url: https://www.rfc-editor.org/rfc/rfc9413
+      how: recalled
+  example:
+    before: |
+      fn read_flight_update(payload: dict) -> FlightUpdate:
+          if payload.keys() != {"flight", "status", "gate"}:
+              raise BadPayload("unexpected fields")
+          status = Status.from_name(payload["status"])
+          return FlightUpdate(payload["flight"], status, payload["gate"])
+
+      fn send_flight_update(update: FlightUpdate) -> dict:
+          return {"flight": update.flight, "status": update.status.name.lower(), "gate": update.gate or ""}
+    after: |
+      fn read_flight_update(payload: dict) -> FlightUpdate:
+          # the spec allows extra fields and an absent gate; ignore or accept those
+          for key in ["flight", "status"]:
+              if key not in payload:
+                  raise BadPayload("missing " + key)
+          status = Status.from_name(payload["status"])   # raises on an unknown status
+          return FlightUpdate(payload["flight"], status, payload.get("gate"))
+
+      fn send_flight_update(update: FlightUpdate) -> dict:
+          out = {"flight": update.flight, "status": update.status.name}
+          if update.gate is not None:
+              out["gate"] = update.gate
+          return out
+    note: >
+      The receiver accepts what the spec allows (extra fields, no gate) and still rejects missing fields and
+      unknown values instead of guessing, while the sender emits one exact form; tolerance stops at what the
+      spec permits.
+  matters_most_for:
+    - web-api
+    - compilers-tooling
+    - data-pipeline
+    - event-driven
+    - plugin-host
+- id: premature-optimization
+  name: Premature Optimization
+  family: law
+  group: planning
+  says: Don't make code faster before you know it is a bottleneck; write it clearly, measure, then optimise the
+    hot spots. Also called Knuth's optimization principle.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - hand-rolled caches, custom data structures or bit tricks in code that runs rarely
+    - performance commits with no profile, benchmark or measurement mentioned
+    - readability traded for speed in setup or configuration paths
+  forces: []
+  overuse: []
+  remedy: Profile or benchmark first, and keep an optimisation only where the measurement shows it matters.
+  counter: >
+    Knuth's full quote also says not to pass up the critical 3%. The slogan is often used to excuse slow
+    designs: choosing the wrong algorithm, data layout or architecture is expensive to fix later and is not
+    "premature" to think about. Randall Hyde's "The Fallacy of Premature Optimization" makes this case.
+    Performance budgets in latency-sensitive work (games, embedded, hot request paths) are design, not
+    premature tuning.
+  in: {}
+  related:
+    - pareto-principle
+    - yagni
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Premature Optimization (Knuth's Optimization Principle)
+      url: https://lawsofsoftwareengineering.com/laws/premature-optimization/
+      how: read
+  example:
+    before: |
+      _flag_cache = {}
+      _flag_cache_keys = []
+
+      fn load_flags(path: str) -> dict:
+          if path in _flag_cache:
+              return _flag_cache[path]
+          flags = parse_toml(read_file(path))
+          if len(_flag_cache_keys) >= 4:
+              del _flag_cache[_flag_cache_keys.pop(0)]
+          _flag_cache[path] = flags
+          _flag_cache_keys.append(path)
+          return flags
+
+      # called once at startup
+    after: |
+      fn load_flags(path: str) -> dict:
+          return parse_toml(read_file(path))
+
+      # called once at startup
+    note: The hand-rolled eviction cache sped up a function that runs once per process; without a measurement
+      showing it mattered, the plain version is kept.
+  matters_most_for:
+    - games
+    - embedded
+    - scientific
+    - databases-storage
+- id: principle-of-least-astonishment
+  name: Principle of Least Astonishment
+  family: law
+  group: design
+  says: Code and APIs should do what a reader would guess from how they look and from the habits of the codebase
+    around them. Also called the Rule of Least Surprise.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - functions whose names suggest a query (get, is, has, parse) but that write state or perform I/O
+    - boolean-sounding names holding non-boolean values
+    - an API whose argument order or defaults differ from its siblings in the same codebase
+  forces: []
+  overuse: []
+  remedy: Name things for what they do, keep side effects out of query-style functions, and follow platform and
+    codebase conventions.
+  counter: >
+    Surprise is relative to who is reading, so conventions from one ecosystem can astonish people from
+    another. Matching a bad existing convention just to avoid surprise can lock in a mistake; sometimes a
+    deliberate, documented break is the right call.
+  in: {}
+  related:
+    - postels-law
+  tell: A function named is* or has* whose body assigns to a field or global, or writes to a file, database or
+    network.
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Principle of Least Astonishment
+      url: https://lawsofsoftwareengineering.com/laws/principle-of-least-astonishment/
+      how: read
+  example:
+    before: |
+      fn is_session_valid(session: Session) -> bool:
+          if session.expires_at < now():
+              return False
+          session.expires_at = now() + SESSION_LENGTH
+          store.save(session)
+          return True
+    after: |
+      fn is_session_valid(session: Session) -> bool:
+          return session.expires_at >= now()
+
+      fn extend_session(session: Session):
+          session.expires_at = now() + SESSION_LENGTH
+          store.save(session)
+    note: A function named like a question no longer writes to the store; the side effect gets a name that says
+      what it does.
+  matters_most_for:
+    - library-sdk
+    - cli-devtool
+    - web-api
+    - plugins-extensions
+    - tui
+    - plugin-host
+- id: second-system-effect
+  name: Second-System Effect
+  family: law
+  group: architecture
+  says: Once a lean first system has worked, the team tends to over-design the version that replaces it and pile
+    in all the ideas they held back the first time.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - a "v2" or rewrite directory growing plugin systems, config options and abstractions the v1 never needed
+    - a rewrite branch that runs for months while the old system keeps shipping fixes
+  forces: []
+  overuse: []
+  remedy: Evolve the existing system incrementally (strangler fig) and hold a rewrite to the scope users
+    actually need.
+  counter: >
+    Some rewrites succeed when the first system's constraints are truly gone and scope is held firm. Brooks
+    himself said the third system tends to be better, and a team that has already been burned once can avoid
+    the trap.
+  in: {}
+  related:
+    - zawinskis-law
+    - yagni
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Second-System Effect
+      url: https://lawsofsoftwareengineering.com/laws/second-system-effect/
+      how: read
+  matters_most_for:
+    - platforms
+    - library-sdk
+- id: solid
+  name: SOLID
+  family: law
+  group: design
+  says: Five object-oriented design guidelines (single responsibility, open/closed, Liskov substitution,
+    interface segregation, dependency inversion) for code that is easy to change.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - large classes mixing persistence, validation, messaging and logging
+    - subclasses that override methods to throw or do nothing
+    - high-level modules importing concrete infrastructure clients directly
+    - wide interfaces that implementers stub out partly
+  forces: []
+  overuse: []
+  remedy: Split classes by reason to change, depend on narrow interfaces at boundaries, and keep subtypes
+    substitutable.
+  counter: >
+    Over-applied it produces an interface for every class and many tiny indirections (the
+    AbstractFactoryFactory problem). The single-responsibility principle is vague in practice, and Dan North's
+    CUPID and others argue for simpler, property-based goals. Much of it targets class-heavy OO; in functional
+    or procedural code some principles map loosely or not at all.
+  in:
+    python: >
+      Duck typing and protocols cover much of interface segregation and dependency inversion without declared
+      interfaces; abstract base classes for every dependency are usually overkill.
+    go: >
+      Small implicit interfaces defined by the consumer give ISP and DIP almost for free; inheritance-based
+      OCP and LSP apply less.
+  related:
+    - yagni
+    - occams-razor
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, SOLID Principles
+      url: https://lawsofsoftwareengineering.com/laws/solid-principles/
+      how: read
+  example:
+    before: |
+      class IrrigationController:
+          fn __init__():
+              self.valves = ModbusValveDriver("/dev/ttyUSB0", baud=9600)
+
+          fn water(zone: Zone, moisture: float):
+              if moisture < zone.target:
+                  self.valves.write_coil(zone.coil, True)
+                  ...
+    after: |
+      interface Valves:
+          fn open(zone: Zone)
+          fn close(zone: Zone)
+
+      class IrrigationController:
+          fn __init__(valves: Valves):
+              self.valves = valves
+
+          fn water(zone: Zone, moisture: float):
+              if moisture < zone.target:
+                  self.valves.open(zone)
+                  ...
+    note: Dependency inversion, one of the five; the watering policy depends on a narrow interface it owns instead
+      of a concrete hardware driver, so the driver can change or be faked in tests without touching it.
+  matters_most_for:
+    - fullstack-web
+    - desktop
+    - mobile
+    - plugins-extensions
+    - plugin-host
+- id: technical-debt
+  name: Technical Debt
+  family: law
+  group: quality
+  says: Shortcuts in code buy speed now and charge interest later as extra effort on every change, until the
+    debt is paid down.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - TODO, FIXME and HACK comments that stay in the code across many commits
+    - copy-pasted blocks and hard-coded values in early or prototype code that became production
+    - features merged without tests, followed by slower and riskier changes in the same area
+  forces: []
+  overuse: []
+  remedy: Record debt where it is taken, refactor and add missing tests as part of regular work, and pay down
+    the debt in the areas that change most.
+  counter: >
+    The source page defines it as anything that slows you down, which is far wider than Cunningham's metaphor:
+    he meant shipping code that reflects your current, incomplete understanding and refactoring as you learn,
+    not writing messy code. Used as a catch-all the term loses its use for deciding anything. Debt in code
+    that never changes costs no interest and may never need paying.
+  in: {}
+  related:
+    - lehmans-laws
+    - pareto-principle
+  tell: TODO, FIXME, HACK or XXX comments added without an issue link or owner.
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Technical Debt
+      url: https://lawsofsoftwareengineering.com/laws/technical-debt/
+      how: read
+    - cite: Ward Cunningham, Debt Metaphor
+      url: https://www.youtube.com/watch?v=pqeJFYwnkjE
+      how: recalled
+  matters_most_for:
+    - fullstack-web
+    - platforms
+- id: teslers-law
+  name: Tesler's Law
+  family: law
+  group: architecture
+  says: Every task has some complexity that cannot be removed, only moved, so decide deliberately whether the
+    user, the caller or the system carries it. Also called the Law of Conservation of Complexity.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - APIs or CLIs that require many flags or setup steps where sensible defaults would do
+    - a "simplification" that moved logic into configuration, stored procedures or callers instead of removing
+      it
+  forces: []
+  overuse: []
+  remedy: Absorb the complexity once inside the system (good defaults, smart handling) rather than pushing it
+    onto every user or caller.
+  counter: >
+    Not all complexity is irreducible; much is accidental and can simply be deleted. Hiding complexity can
+    also go too far: magic defaults and opaque behaviour make the system hard to debug, and expert users may
+    want the knobs.
+  in: {}
+  related:
+    - occams-razor
+    - principle-of-least-astonishment
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Tesler's Law (Conservation of Complexity)
+      url: https://lawsofsoftwareengineering.com/laws/teslers-law/
+      how: read
+  example:
+    before: |
+      fn transcode(src: str, dst: str, codec: str, bitrate: int, audio_codec: str,
+                   audio_bitrate: int, keyframe_interval: int, pixel_format: str):
+          ...
+
+      # every caller
+      transcode(src, dst, "h264", 4000, "aac", 128, 48, "yuv420p")
+    after: |
+      fn transcode(src: str, dst: str, preset: Preset = WEB_DEFAULT,
+                   overrides: dict = {}):
+          settings = preset.merge(overrides)
+          settings.keyframe_interval = settings.keyframe_interval or frame_rate(src) * 2
+          ...
+
+      # every caller
+      transcode(src, dst)
+    note: The encoding choices are still there, but the system now carries them once through a preset and derived
+      values instead of every caller repeating eight arguments, and experts keep overrides.
+  matters_most_for:
+    - cli-devtool
+    - library-sdk
+    - web-api
+    - iac
+- id: testing-pyramid
+  name: Testing Pyramid
+  family: law
+  group: quality
+  says: Put most of your tests at the cheap, fast unit level, a smaller layer of integration tests above that,
+    and just a handful of slow end-to-end tests at the top. Also called the test pyramid.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: true
+  looks_like:
+    - many end-to-end or browser tests and few unit tests, with long CI times and flaky reruns
+    - test directories dominated by slow suites marked as nightly or retried
+  forces: []
+  overuse: []
+  remedy: Push checks down to the cheapest level that can catch the bug, and keep end-to-end tests for the key
+    user journeys.
+  counter: >
+    The shape is debated. Kent C. Dodds' testing trophy and Spotify's testing honeycomb put integration tests
+    at the centre, arguing that heavily mocked unit tests pin implementation details and miss the bugs that
+    matter. For thin services and UI-heavy apps the right mix often has more integration tests than the
+    pyramid suggests.
+  in: {}
+  related:
+    - pesticide-paradox
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Testing Pyramid
+      url: https://lawsofsoftwareengineering.com/laws/testing-pyramid/
+      how: read
+    - cite: Martin Fowler, The Practical Test Pyramid (Ham Vocke)
+      url: https://martinfowler.com/articles/practical-test-pyramid.html
+      how: recalled
+    - cite: Cohn, Succeeding with Agile (2009)
+      url: null
+      how: recalled
+  example:
+    before: |
+      fn test_coupon_rules_in_browser():
+          browser.open("/cart")
+          browser.add_item("sku-1", qty=3)
+          browser.enter_coupon("BULK10")
+          assert browser.text("#total") == "27.00"
+          browser.enter_coupon("EXPIRED")
+          assert browser.text("#error") == "Coupon expired"
+          browser.enter_coupon("BULK10")
+          browser.set_qty("sku-1", 1)
+          assert browser.text("#total") == "10.00"
+    after: |
+      fn test_bulk_coupon_needs_three_items():
+          assert apply_coupon(cart(qty=3, price=10), "BULK10").total == 27.00
+          assert apply_coupon(cart(qty=1, price=10), "BULK10").total == 10.00
+
+      fn test_expired_coupon_is_rejected():
+          assert raises(CouponExpired, apply_coupon, cart(qty=1, price=10), "EXPIRED")
+
+      fn test_checkout_with_coupon_in_browser():
+          browser.open("/cart")
+          browser.add_item("sku-1", qty=3)
+          browser.enter_coupon("BULK10")
+          assert browser.text("#total") == "27.00"
+    note: The coupon rules move down to fast unit tests, and one browser test keeps the journey of applying a
+      coupon at checkout.
+  names: Introduced by Mike Cohn in Succeeding with Agile (2009).
+  matters_most_for:
+    - web-frontend
+    - fullstack-web
+    - mobile
+    - web-api
+- id: yagni
+  name: YAGNI
+  family: law
+  group: design
+  says: Don't build features, options or abstractions until something actually needs them. Short for "You Aren't
+    Gonna Need It".
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - configuration flags, parameters or extension hooks that nothing sets or calls
+    - an interface or base class with a single implementation and no test double
+    - generic helpers with options used by exactly one caller
+  forces: []
+  overuse: []
+  remedy: Build the simplest thing for today's requirement and refactor when the second real need arrives.
+  counter: >
+    It assumes change is cheap later, which holds only with good tests and refactoring room. Decisions that
+    are costly to reverse, such as public APIs, data formats and schemas, security and internationalisation,
+    deserve forethought. Fowler notes YAGNI covers presumptive features, not the work of keeping code easy to
+    change.
+  in: {}
+  related:
+    - occams-razor
+    - second-system-effect
+    - premature-optimization
+    - solid
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, YAGNI (You Aren't Gonna Need It)
+      url: https://lawsofsoftwareengineering.com/laws/yagni/
+      how: read
+  example:
+    before: |
+      fn next_invoice_number(prefix: str = "INV", width: int = 6,
+                             separator: str = "-", reset_yearly: bool = False,
+                             formatter: fn | None = None) -> str:
+          n = counter.increment("invoice")
+          if formatter is not None:
+              return formatter(n)
+          ...
+          return prefix + separator + pad(n, width)
+
+      # the only call
+      next_invoice_number()
+    after: |
+      fn next_invoice_number() -> str:
+          n = counter.increment("invoice")
+          return "INV-" + pad(n, 6)
+
+      # the only call
+      next_invoice_number()
+    note: Options nobody passes come out; the one format in use is written directly and can grow a parameter when
+      a second real need arrives.
+  matters_most_for:
+    - library-sdk
+    - plugins-extensions
+- id: zawinskis-law
+  name: Zawinski's Law
+  family: law
+  group: architecture
+  says: Every program keeps growing features until it tries to do everything, even read mail, so scope has to be
+    defended.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - modules or dependencies for capabilities far outside the project's stated purpose
+    - a steadily growing list of subcommands, settings or integrations with little use
+  forces: []
+  overuse: []
+  remedy: Write down the product's scope, say no to features outside it, and offer extension points or
+    integrations instead of building everything in.
+  counter: >
+    Jamie Zawinski's point was partly that platforms win: users want one place to work, and apps that refuse
+    to grow can lose to ones that do. Some expansion is the product strategy, not bloat.
+  in: {}
+  related:
+    - second-system-effect
+    - lehmans-laws
+  tell: null
+  interview_only: false
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Zawinski's Law
+      url: https://lawsofsoftwareengineering.com/laws/zawinskis-law/
+      how: read
+  matters_most_for:
+    - cli-devtool
+    - desktop
+    - plugins-extensions
+- id: littles-law
+  name: Little's Law
+  family: law
+  group: scale
+  says: >
+    In a stable system, the average number of items in it equals the average arrival rate times the average
+    time each item spends inside (L = λW). Fix any two and the third follows.
+  names: >
+    Proved by John D. C. Little, "A Proof for the Queuing Formula L = λW" (Operations Research, 1961); the
+    relation was used informally before. In software it sizes thread pools, connection pools, queues and
+    concurrency limits (in-flight requests = throughput x latency).
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Pool sizes, worker counts and concurrency limits set as round numbers with no rationale.
+    - Queues that grow without bound under load, or workers sitting idle while latency is high.
+    - Capacity plans and load tests that relate throughput, latency and concurrency.
+  forces:
+    - Sizing a thread, connection or worker pool.
+    - Explaining why latency grows when a queue fills up, or why adding workers didn't raise throughput.
+    - Setting rate limits and concurrency limits for a dependency.
+  overuse:
+    - Applying it to a system that is not in steady state (a burst, a startup ramp) and trusting the result.
+    - Treating averages as the whole story, when tail latency is what users feel.
+  remedy: null
+  counter: >
+    It holds only for long-run averages in a stable system, where arrivals and departures balance; it says
+    nothing about variance, tail latency or what happens during a spike. It tells you the relation, not the
+    service time itself, so you still need measurements. Near full utilisation queueing delay grows sharply
+    (Kingman's formula, queueing theory generally), so a pool sized exactly to λW has no headroom; leave
+    margin. The bottleneck can also be downstream, where more concurrency just moves the queue.
+  in: {}
+  related:
+    - amdahls-law
+    - gustafsons-law
+    - premature-optimization
+    - circuit-breaker
+  tell: null
+  interview_only: false
+  sources:
+    - cite: John D. C. Little, A Proof for the Queuing Formula L = λW, Operations Research 9(3), 1961
+      url: https://doi.org/10.1287/opre.9.3.383
+      how: recalled
+  example:
+    before: |
+      # the export API sees about 200 requests/s, each holding a DB connection ~50 ms
+      db_pool = ConnectionPool(size=8)       # picked once, never revisited
+      fn export(request): conn = db_pool.acquire(); ...
+      # under load, requests queue for connections and p99 latency climbs
+    after: |
+      ARRIVALS_PER_SEC = 200                 # measured peak
+      HOLD_TIME_SEC = 0.050                  # measured mean connection hold time
+      HEADROOM = 1.5
+
+      in_flight = ARRIVALS_PER_SEC * HOLD_TIME_SEC     # L = λW = 10 connections busy on average
+      db_pool = ConnectionPool(size=ceil(in_flight * HEADROOM))   # 15
+    note: The pool is sized from measured rate times time-in-system, with headroom because the law gives only the
+      average.
+  matters_most_for:
+    - web-api
+    - distributed
+    - databases-storage
+    - data-pipeline
+    - serverless

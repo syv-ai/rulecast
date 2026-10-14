@@ -1,0 +1,332 @@
+# Tell for the lens `lava-flow`. Verdict: keep. 13 of 13 sampled hits real (13 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/lava-flow-py
+        name: Commented-out code block
+        files: \.py$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            utils:
+              code-comment:
+                kind: comment
+                regex: "^# ?(?:(?:if|elif|while|for|with|def|class)\\s[^\\n]*:\\s*$|(?:else|try|finally):\\s*$|except\\b[^\\n]*:\\s*$|(?:return|raise|yield|await|assert|del)\\s+[\\w.\\[\\]()\"\\']+|(?:from\\s+[\\w.]+\\s+)?import\\s+\\w[\\w., ]*$|print\\(|pass\\s*$|continue\\s*$|break\\s*$|[\\w.]+(?:\\[[^\\]\\n]+\\])*(?:,\\s*\\w+)*\\s*(?:=|\\+=|-=)\\s*\\S|[\\w.]+: [\\w.\\[\\]|]+(?: = \\S[^\\n]*)?$|[\\w.]+\\([^\\n]*\\)\\s*$)"
+              code-cont:
+                kind: comment
+                regex: "^#\\s+(?:(?:if|elif|while|for|with|def|class)\\s[^\\n]*:\\s*$|(?:else|try|finally):\\s*$|except\\b[^\\n]*:\\s*$|(?:return|raise|yield|await|assert|del)\\s+[\\w.\\[\\]()\"\\']+|(?:from\\s+[\\w.]+\\s+)?import\\s+\\w[\\w., ]*$|print\\(|pass\\s*$|continue\\s*$|break\\s*$|[\\w.]+(?:\\[[^\\]\\n]+\\])*(?:,\\s*\\w+)*\\s*(?:=|\\+=|-=)\\s*\\S|[\\w.]+: [\\w.\\[\\]|]+(?: = \\S[^\\n]*)?$|[\\w.]+\\([^\\n]*\\)\\s*$)"
+              intro-comment:
+                kind: comment
+                regex: ^#.*(?::\s*$|[Ee]xample|[Uu]ncomment)
+            rule:
+              matches: code-comment
+              precedes:
+                matches: code-cont
+              not:
+                follows:
+                  any:
+                    - matches: code-cont
+                    - matches: intro-comment
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "First run used linter ruff ERA001 (the lint rule for commented-out code): 40 hits, 16 real (40%); it flags single lines and comment-drawn data shapes, codegen markers and opt-in template lines. Revised once to ast-grep, which can express the tell: the first of two or more adjacent statement-shaped # comments, not after an intro ending in ':' or mentioning example/uncomment."
+        examples:
+          good:
+            - path: app/tax.py
+              code: |
+                def tax_for(invoice):
+                    # rates come from the country table
+                    # and are cached per request
+                    return tax_v3(invoice)
+            - path: app/db.py
+              code: |
+                def init_db(session):
+                    # Uncomment to create tables without Alembic:
+                    # from sqlmodel import SQLModel
+                    # SQLModel.metadata.create_all(engine)
+                    pass
+          bad:
+            - path: app/tax.py
+              code: |
+                def tax_for(invoice):
+                    # rate = lookup_rate_from_api(invoice.country)
+                    # return invoice.net * rate
+                    return tax_v3(invoice)
+            - path: app/run.py
+              code: |
+                def main():
+                    # import pdb
+                    # pdb.set_trace()
+                    run()
+      - id: lens/lava-flow-ts
+        name: Commented-out code block
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          ast-grep:
+            language: tsx
+            utils:
+              code-comment:
+                kind: comment
+                regex: ^// ?(?:[A-Za-z_$}\[][^\n]*[;{}]\s*$|(?:if|for|while|switch|return|const|let|var|import|export|await|throw|try|catch|else|new)\b[^\n]*[(){};=]|[\w.$\[\]]+(?:,\s*\w+)*\s*(?:=|\+=|-=)\s*\S|[\w.$]+\([^\n]*\)\s*;?\s*$)
+              intro-comment:
+                kind: comment
+                regex: ^//.*(?::\s*$|[Ee]xample|[Uu]ncomment)
+            rule:
+              matches: code-comment
+              precedes:
+                matches: code-comment
+              not:
+                follows:
+                  any:
+                    - matches: code-comment
+                    - matches: intro-comment
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "no oxlint or core eslint rule finds commented-out code; ast-grep on comment nodes: the first of two or more adjacent statement-shaped // comments, not after an intro comment ending in ':' or mentioning example/uncomment. Adjacency is sibling order, so a blank line between comments does not break a block."
+        examples:
+          good:
+            - path: src/tax.ts
+              code: |
+                // rates come from the country table
+                // and are cached per request
+                export function taxFor(invoice) { return taxV3(invoice); }
+            - path: src/tax.ts
+              code: |
+                // For example:
+                // const t = taxFor(invoice);
+                // console.log(t);
+                export function taxFor(invoice) { return taxV3(invoice); }
+          bad:
+            - path: src/tax.ts
+              code: |
+                export function taxFor(invoice) {
+                  // const rate = lookupRate(invoice.country);
+                  // return invoice.net * rate;
+                  return taxV3(invoice);
+                }
+            - path: src/run.ts
+              code: |
+                function main() {
+                  // debugger();
+                  // if (x) { reset(); }
+                  run();
+                }
+      - id: lens/lava-flow-js
+        name: Commented-out code block
+        files: \.(js|jsx|mjs|cjs)$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          ast-grep:
+            language: javascript
+            utils:
+              code-comment:
+                kind: comment
+                regex: ^// ?(?:[A-Za-z_$}\[][^\n]*[;{}]\s*$|(?:if|for|while|switch|return|const|let|var|import|export|await|throw|try|catch|else|new)\b[^\n]*[(){};=]|[\w.$\[\]]+(?:,\s*\w+)*\s*(?:=|\+=|-=)\s*\S|[\w.$]+\([^\n]*\)\s*;?\s*$)
+              intro-comment:
+                kind: comment
+                regex: ^//.*(?::\s*$|[Ee]xample|[Uu]ncomment)
+            rule:
+              matches: code-comment
+              precedes:
+                matches: code-comment
+              not:
+                follows:
+                  any:
+                    - matches: code-comment
+                    - matches: intro-comment
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "no oxlint or core eslint rule finds commented-out code; ast-grep on comment nodes: the first of two or more adjacent statement-shaped // comments, not after an intro comment ending in ':' or mentioning example/uncomment. Adjacency is sibling order, so a blank line between comments does not break a block."
+        examples:
+          good:
+            - path: src/tax.js
+              code: |
+                // rates come from the country table
+                // and are cached per request
+                export function taxFor(invoice) { return taxV3(invoice); }
+            - path: src/tax.js
+              code: |
+                // For example:
+                // const t = taxFor(invoice);
+                // console.log(t);
+                export function taxFor(invoice) { return taxV3(invoice); }
+          bad:
+            - path: src/tax.js
+              code: |
+                export function taxFor(invoice) {
+                  // const rate = lookupRate(invoice.country);
+                  // return invoice.net * rate;
+                  return taxV3(invoice);
+                }
+            - path: src/run.js
+              code: |
+                function main() {
+                  // debugger();
+                  // if (x) { reset(); }
+                  run();
+                }
+      - id: lens/lava-flow-go
+        name: Commented-out code block
+        files: \.go$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: '^(?<!(?:^|\n)[ \t]*//[^\n]*(?::[ \t]*\n|(?:[Ee]xample|[Uu]ncomment)[^\n]*\n)(?:[ \t]*//[^\n]*\n)*)(?<!(?:^|\n)[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)[ \t]*//(?![/!])(?: \t*)?(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n(?:[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)+'
+            flags: m
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "regex fallback: no linter for this language is installed. Two or more consecutive statement-shaped // lines; skips ///, //!, tab-indented doc code, and blocks after an intro comment ending in ':' or mentioning example/uncomment."
+        examples:
+          good:
+            - path: pkg/tax.go
+              code: |
+                // TaxFor returns the tax for an invoice.
+                // It uses the current rate table.
+                func TaxFor(i Invoice) Money { return taxV3(i) }
+            - path: pkg/tax.go
+              code: |
+                // For example:
+                //	t := TaxFor(i)
+                //	fmt.Println(t)
+                func TaxFor(i Invoice) Money { return taxV3(i) }
+          bad:
+            - path: pkg/tax.go
+              code: |
+                func TaxFor(i Invoice) Money {
+                	// rate := lookupRate(i.Country)
+                	// return i.Net * rate
+                	return taxV3(i)
+                }
+            - path: pkg/run.go
+              code: |
+                func main() {
+                	// if debug {
+                	// 	dump()
+                	// }
+                	run()
+                }
+      - id: lens/lava-flow-rs
+        name: Commented-out code block
+        files: \.rs$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: '^(?<!(?:^|\n)[ \t]*//[^\n]*(?::[ \t]*\n|(?:[Ee]xample|[Uu]ncomment)[^\n]*\n)(?:[ \t]*//[^\n]*\n)*)(?<!(?:^|\n)[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)[ \t]*//(?![/!])(?: \t*)?(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n(?:[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)+'
+            flags: m
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "regex fallback: no linter for this language is installed. Two or more consecutive statement-shaped // lines; skips ///, //!, tab-indented doc code, and blocks after an intro comment ending in ':' or mentioning example/uncomment."
+        examples:
+          good:
+            - path: src/tax.rs
+              code: |
+                /// Returns the tax.
+                /// let t = tax_for(&i);
+                fn tax_for(i: &Invoice) -> Money { tax_v3(i) }
+            - path: src/tax.rs
+              code: |
+                // Uncomment to trace:
+                // let t = trace();
+                // dbg!(t);
+                fn tax_for(i: &Invoice) -> Money { tax_v3(i) }
+          bad:
+            - path: src/tax.rs
+              code: |
+                fn tax_for(i: &Invoice) -> Money {
+                    // let rate = lookup_rate(&i.country);
+                    // return i.net * rate;
+                    tax_v3(i)
+                }
+            - path: src/run.rs
+              code: |
+                fn main() {
+                    // println!("{}", x);
+                    // reset(&mut state);
+                    run();
+                }
+      - id: lens/lava-flow-java
+        name: Commented-out code block
+        files: \.java$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: '^(?<!(?:^|\n)[ \t]*//[^\n]*(?::[ \t]*\n|(?:[Ee]xample|[Uu]ncomment)[^\n]*\n)(?:[ \t]*//[^\n]*\n)*)(?<!(?:^|\n)[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)[ \t]*//(?![/!])(?: \t*)?(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n(?:[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)+'
+            flags: m
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "regex fallback: no linter for this language is installed. Two or more consecutive statement-shaped // lines; skips ///, //!, tab-indented doc code, and blocks after an intro comment ending in ':' or mentioning example/uncomment."
+        examples:
+          good:
+            - path: src/main/java/a/Tax.java
+              code: |
+                // Returns the tax for an invoice
+                // using the current rate table.
+                public Money taxFor(Invoice i) { return taxV3(i); }
+            - path: src/main/java/a/Tax.java
+              code: |
+                // Example:
+                // Money t = taxFor(i);
+                // System.out.println(t);
+                public Money taxFor(Invoice i) { return taxV3(i); }
+          bad:
+            - path: src/main/java/a/Tax.java
+              code: |
+                public Money taxFor(Invoice i) {
+                    // Rate rate = lookupRate(i.country());
+                    // return i.net().times(rate);
+                    return taxV3(i);
+                }
+            - path: src/main/java/a/Run.java
+              code: |
+                void run() {
+                    // log.debug("x");
+                    // reset();
+                    go();
+                }
+      - id: lens/lava-flow-cs
+        name: Commented-out code block
+        files: \.cs$
+        exclude: (^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: '^(?<!(?:^|\n)[ \t]*//[^\n]*(?::[ \t]*\n|(?:[Ee]xample|[Uu]ncomment)[^\n]*\n)(?:[ \t]*//[^\n]*\n)*)(?<!(?:^|\n)[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)[ \t]*//(?![/!])(?: \t*)?(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n(?:[ \t]*//(?![/!])[ \t]*(?:(?:[^\s/!][^\n]*)?[;{}][ \t]*(?=\n)|(?:if|for|while|switch|return|const|let|var|func|fn|defer|go|import|export|await|use|using|public|private|protected|static|throw|try|catch|else|impl|match|pub|new)\b[^\n]*[(){};=]|return [\w.$\[\]()"]+(?: [-+*/%<>=!&|]+ [\w.$\[\]()"]+)*[ \t]*;?[ \t]*(?=\n)|[\w.$\[\]]+(?:,[ \t]*\w+)*[ \t]*(?::=|=|\+=|-=)[ \t]*\S|[\w.$:]+!?\([^\n]*\)[ \t]*;?[ \t]*(?=\n))[^\n]*\n)+'
+            flags: m
+        message: "{{file}}:{{line}} starts a block of commented-out code. Delete it; version control keeps the history."
+        description: "regex fallback: no linter for this language is installed. Two or more consecutive statement-shaped // lines; skips ///, //!, tab-indented doc code, and blocks after an intro comment ending in ':' or mentioning example/uncomment."
+        examples:
+          good:
+            - path: src/Tax.cs
+              code: |
+                /// <summary>Returns the tax.</summary>
+                /// var t = TaxFor(i);
+                public Money TaxFor(Invoice i) => TaxV3(i);
+            - path: src/Tax.cs
+              code: |
+                // Uncomment to trace:
+                // var t = Trace();
+                // Console.WriteLine(t);
+                public Money TaxFor(Invoice i) => TaxV3(i);
+          bad:
+            - path: src/Tax.cs
+              code: |
+                public Money TaxFor(Invoice i)
+                {
+                    // var rate = LookupRate(i.Country);
+                    // return i.Net * rate;
+                    return TaxV3(i);
+                }
+            - path: src/Run.cs
+              code: |
+                void Run()
+                {
+                    // _logger.LogDebug("x");
+                    // Reset();
+                    Go();
+                }

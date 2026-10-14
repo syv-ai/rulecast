@@ -1,0 +1,1098 @@
+# The 30 agent-prone tells, run as rulecast rules over a 12-repository corpus. Per rule: hits, hits per repository,
+# sampled hits and how many were real; verdict keep (>=70% real), rewrite, or null. `run`: 2026-10-13 is the first run (regex
+# and ast-grep only); the 18 tells kept or rewritten then were re-measured on 2026-10-14 with detectors chosen in the order
+# linter, command, ast-grep, regex (`detectors` says which and why). The rules are in tell-rules/<lens-id>.yaml; the
+# rules behind the 12 null verdicts were removed, and their numbers here are the record. Seed for the catalog-rules plan.
+- id: poltergeist
+  rules:
+    - lens/poltergeist-py
+    - lens/poltergeist-ts
+    - lens/poltergeist-js
+    - lens/poltergeist-java
+    - lens/poltergeist-cs
+  hits:
+    lens/poltergeist-py: 0
+    lens/poltergeist-ts: 0
+    lens/poltergeist-js: 0
+    lens/poltergeist-java: 0
+    lens/poltergeist-cs: 0
+  by_repo:
+    lens/poltergeist-py: {}
+    lens/poltergeist-ts: {}
+    lens/poltergeist-js: {}
+    lens/poltergeist-java: {}
+    lens/poltergeist-cs: {}
+  sampled:
+    lens/poltergeist-py: 0
+    lens/poltergeist-ts: 0
+    lens/poltergeist-js: 0
+    lens/poltergeist-java: 0
+    lens/poltergeist-cs: 0
+  real:
+    lens/poltergeist-py: 0
+    lens/poltergeist-ts: 0
+    lens/poltergeist-js: 0
+    lens/poltergeist-java: 0
+    lens/poltergeist-cs: 0
+  verdict: "null"
+  tell: null
+  notes: Zero hits in all 12 repositories (a node cross-check confirmed the zeros). A broader grep for
+    construct-and-call one-liners found only value conversions such as new Date(x).toISOString(), never inside
+    a field-less single-method class. So the precision can't be measured, and a rule here would catch nothing
+    in real code. Go and Rust have no classes, so no rules were written for them.
+  run: 2026-10-13
+- id: business-logic-in-helpers
+  rules:
+    - lens/business-logic-in-helpers-py
+    - lens/business-logic-in-helpers-ts
+    - lens/business-logic-in-helpers-go
+    - lens/business-logic-in-helpers-cs
+  hits:
+    lens/business-logic-in-helpers-py: 0
+    lens/business-logic-in-helpers-ts: 0
+    lens/business-logic-in-helpers-go: 0
+    lens/business-logic-in-helpers-cs: 0
+  by_repo:
+    lens/business-logic-in-helpers-py: {}
+    lens/business-logic-in-helpers-ts: {}
+    lens/business-logic-in-helpers-go: {}
+    lens/business-logic-in-helpers-cs: {}
+  sampled:
+    lens/business-logic-in-helpers-py: 0
+    lens/business-logic-in-helpers-ts: 0
+    lens/business-logic-in-helpers-go: 0
+    lens/business-logic-in-helpers-cs: 0
+  real:
+    lens/business-logic-in-helpers-py: 0
+    lens/business-logic-in-helpers-ts: 0
+    lens/business-logic-in-helpers-go: 0
+    lens/business-logic-in-helpers-cs: 0
+  verdict: "null"
+  tell: null
+  notes: Zero hits. Only about 65 corpus files have util or helper in their name. The near misses were lazygit
+    helpers that take slices of entities (AnyStagedFiles(files []*models.File) bool) and helpers that forward
+    to a command layer. Those aren't the single-entity domain rule the tell describes, and calling them real
+    would be a stretch. The tell is too narrow to fire, and loosening it lands on GUI query helpers.
+  run: 2026-10-13
+- id: lava-flow
+  rules:
+    - lens/lava-flow-py
+    - lens/lava-flow-ts
+    - lens/lava-flow-js
+    - lens/lava-flow-go
+    - lens/lava-flow-rs
+    - lens/lava-flow-java
+    - lens/lava-flow-cs
+  detectors:
+    lens/lava-flow-py: ast-grep (revised once from linter ruff ERA001)
+    lens/lava-flow-ts: "ast-grep: comment nodes"
+    lens/lava-flow-js: "ast-grep: comment nodes"
+    lens/lava-flow-go: regex fallback
+    lens/lava-flow-rs: regex fallback
+    lens/lava-flow-java: regex fallback
+    lens/lava-flow-cs: regex fallback
+  hits:
+    lens/lava-flow-py: 4
+    lens/lava-flow-ts: 5
+    lens/lava-flow-js: 0
+    lens/lava-flow-go: 1
+    lens/lava-flow-rs: 1
+    lens/lava-flow-java: 0
+    lens/lava-flow-cs: 2
+  by_repo:
+    lens/lava-flow-py:
+      httpie-cli: 2
+      mealie-recipes-mealie: 2
+    lens/lava-flow-ts:
+      mealie-recipes-mealie: 5
+    lens/lava-flow-go:
+      jesseduffield-lazygit: 1
+    lens/lava-flow-rs:
+      sharkdp-bat: 1
+    lens/lava-flow-cs:
+      eShopOnWeb: 2
+  sampled:
+    lens/lava-flow-py: 4
+    lens/lava-flow-ts: 5
+    lens/lava-flow-go: 1
+    lens/lava-flow-rs: 1
+    lens/lava-flow-cs: 2
+  real:
+    lens/lava-flow-py: 4
+    lens/lava-flow-ts: 5
+    lens/lava-flow-go: 1
+    lens/lava-flow-rs: 1
+    lens/lava-flow-cs: 2
+  verdict: keep
+  tell: null
+  notes: ruff ERA001 came first and scored 16 real out of 40 (40%). It flags single lines, data shapes drawn in
+    comments (mealie's cleaner.py), codegen markers, a licence 'URL:' line and the opt-in template that says
+    to uncomment it. The two-line, intro-aware ast-grep form of the current tell scored 4/4. The regex forms
+    leaked on //! doc examples and on godoc tab- or two-space-indented examples until the first line of a
+    block had to start right after '// ' and an intro could sit any number of comment lines above the block.
+    Every language that had hits was 100%, but there were only 13 hits in all, and the TS ones are all in one
+    test file.
+  run: 2026-10-14
+- id: copy-and-paste-programming
+  rules:
+    - lens/copy-and-paste-programming-py
+    - lens/copy-and-paste-programming-ts
+    - lens/copy-and-paste-programming-js
+    - lens/copy-and-paste-programming-go
+    - lens/copy-and-paste-programming-rs
+    - lens/copy-and-paste-programming-java
+    - lens/copy-and-paste-programming-cs
+  detectors:
+    lens/copy-and-paste-programming-py: regex (textual; no installed duplication linter)
+    lens/copy-and-paste-programming-ts: regex (textual; no installed duplication linter)
+    lens/copy-and-paste-programming-js: regex (textual; no installed duplication linter)
+    lens/copy-and-paste-programming-go: regex fallback
+    lens/copy-and-paste-programming-rs: regex fallback
+    lens/copy-and-paste-programming-java: regex fallback
+    lens/copy-and-paste-programming-cs: regex fallback
+  hits:
+    lens/copy-and-paste-programming-py: 11
+    lens/copy-and-paste-programming-ts: 13
+    lens/copy-and-paste-programming-js: 0
+    lens/copy-and-paste-programming-go: 9
+    lens/copy-and-paste-programming-rs: 3
+    lens/copy-and-paste-programming-java: 0
+    lens/copy-and-paste-programming-cs: 1
+  by_repo:
+    lens/copy-and-paste-programming-py:
+      full-stack-fastapi-template: 1
+      httpie-cli: 1
+      mealie-recipes-mealie: 9
+    lens/copy-and-paste-programming-ts:
+      umami-software-umami: 13
+    lens/copy-and-paste-programming-go:
+      glow: 1
+      jesseduffield-lazygit: 8
+    lens/copy-and-paste-programming-rs:
+      mdBook: 2
+      sharkdp-bat: 1
+    lens/copy-and-paste-programming-cs:
+      eShopOnWeb: 1
+  sampled:
+    lens/copy-and-paste-programming-py: 11
+    lens/copy-and-paste-programming-ts: 13
+    lens/copy-and-paste-programming-go: 9
+    lens/copy-and-paste-programming-rs: 3
+    lens/copy-and-paste-programming-cs: 1
+  real:
+    lens/copy-and-paste-programming-py: 9
+    lens/copy-and-paste-programming-ts: 12
+    lens/copy-and-paste-programming-go: 9
+    lens/copy-and-paste-programming-rs: 3
+    lens/copy-and-paste-programming-cs: 1
+  verdict: keep
+  tell: null
+  notes: "The exclusion for signatures and declarative blocks is done by requiring at least two of the five
+    lines to be statement-shaped. In brace languages that means ending in ; or {, and not being a signature, a
+    closing line or a type member. That took TS from 41 hits, mostly umami's query-function signatures and SQL
+    template text, to 13. What stays false: one signature-plus-destructuring prologue (TS), an argparse
+    signature, and a SQLAlchemy loader-option list (Python). Rust also needed top-level #[test] functions
+    excluded, not only #[cfg(test)] modules."
+  run: 2026-10-14
+- id: wrong-abstraction
+  rules:
+    - lens/wrong-abstraction-py
+    - lens/wrong-abstraction-ts
+    - lens/wrong-abstraction-js
+    - lens/wrong-abstraction-java
+    - lens/wrong-abstraction-cs
+    - lens/wrong-abstraction-go
+    - lens/wrong-abstraction-rs
+  hits:
+    lens/wrong-abstraction-py: 7
+    lens/wrong-abstraction-ts: 69
+    lens/wrong-abstraction-js: 0
+    lens/wrong-abstraction-java: 0
+    lens/wrong-abstraction-cs: 0
+    lens/wrong-abstraction-go: 20
+    lens/wrong-abstraction-rs: 4
+  by_repo:
+    lens/wrong-abstraction-py:
+      mealie-recipes-mealie: 6
+      httpie-cli: 1
+    lens/wrong-abstraction-ts:
+      umami-software-umami: 54
+      full-stack-fastapi-template: 12
+      mealie-recipes-mealie: 3
+    lens/wrong-abstraction-js: {}
+    lens/wrong-abstraction-java: {}
+    lens/wrong-abstraction-cs: {}
+    lens/wrong-abstraction-go:
+      jesseduffield-lazygit: 20
+    lens/wrong-abstraction-rs:
+      sharkdp-bat: 4
+  sampled:
+    lens/wrong-abstraction-py: 7
+    lens/wrong-abstraction-ts: 15
+    lens/wrong-abstraction-js: 0
+    lens/wrong-abstraction-java: 0
+    lens/wrong-abstraction-cs: 0
+    lens/wrong-abstraction-go: 15
+    lens/wrong-abstraction-rs: 4
+  real:
+    lens/wrong-abstraction-py: 1
+    lens/wrong-abstraction-ts: 1
+    lens/wrong-abstraction-js: 0
+    lens/wrong-abstraction-java: 0
+    lens/wrong-abstraction-cs: 0
+    lens/wrong-abstraction-go: 2
+    lens/wrong-abstraction-rs: 0
+  verdict: "null"
+  tell: null
+  notes: "Two boolean parameters are nearly always data or options: React UI toggles (asChild, showActions),
+    terminal capabilities (true_color, italics), directions (up, down, left, right), filter switches
+    (require_all_tags). Rarely are they flags that encode which caller is being served (calledFromWorker was
+    one). A one-file check can't tell those apart, and precision is 4/41."
+  run: 2026-10-13
+- id: global-state
+  rules:
+    - lens/global-state-ts
+    - lens/global-state-js
+  detectors:
+    lens/global-state-ts: "ast-grep (no lint rule: no-global-assign covers builtins, import/no-mutable-exports only exported let)"
+    lens/global-state-js: ast-grep (no lint rule)
+  hits:
+    lens/global-state-ts: 35
+    lens/global-state-js: 0
+  by_repo:
+    lens/global-state-ts:
+      mealie-recipes-mealie: 21
+      rulecast: 8
+      umami-software-umami: 6
+    lens/global-state-js: {}
+  sampled:
+    lens/global-state-ts: 15
+  real:
+    lens/global-state-ts: 15
+  verdict: keep
+  tell: "TypeScript and JavaScript application code only, not scripts/ or *.config.* files: a function that
+    reassigns a module-level let, or writes to a module-level object, array, Map or Set by property, index or
+    a mutating method (set, push, add, delete). It has no Python or Go form."
+  notes: "Every sampled hit was mutable module-level state: auth refresh timers and retry counters, locale-name
+    caches, overridable API host parts, Kafka/ClickHouse client singletons, rulecast's regex scratch scope and
+    its napi load memo. The last two are deliberate and documented, but still what the lens describes. The
+    rule skips names shadowed by a parameter or local. JavaScript had no hits."
+  run: 2026-10-14
+- id: mock-everything
+  rules:
+    - lens/mock-everything-py
+    - lens/mock-everything-ts
+    - lens/mock-everything-js
+    - lens/mock-everything-java
+    - lens/mock-everything-cs
+  hits:
+    lens/mock-everything-py: 0
+    lens/mock-everything-ts: 3
+    lens/mock-everything-js: 0
+    lens/mock-everything-java: 0
+    lens/mock-everything-cs: 1
+  by_repo:
+    lens/mock-everything-py: {}
+    lens/mock-everything-ts:
+      umami-software-umami: 1
+      mealie-recipes-mealie: 2
+    lens/mock-everything-js: {}
+    lens/mock-everything-java: {}
+    lens/mock-everything-cs:
+      eShopOnWeb: 1
+  sampled:
+    lens/mock-everything-py: 0
+    lens/mock-everything-ts: 3
+    lens/mock-everything-js: 0
+    lens/mock-everything-java: 0
+    lens/mock-everything-cs: 1
+  real:
+    lens/mock-everything-py: 0
+    lens/mock-everything-ts: 0
+    lens/mock-everything-js: 0
+    lens/mock-everything-java: 0
+    lens/mock-everything-cs: 1
+  verdict: "null"
+  tell: null
+  notes: "The first version (any stub, plus only toHaveBeenCalled or Received expectations) fired 20 times in
+    TypeScript at about 0/15 and 4 times in C# at 1/4: the verified call was a different mock whose
+    interaction is the behaviour (a delete, a dispatched event). The version that requires the same stub fired
+    4 times, 1 of them real. The other 3 verify call counts or arguments where those are the behaviour under
+    test (one refresh request for three callers, the timezone passed through). A one-file check can't tell
+    'the interaction is the behaviour' from 'replaying the stub'."
+  run: 2026-10-13
+- id: assertion-free-test
+  rules:
+    - lens/assertion-free-test-py
+    - lens/assertion-free-test-ts
+    - lens/assertion-free-test-js
+    - lens/assertion-free-test-go
+    - lens/assertion-free-test-rs
+    - lens/assertion-free-test-java
+    - lens/assertion-free-test-cs
+  hits:
+    lens/assertion-free-test-py: 13
+    lens/assertion-free-test-ts: 3
+    lens/assertion-free-test-js: 0
+    lens/assertion-free-test-go: 2
+    lens/assertion-free-test-rs: 7
+    lens/assertion-free-test-java: 3
+    lens/assertion-free-test-cs: 1
+  by_repo:
+    lens/assertion-free-test-py:
+      httpie-cli: 9
+      mealie-recipes-mealie: 4
+    lens/assertion-free-test-ts:
+      full-stack-fastapi-template: 1
+      rulecast: 2
+    lens/assertion-free-test-js: {}
+    lens/assertion-free-test-go:
+      jesseduffield-lazygit: 2
+    lens/assertion-free-test-rs:
+      mdBook: 2
+      sharkdp-bat: 5
+    lens/assertion-free-test-java:
+      spring-petclinic: 3
+    lens/assertion-free-test-cs:
+      jasontaylordev-CleanArchitecture: 1
+  sampled:
+    lens/assertion-free-test-py: 13
+    lens/assertion-free-test-ts: 3
+    lens/assertion-free-test-js: 0
+    lens/assertion-free-test-go: 2
+    lens/assertion-free-test-rs: 7
+    lens/assertion-free-test-java: 3
+    lens/assertion-free-test-cs: 1
+  real:
+    lens/assertion-free-test-py: 2
+    lens/assertion-free-test-ts: 1
+    lens/assertion-free-test-js: 0
+    lens/assertion-free-test-go: 0
+    lens/assertion-free-test-rs: 0
+    lens/assertion-free-test-java: 3
+    lens/assertion-free-test-cs: 0
+  verdict: "null"
+  tell: null
+  notes: Most hits are deliberate does-not-raise or regression tests ('make sure this task runs even with
+    nothing to do', unicode auth, AutoMapper config, compile-all-mappings). The rest delegate to an asserting
+    helper the check can't see (_validate_crlf, wrapping_test, contract.run()), a race-detector test, or a
+    role binary disguised as a test. Precision is 6/29. The only clean language is Java, at 3 hits that are
+    one copy-pasted test.
+  run: 2026-10-13
+- id: generic-repository
+  rules:
+    - lens/generic-repository-cs
+    - lens/generic-repository-java
+    - lens/generic-repository-ts
+  hits:
+    lens/generic-repository-cs: 38
+    lens/generic-repository-java: 0
+    lens/generic-repository-ts: 0
+  by_repo:
+    lens/generic-repository-cs:
+      eShopOnWeb: 38
+    lens/generic-repository-java: {}
+    lens/generic-repository-ts: {}
+  sampled:
+    lens/generic-repository-cs: 15
+    lens/generic-repository-java: 0
+    lens/generic-repository-ts: 0
+  real:
+    lens/generic-repository-cs: 0
+    lens/generic-repository-java: 0
+    lens/generic-repository-ts: 0
+  verdict: "null"
+  tell: null
+  notes: "Every hit is eShopOnWeb's IRepository<T> or IReadRepository<T>, which extend Ardalis.Specification's
+    IRepositoryBase. Callers use ListAsync(spec) and FirstOrDefaultAsync(spec): this is the
+    specification-backed form the counter-view defends. Whether the generic type has only CRUD methods is
+    decided in another file, so a one-file check can't apply the tell's own condition. Petclinic uses specific
+    Spring Data repositories, and no TypeScript repository layer exists in the corpus."
+  run: 2026-10-13
+- id: broken-object-level-authorization
+  rules:
+    - lens/broken-object-level-authorization-py
+    - lens/broken-object-level-authorization-ts
+    - lens/broken-object-level-authorization-java
+    - lens/broken-object-level-authorization-cs
+  hits:
+    lens/broken-object-level-authorization-py: 38
+    lens/broken-object-level-authorization-ts: 0
+    lens/broken-object-level-authorization-java: 0
+    lens/broken-object-level-authorization-cs: 0
+  by_repo:
+    lens/broken-object-level-authorization-py:
+      mealie-recipes-mealie: 38
+    lens/broken-object-level-authorization-ts: {}
+    lens/broken-object-level-authorization-java: {}
+    lens/broken-object-level-authorization-cs: {}
+  sampled:
+    lens/broken-object-level-authorization-py: 15
+    lens/broken-object-level-authorization-ts: 0
+    lens/broken-object-level-authorization-java: 0
+    lens/broken-object-level-authorization-cs: 0
+  real:
+    lens/broken-object-level-authorization-py: 0
+    lens/broken-object-level-authorization-ts: 0
+    lens/broken-object-level-authorization-java: 0
+    lens/broken-object-level-authorization-cs: 0
+  verdict: "null"
+  tell: null
+  notes: All 38 Python hits are mealie controllers calling self.mixins.get_one/update_one/delete_one(item_id).
+    Their repositories are built in a base controller as AllRepositories(session, group_id, household_id), the
+    scoped repository the lens recommends, or are admin-only, and that scoping is invisible in the handler's
+    file. The full-stack template checks current_user and umami calls can*(auth, id) everywhere, so neither
+    fires. Petclinic loads in @ModelAttribute methods and has no auth. eShop's write endpoints are admin-role.
+    There are no Go web handlers in the corpus.
+  run: 2026-10-13
+- id: hard-coded-secrets
+  rules:
+    - lens/hard-coded-secrets-gitleaks
+  detectors:
+    lens/hard-coded-secrets-gitleaks: "linter gitleaks: an established secrets scanner (known credential formats
+      plus entropy), replacing hand-written regex and ast-grep"
+  hits:
+    lens/hard-coded-secrets-gitleaks: 1
+  by_repo:
+    lens/hard-coded-secrets-gitleaks:
+      eShopOnWeb: 1
+  sampled:
+    lens/hard-coded-secrets-gitleaks: 1
+  real:
+    lens/hard-coded-secrets-gitleaks: 1
+  verdict: keep
+  tell: "Any file outside test fixtures: what gitleaks reports, that is a known credential format (cloud, VCS,
+    payment and chat tokens, private keys) or a high-entropy string assigned to a key-like name."
+  notes: "The one hit outside tests is an ASP.NET Core data-protection key ring file committed under src/. With
+    test fixtures included there were 26: scraped HTML fixtures, fake tokens in auth tests and deliberately
+    committed test certificates, which the counter-view excuses. The corpus has almost no real secrets, so
+    this measures false positives, not recall; gitleaks's own track record is the evidence for recall."
+  run: 2026-10-14
+- id: injection
+  rules:
+    - lens/injection-py
+    - lens/injection-ts
+    - lens/injection-java
+    - lens/injection-cs
+    - lens/injection-go
+    - lens/injection-rs
+  hits:
+    lens/injection-py: 24
+    lens/injection-ts: 3
+    lens/injection-java: 0
+    lens/injection-cs: 0
+    lens/injection-go: 0
+    lens/injection-rs: 0
+  by_repo:
+    lens/injection-py:
+      mealie-recipes-mealie: 24
+    lens/injection-ts:
+      umami-software-umami: 3
+  sampled:
+    lens/injection-py: 15
+    lens/injection-ts: 3
+  real:
+    lens/injection-py: 0
+    lens/injection-ts: 0
+  verdict: "null"
+  tell: null
+  notes: "Every hit interpolated a value the code chose itself, which the counter-view excuses: table and column
+    names from __tablename__ or constant lists (mostly in alembic migrations), a setting read from config, a
+    schema name from env, a package name in a build script. One file can't show whether the interpolated value
+    came from input, so no text pattern got above 0%."
+  run: 2026-10-13
+- id: mass-assignment
+  rules:
+    - lens/mass-assignment-py-django
+    - lens/mass-assignment-py
+    - lens/mass-assignment-ts
+  detectors:
+    lens/mass-assignment-py-django: linter ruff DJ007 (fields = '__all__' in a ModelForm)
+    lens/mass-assignment-py: "ast-grep: no ruff rule covers request-body splats, setattr loops or DRF serializer __all__"
+    lens/mass-assignment-ts: "ast-grep: no oxlint rule matches"
+  hits:
+    lens/mass-assignment-py-django: 0
+    lens/mass-assignment-py: 0
+    lens/mass-assignment-ts: 0
+  by_repo: {}
+  sampled: {}
+  real: {}
+  verdict: keep
+  tell: null
+  notes: No hits, so precision can't be measured. The near misses were {**request.query_params} merged into a
+    dict of query parameters in two mealie routes, which bind nothing onto a model. The rules leave them alone
+    because they match only the request body (json(), data, form, POST, body). The corpus has no real case of
+    this pattern.
+  run: 2026-10-14
+- id: sensitive-data-in-logs
+  rules:
+    - lens/sensitive-data-in-logs-py
+    - lens/sensitive-data-in-logs-ts
+    - lens/sensitive-data-in-logs-java
+    - lens/sensitive-data-in-logs-cs
+    - lens/sensitive-data-in-logs-go
+    - lens/sensitive-data-in-logs-rs
+  detectors:
+    lens/sensitive-data-in-logs-py: "ast-grep: no ruff rule matches (G and T20 judge format, not content)"
+    lens/sensitive-data-in-logs-ts: "ast-grep: no oxlint rule matches"
+    lens/sensitive-data-in-logs-java: "regex fallback: no JVM analyzer installed"
+    lens/sensitive-data-in-logs-cs: "regex fallback: no .NET analyzer installed"
+    lens/sensitive-data-in-logs-go: "regex fallback: golangci-lint not installed"
+    lens/sensitive-data-in-logs-rs: "regex fallback: clippy has no such lint"
+  hits:
+    lens/sensitive-data-in-logs-py: 0
+    lens/sensitive-data-in-logs-ts: 0
+    lens/sensitive-data-in-logs-java: 0
+    lens/sensitive-data-in-logs-cs: 3
+    lens/sensitive-data-in-logs-go: 0
+    lens/sensitive-data-in-logs-rs: 0
+  by_repo:
+    lens/sensitive-data-in-logs-cs:
+      jasontaylordev-CleanArchitecture: 3
+  sampled:
+    lens/sensitive-data-in-logs-cs: 3
+  real:
+    lens/sensitive-data-in-logs-cs: 3
+  verdict: rewrite
+  tell: "Python, TypeScript, Java, C#, Go and Rust. A logging or print call where, outside the text of plain
+    string literals, an argument or an interpolation/placeholder ({...}, ${...}, {@...}) names: a password,
+    passwd, secret, api_key, authorization, cookie, card_number or cvv; a qualified token
+    (access/refresh/auth/bearer/session/csrf/api/id/jwt token, or jwt); or the whole request, its headers or
+    its body (request, req, req.headers, request.body, r.Header, but not request.url or request.method). A
+    bare 'token' name doesn't count, and neither does a name that ends in dir, path, file, name, url, length,
+    count, header or field (secrets_dir names a place, not a secret)."
+  notes: "The first Python version had 2 hits, both false: mealie logs secrets_dir, a directory path. Adding the
+    name-suffix exclusion (the one meaning revision) left 0 Python hits. All 3 C# hits are real: they pass the
+    whole MediatR request to Serilog's {@Request}, which destructures it. The AST rules skip words inside
+    plain strings ('invalid password', 'expired token'), and a grep of the corpus found no real cases that the
+    rules missed."
+  run: 2026-10-14
+- id: user-enumeration
+  rules:
+    - lens/user-enumeration-py
+    - lens/user-enumeration-ts
+    - lens/user-enumeration-java
+    - lens/user-enumeration-cs
+    - lens/user-enumeration-go
+    - lens/user-enumeration-rs
+  detectors:
+    lens/user-enumeration-py: "ast-grep: one function_definition holding both messages, outside log calls"
+    lens/user-enumeration-ts: "ast-grep: one function, arrow function or method holding both messages, outside log calls"
+    lens/user-enumeration-java: "regex fallback: both quoted messages within 1,500 characters"
+    lens/user-enumeration-cs: "regex fallback: both quoted messages within 1,500 characters"
+    lens/user-enumeration-go: "regex fallback: both quoted messages within 1,500 characters"
+    lens/user-enumeration-rs: "regex fallback: both quoted messages within 1,500 characters"
+  hits:
+    lens/user-enumeration-py: 0
+    lens/user-enumeration-ts: 0
+    lens/user-enumeration-java: 0
+    lens/user-enumeration-cs: 0
+    lens/user-enumeration-go: 0
+    lens/user-enumeration-rs: 0
+  by_repo: {}
+  sampled: {}
+  real: {}
+  verdict: keep
+  tell: null
+  notes: No hits, so precision can't be measured. The near misses were correctly left alone. In umami, 'User not
+    found' and 'Incorrect password' are in different 2FA route files. mealie's password-reset service has
+    'user doesn't exists' only in a log call, which the AST rules skip because logs never reach the client.
+    full-stack-fastapi-template already returns one generic login error.
+  run: 2026-10-14
+- id: swallowed-errors
+  rules:
+    - lens/swallowed-errors-py
+  detectors:
+    lens/swallowed-errors-py: linter ruff S110
+  hits:
+    lens/swallowed-errors-py: 2
+  by_repo:
+    lens/swallowed-errors-py:
+      mealie-recipes-mealie: 2
+  sampled:
+    lens/swallowed-errors-py: 2
+  real:
+    lens/swallowed-errors-py: 2
+  verdict: keep
+  tell: null
+  notes: "Both hits are real: a datetime converter that silently returns a naive value, and an importer that
+    silently drops a recipe's image. S110 does not flag a body of '...', but a grep found no such handler
+    outside tests, so nothing was missed. The evidence is thin (n=2), and the result matches the first run's
+    figure after its test exclude."
+  run: 2026-10-14
+- id: init-time-side-effects
+  rules:
+    - lens/init-time-side-effects-go
+    - lens/init-time-side-effects-py
+  detectors:
+    lens/init-time-side-effects-go: "regex fallback: golangci-lint not installed, and gochecknoinits flags every init, not I/O in one"
+    lens/init-time-side-effects-py: "ast-grep: no ruff rule matches; the call must be outside any function or
+      lambda, in a file with no __main__ block"
+  hits:
+    lens/init-time-side-effects-go: 1
+    lens/init-time-side-effects-py: 6
+  by_repo:
+    lens/init-time-side-effects-go:
+      jesseduffield-lazygit: 1
+    lens/init-time-side-effects-py:
+      mealie-recipes-mealie: 3
+      httpie-cli: 3
+  sampled:
+    lens/init-time-side-effects-go: 1
+    lens/init-time-side-effects-py: 6
+  real:
+    lens/init-time-side-effects-go: 1
+    lens/init-time-side-effects-py: 6
+  verdict: keep
+  tell: null
+  notes: "Every hit is real. mealie's core/config.py runs load_dotenv and reads PRODUCTION, TESTING and DATA_DIR
+    at import. httpie freezes three env-tuned constants at import. lazygit's logs.go reads LAZYGIT_LOG_PATH
+    and opens a log file in init. The one known miss: glow's main.go init calls
+    tryLoadConfigFromDefaultPlaces(), which reads config files through a helper that a one-file check on
+    direct calls can't see."
+  run: 2026-10-14
+- id: conditional-test-logic
+  rules:
+    - lens/conditional-test-logic-py
+  detectors:
+    lens/conditional-test-logic-py: ast-grep (no ruff rule; PT017 is assert-in-except)
+  hits:
+    lens/conditional-test-logic-py: 190
+  by_repo:
+    lens/conditional-test-logic-py:
+      httpie-cli: 18
+      mealie-recipes-mealie: 172
+  sampled:
+    lens/conditional-test-logic-py: 15
+  real:
+    lens/conditional-test-logic-py: 14
+  verdict: keep
+  tell: null
+  notes: "Nearly every hit branches its assertions on a pytest parameter, the platform or the result itself (for
+    example 'if ing.quantity: assert ... else: assert not quantity'). That is the lens's Conditional
+    Verification Logic. The false one is a sanity assert on test setup inside a data-building branch. Most
+    hits are the idiomatic 'if expect_x: assert ... else: assert not ...' parametrize form, so expect pushback
+    from teams that accept it."
+  run: 2026-10-14
+- id: test-logic-in-production
+  rules:
+    - lens/test-logic-in-production-py
+    - lens/test-logic-in-production-ts
+    - lens/test-logic-in-production-java
+    - lens/test-logic-in-production-cs
+    - lens/test-logic-in-production-go
+    - lens/test-logic-in-production-rs
+  detectors:
+    lens/test-logic-in-production-py: "ast-grep: no ruff rule matches; if, elif or conditional-expression conditions"
+    lens/test-logic-in-production-ts: "ast-grep: no oxlint rule matches; if and ternary conditions"
+    lens/test-logic-in-production-java: "regex fallback: no JVM analyzer installed"
+    lens/test-logic-in-production-cs: "regex fallback: no .NET analyzer installed"
+    lens/test-logic-in-production-go: "regex fallback: golangci-lint not installed"
+    lens/test-logic-in-production-rs: "regex fallback: clippy has no such lint"
+  hits:
+    lens/test-logic-in-production-py: 5
+    lens/test-logic-in-production-ts: 0
+    lens/test-logic-in-production-java: 0
+    lens/test-logic-in-production-cs: 0
+    lens/test-logic-in-production-go: 0
+    lens/test-logic-in-production-rs: 0
+  by_repo:
+    lens/test-logic-in-production-py:
+      mealie-recipes-mealie: 5
+  sampled:
+    lens/test-logic-in-production-py: 5
+  real:
+    lens/test-logic-in-production-py: 5
+  verdict: keep
+  tell: null
+  notes: "All 5 Python hits are real, all in mealie: get_hasher returns FakeHasher under TESTING, a SQLite
+    pragma is applied only to the test database, SPA mounting and the debug handler are gated on not TESTING,
+    and the logger picks a 'testing' mode. As the tell says, config.py, settings.py and settings/ are
+    excluded, which keeps mealie's determine_data_dir in config.py out. The other languages had no hits, and
+    the corpus has no NODE_ENV === 'test' checks."
+  run: 2026-10-14
+- id: comments
+  rules:
+    - lens/comments-py
+    - lens/comments-ts
+    - lens/comments-java
+    - lens/comments-cs
+    - lens/comments-go
+    - lens/comments-rs
+  hits:
+    lens/comments-py: 54
+    lens/comments-ts: 114
+    lens/comments-java: 2
+    lens/comments-cs: 6
+    lens/comments-go: 283
+    lens/comments-rs: 146
+  by_repo:
+    lens/comments-py:
+      full-stack-fastapi-template: 8
+      httpie-cli: 5
+      mealie-recipes-mealie: 41
+    lens/comments-ts:
+      full-stack-fastapi-template: 2
+      mdBook: 21
+      mealie-recipes-mealie: 49
+      rulecast: 19
+      umami-software-umami: 23
+    lens/comments-java:
+      spring-petclinic: 2
+    lens/comments-cs:
+      jasontaylordev-CleanArchitecture: 6
+    lens/comments-go:
+      glow: 18
+      jesseduffield-lazygit: 265
+    lens/comments-rs:
+      mdBook: 73
+      sharkdp-bat: 73
+  sampled:
+    lens/comments-py: 15
+    lens/comments-ts: 10
+    lens/comments-java: 2
+    lens/comments-cs: 6
+    lens/comments-go: 10
+    lens/comments-rs: 10
+  real:
+    lens/comments-py: 6
+    lens/comments-ts: 5
+    lens/comments-java: 2
+    lens/comments-cs: 2
+    lens/comments-go: 2
+    lens/comments-rs: 0
+  verdict: "null"
+  tell: null
+  notes: Three or more comment-then-code sections in one function can't separate what-comments from
+    why-comments. False hits were explanatory why-comments, numbered precedence steps, parser-grammar notes
+    and migration step labels. In Go, Rust and C#, member doc comments on struct fields, interface methods,
+    enums and `///` docs also hit, because a regex can't see function bounds. Python and TS use ast-grep with
+    real function bounds and still reached only 40-50%.
+  run: 2026-10-13
+- id: dead-code
+  rules:
+    - lens/dead-code-py
+    - lens/dead-code-ts
+    - lens/dead-code-js
+    - lens/dead-code-go
+    - lens/dead-code-rs
+    - lens/dead-code-java
+    - lens/dead-code-cs
+  detectors:
+    lens/dead-code-py: ast-grep (ruff has no unreachable-code or if-False rule)
+    lens/dead-code-ts: linter oxlint no-unreachable, no-constant-condition
+    lens/dead-code-js: linter oxlint no-unreachable, no-constant-condition
+    lens/dead-code-go: regex fallback
+    lens/dead-code-rs: regex fallback
+    lens/dead-code-java: regex fallback
+    lens/dead-code-cs: regex fallback
+  hits:
+    lens/dead-code-py: 0
+    lens/dead-code-ts: 0
+    lens/dead-code-js: 0
+    lens/dead-code-go: 0
+    lens/dead-code-rs: 0
+    lens/dead-code-java: 0
+    lens/dead-code-cs: 0
+  by_repo: {}
+  sampled: {}
+  real: {}
+  verdict: keep
+  tell: null
+  notes: "These rules cover unreachable statements and literal-false branches. Commented-out blocks are the same
+    check as lava-flow, so they are measured there (13/13). The corpus has no instances: oxlint run directly
+    over the whole corpus fires only in vendored ace.js, and no 'if False' or 'if (false)' exists. Before a
+    fix, the brace-language regex had 9 false hits, all C# Allman-style 'return new X' followed by '{' on the
+    next line. Precision for this part can't be measured, only that it doesn't misfire."
+  run: 2026-10-14
+- id: duplicate-code
+  rules:
+    - lens/duplicate-code-go
+  detectors:
+    lens/duplicate-code-go: regex fallback
+  hits:
+    lens/duplicate-code-go: 7
+  by_repo:
+    lens/duplicate-code-go:
+      jesseduffield-lazygit: 7
+  sampled:
+    lens/duplicate-code-go: 7
+  real:
+    lens/duplicate-code-go: 6
+  verdict: keep
+  tell: null
+  notes: The one false hit is a repeated switch-case enumeration of mouse keys, which is declarative. Five of
+    the seven hits are also hits of copy-and-paste-programming-go, so on Go the two rules largely overlap. The
+    evidence is a single repository.
+  run: 2026-10-14
+- id: large-class
+  rules:
+    - lens/large-class-py
+    - lens/large-class-cs
+  detectors:
+    lens/large-class-py: ast-grep (no lint rule measures class length; ruff PLR0904 counts public methods)
+    lens/large-class-cs: regex fallback (no .NET analyzer installed)
+  hits:
+    lens/large-class-py: 4
+    lens/large-class-cs: 1
+  by_repo:
+    lens/large-class-py:
+      mealie-recipes-mealie: 4
+    lens/large-class-cs:
+      eShopOnWeb: 1
+  sampled:
+    lens/large-class-py: 4
+    lens/large-class-cs: 1
+  real:
+    lens/large-class-py: 4
+    lens/large-class-cs: 1
+  verdict: keep
+  tell: "Python and C#: a class body over 500 lines, excluding generated code."
+  notes: "Every hit had several reasons to change: ShoppingListService, RecipeController (scraping, AI, CRUD,
+    images, assets), RecipeService, QueryFilterBuilder (string parsing plus SQL mapping), and eShopOnWeb's
+    ManageController (profile, passwords, external logins, 2FA). Only 5 hits, so the evidence is thin."
+  run: 2026-10-14
+- id: long-method
+  rules:
+    - lens/long-method-py
+  detectors:
+    lens/long-method-py: ast-grep (no lint rule counts function lines; ruff PLR0915 counts statements)
+  hits:
+    lens/long-method-py: 45
+  by_repo:
+    lens/long-method-py:
+      httpie-cli: 9
+      mealie-recipes-mealie: 36
+  sampled:
+    lens/long-method-py: 15
+  real:
+    lens/long-method-py: 11
+  verdict: keep
+  tell: "Python only: a function over 60 lines, excluding tests and generated migrations."
+  notes: "The false hits were one linear thing, which the counter-view excuses: a hand-written recursive-descent
+    parser and a path interpreter, both with their helpers nested inside, an argparse main() in a profiling
+    script, and a dispatch-table literal. The real ones had phases marked by comments, deep try/except
+    nesting, or a 'TODO: refactor' note. Nested functions inside a long function are counted again on their
+    own."
+  run: 2026-10-14
+- id: long-parameter-list
+  rules:
+    - lens/long-parameter-list-py
+    - lens/long-parameter-list-ts
+    - lens/long-parameter-list-js
+    - lens/long-parameter-list-go
+    - lens/long-parameter-list-rs
+    - lens/long-parameter-list-java
+    - lens/long-parameter-list-cs
+  detectors:
+    lens/long-parameter-list-py: ast-grep (ruff PLR0917/PLR0913 count parameters that have defaults, which the
+      tell excludes; FBT001 flags a single bool)
+    lens/long-parameter-list-ts: ast-grep (oxlint max-params covers only the count half, not two boolean flags)
+    lens/long-parameter-list-js: ast-grep (oxlint max-params covers only the count half)
+    lens/long-parameter-list-go: regex fallback (no golangci-lint installed)
+    lens/long-parameter-list-rs: regex fallback (no clippy run)
+    lens/long-parameter-list-java: regex fallback (no JVM analyzer installed)
+    lens/long-parameter-list-cs: regex fallback (no .NET analyzer installed)
+  hits:
+    lens/long-parameter-list-py: 7
+    lens/long-parameter-list-ts: 20
+    lens/long-parameter-list-js: 0
+    lens/long-parameter-list-go: 52
+    lens/long-parameter-list-rs: 6
+    lens/long-parameter-list-java: 0
+    lens/long-parameter-list-cs: 0
+  by_repo:
+    lens/long-parameter-list-py:
+      mealie-recipes-mealie: 7
+    lens/long-parameter-list-ts:
+      mealie-recipes-mealie: 9
+      rulecast: 3
+      umami-software-umami: 8
+    lens/long-parameter-list-js: {}
+    lens/long-parameter-list-go:
+      jesseduffield-lazygit: 52
+    lens/long-parameter-list-rs:
+      mdBook: 2
+      sharkdp-bat: 4
+    lens/long-parameter-list-java: {}
+    lens/long-parameter-list-cs: {}
+  sampled:
+    lens/long-parameter-list-py: 7
+    lens/long-parameter-list-ts: 15
+    lens/long-parameter-list-go: 15
+    lens/long-parameter-list-rs: 6
+  real:
+    lens/long-parameter-list-py: 6
+    lens/long-parameter-list-ts: 14
+    lens/long-parameter-list-go: 12
+    lens/long-parameter-list-rs: 5
+  verdict: rewrite
+  tell: A function with more than five parameters, or with two or more boolean parameters, not counting
+    constructors that take their dependencies. In Python, count only positional parameters that have no
+    default and come before any * or *args, not self or cls.
+  notes: Three of the five false hits were dependency-injection constructors (Go NewGitCommon/NewBranchLoader, a
+    Python migration __init__), which the counter-view excuses. The TypeScript, Java and C# rules already skip
+    constructors, so the rewrite only adds that to the text. The other false hits were a TypeScript function
+    taking six distinct dependencies, a pure four-bool box-drawing lookup in Go, and a Rust test helper inside
+    src/. The only JavaScript hits (4) were in a vendored minified ace.js, which is now excluded. Java and C#
+    had no hits.
+  run: 2026-10-14
+- id: middle-man
+  rules:
+    - lens/middle-man-py
+    - lens/middle-man-ts
+    - lens/middle-man-go
+    - lens/middle-man-rs
+    - lens/middle-man-java
+    - lens/middle-man-cs
+  hits:
+    lens/middle-man-py: 4
+    lens/middle-man-ts: 1
+    lens/middle-man-go: 10
+    lens/middle-man-rs: 0
+    lens/middle-man-java: 0
+    lens/middle-man-cs: 0
+  by_repo:
+    lens/middle-man-py:
+      mealie-recipes-mealie: 4
+    lens/middle-man-ts:
+      jasontaylordev-CleanArchitecture: 1
+    lens/middle-man-go:
+      jesseduffield-lazygit: 10
+  sampled:
+    lens/middle-man-py: 4
+    lens/middle-man-ts: 1
+    lens/middle-man-go: 10
+  real:
+    lens/middle-man-py: 0
+    lens/middle-man-ts: 0
+    lens/middle-man-go: 0
+  verdict: "null"
+  tell: null
+  notes: "The regex found runs of three methods that forward to the same-named method on one field, but \"most
+    methods\" can't be counted in one regex. Every hit was a deliberate seam: FastAPI route handlers over CRUD
+    mixins, lazygit's guiCommon facade, a view-trait adapter, a cmd-builder decorator, a test-driver DSL, or a
+    type with a few forwarding helpers among many real methods."
+  run: 2026-10-13
+- id: primitive-obsession
+  rules:
+    - lens/primitive-obsession-py
+    - lens/primitive-obsession-go
+    - lens/primitive-obsession-java
+    - lens/primitive-obsession-cs
+  detectors:
+    lens/primitive-obsession-py: ast-grep (no lint rule)
+    lens/primitive-obsession-go: regex fallback (no golangci-lint installed)
+    lens/primitive-obsession-java: regex fallback (no JVM analyzer installed)
+    lens/primitive-obsession-cs: regex fallback (no .NET analyzer installed)
+  hits:
+    lens/primitive-obsession-py: 0
+    lens/primitive-obsession-go: 4
+    lens/primitive-obsession-java: 0
+    lens/primitive-obsession-cs: 0
+  by_repo:
+    lens/primitive-obsession-py: {}
+    lens/primitive-obsession-go:
+      jesseduffield-lazygit: 4
+    lens/primitive-obsession-java: {}
+    lens/primitive-obsession-cs: {}
+  sampled:
+    lens/primitive-obsession-go: 4
+  real:
+    lens/primitive-obsession-go: 4
+  verdict: keep
+  tell: "Go, Python, Java and C#, not TypeScript: a field or variable named like status, role, type or kind
+    compared against string or number literals in three or more places in one file."
+  notes: The only hits were lazygit comparing git ShortStatus codes ("DU", "AA", "UU") as strings, all real but
+    from 2 files. Python's only such comparisons outside tests were MIME types and empty-string checks, none
+    three times on one name. Java and C# use enums. The Python rule reports each name once, at its first
+    comparison; the Go, Java and C# regexes report once per three comparisons. A first draft of the Python
+    rule fired on files with no repeats at all, because ast-grep treats the root module as preceding its own
+    children. It now excludes the module, which leaves 0 hits.
+  run: 2026-10-14
+- id: speculative-generality
+  rules:
+    - lens/speculative-generality-py
+    - lens/speculative-generality-ts
+    - lens/speculative-generality-rs
+    - lens/speculative-generality-java
+    - lens/speculative-generality-cs
+  hits:
+    lens/speculative-generality-py: 2
+    lens/speculative-generality-ts: 0
+    lens/speculative-generality-rs: 5
+    lens/speculative-generality-java: 0
+    lens/speculative-generality-cs: 0
+  by_repo:
+    lens/speculative-generality-py:
+      mealie-recipes-mealie: 2
+    lens/speculative-generality-rs:
+      mdBook: 5
+  sampled:
+    lens/speculative-generality-py: 2
+    lens/speculative-generality-rs: 5
+  real:
+    lens/speculative-generality-py: 1
+    lens/speculative-generality-rs: 0
+  verdict: "null"
+  tell: null
+  notes: Only the first half of the tell (one implementation in the same file) is expressible. Go interfaces are
+    implicit and can't be checked. The "same value at every call site" half needs cross-site analysis. Every
+    Rust hit was an extension trait or a blanket impl (CommandExt, TomlExt, ToUrlPath), an idiom rather than
+    speculation. One of the two Python ABCs has a test fake in tests/, which the counter-view excuses and a
+    one-file check can't see. Interfaces in C#, Java and TypeScript live in their own files, so the check
+    never fires there.
+  run: 2026-10-13
+- id: switch-statements
+  rules:
+    - lens/switch-statements-ts
+    - lens/switch-statements-java
+    - lens/switch-statements-cs
+  detectors:
+    lens/switch-statements-ts: ast-grep (no lint rule compares switches across functions)
+    lens/switch-statements-java: regex fallback (no JVM analyzer installed)
+    lens/switch-statements-cs: regex fallback (no .NET analyzer installed)
+  hits:
+    lens/switch-statements-ts: 9
+    lens/switch-statements-java: 0
+    lens/switch-statements-cs: 0
+  by_repo:
+    lens/switch-statements-ts:
+      jasontaylordev-CleanArchitecture: 1
+      mealie-recipes-mealie: 1
+      rulecast: 1
+      umami-software-umami: 6
+    lens/switch-statements-java: {}
+    lens/switch-statements-cs: {}
+  sampled:
+    lens/switch-statements-ts: 9
+  real:
+    lens/switch-statements-ts: 8
+  verdict: keep
+  tell: "TypeScript, Java and C#, excluding generated code: a switch on the same expression in two or more
+    functions of one file."
+  notes: The real hits were umami's dataType switched three times each in clickhouse.ts and prisma.ts, a path
+    operator switched twice in getHeatmap, a status-code pair, a theme switch and a copyType switch. The one
+    false hit was record.t in two functions folding two different union types. The rule only sees functions
+    that are siblings (top level or class members). Java and C# had no hits.
+  run: 2026-10-14
+- id: n-plus-one-queries
+  rules:
+    - lens/n-plus-one-queries-py
+    - lens/n-plus-one-queries-go
+    - lens/n-plus-one-queries-rs
+  hits:
+    lens/n-plus-one-queries-py: 0
+    lens/n-plus-one-queries-go: 0
+    lens/n-plus-one-queries-rs: 0
+  by_repo: {}
+  sampled: {}
+  real: {}
+  verdict: "null"
+  tell: null
+  notes: "Not measured rather than disproven. The corpus has no raw-SQL code in Go, Rust or Python: mealie and
+    the FastAPI template use SQLAlchemy, and the Go and Rust repositories have no database. The rules (a query
+    or fetch call inside a loop over rows.Next(), execute()/fetch() or query_map results) pass their examples
+    but never fired, so precision can't be measured. The only raw SQL in the corpus is umami's TypeScript,
+    which the tell doesn't name."
+  run: 2026-10-13

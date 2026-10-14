@@ -1,0 +1,1769 @@
+# rulecast lens catalog: starter lists. For each kind of project, the lenses an experienced reviewer raises first, in order
+# (at most 25), plus probes for the interview: what to find in the repository first, and what
+# to ask only if it can't tell. Curated by hand across related kinds after the 2026-10-13 field test,
+# replacing lists built from per-entry tags. `hinge`: what this kind's conventions usually hinge on.
+cli-devtool:
+  hinge: What scripts and users can rely on (flags, output, exit codes, error messages) and how failures travel
+    from deep code to one clear message and exit status.
+  lenses:
+    - breaking-change-surface
+    - inconsistent-error-contract
+    - error-handling-policy
+    - swallowed-errors
+    - fail-fast
+    - long-method
+    - principle-of-least-astonishment
+    - validate-at-the-boundary
+    - parse-dont-validate
+    - golden-master-test
+    - functional-core-imperative-shell
+    - injection
+    - terminal-escape-injection
+    - secure-by-default
+    - hyrums-law
+    - fail-open-vs-fail-closed
+    - premature-optimization
+    - init-time-side-effects
+    - global-state
+    - dry
+    - kiss
+    - speculative-generality
+    - semantic-versioning-discipline
+    - deprecation-policy
+    - hard-to-test-code
+  probes:
+    - find: >
+        For each command: what it writes to stdout and to stderr, whether it has a machine-readable mode
+        (--json, --porcelain, a stable format flag), and which exit codes it can return and where they are
+        defined. Which of these the README, --help text, man page or changelog promise. Tests that pin output
+        (golden files, snapshots, subprocess tests). Scripts, CI jobs or shell completions in the repo that
+        parse the output. Commits or issues where an output change was reverted or called breaking.
+      ask: >
+        "<commands> have a documented <JSON mode / exit codes> in <doc>. The plain-text output of <commands>
+        isn't promised anywhere, but <scripts / issues / CI jobs> parse it. Should changing that text count as
+        breaking? I'd treat <JSON output and exit codes> as the contract and say in the docs that text output
+        may change, because <who parses what>."
+      settled_when: >
+        The docs already say which output is stable, tests pin exactly that, and nothing in the repo or its
+        issues parses the rest. The agent states the contract it found and asks only whether it holds going
+        forward. Whether undocumented output people already parse counts as a promise is never settled by code
+        alone.
+      grounded_in:
+        - Hyrum's law
+        - Breaking-Change Surface
+    - find: >
+        Trace how an error deep inside each command reaches the user: where it is caught, how it is printed
+        (one top-level handler, per command, a raw stack trace), and which exit code comes out. Group commands
+        by behaviour and list the ones that differ from the majority, including any that exit 0 after a
+        failure. Whether --help or the docs list exit codes.
+      ask: >
+        "<N> of <M> commands send errors through <handler> and exit <code>; <commands> <print a stack trace /
+        exit 0 on failure> (<files>). Are those deliberate? I'd make <handler> the only way out for every
+        command, with <exit-code scheme>, because a script can then tell <usage errors> from <runtime
+        failures>."
+      settled_when: >
+        Every command already goes through one handler with a documented exit-code scheme. The agent confirms
+        that in one line and asks nothing unless an outlier turns up.
+      grounded_in:
+        - Principle of least astonishment
+        - Fail fast
+    - find: >
+        Home-grown code that overlaps the standard library or a well-known package: argument parsing, config
+        loading, colour and TTY detection, logging, retries, path handling. For each: size, when it was added
+        (git log), who wrote it, and any commit message, comment or doc that says why. The dependency list and
+        its history, and any stated policy such as zero dependencies or a startup-time budget.
+      ask: >
+        "<module> does what <stdlib / package> does (<size>, added <when>; <the commit says why / no reason
+        recorded>). Keep it and point new code at it, or move to <package>? I'd <keep it / switch> because
+        <dependency weight / startup time / behaviour it adds that the package lacks>."
+      settled_when: >
+        A doc, comment or commit records the reason, such as a zero-dependency rule. The agent cites it and
+        asks only whether it still holds.
+      grounded_in:
+        - Not Invented Here
+        - Chesterton's fence
+    - find: >
+        Fix commits and linked issues over the last year or so, sorted by where the fix landed: flag and input
+        parsing, the output scripts read, or deeper logic. Which fixes came with a regression test. Whether
+        any test runs the built binary end to end (a subprocess, golden files) rather than calling functions.
+      ask: "\"Of the last <N> fixes, <k> were in <area> (<examples>), and <j> came with a test. <No test / Only
+        <tests>> run the built binary. Did bugs reach users that don't show here? I'd add <end-to-end tests
+        over the binary for argument parsing and output> as the rule for new commands, because that's where
+        fixes cluster.\""
+      settled_when: >
+        Never fully: the history shows fixes, not which ones reached users. When issues are linked to fixes,
+        the ask shrinks to confirming the pattern the agent found.
+      grounded_in:
+        - Production Bugs
+        - Developers Not Writing Tests
+tui:
+  hinge: How UI state is modelled and kept out of the render and event loop, so screens stay testable and the
+    terminal is always restored, plus the same error and exit-code discipline as any CLI.
+  lenses:
+    - functional-core-imperative-shell
+    - ui-thread-confinement
+    - make-illegal-states-unrepresentable
+    - state
+    - model-view-update
+    - god-object
+    - long-method
+    - error-handling-policy
+    - swallowed-errors
+    - fail-fast
+    - resource-leak
+    - global-state
+    - principle-of-least-astonishment
+    - golden-master-test
+    - hard-to-test-code
+    - switch-statements
+    - command
+    - observer
+    - premature-optimization
+    - validate-at-the-boundary
+    - init-time-side-effects
+    - breaking-change-surface
+    - inconsistent-error-contract
+    - erratic-test
+    - fragile-test
+  probes:
+    - find: >
+        How each screen is tested today: by calling the update or reducer logic directly, by snapshotting
+        rendered output, by driving key events through a harness, or not at all. Counts per approach, and
+        which approach the most recently added screens use.
+      ask: >
+        "<N> screens are tested through <approach>, <M> through <other>, and <K> aren't tested (<files>). The
+        newest ones use <approach>. I'd have new screens follow <approach> because <it tests behaviour without
+        depending on layout>. Right?"
+      settled_when: Every screen, including the recent ones, is tested one way (not "untested"), and a contributing
+        doc names that way or nothing contradicts it. The agent confirms it as the rule going forward. If the
+        doc and the code disagree, or screens go untested, it asks.
+      grounded_in:
+        - Developers Not Writing Tests
+        - Testing pyramid
+    - find: >
+        Where the program enters raw mode or the alternate screen, and every place it restores the terminal.
+        Whether restore runs on a panic or uncaught exception, on SIGINT and SIGTERM, and on early returns and
+        error paths (defer, finally, a panic hook, a signal handler, a guard object). Any other code that
+        changes terminal modes. Issues or commits about a terminal left broken.
+      ask: >
+        "The terminal is restored in <place>. It <does / doesn't> run on <panic / SIGTERM / the error path in
+        <file>>. I'd make <one guard> the only code that touches terminal modes, because <the gap found>.
+        Agree?"
+      settled_when: >
+        One guard covers normal exit, panics and signals, and nothing else changes terminal modes. The agent
+        confirms it in one line.
+      grounded_in:
+        - Murphy's law
+    - find: >
+        Where keybindings, config keys and flags are defined, and which are documented (help screen, README,
+        man page). Whether user config can remap bindings. Changelog entries, issues or reverts about a
+        changed default binding or renamed config key.
+      ask: >
+        "<N> default bindings are documented in <doc>, and users <can / can't> remap them. <version> changed
+        <binding>, <and an issue followed>. Is changing a default binding breaking for you? I'd treat
+        documented bindings and config keys as the contract, with a changelog note and a deprecation period,
+        because <reason>."
+      settled_when: >
+        The changelog or docs already state a policy on bindings and config keys. The agent cites it and asks
+        only whether to keep it.
+      grounded_in:
+        - Hyrum's law
+    - find: 'Snapshot files, and how often they changed in commits that were about a different screen or a shared
+        layout component. How many snapshots a typical shared-layout change updated. For those commits, the
+        signs of bulk acceptance: many snapshot files changed in one commit, a message like "update
+        snapshots", and no review comments on the snapshot files in the pull request (where review history is
+        available).'
+      ask: >
+        "Changing <shared layout> in <commit> updated <N> snapshots across <screens>, and they were accepted
+        in bulk. That's the ongoing cost of <approach>. Is it worth it to you? I'd <narrow snapshots to the
+        screen's own region / assert on model state instead> because <a bulk-accepted snapshot no longer
+        checks anything>."
+      settled_when: >
+        Snapshots rarely change outside their own screen's commits, so there is no cost to discuss. Otherwise
+        whether the cost is acceptable is the developer's call.
+      grounded_in:
+        - High Test Maintenance Cost
+        - Golden Master Test
+library-sdk:
+  hinge: What exactly is public, and how every change to it is signalled, deprecated and kept from breaking
+    callers who depend on more than the docs promise.
+  lenses:
+    - breaking-change-surface
+    - hyrums-law
+    - semantic-versioning-discipline
+    - deprecation-policy
+    - non-exhaustive-types
+    - principle-of-least-astonishment
+    - error-handling-policy
+    - swallowed-errors
+    - exceptions-for-control-flow
+    - secure-by-default
+    - validate-at-the-boundary
+    - parse-dont-validate
+    - init-time-side-effects
+    - global-state
+    - law-of-leaky-abstractions
+    - speculative-generality
+    - misapplied-genericity
+    - composition-over-inheritance
+    - make-illegal-states-unrepresentable
+    - long-parameter-list
+    - contract-test
+    - property-based-test
+    - tolerant-reader
+    - drifting-terminology
+    - resource-leak
+  probes:
+    - find: >
+        What the package exports (an export list, index files, the package exports map, public items), what is
+        reachable without being exported or marked internal (no leading underscore, no internal module), and
+        what the docs and type stubs present. Whether CI runs a public-API check or keeps an API report.
+        Examples, tests or docs that import internal paths.
+      ask: >
+        "<N> names are exported and documented. <M> more are reachable without an internal marker
+        (<examples>), and <the docs / examples> use <some of them>. Are those public? I'd mark <list> internal
+        and add an API check to CI, because callers will otherwise depend on them anyway."
+      settled_when: >
+        An explicit export list matches the docs, internals are marked, and an API check runs in CI. The agent
+        confirms the surface in one line.
+      grounded_in:
+        - Hyrum's law
+        - Breaking-Change Surface
+    - find: >
+        Who changes the public surface: authors of commits touching exported modules, whether those changes
+        went through a pull request with a reviewer other than the author, CODEOWNERS and branch protection
+        for those paths, and any release checklist. How many people have ever changed the public surface.
+      ask: "\"In the last <period>, <N> changes touched the public surface; <k> had a reviewer besides the author,
+        and only <people> ever change it. I'd require <a second reviewer / an API diff in the release
+        checklist> for those paths, because <reason>. Does that fit how you work?\""
+      settled_when: >
+        CODEOWNERS and branch protection already cover the public paths and the history shows reviews
+        happening. For a solo maintainer the agent notes it and moves on.
+      grounded_in:
+        - Linus's law
+        - Bus factor
+    - find: >
+        The runtime dependency list and how it grew or shrank over time, including commits that removed one.
+        Small helpers that duplicate common packages, with any comment or commit saying why. A stated policy
+        in the README or contributing guide.
+      ask: >
+        "You have <N> runtime dependencies, removed <x> in <commit>, and <helpers> reimplement <packages>. Is
+        keeping dependencies minimal a rule? I'd enforce <no new runtime dependency without <condition>>
+        because a library's dependencies become every caller's dependencies."
+      settled_when: >
+        The policy is written down and the dependency history agrees with it. The agent cites it and asks only
+        whether it should be enforced.
+      grounded_in:
+        - Not Invented Here
+    - find: >
+        For each module, what happens when a caller passes bad input: which exception types it raises, whether
+        it returns an error value or null, or logs and carries on. Whether there is a shared error hierarchy
+        and whether the docs describe it.
+      ask: >
+        "<N> modules raise <error types>, <M> return <null / an error value>, and <K> log and carry on
+        (<files>). Is <the outlier> deliberate? I'd make <raise subclasses of X> the rule because callers can
+        then handle every module the same way."
+      settled_when: |
+        Every module already behaves the same way and the docs say so. The agent confirms it in one line.
+      grounded_in:
+        - Principle of least astonishment
+web-api:
+  hinge: Where untrusted requests get checked and authorised, where business logic lives relative to the
+    handlers, and what errors and payloads the API promises its clients.
+  lenses:
+    - broken-object-level-authorization
+    - tenant-isolation
+    - validate-at-the-boundary
+    - injection
+    - mass-assignment
+    - fat-controller
+    - error-handling-policy
+    - inconsistent-error-contract
+    - breaking-change-surface
+    - idempotency
+    - parse-dont-validate
+    - trusting-client-input
+    - n-plus-one-queries
+    - service-layer
+    - swallowed-errors
+    - missing-rate-limiting
+    - sensitive-data-in-logs
+    - hard-coded-secrets
+    - ssrf
+    - dependency-rule
+    - domain-model
+    - data-transfer-object
+    - shotgun-surgery
+    - dry
+    - contract-test
+  probes:
+    - find: >
+        The URL tree beside the module layout. CODEOWNERS, and git authorship per route module, service and
+        model. Routes whose handler, logic and data access are owned or mostly edited by different people. How
+        many people work on the API at all.
+      ask: >
+        "<Routes> live in <modules>, and history shows <people / teams> editing <which parts>. The layout
+        <follows / cuts across> that split. Is that the ownership you want going forward? I'd <group by
+        resource owner / keep the current layout> because <reason>."
+      settled_when: >
+        One person or one small team works on the whole API, or CODEOWNERS already matches the layout. The
+        agent notes it in one line and moves on.
+      grounded_in:
+        - Conway's law
+    - find: >
+        For every route, where input validation and authorisation happen: middleware, a decorator, the
+        handler, or the service layer. Counts per place, the files, and any route that has neither. Whether a
+        doc or decision record says where they belong.
+      ask: >
+        "<N> routes check auth in middleware, <M> in the handler (<files>), and <routes> have no check I could
+        find. Is the split deliberate? I'd put validation and auth in <place> for new routes because <reason>,
+        and treat the unchecked routes as bugs unless you say otherwise."
+      settled_when: >
+        Every route does it the same way and a doc states it. Unchecked routes are always raised, never
+        settled.
+      grounded_in:
+        - Horizontalism
+        - Validate at the boundary
+    - find: >
+        Fix commits touching handlers, validation and access checks, and what kind of request caused each
+        (missing fields, wrong types, oversized payloads, another user's ids). Whether a schema validates
+        requests at the edge. Whether any test sends malformed bodies or ids belonging to another user.
+      ask: >
+        "<k> of the last <N> fixes were about requests the handlers didn't expect (<examples>). No test sends
+        <another user's ids / malformed bodies>. Were there others that reached users? I'd add <a test layer
+        that sends them> for every new route, because <that's where fixes cluster>."
+      settled_when: >
+        Never fully: fixes show in history, but not which ones reached users. With linked issues the ask
+        shrinks to confirming the pattern.
+      grounded_in:
+        - Production Bugs
+        - Testing pyramid
+    - find: "How handler tests are written: through an HTTP client with a real or in-memory database, or by mocking
+        the repository. Counts, and which style the newest tests use. Commits whose message calls them a
+        refactor, rename or move and that changed no assertions on responses, and how many mock-based tests
+        each of those had to edit."
+      ask: >
+        "<N> handler tests go through HTTP with <database>, <M> mock the repository, and the newest use
+        <style>. Refactoring <x> in <commit> meant fixing <k> mock-based tests. I'd write new tests <style>
+        because <reason>; the other side is <its benefit>. Which do you want?"
+      settled_when: One style is used throughout and a doc names it. The agent confirms it. If only the code is
+        consistent and no doc names the style, it confirms it with both sides in one line, since mocking is
+        contested.
+      grounded_in:
+        - High Test Maintenance Cost
+    - find: >
+        Heavyweight patterns in the code (a mediator, CQRS, a split into services, repository plus unit of
+        work): when each came in, the commit or decision record that introduced it and the reason it gives,
+        and how many code paths do real work through it versus just passing through.
+      ask: "\"<Pattern> came in with <commit>, <which says it was for <reason> / with no reason given>, and <N> of
+        <M> handlers just pass through it. <Does <reason> still apply? / What problem does it solve here?> If
+        <none now>, I'd let simple endpoints skip it, because <reason>.\""
+      settled_when: >
+        A decision record names the problem and most code paths use the pattern for it. The agent cites the
+        record and asks only whether it still applies.
+      grounded_in:
+        - Blind Pattern Following
+web-frontend:
+  hinge: How UI state is shaped and owned, how big components get before they are split, and what the client may
+    be trusted with and tested for.
+  lenses:
+    - trusting-client-input
+    - make-illegal-states-unrepresentable
+    - god-object
+    - global-state
+    - dry
+    - wrong-abstraction
+    - immutability-by-default
+    - parse-dont-validate
+    - validation-drift
+    - hard-coded-secrets
+    - swallowed-errors
+    - state
+    - fragile-test
+    - mock-everything
+    - testing-pyramid
+    - erratic-test
+    - shotgun-surgery
+    - large-class
+    - speculative-generality
+    - composite
+    - observer
+    - tolerant-reader
+  probes:
+    - find: >
+        Test files changed in commits that only restyled or restructured components. Whether those tests query
+        by markup, class names or snapshots, or by role, label and visible text. Which style recent tests use.
+      ask: >
+        "Restyling commits <commits> also changed <N> tests, mostly <snapshot / class-selector> ones. I'd have
+        new tests query by role and visible text, because they then survive a restyle. Agree, or do the
+        snapshots earn their keep for you?"
+      settled_when: >
+        Tests already query by behaviour and restyling commits rarely touch them. The agent confirms that as
+        the rule.
+      grounded_in:
+        - High Test Maintenance Cost
+    - find: >
+        When each dependency was added (package manifest and lockfile history). For the recent ones: how many
+        usage styles coexist (old and new APIs, two state or data-fetching libraries side by side), the
+        direction over time, and any migration notes.
+      ask: >
+        "<lib> came in <when> and is used <N> different ways across <files>, while <older lib> still covers
+        <M>. New code since <date> uses <style>. Is it settled? I'd write conventions around <style> <now /
+        once X> because <reason>."
+      settled_when: |
+        One idiom is used throughout and the older library is gone. The agent confirms it and moves on.
+      grounded_in:
+        - The Hype Cycle & Amara's Law
+    - find: >
+        In-house components, hooks and state helpers that do what the framework or a dependency already in the
+        manifest provides. Size, how many call sites, last change, authors, and any comment or commit saying
+        why they exist.
+      ask: >
+        "<helper> does what <framework feature / library> does, <differing only in X>. Keep it as the house
+        way, or move new code to <x>? I'd <recommend> because <reason>; if you'd keep it, I'll record why."
+      settled_when: >
+        A comment or doc gives a reason that still holds. The agent cites it and asks only whether new code
+        should use it.
+      grounded_in:
+        - Not Invented Here
+        - Emotional Attachment
+    - find: >
+        Decisions the client makes: permission checks that hide or disable UI, price or quantity calculations,
+        form validation. For each, whether the endpoint it calls checks the same thing (when the server code
+        is in reach). List what is checked only in the client.
+      ask: >
+        "<checks> happen only in the client (<files>); the server <does / doesn't> repeat them for
+        <endpoints>. I'd require the server to check <x> regardless of the UI, because <anyone can call the
+        API directly>. Is there anything the client may decide on its own?"
+      settled_when: >
+        Every client-side check has a server equivalent. When the server code isn't in reach, this is always
+        an ask.
+      grounded_in:
+        - Defense in depth
+fullstack-web:
+  hinge: Which rules the server enforces no matter what the UI does, where domain logic sits between routes,
+    server-rendered pages and components, and how one change is kept from touching every layer.
+  lenses:
+    - broken-object-level-authorization
+    - tenant-isolation
+    - trusting-client-input
+    - validate-at-the-boundary
+    - validation-drift
+    - mass-assignment
+    - injection
+    - fat-controller
+    - n-plus-one-queries
+    - dry
+    - shotgun-surgery
+    - error-handling-policy
+    - parse-dont-validate
+    - make-illegal-states-unrepresentable
+    - service-layer
+    - dependency-rule
+    - god-object
+    - global-state
+    - wrong-abstraction
+    - missing-rate-limiting
+    - sensitive-data-in-logs
+    - hard-coded-secrets
+    - swallowed-errors
+    - inconsistent-error-contract
+    - mock-everything
+  probes:
+    - find: >
+        From git history: how often one feature commit or pull request touches migrations, server code and UI
+        together, and who authors each layer. How the directories are organised (by layer or by feature).
+      ask: "\"<N>% of feature changes touch the schema, the server and the UI together, and <people> make all three.
+        Is that how you want features built going forward? I'd <organise by feature / keep the layers> because
+        <reason>.\""
+      settled_when: >
+        It's one person or one small team and the layout already suits how they work. The agent notes it in
+        one line.
+      grounded_in:
+        - Horizontalism
+        - Conway's law
+    - find: >
+        Rules enforced in the UI (form validation, hidden or disabled actions, route guards) matched against
+        the server routes and actions they call. List what is checked only in the UI.
+      ask: >
+        "<rules> exist only in the UI (<files>); a direct call to <route / action> skips them. I'd require the
+        server to enforce <x>, because <reason>. Are any of these deliberately UI-only?"
+      settled_when: |
+        Every UI rule has a server equivalent. The agent confirms it in one line.
+      grounded_in:
+        - Defense in depth
+    - find: >
+        The framework version and which newer features are in use (a new router, server actions, a new
+        rendering mode). Where old and new patterns coexist, the counts and the direction over time. Migration
+        commits and notes.
+      ask: >
+        "<N> pages use <new feature>, <M> still use <old one>, and everything added since <date> uses <new>.
+        Is the move settled? I'd write conventions for <new> and leave <old> alone until touched, because
+        <reason>."
+      settled_when: One pattern is used throughout and it is the one the framework version in use recommends, or a
+        doc says to stay on the older one. The agent confirms it. If only the older pattern is used and
+        nothing says why, it asks whether new code should move.
+      grounded_in:
+        - The Hype Cycle & Amara's Law
+    - find: >
+        Whether UI tests go through the real server and database or a mocked API, and where the mocks or
+        fixtures live. Whether server and client share types, a schema or a generated client, and whether a
+        type check or test in CI would fail if an endpoint's response shape changed.
+      ask: >
+        "UI tests mock the API with fixtures in <dir>, and the client <does / doesn't> share types with the
+        server. Changing <endpoint>'s response would be caught by <nothing / the type check / an end-to-end
+        test>. I'd <share the types / add a contract test> because <reason>."
+      settled_when: |
+        Server and client share types or a generated client checked in CI. The agent confirms it.
+      grounded_in:
+        - High Test Maintenance Cost
+        - Contract Test
+mobile:
+  hinge: How screens are kept from becoming god objects, how state survives lifecycle and flaky networks, and
+    what an app shipped to devices you can't update may hold or assume.
+  lenses:
+    - god-object
+    - trusting-client-input
+    - hard-coded-secrets
+    - fallacies-of-distributed-computing
+    - make-illegal-states-unrepresentable
+    - state
+    - ui-thread-confinement
+    - dependency-rule
+    - tolerant-reader
+    - global-state
+    - singleton
+    - hard-to-test-code
+    - large-class
+    - swallowed-errors
+    - error-handling-policy
+    - sensitive-data-in-logs
+    - parse-dont-validate
+    - observer
+    - resource-leak
+    - erratic-test
+    - testing-pyramid
+    - manual-intervention
+    - infrastructure-ignorance
+    - dry
+  probes:
+    - find: >
+        Minimum supported OS versions, any forced-update mechanism, how the API is versioned, version checks
+        in the app and code on the backend (if in reach) that still handles old clients. Release history and
+        its cadence. Docs on support windows.
+      ask: >
+        "The app <has / has no> forced update, the API <is versioned by X>, and <code> still handles clients
+        older than <version>. How long must old versions keep working? I'd <set a window of N releases or
+        months and force-update past it> because <reason>."
+      settled_when: >
+        A support window is written down and the code matches it. The agent cites it and asks whether it
+        holds. Which versions are actually installed is never in the repo.
+      grounded_in:
+        - Breaking-Change Surface
+        - Deprecation Policy
+    - find: "For features merged in the last year or so: later commits or pull requests that reference the same
+        issue or pull request, or touch the same files within a few weeks with a fix-style message. Sort them
+        by cause: lifecycle and background states, offline handling, screen sizes and devices, accessibility,
+        store review. Any PR template or definition-of-done checklist."
+      ask: >
+        "Follow-up fixes after features were mostly about <category> (<examples>). I'd make <X> part of every
+        feature from its first commit, because <reason>. Is that the tail that holds features up for you?"
+      settled_when: |
+        A checklist already covers the categories the history shows. The agent confirms it.
+      grounded_in:
+        - Ninety-ninety rule
+    - find: >
+        Fix commits and linked crash or bug reports, sorted by cause (lifecycle, process death, network loss,
+        rotation, permissions). Whether any test creates those states: backgrounding, restore after process
+        death, offline, slow network.
+      ask: >
+        "<k> of the last <N> fixes came from <lifecycle / network> states (<examples>), and no test creates
+        <them>. Were there others that reached users? I'd add <tests for X> to every screen that <condition>,
+        because <reason>."
+      settled_when: >
+        Never fully: which bugs reached users isn't in the repo. With linked crash reports the ask shrinks to
+        confirming the pattern.
+      grounded_in:
+        - Production Bugs
+        - Murphy's law
+    - find: >
+        Counts of screens per UI toolkit and per concurrency model (old and new side by side), the direction
+        over time, and what screens added in the last months use. Migration notes.
+      ask: >
+        "<N> screens use <old>, <M> use <new>, and every screen added since <date> uses <new>. I'd have new
+        screens use <new>, and move an old screen only when it needs real work, because <reason>. Right?"
+      settled_when: >
+        There's no migration, or all new screens already use the new side and a doc says so. The agent
+        confirms it.
+      grounded_in:
+        - The Hype Cycle & Amara's Law
+desktop:
+  hinge: How UI, commands and document state are separated so the app stays testable and undoable, and what the
+    files and settings it reads and writes promise across versions.
+  lenses:
+    - god-object
+    - large-class
+    - dependency-rule
+    - ui-thread-confinement
+    - command
+    - observer
+    - state
+    - global-state
+    - resource-leak
+    - hard-to-test-code
+    - swallowed-errors
+    - error-handling-policy
+    - validate-at-the-boundary
+    - insecure-deserialization
+    - breaking-change-surface
+    - mediator
+    - memento
+    - composite
+    - singleton
+    - secure-by-default
+    - manual-intervention
+    - long-method
+    - layered-architecture
+    - zawinskis-law
+  probes:
+    - find: >
+        Version fields in saved files and settings, migration or upgrade code and how far back it goes, test
+        fixtures saved by older versions, and what the docs or changelog promise about opening old files.
+      ask: >
+        "Files carry <version field>; there are migrations from <oldest> and fixtures for <versions>. How far
+        back do you promise to open files and settings? I'd <promise X and test it with fixtures> because
+        <reason>."
+      settled_when: |
+        The promise is documented and fixtures cover it. The agent cites it and asks only whether it holds.
+      grounded_in:
+        - Breaking-Change Surface
+        - Hyrum's law
+    - find: >
+        Modules with no commits in years, modules only one person has ever changed, how much other code
+        depends on them, and comments that warn people off.
+      ask: >
+        "<modules> haven't changed since <date>, and only <person> has ever changed <x>. Are they done, or
+        does nobody dare? I'd <protect them with characterisation tests before any change / leave them alone>
+        because <reason>."
+      settled_when: |
+        Never by code alone: the repo shows which parts are untouched, not why.
+      grounded_in:
+        - Never Change a Running System
+        - Bus factor
+    - find: >
+        Fix commits sorted by layer (UI, document model, platform integration), which came with a regression
+        test, and test counts per layer.
+      ask: >
+        "<k> of the last <N> fixes were in <layer>, which has <few / no> tests. Did bugs reach users that
+        don't show here? I'd require tests for <layer> because that's where fixes cluster."
+      settled_when: |
+        Never fully: the history shows fixes, not which reached users.
+      grounded_in:
+        - Production Bugs
+    - find: "For features merged in the last year or so: later commits or pull requests that reference the same
+        issue or pull request, or touch the same files within a few weeks with a fix-style message. Sort them
+        by cause: installers and packaging, per-platform differences, undo, accessibility. Any PR checklist or
+        definition of done."
+      ask: >
+        "Features mostly came back for <category> (<examples>). I'd make <X> required from a feature's first
+        commit because <reason>. Is that what holds features at almost done?"
+      settled_when: |
+        A checklist already covers what the history shows. The agent confirms it.
+      grounded_in:
+        - Ninety-ninety rule
+data-pipeline:
+  hinge: Where bad or duplicate records get caught, and whether a step can be rerun without corrupting what it
+    already wrote.
+  lenses:
+    - pipes-and-filters
+    - validate-at-the-boundary
+    - idempotency
+    - swallowed-errors
+    - fail-fast
+    - parse-dont-validate
+    - fallacies-of-distributed-computing
+    - murphys-law
+    - tolerant-reader
+    - contract-test
+    - breaking-change-surface
+    - shared-database
+    - functional-core-imperative-shell
+    - immutability-by-default
+    - long-method
+    - dry
+    - hard-coded-secrets
+    - injection
+    - sensitive-data-in-logs
+    - insecure-deserialization
+    - property-based-test
+    - assertion-free-test
+    - golden-master-test
+    - slow-tests
+    - erratic-test
+  probes:
+    - find: >
+        For each step: how it writes (overwrite a partition, upsert on a key, append, staging then swap),
+        transactions, dedup keys, and what checks run after it beyond "it finished" (row counts, assertions,
+        data tests). Commits mentioning reruns, backfills or duplicates.
+      ask: >
+        "<N> steps overwrite a partition and are safe to rerun; <steps> append and would duplicate rows on a
+        rerun. Only <k> steps check their output. Are the append steps deliberate? I'd make <write mode> plus
+        <a post-run check> the rule for new steps, because <reason>."
+      settled_when: |
+        Every step is safe to rerun and checks its output. The agent confirms it in one line.
+      grounded_in:
+        - Murphy's law
+        - Idempotency
+        - Production Bugs
+    - find: >
+        Which steps have tests, what fixtures or sample data exist, and any history of tests added then
+        removed or skipped.
+      ask: >
+        "<steps> have no tests, and there's <no / some> sample data in <dir>. Is that because realistic data
+        is hard to fake, or nobody has got to it yet? I'd start with <small hand-made fixtures> for <riskiest
+        step> because <reason>."
+      settled_when: |
+        Every step is tested. Otherwise the reason is the developer's to give.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: >
+        Every source and sink, and whether their schemas are pinned or checked (a data contract, a schema
+        registry, validation on ingest). Fix commits that followed an upstream schema change, and which
+        sources they came from.
+      ask: >
+        "<N> fixes followed schema changes in <sources>, and nothing checks the schema of <x> on ingest. Who
+        owns those sources and consumers, and do they warn you before changing? I'd <check schemas at ingest
+        and fail the run> because <reason>."
+      settled_when: |
+        Never by code alone: the repo shows what breaks, not who owns the other side.
+      grounded_in:
+        - Conway's law
+        - Contract Test
+    - find: >
+        Jobs untouched for a long time, the tables or files they produce, and whether anything in the repo
+        (another step, a dashboard definition, an export) reads those outputs.
+      ask: >
+        "<jobs> haven't changed since <date>, and nothing here reads <their outputs>. Does anyone still use
+        them? I'd <mark them deprecated / remove them> because <reason>."
+      settled_when: |
+        Never by code alone: consumers outside the repo can't be seen.
+      grounded_in:
+        - Never Change a Running System
+        - Chesterton's fence
+    - find: >
+        Every data-quality check, and for each, an analysis of how a step could pass it while producing wrong
+        data (correct row count with a bad join, null rate fine with values shifted by a day, totals right
+        with duplicates cancelling).
+      ask: >
+        "Checks cover <row counts / nulls>. A step could pass them while <failure the analysis found>. I'd add
+        <check> because <reason>. Does that match what has actually gone wrong?"
+      settled_when: >
+        The checks already test values against an independent source, so the analysis finds no cheap way to
+        pass. The agent states that and moves on.
+      grounded_in:
+        - Goodhart's law
+        - Gilb's law
+ml-training:
+  hinge: Whether a run can be reproduced from its config alone, which decides how hyperparameters, seeds and
+    shared state are handled.
+  lenses:
+    - global-state
+    - magic-number
+    - long-method
+    - long-parameter-list
+    - copy-and-paste-programming
+    - lava-flow
+    - assertion-free-test
+    - cargo-cult-programming
+    - swallowed-errors
+    - fail-fast
+    - validate-at-the-boundary
+    - insecure-deserialization
+    - hard-coded-secrets
+    - strategy
+    - pipes-and-filters
+    - functional-core-imperative-shell
+    - immutability-by-default
+    - slow-tests
+    - property-based-test
+    - golden-master-test
+    - amdahls-law
+    - premature-optimization
+  probes:
+    - find: >
+        Which metric is logged and reported, on which split, and how the splits are made. Whether early
+        stopping, hyperparameter search or model selection read the same split the result is reported on. An
+        analysis of how code could raise the metric without improving the goal.
+      ask: >
+        "You report <metric> on <split>, and <early stopping / tuning> also reads <split>, so <consequence>.
+        I'd <keep a split nothing tunes on> because <reason>. Is <metric> the goal, or a stand-in for <X>?"
+      settled_when: >
+        Selection and reporting already use separate splits and a doc says what the metric stands for. The
+        agent confirms it.
+      grounded_in:
+        - Goodhart's law
+        - Confirmation bias
+    - find: >
+        Seed handling and whether configs or scripts run several seeds, held-out or test sets, leakage checks
+        between splits (duplicates, the same entity in both), and notes or experiment logs in the repo about
+        how results were judged.
+      ask: >
+        "Runs use <one seed / N seeds>, and there's <no / a> leakage check between <splits>. When a run beats
+        the baseline, what else do you check? I'd make <N seeds and a held-out set> the bar for calling it a
+        result, because <reason>."
+      settled_when: |
+        A documented evaluation protocol exists and the scripts follow it. The agent confirms it.
+      grounded_in:
+        - Confirmation bias
+    - find: >
+        Tests for data loading, preprocessing, metrics and tensor shapes, and what has none. Whether metrics
+        are tested against hand-computed values.
+      ask: >
+        "<parts> are tested; <metrics / loading> aren't. I'd test <metric code and data loading> first,
+        because a bug there changes every number you report. Agree?"
+      settled_when: |
+        Loading, metrics and shapes are already tested. The agent confirms it and asks only about new code.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: Dependencies added in the last year or so (manifest and lockfile history), and recently added training
+        code such as a new optimiser, scheduler, mixed precision, distributed or parameter-efficient training.
+        For each, whether code calls it directly everywhere or through a thin wrapper, and how many files
+        would change if it were swapped.
+      ask: >
+        "<lib> came in <when> and is called directly in <N> places. Do you expect to swap it? I'd <wrap it /
+        follow its idiom> because <reason>."
+      settled_when: |
+        Never by code alone: whether a library is expected to stay is the developer's judgement.
+      grounded_in:
+        - The Hype Cycle & Amara's Law
+    - find: >
+        The directory layout (notebooks, experiments, a package), what packaging or serving code imports, and
+        what nothing imports.
+      ask: >
+        "<package dir> is imported by <serving / packaging>; <experiments dir> isn't. Is that the line between
+        code that ships and code that gets thrown away? I'd hold <package dir> to the conventions and leave
+        <experiments> free, because <reason>."
+      settled_when: |
+        Packaging config and a doc already draw the line. The agent confirms it.
+      grounded_in:
+        - YAGNI
+distributed:
+  hinge: Where the service boundaries fall, and what each side assumes about the network, consistency and the
+    other side's failures.
+  lenses:
+    - fallacies-of-distributed-computing
+    - distributed-monolith
+    - bounded-context
+    - cap-theorem
+    - outbox
+    - circuit-breaker
+    - idempotency
+    - saga
+    - tolerant-reader
+    - contract-test
+    - breaking-change-surface
+    - shared-database
+    - swallowed-errors
+    - fail-open-vs-fail-closed
+    - least-privilege
+    - defense-in-depth
+    - insecure-deserialization
+    - ssrf
+    - sensitive-data-in-logs
+    - validate-at-the-boundary
+    - over-engineering
+    - over-modularization
+    - erratic-test
+    - anti-corruption-layer
+    - resource-leak
+  probes:
+    - find: >
+        Services and where they live, CODEOWNERS, and commit authors per service. Services that several groups
+        edit, and features that needed several groups.
+      ask: >
+        "<people / teams> work on <services>, and <service> is edited by <several>. Do the boundaries match
+        who owns what? I'd <move X / leave it> because <reason>."
+      settled_when: |
+        One team owns everything, or CODEOWNERS matches the boundaries and history agrees. The agent notes it.
+      grounded_in:
+        - Conway's law
+    - find: >
+        Changes that touched several services at once, version pins or shared libraries between services,
+        coordinated deploy configs, and any doc on release order.
+      ask: >
+        "<N> features needed <services> changed together (<examples>), and <nothing / doc X> says so. Which
+        must ship together? I'd <write the order down / add contract tests / merge them> because <reason>."
+      settled_when: Services deploy independently, contract tests run between them, and the history shows few
+        features that needed several services changed together. The agent confirms it.
+      grounded_in:
+        - Horizontalism
+        - Distributed Monolith
+    - find: >
+        When each service was split out, the commit or decision record that did it and its reason, each
+        service's size, shared databases, and chains of synchronous calls between services.
+      ask: "\"<services> share <database> and call each other synchronously in <chain>. The split came with
+        <commit>, <which says it was for <reason> / with no reason given>. <Does that still hold? / What did
+        it solve that one deployable with modules wouldn't?> I'd <merge X and Y into one deployable / give X
+        its own data / leave it> because <reason>.\""
+      settled_when: >
+        A decision record names the problem and services are independent (own data, async or few calls). The
+        agent cites it.
+      grounded_in:
+        - Blind Pattern Following
+        - Gall's law
+    - find: >
+        Compare the architecture diagram or docs with what the code actually calls: HTTP clients and URLs,
+        queues, shared databases, and deploy config. List calls that aren't on the diagram and arrows with no
+        code behind them.
+      ask: >
+        "The diagram in <doc> shows <A to B>, but the code also has <calls> (<files>). Is the diagram out of
+        date, or are those calls the problem? I'd <update the diagram / route them through X> because
+        <reason>."
+      settled_when: >
+        The diagram matches the code. What runs in production can still differ, so the agent says it checked
+        the code only.
+      grounded_in:
+        - The map is not the territory
+    - find: >
+        Timeout and retry settings, idempotency keys, circuit breakers, fix commits about timeouts, partial
+        failures or duplicate requests, and any test that injects failures between services.
+      ask: >
+        "<calls> have <no timeout / retries without idempotency keys> (<files>), and <fix commits> were about
+        <x>. Which failures have you seen that tests never reproduce? I'd require <timeouts and idempotent
+        retries> on every remote call because <reason>."
+      settled_when: |
+        Never fully: production failures aren't in the repo, though the gaps the agent found always are.
+      grounded_in:
+        - Production Bugs
+        - Fallacies of distributed computing
+event-driven:
+  hinge: What a message promises (its schema, its delivery guarantee, its order) and what a handler does when it
+    sees one twice, late, malformed or never.
+  lenses:
+    - fallacies-of-distributed-computing
+    - outbox
+    - idempotency
+    - domain-event
+    - tolerant-reader
+    - swallowed-errors
+    - saga
+    - breaking-change-surface
+    - contract-test
+    - validate-at-the-boundary
+    - insecure-deserialization
+    - distributed-monolith
+    - fail-open-vs-fail-closed
+    - circuit-breaker
+    - murphys-law
+    - sensitive-data-in-logs
+    - erratic-test
+    - functional-core-imperative-shell
+    - hard-to-test-code
+    - fake-over-mock
+    - event-sourcing
+    - cqrs
+    - bounded-context
+    - littles-law
+  probes:
+    - find: >
+        Where each topic's or queue's schema is defined (a registry, a shared package, inline in producers),
+        CODEOWNERS on those files, and whether a compatibility check runs in CI.
+      ask: >
+        "Schemas for <topics> live in <place>, edited by <people>, and <no / a> compatibility check runs. Who
+        must agree before a schema changes? I'd <require a compatible-change check and the owner's review>
+        because <reason>."
+      settled_when: |
+        Schemas live in one place with owners and a compatibility check in CI. The agent confirms it.
+      grounded_in:
+        - Conway's law
+    - find: >
+        Broker and client configuration (acknowledgement mode, delivery guarantee, partition keys, ordering),
+        and what each handler assumes (order, exactly once, no duplicates), with files.
+      ask: >
+        "The broker is configured for <at-least-once, ordered per key X>, but <handlers> assume <exactly once
+        / global order> (<files>). Does production behave as the config says? I'd make every handler
+        <idempotent on key Y> because <reason>."
+      settled_when: >
+        Handlers already tolerate what the config allows. The agent confirms it, noting production can differ
+        from config.
+      grounded_in:
+        - The map is not the territory
+        - Fallacies of distributed computing
+    - find: >
+        Dedup tables, dead-letter queues, retry policies, fix commits mentioning duplicates, ordering, late
+        events or poison messages, and any test that sends one of those.
+      ask: >
+        "There's <a dead-letter queue / dedup on X>, and <fix commits> were about <y>, but no test sends
+        <duplicates / out-of-order events>. Which have you seen in production? I'd add tests for <x> to every
+        new handler because <reason>."
+      settled_when: |
+        Never fully: what happened in production isn't in the repo.
+      grounded_in:
+        - Production Bugs
+        - Murphy's law
+    - find: >
+        How many features communicate through events versus direct calls, when events came in, decision
+        records or commits giving the reason, and handlers that exist only to forward a call.
+      ask: >
+        "<N> of <M> features use events, and <handlers> just forward a call. Did you go event-driven for
+        <need>, or as the house style? I'd <require events only where X> because <reason>."
+      settled_when: |
+        A decision record states the need and usage fits it. The agent cites it.
+      grounded_in:
+        - Blind Pattern Following
+serverless:
+  hinge: What each function is allowed to touch and trust at its entry point, what runs at cold start versus per
+    invocation, and how far the system is cut into functions.
+  lenses:
+    - least-privilege
+    - hard-coded-secrets
+    - validate-at-the-boundary
+    - broken-object-level-authorization
+    - injection
+    - init-time-side-effects
+    - idempotency
+    - global-state
+    - parse-dont-validate
+    - mass-assignment
+    - trusting-client-input
+    - ssrf
+    - missing-rate-limiting
+    - sensitive-data-in-logs
+    - error-handling-policy
+    - inconsistent-error-contract
+    - swallowed-errors
+    - fail-fast
+    - fat-controller
+    - fallacies-of-distributed-computing
+    - over-modularization
+    - distributed-monolith
+    - transaction-script
+    - hard-to-test-code
+    - n-plus-one-queries
+  probes:
+    - find: >
+        The list of functions, their sizes, code shared between them, functions that call each other, and the
+        commits or docs that explain each split.
+      ask: >
+        "There are <N> functions; <pairs> always call each other, and <functions> share most of their code.
+        What did each split buy you? I'd <merge X and Y / keep them> because <reason>."
+      settled_when: |
+        A doc explains the split and functions are independent. The agent confirms it.
+      grounded_in:
+        - Blind Pattern Following
+    - find: >
+        Where each function's permissions are defined (its own role or a shared one), wildcard actions or
+        resources, how the permission sets grew in history, and CODEOWNERS on those files.
+      ask: >
+        "<N> functions share role <x> with <wildcards>; <k> have their own. Who reviews permission changes
+        now? I'd give each function its own minimal role, reviewed by <owner>, because <reason>."
+      settled_when: |
+        Each function already has its own scoped permissions with owners. The agent confirms it.
+      grounded_in:
+        - Least privilege
+    - find: >
+        Timeout, memory, concurrency and retry settings, work done at module load versus per invocation, any
+        test that runs against a deployed stage, and fix commits about cold starts, timeouts or retries.
+      ask: >
+        "<function> has <timeout X> but calls <Y>, and <fix commits> were about <z>. Nothing runs against a
+        deployed stage. Which behaviour have you only seen once deployed? I'd add <a smoke test on a stage>
+        because <reason>."
+      settled_when: |
+        A test suite already runs against a deployed stage. The agent confirms it.
+      grounded_in:
+        - The map is not the territory
+        - Production Bugs
+    - find: >
+        Direct provider SDK imports in business logic versus calls through the project's own interfaces, with
+        counts and which style recent functions use.
+      ask: >
+        "<N> functions call the provider SDK directly from business logic, <M> go through <interface>, and the
+        newest use <style>. Which should new functions do? I'd <recommend> because <testing without the cloud
+        / less code>."
+      settled_when: |
+        One style is used throughout and a doc names it. The agent confirms it.
+      grounded_in:
+        - Ports and Adapters
+        - Blind Pattern Following
+iac:
+  hinge: Where shared configuration lives and when to extract a module, kept against least privilege, no secrets
+    in code, and module inputs and outputs treated as a versioned contract.
+  lenses:
+    - dry
+    - wrong-abstraction
+    - copy-and-paste-programming
+    - least-privilege
+    - hard-coded-secrets
+    - secure-by-default
+    - defense-in-depth
+    - sensitive-data-in-logs
+    - breaking-change-surface
+    - semantic-versioning-discipline
+    - deprecation-policy
+    - law-of-leaky-abstractions
+    - law-of-unintended-consequences
+    - cargo-cult-programming
+    - over-engineering
+    - inner-platform-effect
+    - boat-anchor
+    - magic-number
+    - teslers-law
+    - kiss
+    - manual-intervention
+    - validate-at-the-boundary
+    - hyrums-law
+  probes:
+    - find: >
+        Whether CI runs a scheduled plan to detect drift, ignore-changes blocks, imported resources, data
+        sources reading resources nothing here manages, and comments or commits about manual changes in the
+        console.
+      ask: >
+        "<N> resources ignore changes to <attributes>, <data sources> read things nothing here manages, and CI
+        <does / doesn't> detect drift. When live infrastructure and the code disagree, which wins? I'd make
+        the code win and <add a drift check> because <reason>."
+      settled_when: >
+        Drift is checked on a schedule and nothing is ignored. The agent confirms it; what the live state
+        holds now isn't in the repo.
+      grounded_in:
+        - The map is not the territory
+    - find: >
+        Prevent-destroy guards, resources untouched for a long time, warning comments, state moves and
+        imports, and commits that reverted an apply.
+      ask: >
+        "<resources> have <guards / warnings> and haven't changed since <date>. Does nobody dare touch them,
+        and why? I'd <require X before changing them> because <reason>."
+      settled_when: |
+        Never by code alone: the repo shows the guards, not the fear behind them.
+      grounded_in:
+        - Never Change a Running System
+    - find: >
+        Pipelines that run apply and on which branches, docs on manual applies, how credentials are
+        configured, CODEOWNERS, and who authored the commits that changed production.
+      ask: >
+        "Production applies run <from CI on main / by hand>, and only <people> changed <prod> in the last
+        <period>. Could someone else apply safely if they were away? I'd <move applies into CI with approval>
+        because <reason>."
+      settled_when: |
+        Applies run only through CI with an approval step and a runbook. The agent confirms it.
+      grounded_in:
+        - Bus factor
+    - find: "Validation, lint and policy checks in CI (format, validate, static security scanners, policy as code),
+        module tests, and plan tests. An analysis of which risky changes would pass all of them: public
+        storage or network exposure, missing encryption, wide permissions, destroyed or replaced stateful
+        resources, values that differ between environments."
+      ask: "\"CI runs <checks>; nothing tests <modules>. A change that <risk the analysis found> would pass all of
+        them. I'd add <a policy check for X> first because <reason>. Is there a risk you worry about more?\""
+      settled_when: |
+        Policy checks and module tests already cover the risks the agent found. The agent confirms it.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: >
+        The module and environment layout, how the environments actually differ (compare their variable
+        files), and code copied between environments.
+      ask: "\"Environments differ only in <variables>, but each keeps its own copy of <N files> <(the layout came
+        from <template>, per <commit / README>)>. Is keeping them separate deliberate, for example to change
+        one environment at a time? I'd <share one module and pass variables> because <reason>.\""
+      settled_when: |
+        The layout already tracks how environments differ, with no copies. The agent confirms it.
+      grounded_in:
+        - Blind Pattern Following
+embedded:
+  hinge: How hardware access and shared state are fenced off, so the logic can be tested off-target and fails
+    safe on it.
+  lenses:
+    - global-state
+    - magic-number
+    - resource-leak
+    - hard-to-test-code
+    - state
+    - premature-optimization
+    - murphys-law
+    - infrastructure-ignorance
+    - fail-fast
+    - fail-open-vs-fail-closed
+    - manual-intervention
+    - singleton
+    - spaghetti-code
+    - functional-core-imperative-shell
+    - bridge
+    - make-illegal-states-unrepresentable
+    - validate-at-the-boundary
+    - swallowed-errors
+    - frequent-debugging
+    - secure-by-default
+    - long-method
+    - dependency-injection
+    - flyweight
+  probes:
+    - find: >
+        Fix commits sorted by where the bug showed (on hardware, in the field, off target), what off-target
+        tests cover (logic versus drivers), and whether a hardware-in-the-loop setup exists.
+      ask: "\"<k> of the last <N> fixes only showed on hardware (<examples>), in code off-target tests don't reach
+        because <it calls registers directly / it is timing-dependent>. I'd <move logic out of X behind an
+        interface> so it can be tested off target, because <reason>. Were there field bugs that don't show in
+        the history?\""
+      settled_when: |
+        Never fully: field bugs aren't all in the repo.
+      grounded_in:
+        - Production Bugs
+    - find: >
+        Modules with no changes for a long time, certification or safety markers (standard references,
+        deviation records, safety headers), and comments that warn people off.
+      ask: >
+        "<modules> haven't changed since <date>, and <some> carry <certification markers>. Certified, proven,
+        or feared? I'd exempt <certified ones> from new conventions and <require characterisation tests> for
+        the rest, because <reason>."
+      settled_when: Certification records list exactly which modules are frozen, and no other module is long
+        untouched. The agent cites them. Untouched modules without certification are never settled by code
+        alone.
+      grounded_in:
+        - Never Change a Running System
+    - find: |
+        Authors of drivers, interrupt handlers and the linker script, and what is written down about them.
+      ask: >
+        "Only <person> has changed <drivers / interrupt handlers / linker script>, and <little / nothing> is
+        written down. Could anyone else change them safely? I'd write <X> down first because <reason>."
+      settled_when: >
+        Several people change these parts and docs exist. For a solo developer the ask is only what to write
+        down.
+      grounded_in:
+        - Bus factor
+    - find: >
+        Watchdog configuration, fault and assert handlers, safe-state code, and how each module handles errors
+        (reset, safe state, carry on degraded).
+      ask: >
+        "<modules> <reset / enter a safe state / carry on> on failure (<files>). What must happen when it
+        fails on the device? I'd make <behaviour> the system-wide rule, with <exceptions>, because <reason>."
+      settled_when: |
+        One system-wide policy is implemented and documented. The agent confirms it.
+      grounded_in:
+        - Murphy's law
+        - Inversion
+games:
+  hinge: How game state is owned and shared between systems, and which hot paths are allowed to trade clarity
+    for speed.
+  lenses:
+    - god-object
+    - global-state
+    - premature-optimization
+    - state
+    - composition-over-inheritance
+    - observer
+    - command
+    - functional-core-imperative-shell
+    - magic-number
+    - large-class
+    - long-method
+    - singleton
+    - hard-to-test-code
+    - manual-intervention
+    - trusting-client-input
+    - flyweight
+    - prototype
+    - data-clumps
+    - spaghetti-code
+    - dry
+    - pareto-principle
+    - memento
+    - exceptions-for-control-flow
+    - resource-leak
+  probes:
+    - find: "Frame-time and memory budgets or checks in the code or CI, and platform-specific branches. For features
+        merged in the last year or so: later commits that reference the same issue or pull request, or touch
+        the same files within a few weeks with a fix-style message. Sort them by cause: performance, memory on
+        the weakest platform, certification."
+      ask: >
+        "Features mostly came back for <cause> (<examples>), and <no / a> budget check runs. I'd require
+        <budget X> from a feature's first commit because <reason>. Is that what holds features at almost
+        done?"
+      settled_when: |
+        Budgets are already checked in CI. The agent confirms it.
+      grounded_in:
+        - Ninety-ninety rule
+    - find: |
+        Which systems have automated tests and which don't, and what recent fixes touched.
+      ask: >
+        "<systems> are tested and <systems> aren't; recent fixes were mostly in <x>. Should <x> stay
+        play-tested only? I'd add tests for <deterministic logic in x> because <reason>."
+      settled_when: |
+        Coverage already matches where fixes land. The agent confirms it.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: >
+        Code written for speed (manual pooling, unsafe code, SIMD, cache-layout tricks, hand-unrolled loops),
+        and for each, whether a comment, commit or benchmark points to a measurement.
+      ask: >
+        "<N> optimisations cite a profile or benchmark; <M> don't (<files>). I'd require a measurement for new
+        ones and <leave / simplify> the unmeasured ones, because <reason>."
+      settled_when: |
+        Every optimisation already links a measurement. The agent confirms it.
+      grounded_in:
+        - Premature optimization
+        - Gilb's law
+    - find: >
+        The project's age and history, release and build pipelines, platform targets, and store or
+        certification config.
+      ask: >
+        "This has <no release pipeline and N months of history / a store build and platform targets>. Is it a
+        prototype that may be thrown away, or something you'll maintain for years? I'd <recommend> because
+        <reason>."
+      settled_when: |
+        The signals are unambiguous (shipping builds on several platforms). The agent confirms it.
+      grounded_in:
+        - YAGNI
+        - Gall's law
+plugins-extensions:
+  hinge: Living inside someone else's process and API, using only the public surface, cleaning up after itself,
+    and never taking the host down when something fails.
+  lenses:
+    - init-time-side-effects
+    - fail-open-vs-fail-closed
+    - swallowed-errors
+    - error-handling-policy
+    - resource-leak
+    - global-state
+    - adapter
+    - tolerant-reader
+    - hyrums-law
+    - breaking-change-surface
+    - contract-test
+    - liskov-substitution-principle
+    - least-privilege
+    - secure-by-default
+    - validate-at-the-boundary
+    - principle-of-least-astonishment
+    - zawinskis-law
+    - yagni
+    - speculative-generality
+    - dead-code
+    - incomplete-library-class
+    - inappropriate-intimacy
+    - long-method
+    - hard-to-test-code
+    - functional-core-imperative-shell
+  probes:
+    - find: >
+        Every host API the plugin uses, checked against the host's public docs or types: private symbols,
+        internal imports, patched host objects, reliance on undocumented timing or order.
+      ask: >
+        "<N> calls reach into <internal host APIs> (<files>). I'd <wrap them in one module / replace them with
+        <public API>> because <the host can change them without warning>. Are any unavoidable?"
+      settled_when: |
+        The plugin uses only the public API. The agent confirms it.
+      grounded_in:
+        - Hyrum's law
+    - find: Helpers that do what the host's API already offers, with the host API that covers each. For each, the
+        minimum host version the plugin supports (manifest, CI) against the host version that introduced that
+        API (host changelog or docs), and any comment or commit saying why the helper exists.
+      ask: >
+        "<helpers> do what <host API> already does. I'd switch to the host's version because <reason>. Is
+        there a reason I'm missing, such as supporting older host versions?"
+      settled_when: |
+        No overlap found. The agent says so.
+      grounded_in:
+        - Not Invented Here
+    - find: |
+        What tests run against (a real host, a fake host, nothing) and which style recent tests use.
+      ask: >
+        "Tests run against <real host / fake / nothing>. I'd have new code follow <approach> because <reason>.
+        Agree?"
+      settled_when: Tests exist and all run one way (a real host or a fake), recent tests included. The agent
+        confirms it. No tests at all is always raised.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: >
+        The host versions pinned in the manifest and CI, whether CI tests against the latest host, and fix
+        commits that followed a host release.
+      ask: >
+        "CI tests against <host version X only>, and <fix commits> followed host releases. I'd add a run
+        against the latest host because <reason>. Should that be required?"
+      settled_when: |
+        CI already tests the minimum supported and latest host. The agent confirms it.
+      grounded_in:
+        - Hyrum's law
+        - Production Bugs
+plugin-host:
+  hinge: The extension contract, treated as a public API, and how much a plugin may do, see and break when it
+    misbehaves.
+  lenses:
+    - microkernel
+    - breaking-change-surface
+    - versioned-plugin-protocol
+    - hyrums-law
+    - contract-test
+    - semantic-versioning-discipline
+    - deprecation-policy
+    - non-exhaustive-types
+    - liskov-substitution-principle
+    - interface-bloat
+    - least-privilege
+    - secure-by-default
+    - fail-open-vs-fail-closed
+    - validate-at-the-boundary
+    - parse-dont-validate
+    - insecure-deserialization
+    - error-handling-policy
+    - swallowed-errors
+    - init-time-side-effects
+    - global-state
+    - principle-of-least-astonishment
+    - law-of-leaky-abstractions
+    - inner-platform-effect
+    - inappropriate-intimacy
+    - resource-leak
+  probes:
+    - find: >
+        The documented plugin contract compared with what plugins in reach (bundled, examples, tests) actually
+        use: internal objects, undocumented hooks, call order. Issues from plugin authors about breakage.
+      ask: >
+        "Plugins in this repo rely on <undocumented behaviour> (<files>). I'd <document it / give them a
+        public alternative> because <reason>. What else do outside authors rely on?"
+      settled_when: |
+        Never fully: outside plugins can't be seen from here.
+      grounded_in:
+        - Hyrum's law
+    - find: >
+        CODEOWNERS on the contract files, an RFC or proposal process, changelog entries for contract changes,
+        and whether issues from plugin authors preceded those changes.
+      ask: >
+        "Contract changes are made by <people>, and <no / a> process asks plugin authors first. Who decides,
+        and should authors be heard before a change ships? I'd <recommend> because <reason>."
+      settled_when: |
+        A documented process exists and the history follows it. The agent confirms it.
+      grounded_in:
+        - Conway's law
+    - find: >
+        Compatibility shims, deprecated contract parts still supported, workarounds around the plugin system,
+        and TODOs about redesigning it.
+      ask: >
+        "<parts> carry <shims / workarounds> (<files>). Would you design them differently now, and what keeps
+        them? I'd <recommend> because <reason>."
+      settled_when: |
+        Never by code alone: why the parts stay is the developer's call.
+      grounded_in:
+        - Emotional Attachment
+        - Sunk cost fallacy
+    - find: >
+        Whether the plugin contract is defined in one place (a types file, a schema) and whether CI compares
+        it across releases.
+      ask: >
+        "The contract <is in <file> / is spread across <files>>. I'd <keep it in one file and check it across
+        releases> because <reason>."
+      settled_when: |
+        It's already in one place with a check in CI. The agent confirms it.
+      grounded_in:
+        - Breaking-Change Surface
+        - Hyrum's law
+compilers-tooling:
+  hinge: How the tree and its passes are represented, how diagnostics and error recovery work, and
+    output-pinning tests that catch regressions without freezing incidental detail.
+  lenses:
+    - make-illegal-states-unrepresentable
+    - golden-master-test
+    - property-based-test
+    - visitor
+    - switch-statements
+    - composite
+    - pipes-and-filters
+    - long-method
+    - error-handling-policy
+    - postels-law
+    - parse-dont-validate
+    - fragile-test
+    - pesticide-paradox
+    - premature-optimization
+    - flyweight
+    - immutability-by-default
+    - builder
+    - parallel-inheritance-hierarchies
+    - breaking-change-surface
+    - hyrums-law
+    - principle-of-least-astonishment
+    - functional-core-imperative-shell
+    - global-state
+    - swallowed-errors
+  probes:
+    - find: >
+        Authors per area (type checker, code generation, parser error recovery, the optimiser) over the whole
+        history and the last year, and what is written down about each: design docs, module-level comments,
+        references to the papers or algorithms they implement.
+      ask: >
+        "Only <person> has changed <area> in <period>, and what's written down is <a few comments / nothing>.
+        If they were away, could anyone change it safely? I'd write down <the invariants of X> first, because
+        <reason>."
+      settled_when: >
+        Several people change each area and design docs exist. On a solo project the ask shrinks to what
+        should be written down.
+      grounded_in:
+        - Bus factor
+    - find: >
+        Reviews on changes to those areas: who reviewed, how long the review took relative to the diff, and
+        whether review comments discuss the algorithm, its invariants and its test cases or only naming and
+        style.
+      ask: >
+        "Changes to <area> were reviewed by <people>, and the comments are mostly about <style / the
+        algorithm>. I'd require <a test case for each new rule / a second reviewer who knows the area> because
+        <reason>. Does that fit how you work?"
+      settled_when: |
+        Reviews already engage with the algorithm. For a solo maintainer the agent notes it and moves on.
+      grounded_in:
+        - Linus's law
+    - find: >
+        Fix commits and linked issues, and whether the snapshot tests covering that code existed before the
+        fix. Commits that updated snapshots alongside a code change without saying why, and commits that
+        re-accepted many snapshots at once.
+      ask: >
+        "<N> fixes were for bugs the snapshots should have shown, and <commits> re-accepted <k> snapshots in
+        bulk. Has a snapshot ever been accepted while wrong? I'd require a stated reason for every snapshot
+        change in a commit, because a bulk-accepted snapshot checks nothing."
+      settled_when: >
+        Never fully: the history shows fixes, not which ones reached users or which snapshots were wrong when
+        accepted.
+      grounded_in:
+        - Production Bugs
+        - Buggy Tests
+    - find: >
+        Fuzz targets, property tests, input generators, reducers and corpus directories, and whether CI runs
+        them.
+      ask: >
+        "Tests cover only hand-written programs; nothing generates inputs. I'd add <a fuzz target for the
+        parser / a property test for X> because hand-written cases stop finding new bugs after a while.
+        Agree?"
+      settled_when: |
+        Fuzzing or generated inputs already run in CI. The agent confirms it.
+      grounded_in:
+        - Pesticide paradox
+        - Property-Based Test
+databases-storage:
+  hinge: What the code guarantees about durability and consistency when a write fails halfway, and how far the
+    storage engine's behaviour is allowed to leak into callers.
+  lenses:
+    - resource-leak
+    - cap-theorem
+    - murphys-law
+    - property-based-test
+    - injection
+    - law-of-leaky-abstractions
+    - variant-drift
+    - n-plus-one-queries
+    - unit-of-work
+    - data-mapper
+    - repository
+    - breaking-change-surface
+    - contract-test
+    - swallowed-errors
+    - fail-fast
+    - premature-optimization
+    - littles-law
+    - erratic-test
+    - pesticide-paradox
+    - fake-over-mock
+    - slow-tests
+    - event-sourcing
+    - identity-map
+    - least-privilege
+    - primitive-obsession
+  probes:
+    - find: >
+        Engine parts with no changes for a long time, who wrote them, how much other code depends on them, and
+        comments that warn people off. Whether those parts have tests that pin their behaviour.
+      ask: >
+        "<parts> haven't changed since <date>, only <person> has ever changed them, and <they have / lack>
+        tests that pin their behaviour. Is that confidence or fear? I'd <require characterisation tests before
+        any change> because <reason>."
+      settled_when: |
+        Never by code alone: the repo shows which parts are untouched, not why.
+      grounded_in:
+        - Never Change a Running System
+    - find: >
+        How writes reach disk (fsync and its error handling, write ordering, checksums), what tests exist for
+        failure (crash injection, fault injection, a model check, randomised testing against a reference), and
+        fix commits about durability or corruption.
+      ask: >
+        "<fix commits> were about <torn writes / lost fsync errors>, and no test <injects crashes / faults>.
+        Which durability or corruption bugs reached users? I'd add <crash injection for X> because <reason>."
+      settled_when: >
+        Never fully: which bugs reached users isn't in the repo, though the testing gaps the agent found
+        always are.
+      grounded_in:
+        - Production Bugs
+        - Murphy's law
+    - find: "Authors of the recovery and on-disk format code over the whole history and the last year. For changes
+        to it: who reviewed, whether anyone other than the author did, and whether review comments discuss
+        invariants, crash cases and tests or only naming and style. What is written down about its
+        invariants."
+      ask: >
+        "Only <person> changes and reviews <recovery / format code>. Who else could review a change to it? I'd
+        <write down its invariants / pair a second reviewer> because <reason>."
+      settled_when: >
+        Several reviewers already engage with those changes. For a solo maintainer the ask is only what to
+        write down.
+      grounded_in:
+        - Bus factor
+        - Linus's law
+    - find: >
+        On-disk and wire format version constants, upgrade and downgrade code, compatibility tests, fixtures
+        written by older versions, and what the docs promise.
+      ask: >
+        "Formats carry <version>, and fixtures cover <versions>. Which formats must older versions still read,
+        and must newer versions still write for old readers? I'd <promise X and test it with fixtures> because
+        <reason>."
+      settled_when: |
+        The promise is documented and fixtures cover it. The agent cites it and asks only whether it holds.
+      grounded_in:
+        - Breaking-Change Surface
+        - Postel's Law
+scientific:
+  hinge: Whether results can be trusted and reproduced, which decides how constants, units, inputs and tests of
+    the numerics are handled.
+  lenses:
+    - long-method
+    - magic-number
+    - global-state
+    - assertion-free-test
+    - long-parameter-list
+    - data-clumps
+    - value-object
+    - primitive-obsession
+    - duplicate-code
+    - lava-flow
+    - property-based-test
+    - golden-master-test
+    - validate-at-the-boundary
+    - reinventing-the-wheel
+    - premature-optimization
+    - amdahls-law
+    - gustafsons-law
+    - spaghetti-code
+    - strategy
+    - immutability-by-default
+    - functional-core-imperative-shell
+    - fail-fast
+    - swallowed-errors
+  probes:
+    - find: >
+        Tests against known analytic cases, comparisons with another implementation or published values,
+        convergence checks, seed handling, and scripts or notes that validate results.
+      ask: >
+        "Results are checked against <X / nothing I could find>. When a result looks right, what do you check
+        before you believe it? I'd add <an analytic case for Y> because <a plausible-looking result is the
+        easiest one to trust wrongly>."
+      settled_when: |
+        A validation suite against known cases runs regularly. The agent confirms it.
+      grounded_in:
+        - Confirmation bias
+    - find: |
+        Which numerical routines have tests, and which are only exercised by scripts that produce plots.
+      ask: >
+        "<routines> have tests; <routines> are only checked by plots. I'd test <the riskiest one> first,
+        against <a known case>, because <reason>. Agree?"
+      settled_when: |
+        All numerical code is tested. The agent confirms it and asks only about new code.
+      grounded_in:
+        - Developers Not Writing Tests
+    - find: >
+        An analysis of whether someone else could rerun the analysis from scratch: environment pinning
+        (lockfile, container), where input data comes from and whether it's versioned, one entry point (a
+        Makefile or workflow file), seeds, hard-coded paths, and manual steps in the README.
+      ask: >
+        "Rerunning from scratch would need <missing pieces: an unpinned environment, data at a local path, a
+        manual step>. I'd fix <X> first because <reason>. Anything else only you know?"
+      settled_when: |
+        A pinned environment and one command reproduce the results. The agent confirms it.
+      grounded_in:
+        - Bus factor
+    - find: >
+        Routines written by hand that a standard library provides (linear algebra, integrators, statistics),
+        with any comment or commit saying why.
+      ask: >
+        "<routines> do what <library> does. I'd switch because <reason>. Is there a reason to keep them, such
+        as matching a published method exactly?"
+      settled_when: |
+        A reason is recorded that still holds. The agent cites it.
+      grounded_in:
+        - Not Invented Here
+    - find: >
+        Signals of how long the code is meant to live: packaging, version tags, tests, a citation file, other
+        projects that depend on it, and how the history clusters around deadlines.
+      ask: >
+        "This has <signals>. Is it code for one paper, or meant to be maintained and reused? I'd <recommend a
+        light or a full set of conventions> because <reason>."
+      settled_when: |
+        The signals are unambiguous (a released package with dependents). The agent confirms it.
+      grounded_in:
+        - YAGNI
+platforms:
+  hinge: How tenants are kept apart and given only what they need, and what the platform promises the teams and
+    customers building on its contracts, since every observable behaviour ends up depended on.
+  lenses:
+    - broken-object-level-authorization
+    - tenant-isolation
+    - least-privilege
+    - breaking-change-surface
+    - hyrums-law
+    - defense-in-depth
+    - validate-at-the-boundary
+    - injection
+    - shared-database
+    - missing-rate-limiting
+    - inconsistent-error-contract
+    - deprecation-policy
+    - contract-test
+    - secure-by-default
+    - ssrf
+    - error-handling-policy
+    - mass-assignment
+    - parse-dont-validate
+    - trusting-client-input
+    - sensitive-data-in-logs
+    - hard-coded-secrets
+    - tolerant-reader
+    - inner-platform-effect
+    - swallowed-errors
+    - fat-controller
+  probes:
+    - find: >
+        The platform's module and service boundaries, CODEOWNERS, which teams edit what, and which consuming
+        teams' requests (issues, commits referencing them) touched which modules.
+      ask: >
+        "Boundaries follow <platform teams' split>, and requests from <consumer> touched <several modules>.
+        Should the boundaries follow the platform's teams or what the teams building on it need? I'd
+        <recommend> because <reason>."
+      settled_when: >
+        CODEOWNERS matches the boundaries and consumer requests land in one module each. The agent confirms it.
+      grounded_in:
+        - Conway's law
+    - find: >
+        Commits or pull requests for customer-facing features that spanned several platform teams' code, and
+        how long those took compared with single-team ones.
+      ask: >
+        "<N> features needed changes from <teams> (<examples>), and took <longer>. I'd <recommend> because
+        <reason>. Is that coordination something you want conventions to reduce?"
+      settled_when: |
+        Features rarely span teams. The agent confirms it.
+      grounded_in:
+        - Horizontalism
+    - find: >
+        Platform components (orchestrators, meshes, gateways, queues), when each came in, and decision records
+        or commits that give a reason.
+      ask: >
+        "<component> came in with <commit> (<reason / none given>). Would you pick it again today? I'd
+        <recommend> because <reason>."
+      settled_when: |
+        Decision records give reasons that still hold. The agent cites them.
+      grounded_in:
+        - Blind Pattern Following
+        - Emotional Attachment
+    - find: >
+        How tenants are kept apart in code (tenant filters on queries, row-level security, per-tenant keys),
+        queries or endpoints without the tenant filter, tests that try cross-tenant access, contract tests for
+        what consumers rely on, and fix commits mentioning tenants or contract changes.
+      ask: >
+        "<queries> don't filter by tenant (<files>), and no test tries cross-tenant access. Which recent
+        incidents came from a leak or a contract change? I'd add <a cross-tenant test / a contract check>
+        because <reason>."
+      settled_when: |
+        Never fully: incidents aren't in the repo, though missing tenant filters are always raised.
+      grounded_in:
+        - Production Bugs
+        - Tenant isolation

@@ -1,0 +1,476 @@
+# Tell for the lens `copy-and-paste-programming`. Verdict: keep. 34 of 37 sampled hits real (37 hits in all).
+# Detectors: regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/copy-and-paste-programming-py
+        name: Pasted block repeated in one file
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\s\S]*)(?=[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n(?:[^\n]*\n){0,3}[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n|[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n(?:[^\n]*\n){0,2}[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n|[^\n]*\n[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n(?:[^\n]*\n)?[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n|[^\n]*\n[^\n]*\n[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[^,(\[{\s][ \t]*\n)(?<blk>(?:[ \t]*\S[^\n]{9,}\n){5})[\s\S]*?^\k<blk>
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out."
+        examples:
+          good:
+            - path: app/x.py
+              code: |
+                def a(x):
+                    y = x + 1
+                    return y
+            - path: app/x.py
+              code: |
+                def get_one(
+                    session: Session,
+                    user_id: int,
+                    limit: int = 100,
+                    offset: int = 0,
+                    order: str = "asc",
+                ):
+                    return session.get(user_id)
+
+                def get_two(
+                    session: Session,
+                    user_id: int,
+                    limit: int = 100,
+                    offset: int = 0,
+                    order: str = "asc",
+                ):
+                    return session.find(user_id)
+          bad:
+            - path: app/x.py
+              code: |
+                def room(b):
+                    net = b.nights * b.rate
+                    vat = net * 0.25 if b.country == "DK" else net * 0.2
+                    total = net + vat
+                    log.info("total %s", total)
+                    return round(total, 2)
+
+                def extras(b):
+                    net = b.nights * b.rate
+                    vat = net * 0.25 if b.country == "DK" else net * 0.2
+                    total = net + vat
+                    log.info("total %s", total)
+                    return round(total, 2)
+            - path: app/x.py
+              code: |
+                def room2(b):
+                    net = b.nights * b.rate
+                    vat = net * 0.25 if b.country == "DK" else net * 0.2
+                    total = net + vat
+                    log.info("total %s", total)
+                    return round(total, 2)
+
+                def extras(b):
+                    net = b.nights * b.rate
+                    vat = net * 0.25 if b.country == "DK" else net * 0.2
+                    total = net + vat
+                    log.info("total %s", total)
+                    return round(total, 2)
+      - id: lens/copy-and-paste-programming-ts
+        name: Pasted block repeated in one file
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)(__tests__|tests?|e2e|cypress)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: "^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\\s\\S]*)(?=[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,3}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,2}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n)?[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n)(?<blk>(?:[ \\t]*\\S[^\\n]{9,}\\n){5})[\\s\\S]*?^\\k<blk>"
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out."
+        examples:
+          good:
+            - path: src/x.ts
+              code: |
+                export const a = (x: number) => x + 1;
+            - path: src/x.ts
+              code: |
+                export async function getOne(
+                  websiteId: string,
+                  filters: QueryFilters,
+                  options: QueryOptions,
+                  timezone: string,
+                  unit: string,
+                ) { return a(websiteId); }
+                export async function getTwo(
+                  websiteId: string,
+                  filters: QueryFilters,
+                  options: QueryOptions,
+                  timezone: string,
+                  unit: string,
+                ) { return b(websiteId); }
+          bad:
+            - path: src/x.ts
+              code: |
+                function room(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+                function extras(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+            - path: src/x.ts
+              code: |
+                function room2(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+                function extras(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+      - id: lens/copy-and-paste-programming-js
+        name: Pasted block repeated in one file
+        files: \.(js|jsx|mjs|cjs)$
+        exclude: (^|/)(__tests__|tests?|e2e|cypress)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: "^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\\s\\S]*)(?=[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,3}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,2}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n)?[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n)(?<blk>(?:[ \\t]*\\S[^\\n]{9,}\\n){5})[\\s\\S]*?^\\k<blk>"
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out."
+        examples:
+          good:
+            - path: src/x.js
+              code: |
+                export const a = (x) => x + 1;
+            - path: src/x.js
+              code: |
+                const schemaA = {
+                  name: string().min(1),
+                  email: string().email(),
+                  age: number().int(),
+                  country: string().length(2),
+                  active: boolean(),
+                };
+                const schemaB = {
+                  name: string().min(1),
+                  email: string().email(),
+                  age: number().int(),
+                  country: string().length(2),
+                  active: boolean(),
+                };
+          bad:
+            - path: src/x.js
+              code: |
+                function room(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+                function extras(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+            - path: src/x.js
+              code: |
+                function room2(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+                function extras(b) {
+                  const net = b.nights * b.rate;
+                  const vat = b.country === "DK" ? net * 0.25 : net * 0.2;
+                  const total = net + vat;
+                  console.log("total", total);
+                  return Math.round(total);
+                }
+      - id: lens/copy-and-paste-programming-go
+        name: Pasted block repeated in one file
+        files: \.go$
+        exclude: _test\.go$|(^|/)(tests?|integration)/|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\s\S]*)(?=[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n(?:[^\n]*\n){0,3}[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n|[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n(?:[^\n]*\n){0,2}[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n|[^\n]*\n[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n(?:[^\n]*\n)?[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n|[^\n]*\n[^\n]*\n[^\n]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n[ \t]*(?!(?:async[ \t]+)?def[ \t]|function[ \t]|func[ \t]|fn[ \t]|pub[ \t]|export[ \t]|public[ \t]|private[ \t]|protected[ \t]|internal[ \t]|static[ \t]|@|#|//|/\*|\*|\)|\]|\}|<|/>)\S[^\n]{8,}[\w)\]}"`{][ \t]*\n)(?<blk>(?:[ \t]*\S[^\n]{9,}\n){5})[\s\S]*?^\k<blk>
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out. Fallback for this language: no linter installed."
+        examples:
+          good:
+            - path: pkg/x.go
+              code: |
+                func A(x int) int { return x + 1 }
+            - path: pkg/x.go
+              code: |
+                var a = Service{
+                	Name:    "alpha-service",
+                	Timeout: defaultTimeout,
+                	Retries: defaultRetries,
+                	Logger:  defaultLogger,
+                	Handler: defaultHandler,
+                }
+                var b = Service{
+                	Name:    "alpha-service",
+                	Timeout: defaultTimeout,
+                	Retries: defaultRetries,
+                	Logger:  defaultLogger,
+                	Handler: defaultHandler,
+                }
+          bad:
+            - path: pkg/x.go
+              code: |
+                func Room(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	return math.Round(total)
+                }
+                func Extras(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	return math.Round(total)
+                }
+            - path: pkg/x.go
+              code: |
+                func Room2(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	return math.Round(total)
+                }
+                func Extras(b Booking) float64 {
+                	net := b.Nights * b.Rate
+                	vat := net * rateFor(b.Country)
+                	total := net + vat
+                	log.Printf("total %v", total)
+                	return math.Round(total)
+                }
+      - id: lens/copy-and-paste-programming-rs
+        name: Pasted block repeated in one file
+        files: \.rs$
+        exclude: (^|/)(tests|benches)/|(^|/)tests\.rs$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: "^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\\s\\S]*)(?<!#\\[(?:cfg\\()?test\\)?\\][\\s\\S]*)(?=[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,3}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,2}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n)?[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n)(?<blk>(?:[ \\t]*\\S[^\\n]{9,}\\n){5})[\\s\\S]*?^\\k<blk>"
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out. Rust #[cfg(test)] modules are skipped. Fallback for this language: no linter installed."
+        examples:
+          good:
+            - path: src/x.rs
+              code: |
+                fn a(x: i32) -> i32 { x + 1 }
+            - path: src/x.rs
+              code: |
+                fn real() {}
+
+                #[cfg(test)]
+                mod tests {
+                    fn one() {
+                        let net = b.nights * b.rate;
+                        let vat = net * rate_for(&b.country);
+                        let total = net + vat;
+                        println!("total {}", total);
+                        assert_eq!(total, 1.0);
+                    }
+                    fn two() {
+                        let net = b.nights * b.rate;
+                        let vat = net * rate_for(&b.country);
+                        let total = net + vat;
+                        println!("total {}", total);
+                        assert_eq!(total, 1.0);
+                    }
+                }
+          bad:
+            - path: src/x.rs
+              code: |
+                fn room(b: &Booking) -> f64 {
+                    let net = b.nights * b.rate;
+                    let vat = net * rate_for(&b.country);
+                    let total = net + vat;
+                    println!("total {}", total);
+                    total.round()
+                }
+                fn extras(b: &Booking) -> f64 {
+                    let net = b.nights * b.rate;
+                    let vat = net * rate_for(&b.country);
+                    let total = net + vat;
+                    println!("total {}", total);
+                    total.round()
+                }
+            - path: src/x.rs
+              code: |
+                fn room2(b: &Booking) -> f64 {
+                    let net = b.nights * b.rate;
+                    let vat = net * rate_for(&b.country);
+                    let total = net + vat;
+                    println!("total {}", total);
+                    total.round()
+                }
+                fn extras(b: &Booking) -> f64 {
+                    let net = b.nights * b.rate;
+                    let vat = net * rate_for(&b.country);
+                    let total = net + vat;
+                    println!("total {}", total);
+                    total.round()
+                }
+      - id: lens/copy-and-paste-programming-java
+        name: Pasted block repeated in one file
+        files: \.java$
+        exclude: (^|/)src/test/|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: "^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\\s\\S]*)(?=[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,3}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,2}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n)?[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n)(?<blk>(?:[ \\t]*\\S[^\\n]{9,}\\n){5})[\\s\\S]*?^\\k<blk>"
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out. Fallback for this language: no linter installed."
+        examples:
+          good:
+            - path: src/main/java/a/X.java
+              code: |
+                int a(int x) { return x + 1; }
+            - path: src/main/java/a/X.java
+              code: |
+                // Code generated by a tool. DO NOT EDIT.
+                double room(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+                double extras(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+          bad:
+            - path: src/main/java/a/X.java
+              code: |
+                double room(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+                double extras(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+            - path: src/main/java/a/X.java
+              code: |
+                double room2(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+                double extras(Booking b) {
+                    double net = b.nights() * b.rate();
+                    double vat = net * rateFor(b.country());
+                    double total = net + vat;
+                    log.info("total {}", total);
+                    return Math.round(total);
+                }
+      - id: lens/copy-and-paste-programming-cs
+        name: Pasted block repeated in one file
+        files: \.cs$
+        exclude: (^|/)tests?/|\.Tests?/|Tests?\.cs$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: "^(?<!(?:DO NOT EDIT|[Aa]uto-?generated|[Aa]utomatically generated|@generated|Code generated|GENERATED FILE)[\\s\\S]*)(?=[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,3}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n){0,2}[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n(?:[^\\n]*\\n)?[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n|[^\\n]*\\n[^\\n]*\\n[^\\n]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n[ \\t]*(?!(?:async[ \\t]+)?def[ \\t]|function[ \\t]|func[ \\t]|fn[ \\t]|pub[ \\t]|export[ \\t]|public[ \\t]|private[ \\t]|protected[ \\t]|internal[ \\t]|static[ \\t]|@|#|//|/\\*|\\*|\\)|\\]|\\}|<|/>|(?:readonly[ \\t]+)?[\\w$]+\\??: [^=\\n]*;[ \\t]*\\n)\\S[^\\n]{8,}[;{][ \\t]*\\n)(?<blk>(?:[ \\t]*\\S[^\\n]{9,}\\n){5})[\\s\\S]*?^\\k<blk>"
+            flags: m
+        message: "{{file}}:{{line}} starts a block of five or more lines repeated later in this file. Extract the shared logic and call it from both places."
+        description: "regex: duplication is textual and no installed linter detects it (jscpd/PMD CPD not installed). Five identical lines of 10+ chars repeated in the file; at least two of the five must be statement-shaped: in brace languages a line ending in ; or { that is not a signature, closing line or type member; in Python and Go a line not ending in , ( [ and not a def/func/decorator/comment line, which drops parameter lists, signatures and declarative literals. Generated headers and paths, migrations and tests are left out. Fallback for this language: no linter installed."
+        examples:
+          good:
+            - path: src/X.cs
+              code: |
+                int A(int x) => x + 1;
+            - path: src/X.cs
+              code: |
+                public CreateCommand(
+                    string name,
+                    string email,
+                    int age,
+                    string country,
+                    bool active,
+                ) { }
+                public UpdateCommand(
+                    string name,
+                    string email,
+                    int age,
+                    string country,
+                    bool active,
+                ) { }
+          bad:
+            - path: src/X.cs
+              code: |
+                double Room(Booking b)
+                {
+                    var net = b.Nights * b.Rate;
+                    var vat = net * RateFor(b.Country);
+                    var total = net + vat;
+                    _logger.LogInformation("total {Total}", total);
+                    return Math.Round(total);
+                }
+                double Extras(Booking b)
+                {
+                    var net = b.Nights * b.Rate;
+                    var vat = net * RateFor(b.Country);
+                    var total = net + vat;
+                    _logger.LogInformation("total {Total}", total);
+                    return Math.Round(total);
+                }
+            - path: src/X.cs
+              code: |
+                double Room2(Booking b)
+                {
+                    var net = b.Nights * b.Rate;
+                    var vat = net * RateFor(b.Country);
+                    var total = net + vat;
+                    _logger.LogInformation("total {Total}", total);
+                    return Math.Round(total);
+                }
+                double Extras(Booking b)
+                {
+                    var net = b.Nights * b.Rate;
+                    var vat = net * RateFor(b.Country);
+                    var total = net + vat;
+                    _logger.LogInformation("total {Total}", total);
+                    return Math.Round(total);
+                }

@@ -1,0 +1,21 @@
+# rulecast lens catalog: laws that ground per-kind questions in starters.yaml but aren't lenses or stances. Kept so
+# every name a question cites has an attribution.
+- name: Linus's law
+  says: With enough people reading and testing the code, almost any bug becomes easy for one of them to spot.
+  sources:
+    - cite: Milanović, Laws of Software Engineering, Linus's Law
+      url: https://lawsofsoftwareengineering.com/laws/linuss-law/
+      how: read
+- name: The Hype Cycle & Amara's Law
+  says: We overrate what a new technology will do soon and underrate what it will do over the long run.
+  sources:
+    - cite: Milanović, Laws of Software Engineering, The Hype Cycle & Amara's Law
+      url: https://lawsofsoftwareengineering.com/laws/hype-cycle-amaras-law/
+      how: read
+- name: Ninety-ninety rule
+  says: The first 90% of the work takes 90% of the time and the last 10% takes another 90%, so "almost done" is
+    often only halfway.
+  sources:
+    - cite: Milanović, Laws of Software Engineering, The Ninety-Ninety Rule
+      url: https://lawsofsoftwareengineering.com/laws/ninety-ninety-rule/
+      how: read

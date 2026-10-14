@@ -1,0 +1,327 @@
+# Tell for the lens `dead-code`. Verdict: keep, but unmeasured. No hits, so precision could not be measured.
+# Detectors: ast-grep, linter, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/dead-code-py
+        name: Unreachable code or literal-false branch
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              any:
+                - kind: if_statement
+                  has:
+                    field: condition
+                    regex: ^(False|0)$
+                - all:
+                    - inside:
+                        kind: block
+                    - not:
+                        kind: comment
+                    - follows:
+                        any:
+                          - kind: return_statement
+                          - kind: raise_statement
+                          - kind: continue_statement
+                          - kind: break_statement
+        message: "{{file}}:{{line}} can never run. Delete it."
+        description: "ruff has no unreachable-code rule (PLW0101 was removed) and none for 'if False'; ast-grep: a statement right after return/raise/continue/break in the same block, or an if whose condition is the literal False or 0. Commented-out blocks, the third part of the tell, are lava-flow's rules."
+        examples:
+          good:
+            - path: app/pay.py
+              code: |
+                def net(gross, tax):
+                    if gross < 0:
+                        raise ValueError(gross)
+                    return gross - tax
+            - path: app/pay.py
+              code: |
+                def net(gross, tax):
+                    if USE_LEGACY:
+                        return legacy(gross)
+                    return gross - tax
+          bad:
+            - path: app/pay.py
+              code: |
+                def net(gross, tax):
+                    return gross - tax
+                    print("done")
+            - path: app/pay.py
+              code: |
+                def net(gross, tax):
+                    if False:
+                        return legacy(gross)
+                    return gross - tax
+      - id: lens/dead-code-ts
+        name: Unreachable code or constant condition
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)(__tests__|tests?|e2e|cypress)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          linter:
+            tool: oxlint
+            rules:
+              - no-unreachable
+              - no-constant-condition
+        message: "{{file}}:{{line}} can never run or never branch. Delete it."
+        description: linter oxlint no-unreachable and no-constant-condition (loops on while(true) are allowed by default). Commented-out blocks, the third part of the tell, are lava-flow's rules.
+        examples:
+          good:
+            - path: src/pay.ts
+              code: |
+                export function net(gross, tax) {
+                  if (gross < 0) throw new Error("negative");
+                  return gross - tax;
+                }
+            - path: src/pay.ts
+              code: |
+                export function poll() {
+                  while (true) {
+                    if (done()) break;
+                  }
+                }
+          bad:
+            - path: src/pay.ts
+              code: |
+                export function net(gross, tax) {
+                  return gross - tax;
+                  console.log("done");
+                }
+            - path: src/pay.ts
+              code: |
+                export function net(gross, tax) {
+                  if (false) {
+                    return legacy(gross);
+                  }
+                  return gross - tax;
+                }
+      - id: lens/dead-code-js
+        name: Unreachable code or constant condition
+        files: \.(js|jsx|mjs|cjs)$
+        exclude: (^|/)(__tests__|tests?|e2e|cypress)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          linter:
+            tool: oxlint
+            rules:
+              - no-unreachable
+              - no-constant-condition
+        message: "{{file}}:{{line}} can never run or never branch. Delete it."
+        description: linter oxlint no-unreachable and no-constant-condition (loops on while(true) are allowed by default). Commented-out blocks, the third part of the tell, are lava-flow's rules.
+        examples:
+          good:
+            - path: src/pay.js
+              code: |
+                export function net(gross, tax) {
+                  if (gross < 0) throw new Error("negative");
+                  return gross - tax;
+                }
+            - path: src/pay.js
+              code: |
+                export function poll() {
+                  while (true) {
+                    if (done()) break;
+                  }
+                }
+          bad:
+            - path: src/pay.js
+              code: |
+                export function net(gross, tax) {
+                  return gross - tax;
+                  console.log("done");
+                }
+            - path: src/pay.js
+              code: |
+                export function net(gross, tax) {
+                  if (false) {
+                    return legacy(gross);
+                  }
+                  return gross - tax;
+                }
+      - id: lens/dead-code-go
+        name: Unreachable code or literal-false branch
+        files: \.go$
+        exclude: _test\.go$|(^|/)(tests?|integration)/|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*if (?:\(false\)|false \{)|^(?<ind>[ \t]+)(?:return\b(?:[^\n]*;|[^\n;]*[\w)\]}"])|throw\b[^\n]*;|panic!?\([^\n]*\);?|break;?|continue;?)[ \t]*\n\k<ind>(?![ \t])(?!(?:case|default|else|catch|finally)\b)[A-Za-z_]
+            flags: m
+        message: "{{file}}:{{line}} can never run. Delete it."
+        description: "regex fallback: no linter for this language is installed. 'if false' / 'if (false)', or a statement at the same indent right after return/throw/panic/break/continue. Commented-out blocks, the third part of the tell, are lava-flow's rules."
+        examples:
+          good:
+            - path: pkg/pay.go
+              code: |
+                func Net(g, t int) int {
+                	if g < 0 {
+                		return 0
+                	}
+                	return g - t
+                }
+            - path: pkg/pay.go
+              code: |
+                func Kind(x int) string {
+                	switch x {
+                	case 1:
+                		return "a"
+                	default:
+                		return "b"
+                	}
+                }
+          bad:
+            - path: pkg/pay.go
+              code: |
+                func Net(g, t int) int {
+                	return g - t
+                	fmt.Println("done")
+                }
+            - path: pkg/pay.go
+              code: |
+                func Net(g, t int) int {
+                	if false {
+                		return legacy(g)
+                	}
+                	return g - t
+                }
+      - id: lens/dead-code-rs
+        name: Unreachable code or literal-false branch
+        files: \.rs$
+        exclude: (^|/)(tests|benches)/|(^|/)tests\.rs$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*if (?:\(false\)|false \{)|^(?<ind>[ \t]+)(?:return\b(?:[^\n]*;|[^\n;]*[\w)\]}"])|throw\b[^\n]*;|panic!?\([^\n]*\);?|break;?|continue;?)[ \t]*\n\k<ind>(?![ \t])(?!(?:case|default|else|catch|finally)\b)[A-Za-z_]
+            flags: m
+        message: "{{file}}:{{line}} can never run. Delete it."
+        description: "regex fallback: no linter for this language is installed. 'if false' / 'if (false)', or a statement at the same indent right after return/throw/panic/break/continue. Commented-out blocks, the third part of the tell, are lava-flow's rules."
+        examples:
+          good:
+            - path: src/pay.rs
+              code: |
+                fn net(g: i64, t: i64) -> i64 {
+                    if g < 0 {
+                        return 0;
+                    }
+                    g - t
+                }
+            - path: src/pay.rs
+              code: |
+                fn net(g: i64, t: i64) -> i64 {
+                    g - t
+                }
+          bad:
+            - path: src/pay.rs
+              code: |
+                fn net(g: i64, t: i64) -> i64 {
+                    return g - t;
+                    println!("done");
+                }
+            - path: src/pay.rs
+              code: |
+                fn net(g: i64, t: i64) -> i64 {
+                    if false {
+                        return legacy(g);
+                    }
+                    g - t
+                }
+      - id: lens/dead-code-java
+        name: Unreachable code or literal-false branch
+        files: \.java$
+        exclude: (^|/)src/test/|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*if (?:\(false\)|false \{)|^(?<ind>[ \t]+)(?:return\b(?:[^\n]*;|[^\n;]*[\w)\]}"])|throw\b[^\n]*;|panic!?\([^\n]*\);?|break;?|continue;?)[ \t]*\n\k<ind>(?![ \t])(?!(?:case|default|else|catch|finally)\b)[A-Za-z_]
+            flags: m
+        message: "{{file}}:{{line}} can never run. Delete it."
+        description: "regex fallback: no linter for this language is installed. 'if false' / 'if (false)', or a statement at the same indent right after return/throw/panic/break/continue. Commented-out blocks, the third part of the tell, are lava-flow's rules."
+        examples:
+          good:
+            - path: src/main/java/a/Pay.java
+              code: |
+                int net(int g, int t) {
+                    if (g < 0) {
+                        return 0;
+                    }
+                    return g - t;
+                }
+            - path: src/main/java/a/Pay.java
+              code: |
+                String kind(int x) {
+                    switch (x) {
+                        case 1:
+                            return "a";
+                        default:
+                            return "b";
+                    }
+                }
+          bad:
+            - path: src/main/java/a/Pay.java
+              code: |
+                int net(int g, int t) {
+                    return g - t;
+                    log("done");
+                }
+            - path: src/main/java/a/Pay.java
+              code: |
+                int net(int g, int t) {
+                    if (false) {
+                        return legacy(g);
+                    }
+                    return g - t;
+                }
+      - id: lens/dead-code-cs
+        name: Unreachable code or literal-false branch
+        files: \.cs$
+        exclude: (^|/)tests?/|\.Tests?/|Tests?\.cs$|(^|/)([Gg]enerated|[Mm]igrations|alembic)/|\.(gen|generated)\.\w+$|\.Designer\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*if (?:\(false\)|false \{)|^(?<ind>[ \t]+)(?:return\b(?:[^\n]*;|[^\n;]*[\w)\]}"])|throw\b[^\n]*;|panic!?\([^\n]*\);?|break;?|continue;?)[ \t]*\n\k<ind>(?![ \t])(?!(?:case|default|else|catch|finally)\b)[A-Za-z_]
+            flags: m
+        message: "{{file}}:{{line}} can never run. Delete it."
+        description: "regex fallback: no linter for this language is installed. 'if false' / 'if (false)', or a statement at the same indent right after return/throw/panic/break/continue. Commented-out blocks, the third part of the tell, are lava-flow's rules."
+        examples:
+          good:
+            - path: src/Pay.cs
+              code: |
+                int Net(int g, int t)
+                {
+                    if (g < 0)
+                    {
+                        return 0;
+                    }
+                    return g - t;
+                }
+            - path: src/Pay.cs
+              code: |
+                int Net(int g, int t)
+                {
+                    return g - t;
+                }
+          bad:
+            - path: src/Pay.cs
+              code: |
+                int Net(int g, int t)
+                {
+                    return g - t;
+                    Log("done");
+                }
+            - path: src/Pay.cs
+              code: |
+                int Net(int g, int t)
+                {
+                    if (false)
+                    {
+                        return Legacy(g);
+                    }
+                    return g - t;
+                }

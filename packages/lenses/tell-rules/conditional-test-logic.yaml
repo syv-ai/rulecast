@@ -1,0 +1,62 @@
+# Tell for the lens `conditional-test-logic`. Verdict: keep. 14 of 15 sampled hits real (190 hits in all).
+# Detectors: ast-grep; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(node_modules|vendor|third_party|dist|build|playground_editor|syntax-tests|benchmarks|testdata|fixtures|snapshots)/|\.min\.(js|css)$|\.d\.ts$|(^|/)front-end/js/highlight\.js$
+repos:
+  - repo: local
+    rules:
+      - id: lens/conditional-test-logic-py
+        name: Assertion inside an if in a test
+        files: (^|/)(test_[^/]*|[^/]*_test)\.py$
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              any:
+                - kind: assert_statement
+                - kind: call
+                  has:
+                    field: function
+                    regex: ^(self\.assert\w*|(\w+\.)*assert_\w+)$
+              inside:
+                stopBy: end
+                kind: if_statement
+                inside:
+                  stopBy: end
+                  kind: function_definition
+                  has:
+                    field: name
+                    regex: ^test
+        message: "{{file}}:{{line}} asserts inside an if in a test, so whether it checks anything depends on the branch. Use a guard assertion or a parameterised case."
+        description: "no ruff rule flags an assertion inside a conditional (PT017 is assert-in-except); ast-grep: an assert statement or self.assert*/assert_* call inside an if/elif/else within a test_* function. Asserts in plain loops are not matched."
+        examples:
+          good:
+            - path: tests/test_rates.py
+              code: |
+                def test_rate():
+                    for w, expected in [(0.5, 4.0), (2, 5.2)]:
+                        assert rate_for(w) == expected
+            - path: tests/test_rates.py
+              code: |
+                def test_rate():
+                    r = rate_for(2)
+                    if r is None:
+                        pytest.fail("no rate")
+                    assert r == 5.2
+          bad:
+            - path: tests/test_rates.py
+              code: |
+                def test_rate(weight):
+                    rate = rate_for(weight)
+                    if weight <= 1:
+                        assert rate == 4.0
+                    else:
+                        assert rate == 4.0 + (weight - 1) * 1.2
+            - path: tests/test_rates.py
+              code: |
+                class TestRates(unittest.TestCase):
+                    def test_rate(self):
+                        if sys.platform == "win32":
+                            self.assertEqual(rate_for(1), 4.0)

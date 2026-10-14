@@ -1,0 +1,369 @@
+# Tell for the lens `long-parameter-list`. Verdict: rewrite: the lens's tell text now says what these rules
+# measured. 37 of 43 sampled hits real (85 hits in all).
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|dist|syntax-tests|benchmarks|fixtures|testdata|__snapshots__|playground_editor)/|/front-end/js/highlight\.js$|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/long-parameter-list-py
+        name: long-parameter-list (Python)
+        files: \.py$
+        exclude: (^|/)alembic/versions/|(^|/)migrations/\d{4}_[^/]*\.py$|(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        detect:
+          ast-grep:
+            language: python
+            utils:
+              required-positional:
+                all:
+                  - any:
+                      - kind: identifier
+                      - kind: typed_parameter
+                        not:
+                          has:
+                            any:
+                              - kind: list_splat_pattern
+                              - kind: dictionary_splat_pattern
+                  - not:
+                      regex: ^(self|cls)\b
+                  - not:
+                      follows:
+                        stopBy: end
+                        any:
+                          - kind: keyword_separator
+                          - kind: list_splat_pattern
+                          - kind: typed_parameter
+                            has:
+                              kind: list_splat_pattern
+              required-bool:
+                matches: required-positional
+                kind: typed_parameter
+                has:
+                  field: type
+                  regex: ^bool$
+            rule:
+              kind: parameters
+              inside:
+                kind: function_definition
+              any:
+                - has:
+                    matches: required-positional
+                    nthChild:
+                      position: 6
+                      ofRule:
+                        matches: required-positional
+                - has:
+                    matches: required-bool
+                    follows:
+                      stopBy: end
+                      matches: required-bool
+        message: "{{file}}:{{line}} takes more than five required positional parameters, or two boolean ones. Make the trailing ones keyword-only, group values that travel together, or split the function on the flag."
+        examples:
+          good:
+            - path: app/g0.py
+              code: |
+                class Repo:
+                    def save(self, a, b, c, d, e, f=None, g=None):
+                        return a
+            - path: app/g1.py
+              code: |
+                def render(series, title, *, width, height, legend: bool, dark: bool):
+                    return series
+          bad:
+            - path: app/b0.py
+              code: |
+                def render(series, title, width, height, x_label, y_label):
+                    return series
+            - path: app/b1.py
+              code: |
+                def copy(src, dst, overwrite: bool, follow_links: bool, mode=None):
+                    return src
+      - id: lens/long-parameter-list-ts
+        name: long-parameter-list (TypeScript)
+        files: \.(ts|tsx|mts|cts)$
+        exclude: (^|/)generated/|\.gen\.tsx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright)/|\.(test|spec)\.tsx?$
+        severity: warning
+        detect:
+          ast-grep:
+            language: tsx
+            utils:
+              param:
+                any:
+                  - kind: required_parameter
+                  - kind: optional_parameter
+              bool-param:
+                matches: param
+                any:
+                  - has:
+                      kind: type_annotation
+                      regex: ^:\s*boolean$
+                  - has:
+                      field: value
+                      any:
+                        - kind: "true"
+                        - kind: "false"
+            rule:
+              kind: formal_parameters
+              not:
+                inside:
+                  kind: method_definition
+                  has:
+                    field: name
+                    regex: ^constructor$
+              any:
+                - has:
+                    matches: param
+                    nthChild:
+                      position: 6
+                      ofRule:
+                        matches: param
+                - has:
+                    matches: bool-param
+                    follows:
+                      stopBy: end
+                      matches: bool-param
+        message: "{{file}}:{{line}} declares more than five parameters, or two boolean flags. Group the values that travel together into a type, or split the function on the flag."
+        examples:
+          good:
+            - path: src/g0.ts
+              code: |
+                export function renderChart(series: Series, title: string, size: ChartSize, axes: Axes, style: Style) {
+                  return series;
+                }
+            - path: src/g1.ts
+              code: |
+                export class ReportService {
+                  constructor(private a: A, private b: B, private c: C, private d: D, private e: E, private f: F) {}
+                  run(opts: { dark: boolean; legend: boolean }) {
+                    return opts;
+                  }
+                }
+          bad:
+            - path: src/b0.ts
+              code: |
+                export function renderChart(series: Series, title: string, width: number, height: number, xLabel: string, yLabel: string) {
+                  return series;
+                }
+            - path: src/b1.tsx
+              code: |
+                const toggle = (id: string, enabled: boolean, persist = false) => {
+                  return id;
+                };
+      - id: lens/long-parameter-list-js
+        name: long-parameter-list (JavaScript)
+        files: \.(js|jsx|mjs|cjs)$
+        exclude: (^|/)(__tests__|tests?|e2e|cypress|playwright)/|\.(test|spec)\.[cm]?jsx?$
+        severity: warning
+        detect:
+          ast-grep:
+            language: javascript
+            utils:
+              param:
+                not:
+                  any:
+                    - kind: comment
+                    - regex: ^[(),]$
+              bool-param:
+                kind: assignment_pattern
+                has:
+                  field: right
+                  any:
+                    - kind: "true"
+                    - kind: "false"
+            rule:
+              kind: formal_parameters
+              not:
+                inside:
+                  kind: method_definition
+                  has:
+                    field: name
+                    regex: ^constructor$
+              any:
+                - has:
+                    matches: param
+                    nthChild:
+                      position: 6
+                      ofRule:
+                        matches: param
+                - has:
+                    matches: bool-param
+                    follows:
+                      stopBy: end
+                      matches: bool-param
+        message: "{{file}}:{{line}} declares more than five parameters, or two boolean flags. Group the values that travel together into an object, or split the function on the flag."
+        examples:
+          good:
+            - path: src/g0.js
+              code: |
+                export function renderChart(series, title, size, axes, style) {
+                  return series;
+                }
+            - path: src/g1.js
+              code: |
+                function copy(src, dst, { overwrite = false, followLinks = false } = {}) {
+                  return src;
+                }
+          bad:
+            - path: src/b0.js
+              code: |
+                export function renderChart(series, title, width, height, xLabel, yLabel) {
+                  return series;
+                }
+            - path: src/b1.js
+              code: |
+                function copy(src, dst, overwrite = false, followLinks = true) {
+                  return src;
+                }
+      - id: lens/long-parameter-list-go
+        name: long-parameter-list (Go)
+        files: \.go$
+        exclude: _test\.go$|(^|/)integration/
+        severity: warning
+        detect:
+          regex:
+            pattern: "^func (?:\\([^)]*\\) )?\\w+(?:\\[[^\\]\\n]*\\])?\\((?:(?:(?:[^(),]|\\((?:[^()]|\\([^()]*\\))*\\))*,){5}\\s*[^\\s),]|(?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*?(?: bool(?=\\s*[,)])(?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*? bool(?=\\s*[,)])|(?<=[(,]\\s*)\\w+,\\s*\\w+ bool(?=\\s*[,)])))"
+            flags: m
+        message: "{{file}}:{{line}} declares more than five parameters, or two bool flags. Group the values that travel together into a struct, or split the function on the flag."
+        examples:
+          good:
+            - path: pkg/g0.go
+              code: |
+                func (s *Server) Render(series Series, title string, size Size, axes Axes, style Style) error {
+                	return nil
+                }
+            - path: pkg/g1.go
+              code: |
+                func Apply(fn func(a, b, c, d, e, f int) bool, opts Options) (bool, bool) {
+                	return true, true
+                }
+          bad:
+            - path: pkg/b0.go
+              code: |
+                func Render(series Series, title string, width, height int, xLabel, yLabel string) error {
+                	return nil
+                }
+            - path: pkg/b1.go
+              code: |
+                func (c *Cmd) Copy(src string, overwrite bool, follow bool) error {
+                	return nil
+                }
+      - id: lens/long-parameter-list-rs
+        name: long-parameter-list (Rust)
+        files: \.rs$
+        exclude: (^|/)tests/|(^|/)benches/
+        severity: warning
+        detect:
+          regex:
+            pattern: "\\bfn \\w+(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?\\((?:\\s*&?(?:'\\w+\\s+)?(?:mut\\s+)?self\\b[^,)]*,)?(?!\\s*&?(?:'\\w+\\s+)?(?:mut\\s+)?self\\b)(?:(?:(?:[^(),<>]|<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>|\\([^()]*\\))*,){5}\\s*[^\\s),]|[^)]*?\\b\\w+: bool\\b[^)]*?\\b\\w+: bool\\b)"
+        message: "{{file}}:{{line}} declares more than five parameters, or two bool flags. Group the values that travel together into a struct, or split the function on the flag."
+        examples:
+          good:
+            - path: src/g0.rs
+              code: |
+                pub fn render(&self, series: &[f64], title: &str, size: Size, axes: Axes, style: Style) -> String {
+                    String::new()
+                }
+            - path: src/g1.rs
+              code: |
+                fn lookup(map: HashMap<String, Vec<(u8, u8)>>, key: &str, opts: Options) -> bool {
+                    true
+                }
+          bad:
+            - path: src/b0.rs
+              code: |
+                pub fn render(series: &[f64], title: &str, width: u32, height: u32, x_label: &str, y_label: &str) {
+                }
+            - path: src/b1.rs
+              code: |
+                fn copy(&self, src: &Path, overwrite: bool, follow_links: bool) -> io::Result<()> {
+                    Ok(())
+                }
+      - id: lens/long-parameter-list-java
+        name: long-parameter-list (Java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*(?:(?:public|private|protected|static|final|synchronized|abstract|default)[ \t]+)*(?:<[^>\n]*>[ \t]+)?(?!(?:public|private|protected|static|final|synchronized|abstract|default|new|return|throw|else)\b)[\w.]+(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\[\])*[ \t]+\w+[ \t]*\((?:(?:(?:[^(),<>]|<(?:[^<>]|<[^<>]*>)*>|\([^()]*\))*,){5}\s*[^\s),]|[^)]*\bboolean \w+[^)]*\bboolean \w+)
+            flags: m
+        message: "{{file}}:{{line}} declares more than five parameters, or two boolean flags. Group the values that travel together into a type, or split the method on the flag."
+        examples:
+          good:
+            - path: src/main/java/a/G0.java
+              code: |
+                class G0 {
+                    public OwnerController(OwnerRepository owners, PetRepository pets, VisitRepository visits, Clock clock, Mailer mailer, Audit audit) {
+                    }
+                }
+            - path: src/main/java/a/G1.java
+              code: |
+                class G1 {
+                    public String render(Series series, String title, Size size, Axes axes, Style style) {
+                        return title;
+                    }
+                }
+          bad:
+            - path: src/main/java/a/B0.java
+              code: |
+                class B0 {
+                    public String render(Series series, String title, int width, int height, String xLabel, String yLabel) {
+                        return title;
+                    }
+                }
+            - path: src/main/java/a/B1.java
+              code: |
+                class B1 {
+                    private void copy(Path src, boolean overwrite, boolean followLinks) {
+                    }
+                }
+      - id: lens/long-parameter-list-cs
+        name: long-parameter-list (C#)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|\.Tests?/|(^|/)Migrations/|\.Designer\.cs$|\.g\.cs$
+        severity: warning
+        detect:
+          regex:
+            pattern: ^[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|sealed|new|abstract|extern|unsafe)[ \t]+)*(?!(?:public|private|protected|internal|static|async|override|virtual|sealed|abstract|extern|unsafe|class|record|struct|interface|new|return|throw|await|else)\b)[\w.]+(?:<(?:[^<>]|<[^<>]*>)*>)?\??(?:\[\])*[ \t]+\w+[ \t]*(?:<[^>\n]*>)?\((?:(?:(?:[^(),<>]|<(?:[^<>]|<[^<>]*>)*>|\([^()]*\))*,){5}\s*[^\s),]|[^)]*\bbool \w+[^)]*\bbool \w+)
+            flags: m
+        message: "{{file}}:{{line}} declares more than five parameters, or two bool flags. Group the values that travel together into a type, or split the method on the flag."
+        examples:
+          good:
+            - path: src/App/G0.cs
+              code: |
+                public class OrderService
+                {
+                    public OrderService(IRepository<Order> orders, IRepository<Basket> baskets, IUriComposer uris, IAppLogger log, IClock clock, IMailer mailer)
+                    {
+                    }
+                }
+            - path: src/App/G1.cs
+              code: |
+                public class Charts
+                {
+                    public string Render(Series series, string title, Size size, Axes axes, Style style)
+                    {
+                        return title;
+                    }
+                }
+          bad:
+            - path: src/App/B0.cs
+              code: |
+                public class Charts
+                {
+                    public string Render(Series series, string title, int width, int height, string xLabel, string yLabel)
+                    {
+                        return title;
+                    }
+                }
+            - path: src/App/B1.cs
+              code: |
+                public class Files
+                {
+                    private async Task CopyAsync(string src, bool overwrite, bool followLinks)
+                    {
+                    }
+                }

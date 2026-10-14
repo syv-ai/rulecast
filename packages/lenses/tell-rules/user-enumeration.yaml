@@ -1,0 +1,277 @@
+# Tell for the lens `user-enumeration`. Verdict: keep, but unmeasured. No hits, so precision could not be
+# measured.
+# Detectors: ast-grep, regex; each rule's description says why.
+# Measured on a 12-repository corpus, 2026-10-14. Evidence: ../tells-tested.yaml and
+# docs/evidence/2026-10-13-tells-on-a-corpus.md.
+exclude: (^|/)(vendor|node_modules|syntax-tests|benchmarks|fixtures|testdata|snapshots)/|\.min\.js$|\.d\.ts$
+max_matches_per_rule: 100000
+repos:
+  - repo: local
+    rules:
+      - id: lens/user-enumeration-py
+        name: Auth failures do not say whether the account exists (py)
+        files: \.py$
+        exclude: (^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$
+        severity: warning
+        description: no ruff rule matches; ast-grep on one function holding both a 'user not found'-style and a 'wrong password'-style string, outside log calls (logs never reach the client).
+        detect:
+          ast-grep:
+            language: python
+            rule:
+              kind: function_definition
+              all:
+                - has:
+                    stopBy: end
+                    matches: MISSING
+                - has:
+                    stopBy: end
+                    matches: WRONGPW
+            utils:
+              NOTLOG:
+                not:
+                  inside:
+                    stopBy: end
+                    kind: call
+                    has:
+                      field: function
+                      regex: (?i)(log|logger|logging)\.\w+$
+              MISSING:
+                kind: string
+                regex: (?i)(user|account|email|username)( was)? (not found|does ?n.?t exists?|not registered|is not registered)|no (such )?(user|account)\b|unknown (user|account|email)
+                matches: NOTLOG
+              WRONGPW:
+                kind: string
+                regex: (?i)(incorrect|wrong|invalid|bad) password|password (is )?(incorrect|wrong|invalid)
+                matches: NOTLOG
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/app/auth.py
+              code: |
+                def login(form):
+                    user = get_user(form.username)
+                    if not user or not verify(form.password, user.hashed):
+                        raise HTTPException(400, "Incorrect email or password")
+            - path: x/app/reset.py
+              code: |
+                def reset(email):
+                    user = get_user(email)
+                    if not user:
+                        logger.error("user not found")
+                        return
+                    if bad(user):
+                        raise HTTPException(400, "Invalid password")
+          bad:
+            - path: x/app/auth.py
+              code: |
+                def login(form):
+                    user = get_user(form.username)
+                    if not user:
+                        raise HTTPException(404, "User not found")
+                    if not verify(form.password, user.hashed):
+                        raise HTTPException(401, "Incorrect password")
+            - path: x/app/auth2.py
+              code: |
+                async def sign_in(email, password):
+                    user = await repo.by_email(email)
+                    if user is None:
+                        return {"error": "No account with that email"}
+                    if not check(password, user):
+                        return {"error": "Wrong password"}
+      - id: lens/user-enumeration-ts
+        name: Auth failures do not say whether the account exists (ts)
+        files: \.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$
+        exclude: \.(test|spec)\.[cm]?[jt]sx?$|(^|/)(__tests__|tests?|e2e|cypress|playwright|__mocks__)/
+        severity: warning
+        description: no oxlint rule matches; ast-grep on one function holding both a 'user not found'-style and a 'wrong password'-style string, outside log calls.
+        detect:
+          ast-grep:
+            language: tsx
+            rule:
+              any:
+                - kind: function_declaration
+                - kind: function_expression
+                - kind: arrow_function
+                - kind: method_definition
+              all:
+                - has:
+                    stopBy: end
+                    matches: MISSING
+                - has:
+                    stopBy: end
+                    matches: WRONGPW
+            utils:
+              NOTLOG:
+                not:
+                  inside:
+                    stopBy: end
+                    kind: call_expression
+                    has:
+                      field: function
+                      regex: (?i)(console|log|logger)(\.\w+)?$
+              MISSING:
+                any:
+                  - kind: string
+                  - kind: template_string
+                regex: (?i)(user|account|email|username)( was)? (not found|does ?n.?t exists?|not registered|is not registered)|no (such )?(user|account)\b|unknown (user|account|email)
+                matches: NOTLOG
+              WRONGPW:
+                any:
+                  - kind: string
+                  - kind: template_string
+                regex: (?i)(incorrect|wrong|invalid|bad) password|password (is )?(incorrect|wrong|invalid)
+                matches: NOTLOG
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/src/login.ts
+              code: |
+                export async function POST(request: Request) {
+                  const user = await getUser(name);
+                  if (!user || !(await checkPassword(password, user.password))) {
+                    return unauthorized({ message: 'Incorrect username or password' });
+                  }
+                }
+            - path: x/src/a.ts
+              code: |
+                const a = () => badRequest({ message: 'User not found' });
+                const b = () => badRequest({ message: 'Incorrect password' });
+          bad:
+            - path: x/src/login.ts
+              code: |
+                export async function POST(request: Request) {
+                  const user = await getUser(name);
+                  if (!user) return notFound({ message: 'User not found' });
+                  if (!(await checkPassword(password, user.password))) return unauthorized({ message: 'Incorrect password' });
+                }
+            - path: x/src/login2.ts
+              code: |
+                const login = async (req, res) => {
+                  if (!user) return res.status(404).json({ error: `Unknown email ${email}` });
+                  if (!ok) return res.status(401).json({ error: "Wrong password" });
+                };
+      - id: lens/user-enumeration-java
+        name: Auth failures do not say whether the account exists (java)
+        files: \.java$
+        exclude: (^|/)src/test/|Tests?\.java$
+        severity: warning
+        description: "fallback: no java analyzer installed; regex on a quoted 'user not found'-style message and a quoted 'wrong password'-style message within 1,500 characters, approximating one function."
+        detect:
+          regex:
+            pattern: '(?:"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"|"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*")'
+            flags: i
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/src/main/java/a/Auth.java
+              code: |
+                if (user == null || !encoder.matches(pw, user.getPassword())) {
+                    throw new BadCredentialsException("Invalid username or password");
+                }
+            - path: x/src/main/java/a/Auth.java
+              code: |
+                throw new NotFoundException("User not found");
+          bad:
+            - path: x/src/main/java/a/Auth.java
+              code: |
+                if (user == null) throw new NotFoundException("User not found");
+                if (!encoder.matches(pw, user.getPassword())) throw new BadCredentialsException("Wrong password");
+            - path: x/src/main/java/a/Auth.java
+              code: |
+                return error("Incorrect password");
+                }
+                return error("No account for that email");
+      - id: lens/user-enumeration-cs
+        name: Auth failures do not say whether the account exists (cs)
+        files: \.cs$
+        exclude: (^|/)tests?/|Tests?\.cs$|(^|/)[^/]*\.(Unit|Functional|Integration)?Tests?/
+        severity: warning
+        description: "fallback: no cs analyzer installed; regex on a quoted 'user not found'-style message and a quoted 'wrong password'-style message within 1,500 characters, approximating one function."
+        detect:
+          regex:
+            pattern: '(?:"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"|"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*")'
+            flags: i
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/src/Web/Auth.cs
+              code: |
+                if (user == null || !encoder.matches(pw, user.getPassword())) {
+                    throw new BadCredentialsException("Invalid username or password");
+                }
+            - path: x/src/Web/Auth.cs
+              code: |
+                throw new NotFoundException("User not found");
+          bad:
+            - path: x/src/Web/Auth.cs
+              code: |
+                if (user == null) throw new NotFoundException("User not found");
+                if (!encoder.matches(pw, user.getPassword())) throw new BadCredentialsException("Wrong password");
+            - path: x/src/Web/Auth.cs
+              code: |
+                return error("Incorrect password");
+                }
+                return error("No account for that email");
+      - id: lens/user-enumeration-go
+        name: Auth failures do not say whether the account exists (go)
+        files: \.go$
+        exclude: _test\.go$
+        severity: warning
+        description: "fallback: no go analyzer installed; regex on a quoted 'user not found'-style message and a quoted 'wrong password'-style message within 1,500 characters, approximating one function."
+        detect:
+          regex:
+            pattern: '(?:"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"|"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*")'
+            flags: i
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/pkg/auth.go
+              code: |
+                if user == nil || !check(pw, user.Hash) {
+                	return errors.New("invalid username or password")
+                }
+            - path: x/pkg/auth.go
+              code: |
+                return errors.New("user not found")
+          bad:
+            - path: x/pkg/auth.go
+              code: |
+                if user == nil {
+                	return errors.New("user not found")
+                }
+                if !check(pw, user.Hash) {
+                	return errors.New("wrong password")
+                }
+            - path: x/pkg/auth.go
+              code: |
+                http.Error(w, "unknown user", 404)
+                http.Error(w, "password is incorrect", 401)
+      - id: lens/user-enumeration-rs
+        name: Auth failures do not say whether the account exists (rs)
+        files: \.rs$
+        exclude: (^|/)tests?/|(^|/)benches/
+        severity: warning
+        description: "fallback: no rs analyzer installed; regex on a quoted 'user not found'-style message and a quoted 'wrong password'-style message within 1,500 characters, approximating one function."
+        detect:
+          regex:
+            pattern: '(?:"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"|"[^"\n]*?(?:(?:incorrect|wrong|invalid|bad) password|password (?:is )?(?:incorrect|wrong|invalid))[^"\n]*"[\s\S]{0,1500}?"[^"\n]*?(?:(?:user|account|email|username)(?: was)? (?:not found|does ?n.?t exists?|not registered|is not registered)|no (?:such )?(?:user|account)\b|unknown (?:user|account|email))[^"\n]*")'
+            flags: i
+        message: "{{file}}:{{line}} answers differently for an unknown account and a wrong password. Give one message and one status for every login failure."
+        examples:
+          good:
+            - path: x/src/auth.rs
+              code: |
+                return Err(anyhow!("invalid username or password"));
+            - path: x/src/auth.rs
+              code: |
+                return Err(anyhow!("user not found"));
+          bad:
+            - path: x/src/auth.rs
+              code: |
+                let user = find(name).ok_or(anyhow!("user not found"))?;
+                if !verify(pw, &user.hash) { return Err(anyhow!("wrong password")); }
+            - path: x/src/auth.rs
+              code: |
+                Err(AuthError::new("no such user"))
+                // ...
+                Err(AuthError::new("bad password"))
