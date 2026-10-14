@@ -228,6 +228,11 @@ export interface Detector<Config> {
    * never stashes to make them equal (spec §12).
    */
   wholeProject?(config: Config): boolean
+  /**
+   * Its tool may change files while it runs and puts them back after (a formatter run as a hook).
+   * The core runs such a kind after every other kind, alone, so nothing reads a file mid-change.
+   */
+  changesFiles?: boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>

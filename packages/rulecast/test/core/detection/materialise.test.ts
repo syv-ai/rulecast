@@ -196,4 +196,19 @@ describe("runDetectionFrom", () => {
     expect(runs).toHaveLength(1)
     expect(differs.warnings).toEqual([`r/project skipped: the working tree differs from ${head} in app/a.py`])
   })
+
+  test("in a project below the repository's top, an unstaged change is still found", async () => {
+    const top = await createRepo({ "sub/app/a.py": "committed\n" })
+    await writeFile(path.join(top, "sub/app/a.py"), "staged\n")
+    await git(top, "add", "sub/app/a.py")
+    await writeFile(path.join(top, "sub/app/a.py"), "worktree\n")
+    const root = path.join(top, "sub")
+    const runs: DetectorRun<unknown>[] = []
+    const output = await runDetectionFrom(
+      input(root, { kind: "index" }, [recorder("project", { wholeProject: () => true }, runs)], ["project"]),
+      { kind: "index" },
+    )
+    expect(runs).toEqual([])
+    expect(output.warnings).toEqual(["r/project skipped: unstaged changes in app/a.py"])
+  })
 })

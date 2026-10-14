@@ -114,6 +114,34 @@ describe("runDetection", () => {
     expect(order).toEqual(["slow:start", "fast", "slow:end"])
   })
 
+  test("a kind that changes files while it runs goes after every other kind, so none reads a file mid-change", async () => {
+    const order: string[] = []
+    const mutating: Detector<unknown> = {
+      ...detector("formatter", async () => {
+        order.push("formatter")
+        return { findings: [], errors: [] }
+      }),
+      changesFiles: true,
+    }
+    const slow = detector("slow", async () => {
+      order.push("slow:start")
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      order.push("slow:end")
+      return { findings: [], errors: [] }
+    })
+    const output = await runDetection(
+      input(
+        [
+          { rule: detectorRule("m", "formatter"), files: ["a"] },
+          { rule: detectorRule("s", "slow"), files: ["a"] },
+        ],
+        [mutating, slow],
+      ),
+    )
+    expect(output.errors).toEqual([])
+    expect(order).toEqual(["slow:start", "slow:end", "formatter"])
+  })
+
   test("a rule: null error disables every rule of that kind, as one error naming them", async () => {
     // Spec §14: "Detector error for a whole run → all rules in the run disabled for the session;
     // one warning naming them". The llm detector reports this when there is no binary and no

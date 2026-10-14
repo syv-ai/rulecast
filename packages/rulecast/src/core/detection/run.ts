@@ -57,44 +57,47 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     | { status: "error"; kind: string; selections: Selection[]; message: string }
     | { status: "timedOut"; kind: string; selections: Selection[] }
 
-  const perKind = await Promise.all(
-    [...byKind].map(async ([kind, selections]): Promise<Outcome> => {
-      const detector = input.detection.registry.get(kind)
-      if (!detector) return { status: "error", kind, selections, message: `detector "${kind}" is not registered` }
-      try {
-        const rules = await Promise.all(
-          selections.map(async ({ rule, files }) => ({
-            id: rule.id,
-            config: rule.detector.config,
-            files,
-            context: await input.detection.contextFor(rule),
-          })),
-        )
-        const result = await Promise.race([
-          detector.run({
-            event: input.event,
-            rules,
-            read: input.read,
-            fromDisk: input.fromDisk ?? true,
-            changes: input.changes,
-            cache: input.detection.cacheFor(kind),
-            settings: input.detection.settings,
-            cwd: input.detection.root,
-            signal: controller.signal,
-            deadlineAt,
-          }),
-          deadline,
-        ])
-        if (result === TIMED_OUT || late()) return { status: "timedOut", kind, selections }
-        return { status: "ok", kind, selections, result }
-      } catch (error) {
-        if (error instanceof DeadlineError || controller.signal.aborted || late()) {
-          return { status: "timedOut", kind, selections }
-        }
-        return { status: "error", kind, selections, message: errorMessage(error) }
+  const runKind = async ([kind, selections]: [string, Selection[]]): Promise<Outcome> => {
+    const detector = input.detection.registry.get(kind)
+    if (!detector) return { status: "error", kind, selections, message: `detector "${kind}" is not registered` }
+    try {
+      const rules = await Promise.all(
+        selections.map(async ({ rule, files }) => ({
+          id: rule.id,
+          config: rule.detector.config,
+          files,
+          context: await input.detection.contextFor(rule),
+        })),
+      )
+      const result = await Promise.race([
+        detector.run({
+          event: input.event,
+          rules,
+          read: input.read,
+          fromDisk: input.fromDisk ?? true,
+          changes: input.changes,
+          cache: input.detection.cacheFor(kind),
+          settings: input.detection.settings,
+          cwd: input.detection.root,
+          signal: controller.signal,
+          deadlineAt,
+        }),
+        deadline,
+      ])
+      if (result === TIMED_OUT || late()) return { status: "timedOut", kind, selections }
+      return { status: "ok", kind, selections, result }
+    } catch (error) {
+      if (error instanceof DeadlineError || controller.signal.aborted || late()) {
+        return { status: "timedOut", kind, selections }
       }
-    }),
-  )
+      return { status: "error", kind, selections, message: errorMessage(error) }
+    }
+  }
+  // A kind that changes files while it runs (a formatter hook, which puts them back after) goes
+  // after the others, one at a time, so no other detector reads a file while it is changed.
+  const changesFiles = (kind: string) => input.detection.registry.get(kind)?.changesFiles === true
+  const perKind = await Promise.all([...byKind].filter(([kind]) => !changesFiles(kind)).map(runKind))
+  for (const entry of [...byKind].filter(([kind]) => changesFiles(kind))) perKind.push(await runKind(entry))
   clearTimeout(timer)
 
   for (const outcome of perKind) {

@@ -4,6 +4,7 @@ import { parse } from "yaml"
 
 import { runTool } from "../../core/detection/tool"
 import { isNotFound } from "../../core/errors"
+import { git } from "../../core/git"
 import { onPath } from "../../core/which"
 import type { Runner } from "./framing"
 
@@ -43,27 +44,40 @@ export async function findPreCommitHook(root: string, id: string): Promise<{ id:
   return null
 }
 
-/** The project's node_modules/.bin, then PATH. */
-async function locate(name: string, root: string, signal?: AbortSignal): Promise<string | null> {
-  const local = path.join(root, "node_modules", ".bin", name)
-  if (await onPath(local, signal)) return local
+/**
+ * The repository's top, where git hooks are declared and run: a rulecast project can sit below it.
+ * As a path from `root` rather than git's own absolute one, which is the realpath and would not be
+ * under a root reached through a symlink. `root` itself outside a repository.
+ */
+export async function repositoryTop(root: string): Promise<string> {
+  const result = await git(root, ["rev-parse", "--show-cdup"])
+  return result.ok ? path.resolve(root, result.stdout.trim()) : root
+}
+
+/** The project's node_modules/.bin, then the repository's, then PATH. */
+async function locate(name: string, root: string, top: string, signal?: AbortSignal): Promise<string | null> {
+  for (const dir of new Set([root, top])) {
+    const local = path.join(dir, "node_modules", ".bin", name)
+    if (await onPath(local, signal)) return local
+  }
   return (await onPath(name, signal)) ? name : null
 }
 
 /** prek when installed (a third of pre-commit's overhead, same config), else pre-commit. */
 export async function preCommitRunner(
   root: string,
+  top: string,
   signal?: AbortSignal,
 ): Promise<{ runner: Runner; command: string } | null> {
   for (const runner of ["prek", "pre-commit"] as const) {
-    const command = await locate(runner, root, signal)
+    const command = await locate(runner, root, top, signal)
     if (command !== null) return { runner, command }
   }
   return null
 }
 
-export async function lefthookCommand(root: string, signal?: AbortSignal): Promise<string | null> {
-  return locate("lefthook", root, signal)
+export async function lefthookCommand(root: string, top: string, signal?: AbortSignal): Promise<string | null> {
+  return locate("lefthook", root, top, signal)
 }
 
 /** lefthook's merged config (extends and lefthook-local applied), as `lefthook dump` prints it. */

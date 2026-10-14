@@ -16,6 +16,7 @@ import {
   lefthookDump,
   PRE_COMMIT_CONFIG,
   preCommitRunner,
+  repositoryTop,
   substituteFiles,
 } from "./resolve"
 import { type HookConfig, hookName, hookSchema } from "./schema"
@@ -34,15 +35,21 @@ interface HookRun {
   dir: string
 }
 
+/** The rule's files as paths from `dir`. */
+const from = (dir: string, files: string[], input: DetectorRun<HookConfig>) =>
+  files.map((file) => path.relative(dir, path.join(input.cwd, file)))
+
+/** The repository declares and runs the hook, from its top; the files are the project's. */
 async function runPreCommit(id: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
-  const hook = await findPreCommitHook(input.cwd, id)
+  const top = await repositoryTop(input.cwd)
+  const hook = await findPreCommitHook(top, id)
   if (hook === null) throw new Error(`no hook with id "${id}" in ${PRE_COMMIT_CONFIG}`)
-  const found = await preCommitRunner(input.cwd, input.signal)
+  const found = await preCommitRunner(input.cwd, top, input.signal)
   if (found === null) throw new Error("neither prek nor pre-commit is installed")
   const stage = hook.stage === "pre-commit" ? [] : ["--hook-stage", hook.stage]
   // `--files` runs on exactly these files and never stashes (pre-commit and prek both).
-  const ran = await runTool(found.command, ["run", id, ...stage, "--files", ...files], {
-    cwd: input.cwd,
+  const ran = await runTool(found.command, ["run", id, ...stage, "--files", ...from(top, files, input)], {
+    cwd: top,
     signal: input.signal,
     notFound: `${found.runner} is not installed`,
   })
@@ -53,7 +60,7 @@ async function runPreCommit(id: string, files: string[], input: DetectorRun<Hook
     exitCode: framed.exitCode,
     failed: framed.status === "failed",
     output: framed.output,
-    dir: input.cwd,
+    dir: top,
   }
 }
 
@@ -62,14 +69,14 @@ async function runPreCommit(id: string, files: string[], input: DetectorRun<Hook
  * and its framing says less than the tool does.
  */
 async function runLefthook(spec: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
-  const command = await lefthookCommand(input.cwd, input.signal)
+  const top = await repositoryTop(input.cwd)
+  const command = await lefthookCommand(input.cwd, top, input.signal)
   if (command === null) throw new Error("lefthook is not installed")
-  const job = findLefthookJob(await lefthookDump(command, input.cwd, input.signal), spec)
+  const job = findLefthookJob(await lefthookDump(command, top, input.signal), spec)
   if (job === null) throw new Error(`lefthook has no job "${spec}" with a run command`)
-  const dir = path.join(input.cwd, job.root)
-  // A job with a root sees its files relative to it, as lefthook gives them.
-  const relative = files.map((file) => path.relative(dir, path.join(input.cwd, file)))
-  const ran: ToolResult = await runTool("/bin/sh", ["-c", substituteFiles(job.run, relative)], {
+  // lefthook runs a job from the repository's top, or its `root` under it, and gives it files from there.
+  const dir = path.join(top, job.root)
+  const ran: ToolResult = await runTool("/bin/sh", ["-c", substituteFiles(job.run, from(dir, files, input))], {
     cwd: dir,
     signal: input.signal,
     notFound: "/bin/sh is not available",
@@ -121,6 +128,8 @@ export const hookDetector: Detector<HookConfig> = {
   events: () => ["verify"],
   // A hook runs in the project with its own environment; a scratch copy is not that project.
   wholeProject: () => true,
+  // A formatter hook rewrites files until they are put back: nothing else may read them meanwhile.
+  changesFiles: true,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     const groups = new Map<string, DetectorRuleInput<HookConfig>[]>()
@@ -165,10 +174,12 @@ export const hookDetector: Detector<HookConfig> = {
             : { ...finding, file: path.relative(input.cwd, path.join(ran.dir, finding.file)) },
         )
         await distribute(findings, rules, input.read, result)
-        if (ran.failed && findings.length === 0 && changed.length === 0) {
-          // The hook failed and said nothing a format reads: the agent still hears that, and what it said.
+        if (ran.failed && changed.length === 0) {
+          // The hook failed and nothing it said reached a rule — no format reads it, or it is all
+          // about files the rule did not select: the agent still hears that it failed, and what it said.
           const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
-          for (const rule of forHook(rules, name)) {
+          const told = new Set(result.findings.map((finding) => finding.rule))
+          for (const rule of forHook(rules, name).filter((rule) => !told.has(rule.id))) {
             const finding = await hookFinding(
               rule.files[0]!,
               name,
@@ -188,9 +199,10 @@ export const hookDetector: Detector<HookConfig> = {
   },
   async validate(input) {
     const problems: { rule: string; message: string }[] = []
+    const top = await repositoryTop(input.cwd)
     for (const rule of input.rules) {
       const id = rule.config["pre-commit"]
-      if (id !== undefined && (await findPreCommitHook(input.cwd, id)) === null) {
+      if (id !== undefined && (await findPreCommitHook(top, id)) === null) {
         problems.push({ rule: rule.id, message: `no hook with id "${id}" in ${PRE_COMMIT_CONFIG}` })
       }
     }
@@ -198,9 +210,10 @@ export const hookDetector: Detector<HookConfig> = {
   },
   async check(input) {
     const results: CheckResult[] = []
+    const top = await repositoryTop(input.cwd)
     const preCommit = input.rules.filter((rule) => rule.config["pre-commit"] !== undefined)
     if (preCommit.length > 0) {
-      const found = await preCommitRunner(input.cwd, input.signal)
+      const found = await preCommitRunner(input.cwd, top, input.signal)
       results.push(
         found === null
           ? {
@@ -215,13 +228,13 @@ export const hookDetector: Detector<HookConfig> = {
       for (const rule of preCommit)
         byId.set(rule.config["pre-commit"]!, [...(byId.get(rule.config["pre-commit"]!) ?? []), rule.id])
       for (const [id, rules] of byId) {
-        if ((await findPreCommitHook(input.cwd, id)) !== null) continue
+        if ((await findPreCommitHook(top, id)) !== null) continue
         results.push({ what: `hook "${id}"`, level: "error", detail: `not in ${PRE_COMMIT_CONFIG}`, rules })
       }
     }
     const lefthook = input.rules.filter((rule) => rule.config.lefthook !== undefined)
     if (lefthook.length > 0) {
-      const command = await lefthookCommand(input.cwd, input.signal)
+      const command = await lefthookCommand(input.cwd, top, input.signal)
       if (command === null) {
         results.push({
           what: "lefthook",
@@ -232,7 +245,7 @@ export const hookDetector: Detector<HookConfig> = {
         return results
       }
       results.push({ what: "lefthook", level: "ok", detail: shown(command), rules: [] })
-      const dump = await lefthookDump(command, input.cwd, input.signal)
+      const dump = await lefthookDump(command, top, input.signal)
       const byJob = new Map<string, string[]>()
       for (const rule of lefthook)
         byJob.set(rule.config.lefthook!, [...(byJob.get(rule.config.lefthook!) ?? []), rule.id])

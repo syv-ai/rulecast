@@ -8,6 +8,7 @@ import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { hookDetector } from "../../../src/detectors/hook/detector"
 import type { HookConfig } from "../../../src/detectors/hook/schema"
+import { createRepo } from "../../helpers/git"
 import { createProject, fromDisk } from "../../helpers/project"
 
 const payloads = fileURLToPath(new URL("../../payloads/hook/", import.meta.url))
@@ -184,6 +185,19 @@ describe("hook detector: pre-commit hooks", () => {
     ])
   })
 
+  test("a hook that fails over files the rule did not select still says it failed", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n", "b.py": "y\n" })
+    await stubRunner(
+      root,
+      "prek",
+      "printf 'licence....Failed\\n- hook id: licence\\n- exit code: 1\\n\\n  b.py:3:1: error: imported module is broken\\n'\nexit 1",
+    )
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
+    expect(result.findings.map((f) => [f.match.file, f.match.captures.message])).toEqual([
+      ["a.py", "licence failed: b.py:3:1: error: imported module is broken"],
+    ])
+  })
+
   test("a hook that passed is clean", async () => {
     const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n" })
     await stubRunner(root, "prek", "echo 'licence....Passed'")
@@ -191,6 +205,36 @@ describe("hook detector: pre-commit hooks", () => {
       findings: [],
       errors: [],
     })
+  })
+})
+
+describe("hook detector: a project below the repository's top", () => {
+  test("the pre-commit config and the runner are the repository's; files and findings are the project's", async () => {
+    const top = await createRepo({ ".pre-commit-config.yaml": CONFIG, "sub/s.sh": SCRIPT })
+    await stubRunner(
+      top,
+      "prek",
+      "printf 'sc....Failed\\n- hook id: sc\\n- exit code: 1\\n\\n  sub/s.sh:4:1: warning: cd [SC2164]\\n'\nexit 1",
+    )
+    const root = path.join(top, "sub")
+    // The runner is found from the repository's node_modules too.
+    const result = await run(root, [ruleFor("shell", { "pre-commit": "sc" }, ["s.sh"])])
+    expect(result.errors).toEqual([])
+    expect(await calls(top, "prek")).toEqual(["run sc --files sub/s.sh"])
+    expect(result.findings.map((f) => [f.match.file, f.match.line])).toEqual([["s.sh", 4]])
+  })
+
+  test("a lefthook job's root is relative to the repository's top", async () => {
+    const top = await createRepo({ "sub/web/a.ts": "x\n" })
+    const dump = JSON.stringify({
+      "pre-commit": { jobs: [{ name: "lint", root: "sub/web/", run: "./lint.sh {staged_files}" }] },
+    })
+    await stubRunner(top, "lefthook", `cat <<'OUT'\n${dump}\nOUT`)
+    await writeFile(path.join(top, "sub/web/lint.sh"), `#!/bin/sh\necho "$1:1:1: error: bad [L1]"\nexit 1\n`)
+    await chmod(path.join(top, "sub/web/lint.sh"), 0o755)
+    const result = await run(path.join(top, "sub"), [ruleFor("lint", { lefthook: "pre-commit/lint" }, ["web/a.ts"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => f.match.file)).toEqual(["web/a.ts"])
   })
 })
 

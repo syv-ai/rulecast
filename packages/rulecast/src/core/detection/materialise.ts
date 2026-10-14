@@ -58,7 +58,8 @@ export async function runDetectionFrom(input: DetectionInput, source: ContentSou
 export async function unstagedChanges(files: string[], cwd: string, source: ContentSource): Promise<string[]> {
   if (source.kind === "worktree" || files.length === 0) return []
   const against = source.kind === "commit" ? [source.ref] : []
-  const result = await git(cwd, ["diff", "--name-only", "--no-renames", ...against, "--", ...files])
+  // --relative: git prints paths from the repository's top, and a project can sit below it.
+  const result = await git(cwd, ["diff", "--name-only", "--relative", "--no-renames", ...against, "--", ...files])
   if (!result.ok) throw new Error(`git diff failed: ${result.stderr.trim()}`)
   return result.stdout.split("\n").filter((line) => line !== "")
 }
