@@ -77,13 +77,22 @@ async function runLefthook(spec: string, files: string[], input: DetectorRun<Hoo
   return { exitCode: ran.exitCode, failed: ran.exitCode !== 0, output: `${ran.stdout}\n${ran.stderr}`, dir }
 }
 
-/** A finding the hook itself is the source of, not a line of its output. */
-function hookFinding(file: string, ruleId: string, message: string): ToolFinding {
+/**
+ * A finding the hook itself is the source of, not a line of its output. It spans the whole file,
+ * as a `path` match does, so any edit to the file makes it the agent's rather than the backlog.
+ */
+async function hookFinding(
+  file: string,
+  ruleId: string,
+  message: string,
+  read: (file: string) => Promise<string | null>,
+): Promise<ToolFinding> {
+  const text = await read(file)
   return {
     file,
     line: 1,
     column: 1,
-    endLine: 1,
+    endLine: text === null ? 1 : text.split(/\r?\n/).length,
     endColumn: null,
     ruleId,
     message,
@@ -100,6 +109,9 @@ function hookFinding(file: string, ruleId: string, message: string): ToolFinding
 function forHook(rules: DetectorRuleInput<HookConfig>[], name: string) {
   return rules.filter((rule) => !rule.config.rules || rule.config.rules.includes(name))
 }
+
+/** A command as doctor shows it: its path, or "(PATH)" after a bare name, as for command and linter. */
+const shown = (command: string) => (command.includes("/") ? command : `${command} (PATH)`)
 
 export const hookDetector: Detector<HookConfig> = {
   kind: "hook",
@@ -139,7 +151,9 @@ export const hookDetector: Detector<HookConfig> = {
             : await runLefthook(config.lefthook!, files, input)
         } finally {
           changed = await restoreChanged(before, input.cwd)
-          const findings = changed.map((file) => hookFinding(file, name, `${name} would change this file`))
+          const findings = await Promise.all(
+            changed.map((file) => hookFinding(file, name, `${name} would change this file`, input.read)),
+          )
           await distribute(findings, forHook(rules, name), input.read, result)
         }
         if (ran.exitCode !== null && isToolError(ran.exitCode, config)) {
@@ -155,7 +169,12 @@ export const hookDetector: Detector<HookConfig> = {
           // The hook failed and said nothing a format reads: the agent still hears that, and what it said.
           const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
           for (const rule of forHook(rules, name)) {
-            const finding = hookFinding(rule.files[0]!, name, `${name} failed${said ? `: ${said}` : ""}`)
+            const finding = await hookFinding(
+              rule.files[0]!,
+              name,
+              `${name} failed${said ? `: ${said}` : ""}`,
+              input.read,
+            )
             await distribute([finding], [rule], input.read, result)
           }
         }
@@ -190,7 +209,7 @@ export const hookDetector: Detector<HookConfig> = {
               detail: "neither is installed",
               rules: preCommit.map((rule) => rule.id),
             }
-          : { what: found.runner, level: "ok", detail: found.command, rules: [] },
+          : { what: found.runner, level: "ok", detail: shown(found.command), rules: [] },
       )
       const byId = new Map<string, string[]>()
       for (const rule of preCommit)
@@ -212,7 +231,7 @@ export const hookDetector: Detector<HookConfig> = {
         })
         return results
       }
-      results.push({ what: "lefthook", level: "ok", detail: command, rules: [] })
+      results.push({ what: "lefthook", level: "ok", detail: shown(command), rules: [] })
       const dump = await lefthookDump(command, input.cwd, input.signal)
       const byJob = new Map<string, string[]>()
       for (const rule of lefthook)

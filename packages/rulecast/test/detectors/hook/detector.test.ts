@@ -146,10 +146,10 @@ describe("hook detector: pre-commit hooks", () => {
   })
 
   test("a hook that changes a file: the file is restored and the change is the finding", async () => {
-    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello   \n" })
-    await stubRunner(root, "prek", `printf 'hello\\n' > t.txt\n${replay("prek.modified.txt", 1)}`)
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello   \nworld\n" })
+    await stubRunner(root, "prek", `printf 'hello\\nworld\\n' > t.txt\n${replay("prek.modified.txt", 1)}`)
     const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["t.txt"])])
-    expect(await readFile(path.join(root, "t.txt"), "utf8")).toBe("hello   \n")
+    expect(await readFile(path.join(root, "t.txt"), "utf8")).toBe("hello   \nworld\n")
     expect(result.errors).toEqual([])
     expect(result.findings).toEqual([
       {
@@ -157,7 +157,8 @@ describe("hook detector: pre-commit hooks", () => {
         match: {
           file: "t.txt",
           line: 1,
-          endLine: 1,
+          // The whole file: any edit to it makes the finding the agent's, as for the path detector.
+          endLine: 3,
           column: 1,
           text: "",
           captures: {
