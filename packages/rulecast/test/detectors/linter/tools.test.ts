@@ -13,12 +13,13 @@ const recording = async (tool: string) =>
   (await readFile(path.join(payloads, `${tool}.json`), "utf8")).replaceAll("__ROOT__", ROOT)
 
 describe("linter schema", () => {
-  test("accepts the three tools and an optional rule list", () => {
+  test("accepts the four tools and an optional rule list", () => {
     expect(linterSchema.parse({ tool: "ruff" })).toEqual({ tool: "ruff" })
     expect(linterSchema.parse({ tool: "oxlint", rules: ["no-debugger"] })).toEqual({
       tool: "oxlint",
       rules: ["no-debugger"],
     })
+    expect(linterSchema.parse({ tool: "gitleaks" })).toEqual({ tool: "gitleaks" })
     expect(linterSchema.safeParse({ tool: "biome" }).success).toBe(false)
     expect(linterSchema.safeParse({ tool: "ruff", extra: 1 }).success).toBe(false)
   })
@@ -32,9 +33,109 @@ describe("tool adapters", () => {
   })
 
   test("each tool asks for JSON and passes the files last", () => {
-    expect(TOOLS.ruff.args(["a.py"])).toEqual(["check", "--output-format", "json", "--force-exclude", "--", "a.py"])
-    expect(TOOLS.oxlint.args(["a.js"])).toEqual(["--format=json", "--", "a.js"])
-    expect(TOOLS.eslint.args(["a.js"])).toEqual(["--format=json", "--no-error-on-unmatched-pattern", "--", "a.js"])
+    expect(TOOLS.ruff.args(["a.py"], [])).toEqual(["check", "--output-format", "json", "--force-exclude", "--", "a.py"])
+    expect(TOOLS.oxlint.args(["a.js"], [])).toEqual(["--format=json", "--", "a.js"])
+    expect(TOOLS.eslint.args(["a.js"], [])).toEqual(["--format=json", "--no-error-on-unmatched-pattern", "--", "a.js"])
+  })
+
+  test("each tool turns on the rules it is asked for, whatever the project's config selects", () => {
+    expect(TOOLS.ruff.args(["a.py"], ["S110", "T201"])).toEqual([
+      "check",
+      "--output-format",
+      "json",
+      "--force-exclude",
+      "--extend-select",
+      "S110,T201",
+      "--",
+      "a.py",
+    ])
+    expect(TOOLS.ruff.stdinArgs!("a.py", ["S110"])).toEqual([
+      "check",
+      "--output-format",
+      "json",
+      "--force-exclude",
+      "--extend-select",
+      "S110",
+      "--stdin-filename",
+      "a.py",
+      "-",
+    ])
+    expect(TOOLS.oxlint.args(["a.js"], ["no-empty", "max-params"])).toEqual([
+      "--format=json",
+      "-D",
+      "no-empty",
+      "-D",
+      "max-params",
+      "--",
+      "a.js",
+    ])
+    expect(TOOLS.eslint.args(["a.js"], ["no-empty", "@typescript-eslint/no-explicit-any"])).toEqual([
+      "--format=json",
+      "--no-error-on-unmatched-pattern",
+      "--rule",
+      "no-empty: error",
+      "--rule",
+      "@typescript-eslint/no-explicit-any: error",
+      "--",
+      "a.js",
+    ])
+    expect(TOOLS.eslint.stdinArgs!("a.js", ["no-empty"])).toEqual([
+      "--format=json",
+      "--rule",
+      "no-empty: error",
+      "--stdin",
+      "--stdin-filename",
+      "a.js",
+    ])
+  })
+
+  test("gitleaks scans the files given, or one file on stdin, with the rules asked for", () => {
+    expect(TOOLS.gitleaks.events).toEqual(["edit", "verify"])
+    expect(TOOLS.gitleaks.args(["app/conf.py"], [])).toEqual([
+      "dir",
+      "--no-banner",
+      "--log-level",
+      "error",
+      "--report-format",
+      "json",
+      "--report-path",
+      "-",
+      "--",
+      "app/conf.py",
+    ])
+    expect(TOOLS.gitleaks.stdinArgs!("app/conf.py", ["generic-api-key", "aws-access-token"])).toEqual([
+      "stdin",
+      "--no-banner",
+      "--log-level",
+      "error",
+      "--report-format",
+      "json",
+      "--report-path",
+      "-",
+      "--enable-rule",
+      "generic-api-key",
+      "--enable-rule",
+      "aws-access-token",
+    ])
+    // The secret is the finding: it must not be echoed into hook output, logs or SARIF.
+    expect(TOOLS.gitleaks.redacts).toBe(true)
+  })
+
+  test("gitleaks output becomes findings with an exclusive end column; stdin findings name no file", async () => {
+    expect(TOOLS.gitleaks.parse(await recording("gitleaks"), ROOT)).toEqual([
+      {
+        file: "app/conf.py",
+        line: 1,
+        column: 1,
+        endLine: 1,
+        endColumn: 42,
+        ruleId: "generic-api-key",
+        message:
+          "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+      },
+    ])
+    expect(TOOLS.gitleaks.parse(await recording("gitleaks-stdin"), ROOT).map((finding) => finding.file)).toEqual([""])
+    expect(TOOLS.gitleaks.parse("[]", ROOT)).toEqual([])
   })
 
   test("ruff output becomes findings with repo-relative files", async () => {

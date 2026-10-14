@@ -6,7 +6,7 @@ import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
-import { linkTool, stubArgv, stubTool } from "../../helpers/linters"
+import { brokenTool, linkTool, stubArgv, stubCalls, stubTool } from "../../helpers/linters"
 import { createProject, fromDisk } from "../../helpers/project"
 
 const ruleFor = (id: string, config: unknown, files: string[]): DetectorRuleInput<LinterConfig> => ({
@@ -75,7 +75,72 @@ describe("linter detector", () => {
       ruleFor("print", { tool: "ruff", rules: ["T201"] }, ["app/a.py", "app/b.py"]),
       ruleFor("imports", { tool: "ruff", rules: ["F401"] }, ["app/a.py"]),
     ])
-    expect(await stubArgv(root, "ruff")).toBe("check --output-format json --force-exclude -- app/a.py app/b.py")
+    expect(await stubArgv(root, "ruff")).toBe(
+      "check --output-format json --force-exclude --extend-select F401,T201 -- app/a.py app/b.py",
+    )
+  })
+
+  test("rules that take every finding run apart from rules that name theirs", async () => {
+    // Turning named rules on must not hand extra findings to a rule that asked for whatever the
+    // project's own config reports: the two kinds get a run each.
+    const root = await createProject({ "app/a.py": PY, "app/b.py": PY })
+    await stubTool(root, "ruff")
+    await run(root, [
+      ruleFor("print", { tool: "ruff", rules: ["T201"] }, ["app/a.py"]),
+      ruleFor("everything", { tool: "ruff" }, ["app/b.py"]),
+    ])
+    expect((await stubCalls(root, "ruff")).sort()).toEqual([
+      "check --output-format json --force-exclude -- app/b.py",
+      "check --output-format json --force-exclude --extend-select T201 -- app/a.py",
+    ])
+  })
+
+  test("a gitleaks finding never carries the secret it found", async () => {
+    const root = await createProject({ "app/conf.py": 'API_KEY = "x8Fq2LmN9pRt6VwXy1Zb3Cd5Ef7Gh"\nTIMEOUT = 30\n' })
+    await stubTool(root, "gitleaks")
+    const result = await run(root, [ruleFor("secrets", { tool: "gitleaks" }, ["app/conf.py"])], "edit")
+    expect(result.errors).toEqual([])
+    expect(result.findings).toHaveLength(1)
+    expect(result.findings[0]!.match).toMatchObject({ file: "app/conf.py", line: 1, text: "[redacted]" })
+    expect(result.findings[0]!.match.captures.ruleId).toBe("generic-api-key")
+  })
+
+  test("a finding from a stdin run that names no file belongs to the file that was piped in", async () => {
+    const root = await createProject({ "app/conf.py": "TIMEOUT = 30\n" })
+    await stubTool(root, "gitleaks", { recording: "gitleaks-stdin" })
+    const staged = new Map([["app/conf.py", 'API_KEY = "x8Fq2LmN9pRt6VwXy1Zb3Cd5Ef7Gh"\n']])
+    const result = await linterDetector.run({
+      event: "verify",
+      rules: [ruleFor("secrets", { tool: "gitleaks" }, ["app/conf.py"])],
+      changes: new Map(),
+      read: async (file) => staged.get(file) ?? null,
+      fromDisk: false,
+      cache: memoryCache(),
+      settings: defaultDetectorSettings(),
+      cwd: root,
+      signal: new AbortController().signal,
+      deadlineAt: Date.now() + 60_000,
+    })
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((finding) => [finding.rule, finding.match.file, finding.match.text])).toEqual([
+      ["secrets", "app/conf.py", "[redacted]"],
+    ])
+  })
+
+  test("a rule the project's config leaves off still fires; an inline suppression still holds", async () => {
+    const root = await createProject({
+      "src/a.js": "try { f() } catch (e) {}\n",
+      "src/b.js": "// oxlint-disable-next-line no-empty\ntry { f() } catch (e) {}\n",
+      ".oxlintrc.json": '{ "rules": { "no-empty": "off" } }\n',
+    })
+    await linkTool(root, "oxlint")
+    const result = await run(root, [
+      ruleFor("empty", { tool: "oxlint", rules: ["no-empty"] }, ["src/a.js", "src/b.js"]),
+    ])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((finding) => [finding.match.file, finding.match.captures.ruleId])).toEqual([
+      ["src/a.js", "no-empty"],
+    ])
   })
 
   test("attributes a finding to every rule that asked for its rule id", async () => {
@@ -96,9 +161,11 @@ describe("linter detector", () => {
     expect(byRule("other-file")).toEqual([])
   })
 
-  test("tools run independently: a missing one fails only its own rules", async () => {
+  test("tools run independently: a failing one fails only its own rules", async () => {
     const root = await createProject({ "src/a.js": JS, "app/a.py": PY })
     await linkTool(root, "oxlint")
+    // A ruff that answers with garbage, so the test doesn't depend on ruff being absent from PATH.
+    await brokenTool(root, "ruff")
     const result = await run(root, [
       ruleFor("js", { tool: "oxlint", rules: ["no-debugger"] }, ["src/a.js"]),
       ruleFor("py", { tool: "ruff" }, ["app/a.py"]),
@@ -115,7 +182,9 @@ describe("linter detector", () => {
     const root = await createProject({ "src/a.js": JS })
     await stubTool(root, "eslint")
     const result = await run(root, [ruleFor("js", { tool: "eslint", rules: ["no-console"] }, ["src/a.js"])])
-    expect(await stubArgv(root, "eslint")).toBe("--format=json --no-error-on-unmatched-pattern -- src/a.js")
+    expect(await stubArgv(root, "eslint")).toBe(
+      "--format=json --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
+    )
     expect(result.errors).toEqual([])
     expect(result.findings).toHaveLength(1)
     expect(result.findings[0]!.match).toMatchObject({

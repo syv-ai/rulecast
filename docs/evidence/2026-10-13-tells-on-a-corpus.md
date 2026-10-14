@@ -38,3 +38,37 @@ A **tell** is a lens's claim that one file's text shows the problem, so a check 
 
 1. **A regex that backtracks catastrophically reports "0 violations" and exits 0.** Reproduced: the pattern `"(a+)+"` on one file of 40 `a`s followed by `!` spent 60 seconds of CPU, then printed `0 violations in 0 of 1 matching files`. A rule that never finished is reported exactly like a clean one. In the corpus run, a BOLA rule showed 0 hits over two minutes; once the regex was fixed, it found 38 in two seconds. `test --against` should report the rule that ran out of time, and the hook path should treat it as a rule error.
 2. **`rulecast test --against` lists only the top 10 files,** so measuring precision needed a separate script to see every hit. An option to print all hits, or to sample them, would make this a rulecast workflow.
+
+## Rerun with structural detectors, 2026-10-14
+
+In the first run, 83 of the 91 rules were regex, because the brief allowed only regex, path and ast-grep. Most tells are structural (what's inside an `except`, a call inside a log statement, how long a function is), and a regex can't tell code from strings or comments. The 18 tells kept or rewritten were measured again on the same corpus, with each rule's detector chosen in the order: an existing lint rule (`linter`), an established tool (`command`), `ast-grep`, and regex only for textual tells or as a marked fallback for Go, Rust, Java and C#, where no tool was installed.
+
+| Tell | First run (real/sampled) | Rerun | Detectors | Verdict |
+|---|---|---|---|---|
+| `lava-flow` | 10/19 | 13/13 | ast-grep, regex | keep |
+| `copy-and-paste-programming` | 37/53 | 34/37 | regex | keep |
+| `global-state` | 23/34 | 15/15 | ast-grep | keep |
+| `hard-coded-secrets` | 0/0 | 1/1 (gitleaks) | linter (gitleaks) | keep |
+| `mass-assignment` | 0/3 | 0/0 | linter, ast-grep | keep, unmeasured |
+| `sensitive-data-in-logs` | 3/3 | 3/3 | ast-grep, regex | rewrite |
+| `user-enumeration` | 0/0 | 0/0 | ast-grep, regex | keep, unmeasured |
+| `swallowed-errors` | 5/28 | 2/2 | linter | keep |
+| `init-time-side-effects` | 7/7 | 7/7 | regex, ast-grep | keep |
+| `conditional-test-logic` | 16/33 | 14/15 | ast-grep | keep |
+| `test-logic-in-production` | 5/5 | 5/5 | ast-grep, regex | keep |
+| `dead-code` | 2/2 | 0/0 | ast-grep, linter, regex | keep, unmeasured |
+| `duplicate-code` | 23/53 | 6/7 | regex | keep |
+| `large-class` | 16/23 | 5/5 | ast-grep, regex | keep |
+| `long-method` | 37/56 | 11/15 | ast-grep | keep |
+| `long-parameter-list` | 44/49 | 37/43 | ast-grep, regex | rewrite |
+| `primitive-obsession` | 7/19 | 4/4 | ast-grep, regex | keep |
+| `switch-statements` | 16/24 | 8/9 | ast-grep, regex | keep |
+
+- **Precision rose, but not only because of the detectors.** The rerun followed the tell texts as narrowed after the first run (Python only for `swallowed-errors`, required positional parameters for `long-parameter-list`), so the two columns don't measure the same check. Several samples are small; `dead-code`, `mass-assignment` and `user-enumeration` never fired.
+- **An existing lint rule is not automatically the tell.** ruff `ERA001` gave 16 real of 40 for commented-out code (it flags single lines and "uncomment to enable" templates), and ruff `S105`/`S106` gave 0 real of 6 for hard-coded secrets (`token_type = "bearer"`). Both were tried first, recorded, and replaced by ast-grep rules that follow the tell. ruff `S110` (swallowed errors) and `DJ007` (Django forms with `fields = "__all__"`) were kept.
+- **Secrets belong to a secrets scanner.** gitleaks was added to rulecast's `linter` detector for `hard-coded-secrets`: outside test fixtures it found one hit, a committed ASP.NET Core data-protection key under `src/`, and it was real. With fixtures it found 26 (scraped HTML, fake tokens in auth tests, deliberately committed test certificates). The corpus measures its false positives, not its recall.
+- **An ast-grep gotcha:** a rule that looks for a later sibling (`precedes`, `follows`) can match the file's root node, so it fires on files with no repeat at all. Rules that use these relations need `not: { kind: module }` (Python) or the equivalent.
+
+## A third rulecast defect, fixed
+
+3. **A `linter` rule only reported what the project's config already enabled.** rulecast ran ruff, oxlint and eslint with the project's own selection and filtered by the rule ids, so a rule asking for ruff `S110` found nothing in a project that didn't select it, which is most projects. Fixed on 2026-10-14: the detector now turns on the rules it names (ruff `--extend-select`, oxlint `-D`, eslint `--rule`); inline suppressions, ruff's `per-file-ignores` and oxlint's `overrides` still apply.

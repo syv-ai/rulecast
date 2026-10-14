@@ -33,8 +33,15 @@ export async function linkTool(root: string, tool: string): Promise<void> {
 }
 
 /** A stub that replays a recording and writes the argv it was called with to <root>/<tool>.argv. */
-export async function stubTool(root: string, tool: string, options: { exitCode?: number } = {}): Promise<void> {
-  const recording = (await readFile(path.join(payloads, `${tool}.json`), "utf8")).replaceAll("__ROOT__", root)
+export async function stubTool(
+  root: string,
+  tool: string,
+  options: { exitCode?: number /** A recording other than <tool>.json. */; recording?: string } = {},
+): Promise<void> {
+  const recording = (await readFile(path.join(payloads, `${options.recording ?? tool}.json`), "utf8")).replaceAll(
+    "__ROOT__",
+    root,
+  )
   await mkdir(binDir(root), { recursive: true })
   const output = path.join(binDir(root), `${tool}.recording.json`)
   await writeFile(output, recording)
@@ -44,6 +51,8 @@ export async function stubTool(root: string, tool: string, options: { exitCode?:
     [
       "#!/bin/sh",
       `printf '%s\\n' "$*" > "${path.join(root, `${tool}.argv`)}"`,
+      // Every call, one line each: a tool can be run more than once per event.
+      `printf '%s\\n' "$*" >> "${path.join(root, `${tool}.calls`)}"`,
       // What the detector piped in: empty for a path run, the file's content for a stdin run.
       `cat > "${path.join(root, `${tool}.stdin`)}"`,
       `cat "${output}"`,
@@ -58,6 +67,11 @@ export async function stubTool(root: string, tool: string, options: { exitCode?:
 /** The argv a stub was called with, as one space-joined line. */
 export async function stubArgv(root: string, tool: string): Promise<string> {
   return (await readFile(path.join(root, `${tool}.argv`), "utf8")).trim()
+}
+
+/** Every argv a stub was called with, one space-joined line per call, in call order. */
+export async function stubCalls(root: string, tool: string): Promise<string[]> {
+  return (await readFile(path.join(root, `${tool}.calls`), "utf8")).trim().split("\n")
 }
 
 /** What the detector wrote to a stub's stdin. */

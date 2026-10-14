@@ -13,6 +13,8 @@ fixture's `node_modules/.bin`, which is where the detector looks first.
 |---|---|---|---|
 | `ruff.json` | ruff 0.14.0 | `ruff check --output-format json --isolated --select F401,T201 --force-exclude -- app/a.py` | `import os` + `print("x")` |
 | `oxlint.json` | oxlint 1.83.0 | `oxlint --format=json -- src/a.js` | `console.log("hi")` + an unused const + `debugger` |
+| `gitleaks.json` | gitleaks 8.30.1 | `gitleaks dir --no-banner --log-level error --report-format json --report-path - -- app/conf.py` | `API_KEY = "x8Fq…Gh"` (a made-up generic key) + `TIMEOUT = 30` |
+| `gitleaks-stdin.json` | gitleaks 8.30.1 | `gitleaks stdin …` with the same flags, the file on stdin | the same file; stdin findings carry no file name |
 | `eslint.json` | eslint 10.11.0 | `eslint --format=json --no-error-on-unmatched-pattern -- src/a.js` | the same JS, with `no-console: error` and `no-debugger: warn` |
 
 ## Why these are recordings

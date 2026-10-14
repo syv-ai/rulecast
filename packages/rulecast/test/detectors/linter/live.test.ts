@@ -30,6 +30,12 @@ const LIVE: Live[] = [
   },
   { tool: "oxlint", files: { "src/a.js": "debugger\n" }, file: "src/a.js", ruleId: "no-debugger" },
   {
+    tool: "gitleaks",
+    files: { "app/conf.py": 'API_KEY = "x8Fq2LmN9pRt6VwXy1Zb3Cd5Ef7Gh"\n' },
+    file: "app/conf.py",
+    ruleId: "generic-api-key",
+  },
+  {
     tool: "eslint",
     files: {
       "src/a.js": 'console.log("x")\n',
@@ -59,7 +65,7 @@ describe.runIf(process.env.RULECAST_LINTERS === "1")("live linters", () => {
         console.log(`skipping ${live.tool}: not installed`)
         return
       }
-      const args = [...resolved.prefix, ...TOOLS[live.tool].args([live.file])]
+      const args = [...resolved.prefix, ...TOOLS[live.tool].args([live.file], [])]
       const { stdout } = await exec(resolved.command, args, { cwd: root }).catch(
         (error: { stdout?: string }) => error as { stdout: string },
       )
@@ -108,14 +114,14 @@ describe.runIf(process.env.RULECAST_LINTERS === "1")("live linters", () => {
         return
       }
       const onDisk = async (file: string) => {
-        const args = [...resolved.prefix, ...TOOLS[keyed.tool].args([file])]
+        const args = [...resolved.prefix, ...TOOLS[keyed.tool].args([file], [])]
         const { stdout } = await exec(resolved.command, args, { cwd: root }).catch(
           (error: { stdout?: string }) => error as { stdout: string },
         )
         return TOOLS[keyed.tool].parse(stdout, root).map((finding) => finding.ruleId)
       }
       const onStdin = async (file: string) => {
-        const args = [...resolved.prefix, ...TOOLS[keyed.tool].stdinArgs!(file)]
+        const args = [...resolved.prefix, ...TOOLS[keyed.tool].stdinArgs!(file, [])]
         const child = exec(resolved.command, args, { cwd: root })
         // A tool that exits without reading stdin raises EPIPE on it, unhandled unless listened for.
         child.child.stdin?.on("error", () => {})

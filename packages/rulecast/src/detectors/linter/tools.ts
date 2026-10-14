@@ -16,13 +16,20 @@ export interface LinterFinding {
 
 export interface LinterTool {
   events: DetectorEvent[]
-  args(files: string[]): string[]
+  /**
+   * `select`: the rule ids to turn on for this run, on top of whatever the project's config
+   * enables, so a rule fires even where the config leaves it off. Empty: the config decides.
+   */
+  args(files: string[], select: string[]): string[]
   /**
    * One file's content on stdin, linted as if it were at `file` (repo-relative). Absent: the tool
    * has no such mode, so content that is not on disk reaches it as a scratch copy.
    */
-  stdinArgs?(file: string): string[]
+  stdinArgs?(file: string, select: string[]): string[]
+  /** "" for a finding's file when the tool names none, as gitleaks does for stdin. */
   parse(stdout: string, root: string): LinterFinding[]
+  /** The source a finding points at is itself sensitive (a secret), so `{{text}}` must not carry it. */
+  redacts?: boolean
 }
 
 type JsonObject = Record<string, unknown>
@@ -47,11 +54,62 @@ function oxlintRuleId(code: unknown): string {
   return /^[\w-]+\((?<rule>[^)]+)\)$/.exec(raw)?.groups?.rule ?? raw
 }
 
+const ruffSelect = (select: string[]): string[] => (select.length ? ["--extend-select", select.join(",")] : [])
+const eslintRules = (select: string[]): string[] => select.flatMap((rule) => ["--rule", `${rule}: error`])
+const GITLEAKS_FLAGS = ["--no-banner", "--log-level", "error", "--report-format", "json", "--report-path", "-"]
+// gitleaks runs every rule of its config by default; --enable-rule narrows the run to the ones asked for.
+const gitleaksRules = (select: string[]): string[] => select.flatMap((rule) => ["--enable-rule", rule])
+
 export const TOOLS: Record<ToolName, LinterTool> = {
+  gitleaks: {
+    events: ["edit", "verify"],
+    // The project's .gitleaks.toml, .gitleaksignore and `gitleaks:allow` comments apply in both modes.
+    args: (files, select) => ["dir", ...GITLEAKS_FLAGS, ...gitleaksRules(select), "--", ...files],
+    // gitleaks stdin takes no file name: its findings come back with File "", and the detector
+    // gives them the file it piped in.
+    stdinArgs: (_file, select) => ["stdin", ...GITLEAKS_FLAGS, ...gitleaksRules(select)],
+    redacts: true,
+    parse(stdout, root) {
+      const parsed = json("gitleaks", stdout)
+      if (!Array.isArray(parsed)) throw new Error("gitleaks output is not a JSON array of findings")
+      const relative = repoRelativeTo(root)
+      return parsed.filter(isObject).map((leak) => {
+        const line = number(leak.StartLine, 1)
+        return {
+          file: text(leak.File) === "" ? "" : relative(text(leak.File)),
+          line,
+          column: number(leak.StartColumn, 1),
+          endLine: number(leak.EndLine, line),
+          // gitleaks's end column is inclusive; a finding's is exclusive.
+          endColumn: typeof leak.EndColumn === "number" ? leak.EndColumn + 1 : null,
+          ruleId: text(leak.RuleID),
+          message: text(leak.Description),
+        }
+      })
+    },
+  },
   ruff: {
     events: ["edit", "verify"],
-    args: (files) => ["check", "--output-format", "json", "--force-exclude", "--", ...files],
-    stdinArgs: (file) => ["check", "--output-format", "json", "--force-exclude", "--stdin-filename", file, "-"],
+    // --extend-select adds to the config's selection; per-file-ignores and `# noqa` still apply.
+    args: (files, select) => [
+      "check",
+      "--output-format",
+      "json",
+      "--force-exclude",
+      ...ruffSelect(select),
+      "--",
+      ...files,
+    ],
+    stdinArgs: (file, select) => [
+      "check",
+      "--output-format",
+      "json",
+      "--force-exclude",
+      ...ruffSelect(select),
+      "--stdin-filename",
+      file,
+      "-",
+    ],
     parse(stdout, root) {
       const parsed = json("ruff", stdout)
       if (!Array.isArray(parsed)) throw new Error("ruff output is not a JSON array of diagnostics")
@@ -74,7 +132,8 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   },
   oxlint: {
     events: ["edit", "verify"],
-    args: (files) => ["--format=json", "--", ...files],
+    // -D turns a rule on as an error over the config; inline disable comments still apply.
+    args: (files, select) => ["--format=json", ...select.flatMap((rule) => ["-D", rule]), "--", ...files],
     parse(stdout, root) {
       const parsed = json("oxlint", stdout)
       if (!isObject(parsed) || !Array.isArray(parsed.diagnostics)) {
@@ -100,8 +159,16 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   eslint: {
     // eslint is the slow one: spec §6 keeps it off the edit hook by default.
     events: ["verify"],
-    args: (files) => ["--format=json", "--no-error-on-unmatched-pattern", "--", ...files],
-    stdinArgs: (file) => ["--format=json", "--stdin", "--stdin-filename", file],
+    // --rule wins over the config, its per-file settings included; inline disable comments still
+    // apply. A plugin rule needs its plugin loaded by the project's config.
+    args: (files, select) => [
+      "--format=json",
+      "--no-error-on-unmatched-pattern",
+      ...eslintRules(select),
+      "--",
+      ...files,
+    ],
+    stdinArgs: (file, select) => ["--format=json", ...eslintRules(select), "--stdin", "--stdin-filename", file],
     parse(stdout, root) {
       const parsed = json("eslint", stdout)
       if (!Array.isArray(parsed)) throw new Error("eslint output is not a JSON array of file results")

@@ -67,7 +67,7 @@ The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-
 | `path` | The file's path alone — "never edit `src/client/`" | every edit |
 | `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
 | `command` | Whatever your own script reports, as JSON or SARIF | every edit |
-| `linter` | ruff, oxlint or eslint findings, narrowed to the rules you care about | edit (eslint: verify) |
+| `linter` | ruff, oxlint, eslint or gitleaks findings, narrowed to the rules you care about | edit (eslint: verify) |
 | `llm` | Conventions nothing mechanical expresses, judged by a model | verify only |
 
 `llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).

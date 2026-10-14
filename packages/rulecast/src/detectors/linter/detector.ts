@@ -25,9 +25,15 @@ function excerpt(source: string | null, finding: LinterFinding): string {
   return source.slice(from, Math.max(from, to)).replace(/\n$/, "")
 }
 
-async function runLinter(tool: ToolName, files: string[], cwd: string, signal: AbortSignal): Promise<LinterFinding[]> {
+async function runLinter(
+  tool: ToolName,
+  files: string[],
+  select: string[],
+  cwd: string,
+  signal: AbortSignal,
+): Promise<LinterFinding[]> {
   const resolved = await resolveTool(tool, cwd)
-  const args = [...resolved.prefix, ...TOOLS[tool].args(files)]
+  const args = [...resolved.prefix, ...TOOLS[tool].args(files, select)]
   // Linters exit non-zero when they find something; the output is the answer, not the exit code.
   const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed` })
   return TOOLS[tool].parse(stdout, cwd)
@@ -41,6 +47,7 @@ async function runLinter(tool: ToolName, files: string[], cwd: string, signal: A
 async function runLinterOnContent(
   tool: ToolName,
   files: string[],
+  select: string[],
   read: (file: string) => Promise<string | null>,
   cwd: string,
   signal: AbortSignal,
@@ -50,9 +57,10 @@ async function runLinterOnContent(
   for (const file of files) {
     const stdin = await read(file)
     if (stdin === null) continue
-    const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(file)]
+    const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(file, select)]
     const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed`, stdin })
-    findings.push(...TOOLS[tool].parse(stdout, cwd))
+    // A tool that names no file for stdin input (gitleaks) means the file it was given.
+    findings.push(...TOOLS[tool].parse(stdout, cwd).map((finding) => (finding.file ? finding : { ...finding, file })))
   }
   return findings
 }
@@ -66,17 +74,24 @@ export const linterDetector: Detector<LinterConfig> = {
   takesContent: (config) => TOOLS[config.tool].stdinArgs !== undefined,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
-    const byTool = new Map<ToolName, DetectorRuleInput<LinterConfig>[]>()
+    // One run per tool for the rules that name their linter rules, with those rules turned on, and
+    // one for the rules that take every finding, which must see only what the project's own config
+    // reports. Most configs have only one kind, so most tools still run once.
+    const runs = new Map<string, { tool: ToolName; select: string[]; rules: DetectorRuleInput<LinterConfig>[] }>()
     for (const rule of input.rules) {
-      const group = byTool.get(rule.config.tool)
-      if (group) group.push(rule)
-      else byTool.set(rule.config.tool, [rule])
+      const key = `${rule.config.tool}:${rule.config.rules ? "named" : "all"}`
+      const group = runs.get(key)
+      if (group) group.rules.push(rule)
+      else runs.set(key, { tool: rule.config.tool, select: [], rules: [rule] })
+    }
+    for (const group of runs.values()) {
+      group.select = [...new Set(group.rules.flatMap((rule) => rule.config.rules ?? []))].sort()
     }
     const onDisk = input.fromDisk !== false
     const read = onDisk ? sourceReader(input.cwd) : input.read
 
     await Promise.all(
-      [...byTool].map(async ([tool, rules]) => {
+      [...runs.values()].map(async ({ tool, select, rules }) => {
         const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
         if (files.length === 0) return
         // Everything that can fail for this tool is inside one guard, reading the files for
@@ -84,15 +99,15 @@ export const linterDetector: Detector<LinterConfig> = {
         // other tools down with it (spec §14).
         try {
           const findings = onDisk
-            ? await runLinter(tool, files, input.cwd, input.signal)
-            : await runLinterOnContent(tool, files, read, input.cwd, input.signal)
+            ? await runLinter(tool, files, select, input.cwd, input.signal)
+            : await runLinterOnContent(tool, files, select, read, input.cwd, input.signal)
           for (const finding of findings) {
             const match: Match = {
               file: finding.file,
               line: finding.line,
               endLine: finding.endLine,
               column: finding.column,
-              text: excerpt(await read(finding.file), finding),
+              text: TOOLS[tool].redacts ? "[redacted]" : excerpt(await read(finding.file), finding),
               captures: { message: finding.message, ruleId: finding.ruleId },
             }
             for (const rule of rules) {
