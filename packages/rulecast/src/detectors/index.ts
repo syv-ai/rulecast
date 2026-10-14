@@ -1,6 +1,7 @@
 import type { AnyDetector } from "../core/detection/registry"
 import { astGrepDetector } from "./ast-grep/detector"
 import { commandDetector } from "./command/detector"
+import { hookDetector } from "./hook/detector"
 import { linterDetector } from "./linter/detector"
 import { llmDetector } from "./llm/detector"
 import { pathDetector } from "./path"
@@ -11,6 +12,7 @@ export const builtinDetectors: readonly AnyDetector[] = [
   pathDetector,
   astGrepDetector,
   commandDetector,
+  hookDetector,
   linterDetector,
   llmDetector,
 ]

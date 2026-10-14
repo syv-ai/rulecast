@@ -1,0 +1,6 @@
+trim trailing whitespace.................................................Failed
+- hook id: trailing-whitespace
+- exit code: 1
+
+Fixing t3.txt
+

@@ -1,0 +1,1 @@
+shellcheck (local)...................................(no files to check)Skipped

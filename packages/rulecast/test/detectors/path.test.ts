@@ -38,6 +38,7 @@ test("built-in detectors have unique kinds", () => {
     "path",
     "ast-grep",
     "command",
+    "hook",
     "linter",
     "llm",
   ])

@@ -1,0 +1,1 @@
+No hook with id `nope` in stage `pre-commit`

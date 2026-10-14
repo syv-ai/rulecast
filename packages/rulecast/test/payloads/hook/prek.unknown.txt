@@ -1,0 +1,2 @@
+warning: selector `nope` did not match any hooks
+error: No hooks found after filtering with the given selectors

@@ -14,6 +14,18 @@ export const exitCodesSchema = z.object({ error: z.array(z.number().int()).min(1
 /** Only findings with these rule ids; several rules can share one run and split its findings. */
 export const ruleIdsSchema = z.array(z.string().min(1)).min(1)
 
+/** Fields a rule's message can use beyond the core ones, which the tool must emit on every finding. */
+export const capturesSchema = z
+  .array(z.string().regex(VARIABLE_NAME, "a capture must be a template variable name"))
+  .default([])
+  .superRefine((captures, ctx) => {
+    for (const name of captures) {
+      if ((CORE_VARIABLES as readonly string[]).includes(name)) {
+        ctx.addIssue({ code: "custom", message: `"${name}" is a core template variable` })
+      }
+    }
+  })
+
 export const commandSchema = z
   .object({
     /** argv. The element exactly "{{files}}" is replaced by the rule's files; otherwise they are appended. */
@@ -28,16 +40,7 @@ export const commandSchema = z
      * dead-code tool, whose answer about one file depends on the rest.
      */
     scope: z.enum(["files", "project"]).optional(),
-    captures: z
-      .array(z.string().regex(VARIABLE_NAME, "a capture must be a template variable name"))
-      .default([])
-      .superRefine((captures, ctx) => {
-        for (const name of captures) {
-          if ((CORE_VARIABLES as readonly string[]).includes(name)) {
-            ctx.addIssue({ code: "custom", message: `"${name}" is a core template variable` })
-          }
-        }
-      }),
+    captures: capturesSchema,
   })
   .strict()
 

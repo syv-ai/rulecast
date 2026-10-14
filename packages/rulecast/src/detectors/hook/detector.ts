@@ -1,0 +1,170 @@
+import path from "node:path"
+
+import { readOutput, type ToolFinding } from "../../core/detection/outputs"
+import { pastDeadline } from "../../core/detection/per-rule"
+import { runTool, type ToolResult } from "../../core/detection/tool"
+import { errorMessage } from "../../core/errors"
+import type { Detector, DetectorResult, DetectorRuleInput, DetectorRun } from "../../core/types"
+import { distribute } from "../command/detector"
+import { isToolError, toolFailure } from "../command/exit"
+import { stripRunnerFraming } from "./framing"
+import { restoreChanged, snapshot } from "./modified"
+import {
+  findLefthookJob,
+  findPreCommitHook,
+  lefthookCommand,
+  lefthookDump,
+  PRE_COMMIT_CONFIG,
+  preCommitRunner,
+  substituteFiles,
+} from "./resolve"
+import { type HookConfig, hookName, hookSchema } from "./schema"
+
+const ALWAYS = ["message", "ruleId", "severity"] as const
+/** How many lines of an unreadable failure the finding carries. */
+const OUTPUT_LINES = 5
+
+/** What one run of a hook said, whichever runner ran it. */
+interface HookRun {
+  /** The hook's own exit code; null when it passed or was skipped. */
+  exitCode: number | null
+  failed: boolean
+  output: string
+  /** Where relative paths in the output are relative to. */
+  dir: string
+}
+
+async function runPreCommit(id: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
+  const hook = await findPreCommitHook(input.cwd, id)
+  if (hook === null) throw new Error(`no hook with id "${id}" in ${PRE_COMMIT_CONFIG}`)
+  const found = await preCommitRunner(input.cwd, input.signal)
+  if (found === null) throw new Error("neither prek nor pre-commit is installed")
+  const stage = hook.stage === "pre-commit" ? [] : ["--hook-stage", hook.stage]
+  // `--files` runs on exactly these files and never stashes (pre-commit and prek both).
+  const ran = await runTool(found.command, ["run", id, ...stage, "--files", ...files], {
+    cwd: input.cwd,
+    signal: input.signal,
+    notFound: `${found.runner} is not installed`,
+  })
+  const framed = stripRunnerFraming(`${ran.stdout}\n${ran.stderr}`, found.runner)
+  // No status line: the runner stopped before the hook (an id it rejects, an environment it could not build).
+  if (framed.status === null && ran.exitCode !== 0) throw new Error(toolFailure(found.runner, ran))
+  return {
+    exitCode: framed.exitCode,
+    failed: framed.status === "failed",
+    output: framed.output,
+    dir: input.cwd,
+  }
+}
+
+/**
+ * The job's own command, run directly: `lefthook run` would install git hooks as a side effect,
+ * and its framing says less than the tool does.
+ */
+async function runLefthook(spec: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
+  const command = await lefthookCommand(input.cwd, input.signal)
+  if (command === null) throw new Error("lefthook is not installed")
+  const job = findLefthookJob(await lefthookDump(command, input.cwd, input.signal), spec)
+  if (job === null) throw new Error(`lefthook has no job "${spec}" with a run command`)
+  const dir = path.join(input.cwd, job.root)
+  // A job with a root sees its files relative to it, as lefthook gives them.
+  const relative = files.map((file) => path.relative(dir, path.join(input.cwd, file)))
+  const ran: ToolResult = await runTool("/bin/sh", ["-c", substituteFiles(job.run, relative)], {
+    cwd: dir,
+    signal: input.signal,
+    notFound: "/bin/sh is not available",
+  })
+  return { exitCode: ran.exitCode, failed: ran.exitCode !== 0, output: `${ran.stdout}\n${ran.stderr}`, dir }
+}
+
+/** A finding the hook itself is the source of, not a line of its output. */
+function hookFinding(file: string, ruleId: string, message: string): ToolFinding {
+  return {
+    file,
+    line: 1,
+    column: 1,
+    endLine: 1,
+    endColumn: null,
+    ruleId,
+    message,
+    severity: "error",
+    text: "",
+    properties: {},
+  }
+}
+
+/**
+ * Findings about the hook as a whole (it would change a file, it failed without a location) go to
+ * the rules that take every finding of the hook, or name the hook among their `rules`.
+ */
+function forHook(rules: DetectorRuleInput<HookConfig>[], name: string) {
+  return rules.filter((rule) => !rule.config.rules || rule.config.rules.includes(name))
+}
+
+export const hookDetector: Detector<HookConfig> = {
+  kind: "hook",
+  schema: hookSchema,
+  captures: (config) => [...new Set([...ALWAYS, ...config.captures])],
+  // A hook is written for a commit, not a keystroke: `stages: [edit, verify]` opts in.
+  events: () => ["verify"],
+  // A hook runs in the project with its own environment; a scratch copy is not that project.
+  wholeProject: () => true,
+  async run(input) {
+    const result: DetectorResult = { findings: [], errors: [] }
+    const groups = new Map<string, DetectorRuleInput<HookConfig>[]>()
+    for (const rule of input.rules) {
+      const key = JSON.stringify([
+        rule.config["pre-commit"],
+        rule.config.lefthook,
+        rule.config.output,
+        rule.config.exit_codes,
+      ])
+      const group = groups.get(key)
+      if (group) group.push(rule)
+      else groups.set(key, [rule])
+    }
+    // One hook at a time: two hooks over the same files would see each other's changes.
+    for (const rules of groups.values()) {
+      const config = rules[0]!.config
+      const name = hookName(config)
+      const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
+      if (files.length === 0) continue
+      try {
+        const before = await snapshot(files, input.cwd)
+        let ran: HookRun
+        let changed: string[] = []
+        try {
+          ran = config["pre-commit"]
+            ? await runPreCommit(config["pre-commit"], files, input)
+            : await runLefthook(config.lefthook!, files, input)
+        } finally {
+          changed = await restoreChanged(before, input.cwd)
+          const findings = changed.map((file) => hookFinding(file, name, `${name} would change this file`))
+          await distribute(findings, forHook(rules, name), input.read, result)
+        }
+        if (ran.exitCode !== null && isToolError(ran.exitCode, config)) {
+          throw new Error(toolFailure(name, { stdout: ran.output, stderr: "", exitCode: ran.exitCode }))
+        }
+        const findings = readOutput(config.output, ran.output, ran.dir).map((finding) =>
+          ran.dir === input.cwd
+            ? finding
+            : { ...finding, file: path.relative(input.cwd, path.join(ran.dir, finding.file)) },
+        )
+        await distribute(findings, rules, input.read, result)
+        if (ran.failed && findings.length === 0 && changed.length === 0) {
+          // The hook failed and said nothing a format reads: the agent still hears that, and what it said.
+          const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
+          for (const rule of forHook(rules, name)) {
+            const finding = hookFinding(rule.files[0]!, name, `${name} failed${said ? `: ${said}` : ""}`)
+            await distribute([finding], [rule], input.read, result)
+          }
+        }
+      } catch (error) {
+        if (pastDeadline(error, input)) throw error
+        const message = errorMessage(error)
+        for (const rule of rules) result.errors.push({ rule: rule.id, message })
+      }
+    }
+    return result
+  },
+}

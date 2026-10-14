@@ -1,4 +1,4 @@
-import { chmod } from "node:fs/promises"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { DetectorFixture } from "../../src/testing/detector-contract"
@@ -8,6 +8,16 @@ import { stubAgentCli } from "../helpers/llm"
 const PY = "import os\n\n\ndef get(id):\n    try:\n        return fetch(id)\n    except ValueError:\n        pass\n"
 const JS = 'console.log("hi")\nconst unused = 1\ndebugger\n'
 const CHECKER = '#!/bin/sh\necho \'[{"file":"app/a.py","line":1,"layer":"crud"}]\'\n'
+const PRE_COMMIT =
+  "repos:\n  - repo: local\n    hooks:\n      - id: check\n        name: check\n        entry: ./check.sh\n        language: system\n"
+/** A prek that reports one gcc-style line per file it is given, framed as prek frames it. */
+const PREK = [
+  "#!/bin/sh",
+  "printf 'check....Failed\\n- hook id: check\\n- exit code: 1\\n\\n'",
+  'shift 3; for f in "$@"; do printf \'  %s:1:1: error: found [X1]\\n\' "$f"; done',
+  "exit 1",
+  "",
+].join("\n")
 
 /** One fixture per built-in detector. A third-party detector supplies the same shape. */
 export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
@@ -33,6 +43,17 @@ export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
     config: { run: ["./check.sh", "{{files}}"], captures: ["layer"] },
     matching: ["app/a.py"],
     failing: { config: { run: ["./no-such-command"] } },
+  },
+  hook: {
+    files: { "app/a.py": PY, ".pre-commit-config.yaml": PRE_COMMIT },
+    prepare: async (root) => {
+      await mkdir(path.join(root, "node_modules", ".bin"), { recursive: true })
+      await writeFile(path.join(root, "node_modules", ".bin", "prek"), PREK)
+      await chmod(path.join(root, "node_modules", ".bin", "prek"), 0o755)
+    },
+    config: { "pre-commit": "check" },
+    matching: ["app/a.py"],
+    failing: { config: { "pre-commit": "not-declared" } },
   },
   linter: {
     files: { "src/a.js": JS },
