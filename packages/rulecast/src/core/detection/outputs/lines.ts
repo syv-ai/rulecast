@@ -27,8 +27,11 @@ const HEADS: Record<Preset, RegExp> = {
 /** `error:`, ty's `error[rule]`, tflint's `Warning - `. */
 const SEVERITY =
   /^(?<severity>fatal error|error|warning|warn|note|info|information|hint|style|remark)(?:\[(?<rule>[^\]\s]+)\]:?|\s*:|\s+-)\s+/i
-/** A trailing `(U1000)` or `[SC2115]`: no spaces inside, so `(90% confidence)` stays in the message. */
-const TRAILING_RULE = /\s+[[(](?<rule>[\w.:/@-]+)[\])]$/
+/**
+ * A trailing `(U1000)` or `[SC2115]`: no spaces inside and at least one letter, so
+ * `(90% confidence)` and jscpd's `(1-8)` stay in the message.
+ */
+const TRAILING_RULE = /\s+[[(](?<rule>[\w.:/@-]*[A-Za-z][\w.:/@-]*)[\])]$/
 /** `error TS2322: message`, `warning CA1822: message`, or a bare `error: message`. */
 const MSBUILD_REST =
   /^(?:(?<severity>fatal error|error|warning|info|message|hint)\s*)?(?<rule>[A-Za-z][\w-]*\d+)?\s*:\s*(?<message>.*)$/i

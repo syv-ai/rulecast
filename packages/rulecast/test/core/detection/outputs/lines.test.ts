@@ -80,9 +80,12 @@ describe("lines: gcc", () => {
     ])
   })
 
-  test("a parenthesised remark with spaces is part of the message, not a rule id", () => {
+  test("a parenthesised remark with spaces, or with no letter, is part of the message, not a rule id", () => {
     const [finding] = readOutput({ lines: "gcc" }, "a.py:1:1: something odd (90% confidence)\n", cwd)
     expect(finding).toMatchObject({ ruleId: "", message: "something odd (90% confidence)" })
+    // jscpd: the line range of the clone.
+    const [range] = readOutput({ lines: "gcc" }, "a.ts:1:0: warning: Found 7 lines (1-8)\n", cwd)
+    expect(range).toMatchObject({ ruleId: "", message: "Found 7 lines (1-8)" })
   })
 
   test("absolute paths are made repo-relative; ANSI colour is stripped; CRLF is fine", () => {
