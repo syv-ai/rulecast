@@ -23,6 +23,7 @@ import { VERSION } from "../core/version"
 import type { CatalogRef, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, docChoices, markerExists, matchHeading } from "../init/detect"
 import { draftPrompt } from "../init/draft-prompt"
+import { detectHooks, hookRule, type LocalRule } from "../init/hooks"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { Cancelled, type Choice, type Prompter } from "../init/prompts"
 import type { CliIo } from "./main"
@@ -43,6 +44,8 @@ interface Flags {
   agents: Adapter[]
   /** --no-agents: install no hooks, whatever is detected. */
   noAgents: boolean
+  /** --no-hooks: offer none of the project's own pre-commit or lefthook hooks. */
+  noHooks: boolean
   scope: InstallScope | null
   yes: boolean
 }
@@ -69,6 +72,7 @@ function parseFlags(args: string[]): Flags {
       "no-rules": { type: "boolean", default: false },
       agent: { type: "string", multiple: true },
       "no-agents": { type: "boolean", default: false },
+      "no-hooks": { type: "boolean", default: false },
       scope: { type: "string" },
       yes: { type: "boolean", default: false },
     },
@@ -99,6 +103,7 @@ function parseFlags(args: string[]): Flags {
     noRules: values["no-rules"],
     agents,
     noAgents: values["no-agents"],
+    noHooks: values["no-hooks"],
     scope: scope as InstallScope | null,
     yes: values.yes,
   }
@@ -248,6 +253,33 @@ async function chooseConventions(rules: CompiledRule[], detection: Detection, ui
 }
 
 /**
+ * The project's own pre-commit and lefthook hooks, offered as `hook` rules (plan 16). A hook that
+ * changes files is offered but never ticked: rulecast restores the file and reports the change,
+ * which is only useful when the developer asks for it.
+ */
+async function chooseHooks(root: string, config: Config | null, flags: Flags, ui: Ui): Promise<LocalRule[]> {
+  if (flags.noHooks) return []
+  const local = config?.repos.find((repo) => repo.repo === "local")
+  const configured = new Set((local?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
+  const hooks = (await detectHooks((file) => readSourceFile(root, file))).filter((hook) => !configured.has(hook.id))
+  if (hooks.length === 0) return []
+  const preselected = hooks.filter((hook) => !hook.modifies).map((hook) => hook.id)
+  const chosen =
+    ui.prompter === null
+      ? preselected
+      : await ui.prompter.multiselect({
+          message: "Run your project's hooks as rules",
+          choices: hooks.map((hook) => ({
+            value: hook.id,
+            label: hook.name,
+            hint: hook.modifies ? `changes files: reported, never applied · ${hook.source}` : hook.source,
+          })),
+          initialValues: preselected,
+        })
+  return hooks.filter((hook) => chosen.includes(hook.id)).map(hookRule)
+}
+
+/**
  * The agents `init` installs hooks for unless told otherwise: the detected ones, or — when nothing
  * marks any agent yet — every adapter rulecast has. A project with only an AGENTS.md is the common
  * case, and installing nothing there is the one default that makes rulecast do nothing at all.
@@ -352,10 +384,11 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   const installed = new Set((configured?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
   const rules = catalog === null ? [] : await chooseRules(catalog, installed, files, flags, ui, registry)
   const selections = await chooseConventions(rules, detection, ui)
+  const hooks = await chooseHooks(root, config, flags, ui)
   const agents = await chooseAgents(detection, flags, ui)
 
   const changes = await planInit(
-    { catalog: catalog === null ? null : { url: catalog.url, rev: catalog.rev }, rules: selections, agents },
+    { catalog: catalog === null ? null : { url: catalog.url, rev: catalog.rev }, rules: selections, agents, hooks },
     {
       configText,
       verifyMs: (config ?? defaultConfig()).timeouts.verifyMs,

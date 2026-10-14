@@ -18,13 +18,14 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "init",
     synopsis:
-      "rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--scope shared|personal] [--yes]",
+      "rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--no-hooks] [--scope shared|personal] [--yes]",
     summary: "Set rulecast up: config, catalog rules, agent hooks",
     flags: [
       ["--rules id,id", "Install these catalog rules instead of the ones that apply to your files"],
       ["--no-rules", "Install no catalog rules"],
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable"],
       ["--no-agents", "Install no agent hooks"],
+      ["--no-hooks", "Offer none of the project's pre-commit or lefthook hooks as rules"],
       ["--scope shared|personal", "Write hooks to the shared or the personal settings file"],
       ["--yes", "Take every default and write without asking"],
     ],

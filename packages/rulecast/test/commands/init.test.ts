@@ -288,3 +288,37 @@ describe("rulecast init defaults (plan 10, A1 and G6)", () => {
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(true)
   })
 })
+
+describe("rulecast init with the project's own hooks (plan 16)", () => {
+  const HOOKS: Record<string, string> = {
+    ...PROJECT,
+    ".pre-commit-config.yaml":
+      "repos:\n  - repo: local\n    hooks:\n      - id: types\n        name: types\n        entry: ./types.sh\n        language: system\n      - id: black\n        name: black\n        entry: black\n        language: system\n",
+  }
+
+  test("--yes adds the hooks that do not change files as hook rules, and they validate", async () => {
+    const root = await createRepo(HOOKS)
+    const result = await runCli(root, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.code).toBe(0)
+    const config = parse(await read(root, CONFIG_FILE)) as { repos: { repo: string; rules: { id: string }[] }[] }
+    const local = config.repos.find((repo) => repo.repo === "local")!
+    expect(local.rules.map((rule) => rule.id)).toEqual(["hook/types"])
+    expect(result.stdout).toContain("new, 1 hook rule")
+    expect(result.stdout).toContain("rulecast validate: 1 rule valid")
+  })
+
+  test("in a terminal they are offered, formatters unticked, and --no-hooks skips them", async () => {
+    const root = await createRepo(HOOKS)
+    const script = scriptedPrompter([[], ACCEPT, ACCEPT, "shared", false])
+    await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
+    const hooks = script.asked[1]!
+    expect(hooks.message).toBe("Run your project's hooks as rules")
+    expect(hooks.values).toEqual(["hook/types", "hook/black"])
+    expect(hooks.initial).toEqual(["hook/types"])
+    expect(hooks.hints["hook/black"]).toContain("changes files")
+
+    const skipped = await createRepo(HOOKS)
+    const plain = await runCli(skipped, ["init", "--yes", "--no-rules", "--no-hooks"], "", env)
+    expect(plain.stdout).toContain("new, no rules yet")
+  })
+})
