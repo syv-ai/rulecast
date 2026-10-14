@@ -75,10 +75,12 @@
     - switch-statements
     - state
     - strategy
+    - open-closed-principle
   pick: >
     switch-statements is the smell, and state and strategy are the two usual remedies: state when the switch
     is on an object's lifecycle, strategy when it chooses an algorithm. Exhaustive matching on a closed set is
-    often better than either.
+    often better than either. open-closed-principle says when the switch is worth replacing at all: when
+    others add cases, not when you own every one.
 - ids:
     - anemic-domain-model
     - data-class
@@ -99,11 +101,13 @@
 - ids:
     - ports-and-adapters
     - dependency-rule
+    - dependency-inversion-principle
     - layered-architecture
   pick: >
-    dependency-rule is the principle (dependencies point toward policy). ports-and-adapters is the
-    architecture built on it, and layered-architecture the older style it corrects, where the domain depends
-    on persistence.
+    dependency-rule is the principle (dependencies point toward policy). dependency-inversion-principle is
+    the same idea at the scale of one dependency: the interface belongs to the code that needs it, which is
+    how a single import is made to point inward. ports-and-adapters is the architecture built on both, and
+    layered-architecture the older style it corrects, where the domain depends on persistence.
 - ids:
     - postels-law
     - tolerant-reader
@@ -156,3 +160,18 @@
   pick: >
     Start from error-handling-policy, which decides how errors travel in this codebase. swallowed-errors and
     exceptions-for-control-flow are the two common ways code breaks that policy.
+- ids:
+    - single-responsibility-principle
+    - divergent-change
+    - shotgun-surgery
+  pick: >
+    single-responsibility-principle is the principle: one reason to change per module. divergent-change is the
+    smell when it is broken one way (one module changes for many reasons), shotgun-surgery when it is broken
+    the other way (one reason to change touches many modules). Use the smells to find it in code.
+- ids:
+    - interface-segregation-principle
+    - interface-bloat
+  pick: >
+    interface-segregation-principle is the principle seen from the caller (depend only on what you use);
+    interface-bloat is the type that broke it. Start from the principle when reviewing a function's
+    parameters, from interface-bloat when reviewing the type itself.

@@ -1,5 +1,364 @@
-# rulecast lens catalog: patterns. Distilled 2026-10-13; see docs/references.md.
-# Own words throughout; sources cited per entry (how: read | recalled).
+# rulecast lens catalog: patterns. Distilled 2026-10-13, regrouped by kind 2026-10-14; see docs/references.md.
+# Own words throughout; sources cited per entry (how: read | recalled | developer).
+- id: bounded-context
+  name: Bounded Context
+  family: pattern
+  group: architecture
+  says: Draw an explicit boundary around each model, in code, data and team ownership, and keep terms consistent
+    inside it, accepting that the same word (customer, product, course) means different things in different
+    contexts.
+  names: Eric Evans, Domain-Driven Design (2003), ch. 14, the centre of DDD's strategic design.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Top-level modules, packages, projects or services named after business areas (billing, scheduling,
+      grading), each with its own model classes.
+    - Two classes with the same name in different contexts, each holding only what that context needs, linked
+      by an id.
+    - Each context owns its tables or schema, and other contexts go through its published interface.
+    - Import rules or architecture tests that stop one context reaching into another's internals.
+  forces:
+    - One central class (Customer, Product, Account) has grown fields and rules for every department, and
+      every change risks breaking someone.
+    - Teams argue about what a word means because each is right in its own area.
+    - A shared database schema couples modules that should change independently.
+    - Different parts of the system change at different rates or are owned by different teams.
+  overuse:
+    - A microservice per context, or worse per entity, in a system one team could run as a modular monolith.
+    - Dozens of tiny contexts with translation layers between them for a domain that is really one model.
+    - Duplicating a concept into two contexts when it means the same thing in both.
+  remedy: null
+  counter: >
+    A bounded context is a model boundary, not a deployment unit; mapping each to a microservice is a common
+    misreading that produces a distributed monolith. Evans himself warns that splitting into ever smaller
+    contexts loses integration and coherence. A small app with one team and one coherent vocabulary is one
+    context, and drawing internal boundaries adds translation without benefit. Boundaries are hard to get
+    right early, so many practitioners start with a modular monolith and split once the boundaries have proved
+    stable. Applying the tactical patterns without this strategic step is what Vernon calls DDD-Lite, the most
+    common criticism of how DDD is practised.
+  in:
+    python: >
+      One top-level package per context; import-linter contracts can forbid imports between contexts except
+      through a public module.
+    typescript: >
+      Workspace packages or folders per context, with dependency-cruiser or eslint-plugin-boundaries rules
+      enforcing what may import what.
+    java: >
+      Packages or Maven/Gradle modules per context. Spring Modulith treats top-level packages as application
+      modules and verifies their dependencies; ArchUnit does the same in any Java codebase.
+    csharp: >
+      A project (assembly) per context, with internal visibility for what other contexts must not use;
+      NetArchTest can check the rules.
+    go: >
+      A package tree per context, with internal/ directories so other contexts can't import the internals; the
+      compiler enforces it.
+    rust: >
+      A crate per context in a workspace, with pub only on the published interface; the crate graph makes
+      dependencies explicit and acyclic.
+  related:
+    - ubiquitous-language
+    - context-map
+    - anti-corruption-layer
+    - core-subdomain
+    - shared-database
+    - distributed-monolith
+    - big-ball-of-mud
+    - drifting-terminology
+  tell: >
+    Any language: a file inside one context's directory that imports from another context's internal module
+    rather than its published interface (for example billing/ importing scheduling/domain/). Needs the
+    project's context directories configured, so it is a path-aware check, not a universal one.
+  interview_only: false
+  example:
+    before: |
+      class Course:                  # shared by every part of the university system
+          code: str
+          room: Room
+          timeslots: list
+          enrolment_cap: int
+          grading_scheme: GradingScheme
+          credits: int
+          pass_mark: int
+          # scheduling changes break grading tests, and the reverse
+    after: |
+      # scheduling/course.py
+      class Course:
+          course_id: CourseId
+          room: Room
+          timeslots: list
+          enrolment_cap: int
+
+      # grading/course.py
+      class Course:
+          course_id: CourseId
+          grading_scheme: GradingScheme
+          credits: int
+          pass_mark: int
+    note: Each context keeps the version of Course its own people mean, linked by id, so scheduling and grading
+      change independently.
+  sources:
+    - cite: Eric Evans, Domain-Driven Design Reference (2015), Bounded Context and Continuous Integration
+      url: https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf
+      how: read
+    - cite: Eric Evans, Domain-Driven Design (2003), ch. 14
+      url: https://www.domainlanguage.com/ddd/
+      how: recalled
+    - cite: Martin Fowler, bliki, BoundedContext
+      url: https://martinfowler.com/bliki/BoundedContext.html
+      how: recalled
+    - cite: Vaughn Vernon, Implementing Domain-Driven Design (2013), ch. 1 (DDD-Lite) and ch. 2
+      url: null
+      how: recalled
+    - cite: Vlad Khononov, Learning Domain-Driven Design (2021), ch. 3
+      url: https://www.oreilly.com/library/view/learning-domain-driven-design/9781098100124/
+      how: recalled
+  matters_most_for:
+    - distributed
+    - web-api
+    - fullstack-web
+    - platforms
+    - event-driven
+- id: ubiquitous-language
+  name: Ubiquitous Language
+  family: pattern
+  group: design
+  says: Developers and domain experts share one vocabulary within a bounded context and use it everywhere, in
+    talk, docs and especially code, so renaming a concept in conversation means renaming it in code too.
+  names: Eric Evans, Domain-Driven Design (2003), ch. 2.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - Class, method and module names that a domain expert would recognise (Batch, pitch_yeast, GravityReading)
+      rather than technical stand-ins (Job, add_item, Measurement).
+    - A glossary in the repository that the code follows, with one entry per term and the context it holds in.
+    - Commits that rename code after the business changed how it talks about something.
+    - Tests named in domain sentences.
+  forces:
+    - Developers translate between what the business says and what the code says, and things get lost.
+    - The same concept goes by several names in the code, or one name covers several concepts (Drifting
+      Terminology).
+    - Bugs trace back to a misunderstanding of what a term meant.
+    - New developers can't map a feature request onto the code.
+  overuse:
+    - One company-wide glossary forced onto every team, ignoring that terms legitimately differ between
+      contexts.
+    - Renaming established technical terms (cache, queue, retry) into business words they have no business
+      name for.
+    - Arguing over wording for code that has no domain experts and no domain beyond its own mechanics.
+  remedy: null
+  counter: >
+    The language holds within one bounded context, not across a company; trying to make it universal is the
+    commonest misreading. For tooling, libraries and infrastructure the "domain" is technical, and its
+    language is the vocabulary of its users, developers, so the practice still applies but there are no
+    business experts to consult. Teams working in a non-English domain face a real trade-off between keeping
+    domain terms untranslated in code and keeping code in one language; both are defensible if chosen
+    deliberately. Drifting Terminology is the anti-pattern this practice prevents, and coding agents produce
+    it readily, so a checked-in glossary is a cheap convention that pays off.
+  in: {}
+  related:
+    - drifting-terminology
+    - bounded-context
+    - domain-allergy
+    - principle-of-least-astonishment
+  tell: null
+  interview_only: false
+  example:
+    before: |
+      class Job:
+          readings: list            # brewers call these gravity readings
+
+      fn add_item(job: Job, kind: str, grams: int): ...    # kind == "yeast" means pitching
+      fn finish_job(job: Job): ...                         # brewers say "rack to conditioning"
+      fn calc_abv(m1: float, m2: float) -> float: ...
+    after: |
+      class Batch:
+          gravity_readings: list
+
+      fn pitch_yeast(batch: Batch, strain: YeastStrain, grams: int): ...
+      fn add_hops(batch: Batch, variety: HopVariety, grams: int): ...
+      fn rack_to_conditioning(batch: Batch): ...
+      fn alcohol_by_volume(original: Gravity, final: Gravity) -> Percentage: ...
+    note: The code now uses the brewers' own words, so a request about racking or pitching maps straight onto a
+      function.
+  sources:
+    - cite: Eric Evans, Domain-Driven Design Reference (2015), Ubiquitous Language
+      url: https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf
+      how: read
+    - cite: Eric Evans, Domain-Driven Design (2003), ch. 2
+      url: https://www.domainlanguage.com/ddd/
+      how: recalled
+    - cite: Martin Fowler, bliki, UbiquitousLanguage
+      url: https://martinfowler.com/bliki/UbiquitousLanguage.html
+      how: recalled
+    - cite: Vlad Khononov, Learning Domain-Driven Design (2021), ch. 2
+      url: https://www.oreilly.com/library/view/learning-domain-driven-design/9781098100124/
+      how: recalled
+  matters_most_for:
+    - web-api
+    - fullstack-web
+    - library-sdk
+    - plugin-host
+- id: context-map
+  name: Context Map
+  family: pattern
+  group: architecture
+  says: A map of the bounded contexts in play, including outside systems, and of how each pair relates (who is
+    upstream, who translates, what is shared), drawn as things are now rather than as hoped.
+  names: Eric Evans, Domain-Driven Design (2003), ch. 14. The relationship patterns it uses are Evans's too
+    (Shared Kernel, Customer/Supplier, Conformist, Anticorruption Layer, Open Host Service, Published
+    Language, Separate Ways); Partnership and Big Ball of Mud were added in his 2015 DDD Reference.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A diagram or document in the repository naming each context, its owner and each integration with its
+      relationship type.
+    - Integration code whose shape matches the map (a translator where the map says anticorruption layer, a
+      versioned public API where it says open host service).
+    - Dependency rules or architecture tests that encode the allowed directions.
+  forces:
+    - Several teams or systems integrate, and changes on one side keep surprising the other.
+    - Nobody can say which system is the source of truth for a concept.
+    - A downstream team plans around features an upstream team never committed to.
+    - A legacy system or vendor API is shaping the model of the code that uses it.
+  overuse:
+    - A detailed map for a single-team app with one context and a couple of third-party APIs.
+    - Drawing the map as the desired future state, so it describes nothing that exists.
+    - Maintaining a heavy modelling tool's output that nobody reads after the workshop.
+  remedy: null
+  counter: >
+    Its value grows with the number of teams and systems; for one team and one codebase, a list of external
+    integrations and how each is wrapped is enough. Like any architecture diagram it rots unless something
+    checks it, so encode the important edges as dependency rules instead of trusting the picture. Evans's
+    advice is to map the existing terrain first and change it later; a map drawn as the target state misleads.
+  in: {}
+  related:
+    - bounded-context
+    - anti-corruption-layer
+    - shared-database
+    - big-ball-of-mud
+  tell: null
+  interview_only: false
+  example: null
+  example_reason: A context map describes relationships between contexts and teams in a diagram or document; it
+    has no shape in a single code snippet.
+  sources:
+    - cite: Eric Evans, Domain-Driven Design Reference (2015), Context Map and the relationship patterns
+      url: https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf
+      how: read
+    - cite: Eric Evans, Domain-Driven Design (2003), ch. 14
+      url: https://www.domainlanguage.com/ddd/
+      how: recalled
+    - cite: Vaughn Vernon, Implementing Domain-Driven Design (2013), ch. 3
+      url: null
+      how: recalled
+    - cite: Vlad Khononov, Learning Domain-Driven Design (2021), ch. 4
+      url: https://www.oreilly.com/library/view/learning-domain-driven-design/9781098100124/
+      how: recalled
+    - cite: Context Mapper, a DSL and tooling for context maps
+      url: https://contextmapper.org/
+      how: recalled
+  matters_most_for:
+    - distributed
+    - platforms
+    - event-driven
+- id: core-subdomain
+  name: Core, Supporting and Generic Subdomains
+  family: pattern
+  group: architecture
+  says: Sort the business areas a system covers into core (what sets the business apart), supporting (needed and
+    specific, but no edge) and generic (solved problems), and spend design rigour on the core while keeping
+    the rest simple or buying it.
+  names: Also called Core domain, Subdomain types, Distillation. Eric Evans, Domain-Driven Design (2003), ch. 15
+    (Distillation, in part IV, Strategic Design), which names Core Domain and Generic Subdomains and speaks of
+    supporting elements only in passing. The three-way split with supporting subdomains was made standard by
+    Vaughn Vernon's Implementing Domain-Driven Design (2013) and Vlad Khononov's Learning Domain-Driven Design
+    (2021), which ties each type to a choice of implementation pattern.
+  applies_to:
+    kinds: []
+    languages: []
+  contested: false
+  looks_like:
+    - A rich domain model (aggregates, value objects, events, thorough tests) in one or two modules, and plain
+      CRUD or transaction scripts elsewhere.
+    - Authentication, billing, email or search delegated to a library or service rather than written in-house.
+    - A short document or README section naming which module is core and why.
+    - The strongest developers and most review attention on the core module.
+  forces:
+    - The same heavy patterns are applied everywhere, so simple admin screens take as long as the hard parts.
+    - The team has built its own version of something it could have bought (auth, scheduling, PDF rendering).
+    - The part that makes the product different is buried in code no more careful than the rest.
+    - Deciding which DDD patterns to use, and where, needs a rule better than "everywhere" or "nowhere".
+  overuse:
+    - Labelling everything core, so the classification guides nothing.
+    - Treating supporting code as unimportant and letting it rot, when it still has to work.
+    - Building a "core" from scratch that is actually generic, such as a home-grown identity system.
+  remedy: null
+  counter: >
+    This is where DDD's rigour pays and where it doesn't. Khononov's heuristic is the clearest: core
+    subdomains get a domain model (or an event-sourced one) because their logic is complex and changes;
+    supporting subdomains get a transaction script or active record; generic ones are bought or adopted. So
+    the tactical patterns are overkill for CRUD and for supporting and generic areas, and a CRUD app with no
+    distinctive logic may have no core worth modelling at all. Classifications move: a core idea can become a
+    commodity, and a supporting area can become core when the business competes on it, so revisit them. For
+    developer tools and libraries the core is usually the technical problem itself, and the business framing
+    fits less well. Teams tend to overrate how much of their system is core; asking "would we lose customers
+    if a competitor had this?" helps.
+  in: {}
+  related:
+    - bounded-context
+    - reinventing-the-wheel
+    - over-engineering
+    - yagni
+    - domain-allergy
+    - aggregate
+  tell: null
+  interview_only: false
+  example:
+    before: |
+      # office_locations: an admin table edited twice a year
+      class OfficeLocation(AggregateRoot): ...
+      class OfficeLocationFactory: ...
+      class OfficeLocationRepository: ...
+      class OfficeLocationRenamed(DomainEvent): ...
+
+      # dynamic pricing: the product's edge
+      fn price(room, date) -> float:
+          return base_rates[room.type] * (1.2 if date.is_weekend else 1.0)
+    after: |
+      # supporting: plain CRUD is enough
+      fn update_office_location(id, fields): db.update("office_locations", id, fields)
+
+      # core: the rigour goes here
+      class RatePlan:                       # aggregate with invariants and tests
+          fn quote(room: RoomType, stay: StayDates, demand: DemandForecast) -> Quote:
+              ...                           # floors, ceilings, length-of-stay rules
+      class Quote: ...                      # value object
+    note: Effort moves from ceremony around an admin table to the pricing model that sets the business apart.
+  sources:
+    - cite: Eric Evans, Domain-Driven Design Reference (2015), Core Domain, Generic Subdomains, Domain Vision
+        Statement, Highlighted Core, Segregated Core
+      url: https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf
+      how: read
+    - cite: Eric Evans, Domain-Driven Design (2003), ch. 15
+      url: https://www.domainlanguage.com/ddd/
+      how: recalled
+    - cite: Vlad Khononov, Learning Domain-Driven Design (2021), ch. 1 and 10 (design heuristics)
+      url: https://www.oreilly.com/library/view/learning-domain-driven-design/9781098100124/
+      how: recalled
+    - cite: Vaughn Vernon, Implementing Domain-Driven Design (2013), ch. 2
+      url: null
+      how: recalled
+  matters_most_for:
+    - web-api
+    - fullstack-web
+    - platforms
+    - distributed
 - id: abstract-factory
   name: Abstract Factory
   family: pattern
