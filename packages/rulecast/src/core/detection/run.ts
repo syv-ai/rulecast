@@ -25,7 +25,7 @@ export interface DetectionOutput {
   timedOut: { kind: string; rules: string[] }[]
   /** Findings dropped by a `rulecast-ignore` comment (core/suppress.ts). */
   ignored: IgnoredFinding[]
-  /** Ignores written without a reason, which suppressed nothing. */
+  /** Ignores written without a reason, which suppressed nothing, and rules a staged run skipped. */
   warnings: string[]
 }
 

@@ -221,6 +221,13 @@ export interface Detector<Config> {
    * on the file's path no longer matches (spec §12).
    */
   takesContent?(config: Config): boolean
+  /**
+   * This rule's tool reads the whole project (imports, a venv, node_modules), so a scratch copy of
+   * the files breaks it. When the content is not the working tree, such a rule runs on the working
+   * tree if its files there equal the content, and is skipped with a warning otherwise: rulecast
+   * never stashes to make them equal (spec §12).
+   */
+  wholeProject?(config: Config): boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>

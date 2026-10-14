@@ -146,4 +146,54 @@ describe("runDetectionFrom", () => {
     expect(runs[0]!.rules[0]!.files).toEqual(["app/a.py"])
     expect(existsSync(path.join(root, "app/a.py"))).toBe(true)
   })
+
+  test("a whole-project rule whose files have no unstaged changes runs on the working tree itself", async () => {
+    const root = await createRepo({ "app/a.py": "committed\n" })
+    await writeFile(path.join(root, "app/a.py"), "staged\n")
+    await git(root, "add", "app/a.py")
+    const runs: DetectorRun<unknown>[] = []
+    const output = await runDetectionFrom(
+      input(root, { kind: "index" }, [recorder("project", { wholeProject: () => true }, runs)], ["project"]),
+      { kind: "index" },
+    )
+    expect(output.warnings).toEqual([])
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.cwd).toBe(root)
+    expect(runs[0]!.rules[0]!.files).toEqual(["app/a.py"])
+    expect(await scratchDirs(root)).toEqual([])
+  })
+
+  test("with an unstaged change in its files it is skipped with the file named, and nothing is stashed", async () => {
+    const root = await stagedRepo()
+    const runs: DetectorRun<unknown>[] = []
+    const output = await runDetectionFrom(
+      input(root, { kind: "index" }, [recorder("project", { wholeProject: () => true }, runs)], ["project"]),
+      { kind: "index" },
+    )
+    expect(runs).toEqual([])
+    expect(output.warnings).toEqual(["r/project skipped: unstaged changes in app/a.py"])
+    expect(output.errors).toEqual([])
+    expect(await git(root, "stash", "list")).toBe("")
+    expect(await readFile(path.join(root, "app/a.py"), "utf8")).toBe("worktree\n")
+  })
+
+  test("against a commit, it runs when the working tree matches the commit and is skipped when not", async () => {
+    const root = await createRepo({ "app/a.py": "committed\n" })
+    const head = await git(root, "rev-parse", "HEAD")
+    const runs: DetectorRun<unknown>[] = []
+    const detectors = [recorder("project", { wholeProject: () => true }, runs)]
+    const same = await runDetectionFrom(input(root, { kind: "commit", ref: head }, detectors, ["project"]), {
+      kind: "commit",
+      ref: head,
+    })
+    expect(same.warnings).toEqual([])
+    expect(runs).toHaveLength(1)
+    await writeFile(path.join(root, "app/a.py"), "changed\n")
+    const differs = await runDetectionFrom(input(root, { kind: "commit", ref: head }, detectors, ["project"]), {
+      kind: "commit",
+      ref: head,
+    })
+    expect(runs).toHaveLength(1)
+    expect(differs.warnings).toEqual([`r/project skipped: the working tree differs from ${head} in app/a.py`])
+  })
 })

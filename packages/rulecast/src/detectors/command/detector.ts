@@ -2,11 +2,13 @@ import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
 import { readOutput, type ToolFinding } from "../../core/detection/outputs"
-import { perRule } from "../../core/detection/per-rule"
+import { pastDeadline } from "../../core/detection/per-rule"
 import { excerpt } from "../../core/detection/positions"
 import { runTool } from "../../core/detection/tool"
-import type { CheckResult, Detector, Match } from "../../core/types"
+import { errorMessage } from "../../core/errors"
+import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import { onPath } from "../../core/which"
+import { isToolError, streamText, toolFailure } from "./exit"
 import { type CommandConfig, commandSchema } from "./schema"
 
 const FILES = "{{files}}"
@@ -86,23 +88,88 @@ async function reachable(
   return { level: "ok", detail: full }
 }
 
+/**
+ * Rules that make the same call share one run: same argv before the files are put in, and the
+ * output read the same way. Three semgrep rules with different `rules:` scan once.
+ */
+export function runKey(config: CommandConfig): string {
+  return JSON.stringify([
+    config.run,
+    config.output,
+    config.stream ?? "stdout",
+    config.scope ?? "files",
+    config.exit_codes,
+  ])
+}
+
+/**
+ * A tool's findings handed to every rule of the run that selected the finding's file and whose
+ * `rules` admit its rule id. Shared with `hook`, which reads its runs the same way.
+ */
+export async function distribute(
+  findings: ToolFinding[],
+  rules: DetectorRuleInput<{ rules?: string[]; captures: string[] }>[],
+  read: (file: string) => Promise<string | null>,
+  result: DetectorResult,
+): Promise<void> {
+  for (const rule of rules) {
+    const files = new Set(rule.files)
+    try {
+      const matches: Match[] = []
+      for (const [index, finding] of findings.entries()) {
+        if (!files.has(finding.file)) continue
+        if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
+        matches.push(await toMatch(finding, index, rule.config.captures, read))
+      }
+      for (const match of matches) result.findings.push({ rule: rule.id, match })
+    } catch (error) {
+      result.errors.push({ rule: rule.id, message: errorMessage(error) })
+    }
+  }
+}
+
 export const commandDetector: Detector<CommandConfig> = {
   kind: "command",
   schema: commandSchema,
   captures: (config) => [...new Set([...ALWAYS, ...config.captures])],
-  events: () => ["edit", "verify"],
-  run: perRule(async (rule, input) => {
-    if (rule.files.length === 0) return []
-    const [command, ...rest] = argvFor(rule.config.run, rule.files)
-    // The exit code says "I found something", not "I failed": the output is the answer.
-    const { stdout } = await runTool(command!, rest, {
-      cwd: input.cwd,
-      signal: input.signal,
-      notFound: `command not found: ${command}`,
-    })
-    const findings = readOutput(rule.config.output, stdout, input.cwd)
-    return Promise.all(findings.map((finding, index) => toMatch(finding, index, rule.config.captures, input.read)))
-  }),
+  // A whole-project tool is too slow for an edit, as eslint is: `stages: [edit, verify]` opts in.
+  events: (config) => (config.scope === "project" ? ["verify"] : ["edit", "verify"]),
+  wholeProject: (config) => config.scope === "project",
+  async run(input) {
+    const result: DetectorResult = { findings: [], errors: [] }
+    const groups = new Map<string, DetectorRuleInput<CommandConfig>[]>()
+    for (const rule of input.rules) {
+      const key = runKey(rule.config)
+      const group = groups.get(key)
+      if (group) group.push(rule)
+      else groups.set(key, [rule])
+    }
+    await Promise.all(
+      [...groups.values()].map(async (rules) => {
+        const config = rules[0]!.config
+        const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
+        if (files.length === 0) return
+        // A project-scope tool is given no files; which findings matter is the rules' files.
+        const [command, ...rest] = argvFor(config.run, config.scope === "project" ? [] : files)
+        try {
+          const ran = await runTool(command!, rest, {
+            cwd: input.cwd,
+            signal: input.signal,
+            notFound: `command not found: ${command}`,
+          })
+          if (isToolError(ran.exitCode, config)) throw new Error(toolFailure(command!, ran))
+          const findings = readOutput(config.output, streamText(ran, config.stream), input.cwd)
+          await distribute(findings, rules, input.read, result)
+        } catch (error) {
+          if (pastDeadline(error, input)) throw error
+          // One error per rule of this run: the other runs are not affected.
+          const message = errorMessage(error)
+          for (const rule of rules) result.errors.push({ rule: rule.id, message })
+        }
+      }),
+    )
+    return result
+  },
   async check(input) {
     // One result per distinct command, not per rule: two rules calling the same script share a fate.
     const byCommand = new Map<string, string[]>()

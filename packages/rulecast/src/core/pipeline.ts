@@ -477,8 +477,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
     }
-    // An ignore without a reason is the author's mistake, said once per site.
-    for (const text of output.warnings) warnings.push({ key: `ignore:${text}`, text })
+    // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
+    // skipped in a staged run says which files kept it from running (detection/materialise.ts).
+    for (const text of output.warnings) warnings.push({ key: `detection:${text}`, text })
     // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
     // failure, so it must not change the exit code.
     for (const { kind, max, setting, skipped } of overBudget) {
