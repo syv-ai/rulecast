@@ -34,6 +34,29 @@ function kindOf(full: string, data: Loaded<unknown>): Kind | null {
   return null
 }
 
+/** What each detector's static `validate` finds wrong with its rules in this project. */
+async function projectProblems(
+  rules: CompiledRule[],
+  registry: DetectorRegistry,
+  root: string,
+  source: string,
+): Promise<Diagnostic[]> {
+  const byKind = new Map<string, { id: string; config: unknown }[]>()
+  for (const rule of rules) {
+    if (rule.detector === null || registry.get(rule.detector.kind)?.validate === undefined) continue
+    const group = byKind.get(rule.detector.kind) ?? []
+    group.push({ id: rule.id, config: rule.detector.config })
+    byKind.set(rule.detector.kind, group)
+  }
+  const diagnostics: Diagnostic[] = []
+  for (const [kind, group] of byKind) {
+    for (const problem of await registry.get(kind)!.validate!({ rules: group, cwd: root })) {
+      diagnostics.push({ source: path.basename(source), rule: problem.rule, message: problem.message, level: "error" })
+    }
+  }
+  return diagnostics
+}
+
 /** Validates a config or a manifest, named or found at the root. */
 export async function validateCommand(
   root: string,
@@ -75,6 +98,9 @@ export async function validateCommand(
             configData: data.ok ? data.value : undefined,
           })
         : await compileManifest(dir, registry, full)
+    // The project's own files are only the config's to check against: a manifest's rules run in
+    // whichever project installs them.
+    if (kind === "config") result.diagnostics.push(...(await projectProblems(result.rules, registry, dir, shown)))
     for (const diagnostic of result.diagnostics) {
       // A diagnostic about the file itself names it once, as given; one from a rule repo the file
       // pins keeps its own source after the file's name.

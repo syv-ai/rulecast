@@ -131,3 +131,36 @@ describe("rulecast validate", () => {
     expect(empty.stderr).toContain("nothing to validate: no .rulecast-config.yaml or .rulecast-rules.yaml")
   })
 })
+
+describe("rulecast validate: tool rules", () => {
+  test("names a hook rule whose id the project's .pre-commit-config.yaml does not declare", async () => {
+    const root = await createProject({
+      ".pre-commit-config.yaml": "repos:\n  - repo: local\n    hooks:\n      - id: lint\n        entry: ./lint.sh\n",
+      ".rulecast-config.yaml": localConfig([
+        { id: "lint", name: "Lint", detect: { hook: { "pre-commit": "lint" } }, message: "{{message}}" },
+        { id: "types", name: "Types", detect: { hook: { "pre-commit": "mypy" } }, message: "{{message}}" },
+      ]),
+    })
+    expect(await validate(root)).toMatchObject({
+      code: 2,
+      stdout: '.rulecast-config.yaml (types): no hook with id "mypy" in .pre-commit-config.yaml\n',
+    })
+  })
+
+  test("names a lines pattern that does not compile", async () => {
+    const root = await createProject({
+      ".rulecast-config.yaml": localConfig([
+        {
+          id: "p",
+          name: "P",
+          detect: { command: { run: ["./x"], output: { lines: { pattern: "(?<file>[a-" } } } },
+          message: "m",
+        },
+      ]),
+    })
+    const result = await validate(root)
+    expect(result.code).toBe(2)
+    expect(result.stdout).toContain("(p): detect.command.output")
+    expect(result.stdout).toContain("does not compile")
+  })
+})

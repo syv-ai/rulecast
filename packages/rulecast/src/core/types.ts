@@ -231,6 +231,15 @@ export interface Detector<Config> {
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>
+  /**
+   * Optional: static checks of rules against the project's own files, for `rulecast validate` —
+   * a hook id its .pre-commit-config.yaml does not declare. Nothing is run and the environment is
+   * not asked; that is `check`'s job.
+   */
+  validate?(input: {
+    rules: { id: string; config: Config }[]
+    cwd: string
+  }): Promise<{ rule: string; message: string }[]>
   /** Optional: report what this detector's rules need from the environment (rulecast doctor, §5). */
   check?(input: DetectorCheck<Config>): Promise<CheckResult[]>
 }

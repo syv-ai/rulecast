@@ -4,7 +4,7 @@ import { readOutput, type ToolFinding } from "../../core/detection/outputs"
 import { pastDeadline } from "../../core/detection/per-rule"
 import { runTool, type ToolResult } from "../../core/detection/tool"
 import { errorMessage } from "../../core/errors"
-import type { Detector, DetectorResult, DetectorRuleInput, DetectorRun } from "../../core/types"
+import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, DetectorRun } from "../../core/types"
 import { distribute } from "../command/detector"
 import { isToolError, toolFailure } from "../command/exit"
 import { stripRunnerFraming } from "./framing"
@@ -166,5 +166,62 @@ export const hookDetector: Detector<HookConfig> = {
       }
     }
     return result
+  },
+  async validate(input) {
+    const problems: { rule: string; message: string }[] = []
+    for (const rule of input.rules) {
+      const id = rule.config["pre-commit"]
+      if (id !== undefined && (await findPreCommitHook(input.cwd, id)) === null) {
+        problems.push({ rule: rule.id, message: `no hook with id "${id}" in ${PRE_COMMIT_CONFIG}` })
+      }
+    }
+    return problems
+  },
+  async check(input) {
+    const results: CheckResult[] = []
+    const preCommit = input.rules.filter((rule) => rule.config["pre-commit"] !== undefined)
+    if (preCommit.length > 0) {
+      const found = await preCommitRunner(input.cwd, input.signal)
+      results.push(
+        found === null
+          ? {
+              what: "prek or pre-commit",
+              level: "error",
+              detail: "neither is installed",
+              rules: preCommit.map((rule) => rule.id),
+            }
+          : { what: found.runner, level: "ok", detail: found.command, rules: [] },
+      )
+      const byId = new Map<string, string[]>()
+      for (const rule of preCommit)
+        byId.set(rule.config["pre-commit"]!, [...(byId.get(rule.config["pre-commit"]!) ?? []), rule.id])
+      for (const [id, rules] of byId) {
+        if ((await findPreCommitHook(input.cwd, id)) !== null) continue
+        results.push({ what: `hook "${id}"`, level: "error", detail: `not in ${PRE_COMMIT_CONFIG}`, rules })
+      }
+    }
+    const lefthook = input.rules.filter((rule) => rule.config.lefthook !== undefined)
+    if (lefthook.length > 0) {
+      const command = await lefthookCommand(input.cwd, input.signal)
+      if (command === null) {
+        results.push({
+          what: "lefthook",
+          level: "error",
+          detail: "not installed",
+          rules: lefthook.map((rule) => rule.id),
+        })
+        return results
+      }
+      results.push({ what: "lefthook", level: "ok", detail: command, rules: [] })
+      const dump = await lefthookDump(command, input.cwd, input.signal)
+      const byJob = new Map<string, string[]>()
+      for (const rule of lefthook)
+        byJob.set(rule.config.lefthook!, [...(byJob.get(rule.config.lefthook!) ?? []), rule.id])
+      for (const [job, rules] of byJob) {
+        if (findLefthookJob(dump, job) !== null) continue
+        results.push({ what: `lefthook job "${job}"`, level: "error", detail: "no such job with a run command", rules })
+      }
+    }
+    return results
   },
 }
