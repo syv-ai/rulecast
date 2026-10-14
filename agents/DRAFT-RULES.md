@@ -57,6 +57,8 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
 
 For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
+If the project already runs a tool that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml` or `lefthook.yml` — a `hook` or `command` rule using it beats a new pattern: the tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
+
 **Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
 
 ## 3. Draft one rule at a time

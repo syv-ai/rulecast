@@ -141,6 +141,14 @@ export const PAGES: Page[] = [
     source: { readme: ["Detectors"], file: "agents/reference/detectors.md" },
   },
   {
+    route: "reference/tool-recipes",
+    title: "Tool recipes",
+    description:
+      "A tested rule for each tool a project already runs: type checkers, dead-code finders, security scanners, hooks.",
+    group: "Reference",
+    source: { file: "agents/reference/tool-recipes.md" },
+  },
+  {
     route: "agents/setup",
     title: "SETUP.md",
     description: "The instructions an agent follows to set rulecast up.",

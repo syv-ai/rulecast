@@ -45,7 +45,7 @@ Every hook invocation is a **fresh process**, with no daemon. Each event flows t
 Where things live:
 
 - `adapters/` knows about one agent each (`claude-code`, `cli`). The core is agent-neutral: shell and session-start events are mapped by the adapter, but the working-tree comparison and the sweep live in `core/session/tree.ts`.
-- `detectors/` holds `regex`, `path`, `ast-grep`, `command`, `linter` (ruff, oxlint, eslint, gitleaks) and `llm`.
+- `detectors/` holds `regex`, `path`, `ast-grep`, `command`, `hook` (pre-commit and lefthook hooks), `linter` (ruff, oxlint, eslint, gitleaks) and `llm`. Tool output is read in one place, `core/detection/outputs/`.
 - `testing/` holds the exported detector and adapter contract suites.
 - `commands/` has one file per CLI command. `init/` is the interactive setup.
 - Catalog rules live in `packages/rules-general`, `rules-python` and `rules-react`, each with `rules.yaml` and the docs its rules cite.

@@ -211,7 +211,7 @@ A rule that fires three or more times has its `message` printed once, with the v
 - `edit`: the detector runs on each file the agent edits.
 - `verify`: the detector runs when the agent stops, on the files it changed, and in `rulecast run`. A staged `rulecast run` (no file flags, the pre-commit check) skips `llm` rules unless given `--llm`.
 
-Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit` or `verify` among its stages.
+Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults. Those are `edit` and `verify`, except `verify` only for `llm`, `eslint`, `hook`, and `command` with `scope: project`: each is too slow to be felt on every edit, and `stages: [edit, verify]` asks for it anyway. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit` or `verify` among its stages.
 
 ### Overrides
 

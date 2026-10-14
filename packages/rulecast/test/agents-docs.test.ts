@@ -13,6 +13,7 @@ const DOCS = [
   "agents/DRAFT-RULES.md",
   "agents/reference/rule-format.md",
   "agents/reference/detectors.md",
+  "agents/reference/tool-recipes.md",
 ]
 
 const FENCE = /^[ \t]*(`{3,}|~{3,})[\s\S]*?^[ \t]*\1[ \t]*$/gm

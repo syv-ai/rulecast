@@ -66,11 +66,12 @@ The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-
 | `regex` | A pattern in the file's text | every edit |
 | `path` | The file's path alone — "never edit `src/client/`" | every edit |
 | `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
-| `command` | Whatever your own script reports, as JSON or SARIF | every edit |
+| `command` | Whatever a tool or your own script reports: SARIF, JSON, checkstyle, code-quality JSON or `file:line:` lines. Type checkers, dead-code finders and scanners [by config](agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
+| `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | verify |
 | `linter` | ruff, oxlint, eslint or gitleaks findings, narrowed to the rules you care about | edit (eslint: verify) |
 | `llm` | Conventions nothing mechanical expresses, judged by a model | verify only |
 
-`llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
+`llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
 
 ## Refusing a write
 
@@ -93,7 +94,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 
 | Command | Does |
 |---|---|
-| `rulecast init` | Set rulecast up: config, catalog rules, agent hooks |
+| `rulecast init` | Set rulecast up: config, catalog rules, your existing git hooks as rules, agent hooks |
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
@@ -170,7 +171,7 @@ jobs:
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
-`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies.
+`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
 
 ## Turning a rule off
 

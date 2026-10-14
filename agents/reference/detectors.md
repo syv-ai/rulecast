@@ -62,20 +62,61 @@ That matches a `style` attribute on any element — the `<div>` is only there so
 
 ## `command`
 
+Any tool that works as a pre-commit hook works as a `command` rule: rulecast runs it, reads what it prints, and hands each finding to the agent with the rule's message and the doc section it cites. [tool-recipes.md](tool-recipes.md) has a tested rule for ty, mypy, pyright, vulture, tsc, knip, jscpd, staticcheck, golangci-lint, deadcode, semgrep, hadolint, tflint, shellcheck, osv-scanner and checkov.
+
 ```yaml
 detect:
   command:
-    run: ["uv", "run", "python", "scripts/check_layers.py", "{{files}}"]
-    output: json            # json | sarif
-    captures: [layer, target]
+    run: [ty, check, --output-format, gitlab, "{{files}}"]
+    output: gitlab
+    rules: [invalid-assignment]       # optional: only these rule ids
+    exit_codes: { error: [2, 101] }   # optional: these codes mean the tool failed
 ```
 
 - `run`: the command and its arguments, run from the project root. The argument that is exactly `{{files}}` is replaced by the rule's files; if there is no such argument, the files are appended. A rule that selects no files does not run the command at all.
-- `output`: `json` is an array of `{ file, line, endLine?, column?, text?, ...captures }`. `file` may be absolute or repo-relative. `sarif` is read as SARIF 2.1.0, taking `runs[].results[]`; a result with no location is skipped, and captures are read from the result's `properties`.
-- `captures`: the names your message uses. Each must be a string on **every** result — a missing one disables the rule, so the mistake is visible rather than silently blank. A capture may not shadow `file`, `line`, `column`, `text` or `rule`.
-- The exit code is ignored: finding something is not failing. Output that cannot be parsed disables the rule and is reported by `rulecast validate`.
-- In a staged run (`rulecast run` with no file flags) or with `--to-ref`, the script is handed a copy of each file under a scratch directory (`.rulecast-staged-XXXX/<path>`), because the content it must judge is the index or a commit, not the file on disk. Findings are mapped back to the real path. A script that decides by path should match the end of the path, not its start.
-- Default stages: `edit`, `verify`.
+- `output`: how to read what the tool prints. Default `json`.
+  - `json`: an array of `{ file, line, endLine?, column?, endColumn?, ruleId?, message?, severity?, text?, ...captures }`.
+  - `sarif`: SARIF 2.1.0, `runs[].results[]`. A result with no region is on line 1; one that passed, did not apply or is suppressed is skipped.
+  - `checkstyle`: checkstyle XML. The rule id is the last dotted part of `source` (`ShellCheck.SC2164` → `SC2164`).
+  - `gitlab`: GitLab code-quality JSON, the only JSON ty prints. `check_name` is the rule id.
+  - `rdjson`: reviewdog's diagnostic format, or rdjsonl, one diagnostic per line.
+  - `{ lines: gcc }`: `file:line:col: [severity[rule]:] message [(rule)]` — mypy `--show-column-numbers`, ty `--output-format concise`, shellcheck `-f gcc`, staticcheck, golangci-lint, deadcode, tflint `-f compact`. A trailing `(U1000)` or `[SC2115]` is the rule id when it has no spaces and has a letter.
+  - `{ lines: gcc-nocol }`: the same without a column — vulture, mypy without columns.
+  - `{ lines: msbuild }`: `file(line,col): severity CODE: message` — tsc, dotnet.
+  - `{ lines: { pattern: '…' } }`: a JavaScript regular expression matched against each line, with named groups `file`, `line` and `message` (required) and `col`, `endLine`, `endCol`, `rule`, `severity` (optional). Any other named group is a capture. A pattern that does not compile or lacks a required group is a `rulecast validate` error.
+  - For every line format, a line that does not match is ignored: tools interleave source excerpts and summaries with their findings. `file` may be absolute or repo-relative.
+- `stream`: `stdout` (default), `stderr`, or `both` for a tool that reports on stderr.
+- `rules`: keep only findings with these rule ids. Rules with the same `run`, `output`, `stream`, `scope` and `exit_codes` share one run and split its findings, so three semgrep rules scan once.
+- `exit_codes`: `{ error: [...] }` names the exit codes that mean the tool failed rather than found something — ty exits 1 on findings and 2 on a bad config, vulture 3 on findings, semgrep 0 either way. A listed code disables the rule with the tool's first lines of stderr. Every other code is read as findings-or-clean: the output is the answer.
+- `scope`: `files` (default) gives the tool the rule's files. `project` runs it without files (`{{files}}` resolves to nothing) and keeps only the findings in the rule's files. Use it for a type checker, a dead-code tool or a duplication finder, whose answer about a file depends on the rest of the project.
+- `captures`: extra names your message uses, each a string field the tool emits on **every** finding (JSON fields, SARIF `properties`, a pattern's named groups). A missing one disables the rule, so the mistake is visible rather than silently blank. A capture may not shadow `file`, `line`, `column`, `text` or `rule`.
+- Every finding carries `{{message}}`, `{{ruleId}}` and `{{severity}}` (the tool's own word: `error`, `major`, `note`; empty when it gave none). `{{text}}` is the source at the finding's range, unless a JSON result gives its own `text`.
+- Output that cannot be parsed disables the rule.
+- In a staged run (`rulecast run` with no file flags) or with `--to-ref`, a `files` rule is handed a copy of each file under a scratch directory (`.rulecast-staged-XXXX/<path>`), because the content it must judge is the index or a commit, not the file on disk. Findings are mapped back to the real path. A script that decides by path should match the end of the path, not its start. A `project` rule needs the real project, so it runs on the working tree when its files there match the index (or the commit), and is skipped with a warning naming the files when they don't. rulecast never stashes to make them match.
+- Default stages: `edit`, `verify`; **`verify` only with `scope: project`**, since a whole-project run is usually too slow for an edit. Write `stages: [edit, verify]` if your tool is fast enough (ty, hadolint, shellcheck and tflint take 15–50 ms per file).
+
+## `hook`
+
+```yaml
+detect:
+  hook:
+    pre-commit: mypy                 # a hook id in .pre-commit-config.yaml
+    # lefthook: pre-commit/typecheck # or a lefthook job: <hook>/<job>
+    output: { lines: gcc }           # default
+```
+
+Runs a hook the project already declares, so the agent sees the same thing a commit would show it, with the rule's message and doc section.
+
+- `pre-commit`: a hook id (or alias) in `.pre-commit-config.yaml`. rulecast runs `prek run <id> --files <files>` when prek is installed, else `pre-commit run …`, from the project's `node_modules/.bin` or `PATH`. That mode never stashes. A hook whose `stages` leave out `pre-commit` is run at its first stage. `rulecast validate` names an id the config does not declare.
+- `lefthook`: `<hook>/<job>` in lefthook's merged config (`lefthook dump`), including jobs inside groups and lefthook 1's `commands:`. rulecast runs the job's `run` command itself, from the job's `root`, with the rule's files in place of `{staged_files}`, `{files}`, `{all_files}` and `{push_files}`. It does not call `lefthook run`, which can install git hooks. The job's `glob` is not applied: the rule's `files` decide.
+- `output`, `rules`, `exit_codes`, `captures`: as for `command`. The runner's own framing (pre-commit's status line and `- hook id` block, prek's indent) is removed before the output is read.
+- A hook that changes a file — a formatter, a fixer — has the file put back as it was, and each changed file is a finding: `{{message}}` is "<hook> would change this file". rulecast never rewrites an agent's file behind its back. Only the rule's files are compared.
+- A hook that fails and prints nothing the `output` format reads is one finding on the rule's first file, carrying the hook's first lines of output, so the agent still hears that it failed and why.
+- A runner that never ran the hook (an unknown id, an environment it could not install) disables the rule with what it said.
+- `rulecast doctor` reports the runner it would use and every hook id or job it cannot find.
+- husky is not supported: its hooks are shell scripts with nothing structured to read. Use `command` with the script's command.
+- Like a `project` command rule, a hook rule runs on the working tree in a staged run when its files match the index, and is skipped with a warning when they don't.
+- Default stages: **`verify` only.** Hooks are written for a commit, not a keystroke. Write `stages: [edit, verify]` if yours is fast.
 
 ## `linter`
 
