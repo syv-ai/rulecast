@@ -54,7 +54,7 @@ export const commandDetector: Detector<CommandConfig> = {
     if (rule.files.length === 0) return []
     const [command, ...rest] = argvFor(rule.config.run, rule.files)
     // The exit code says "I found something", not "I failed": the output is the answer.
-    const stdout = await runTool(command!, rest, {
+    const { stdout } = await runTool(command!, rest, {
       cwd: input.cwd,
       signal: input.signal,
       notFound: `command not found: ${command}`,

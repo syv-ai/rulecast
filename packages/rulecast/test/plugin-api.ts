@@ -33,6 +33,7 @@ import type {
   RuleScope,
   Severity,
   Stage,
+  ToolResult,
 } from "../src/index"
 import {
   lineStarts,
@@ -88,5 +89,5 @@ export const detectorKind: string = detectorRule.detector.kind
 export const relative: string = repoRelative("/repo/a.ts", "/repo")
 export const relativeAll: (file: string) => string = repoRelativeTo("/repo")
 export const reader: (file: string) => Promise<string | null> = sourceReader("/repo")
-export const ran: Promise<string> = runTool("true", [], { cwd: "/repo", signal: run.signal, notFound: "missing" })
+export const ran: Promise<ToolResult> = runTool("true", [], { cwd: "/repo", signal: run.signal, notFound: "missing" })
 export const clock: boolean = pastDeadline(new Error("x"), run)

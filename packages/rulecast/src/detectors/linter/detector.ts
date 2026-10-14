@@ -35,7 +35,7 @@ async function runLinter(
   const resolved = await resolveTool(tool, cwd)
   const args = [...resolved.prefix, ...TOOLS[tool].args(files, select)]
   // Linters exit non-zero when they find something; the output is the answer, not the exit code.
-  const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed` })
+  const { stdout } = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed` })
   return TOOLS[tool].parse(stdout, cwd)
 }
 
@@ -58,7 +58,12 @@ async function runLinterOnContent(
     const stdin = await read(file)
     if (stdin === null) continue
     const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(file, select)]
-    const stdout = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed`, stdin })
+    const { stdout } = await runTool(resolved.command, args, {
+      cwd,
+      signal,
+      notFound: `${tool} is not installed`,
+      stdin,
+    })
     // A tool that names no file for stdin input (gitleaks) means the file it was given.
     findings.push(...TOOLS[tool].parse(stdout, cwd).map((finding) => (finding.file ? finding : { ...finding, file })))
   }

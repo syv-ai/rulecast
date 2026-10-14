@@ -5,11 +5,19 @@ import { isNotFound } from "../errors"
 
 const exec = promisify(execFile)
 
+/** What a checker printed, and how it exited. */
+export interface ToolResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
 /**
- * Runs a checker and returns what it printed.
+ * Runs a checker and returns what it printed and its exit code.
  *
  * A non-zero exit is not a failure: a linter or a command rule exits non-zero precisely when it
- * found something, and the output is the answer. What is a failure is a binary that is not there —
+ * found something, and the output is the answer. The exit code is kept for a caller that knows a
+ * tool's codes (ty exits 2 on a bad config); none is told to fail on it here. What is a failure is a binary that is not there —
  * reported as `notFound`, which the caller words for its own user — and an error that carries no
  * output at all, such as a permission failure. An abort is rethrown untouched, so the caller can tell the clock from
  * the rule (`pastDeadline`).
@@ -22,7 +30,7 @@ export async function runTool(
   command: string,
   args: readonly string[],
   options: { cwd: string; signal: AbortSignal; notFound: string; stdin?: string },
-): Promise<string> {
+): Promise<ToolResult> {
   try {
     const running = exec(command, [...args], {
       cwd: options.cwd,
@@ -39,12 +47,14 @@ export async function runTool(
     if (options.stdin === undefined) running.child.stdin?.end()
     else running.child.stdin?.end(options.stdin)
     const result = await running
-    return result.stdout
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 }
   } catch (error) {
     if (options.signal.aborted) throw error
     if (isNotFound(error)) throw new Error(options.notFound)
-    const failure = error as { stdout?: string }
+    const failure = error as { stdout?: string; stderr?: string; code?: unknown }
     if (typeof failure.stdout !== "string") throw error
-    return failure.stdout
+    // execFile puts the exit code on `code`; a process killed by a signal has none.
+    const exitCode = typeof failure.code === "number" ? failure.code : 1
+    return { stdout: failure.stdout, stderr: failure.stderr ?? "", exitCode }
   }
 }

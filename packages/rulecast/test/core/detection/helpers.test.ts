@@ -71,12 +71,23 @@ describe("runTool", () => {
   const node = process.execPath
   const options = () => ({ cwd: tmpdir(), signal: new AbortController().signal, notFound: "the tool is not installed" })
 
-  test("a clean exit returns what it printed", async () => {
-    expect(await runTool(node, ["-e", "process.stdout.write('clean')"], options())).toBe("clean")
+  test("a clean exit returns what it printed, with exit code 0", async () => {
+    expect(await runTool(node, ["-e", "process.stdout.write('clean')"], options())).toEqual({
+      stdout: "clean",
+      stderr: "",
+      exitCode: 0,
+    })
   })
 
   test("a non-zero exit is an answer, not a failure: a checker exits 1 when it found something", async () => {
-    expect(await runTool(node, ["-e", "process.stdout.write('found'); process.exit(1)"], options())).toBe("found")
+    expect((await runTool(node, ["-e", "process.stdout.write('found'); process.exit(1)"], options())).stdout).toBe(
+      "found",
+    )
+  })
+
+  test("a non-zero exit keeps its code and what went to stderr", async () => {
+    const script = "process.stderr.write('bad config'); process.exit(3)"
+    expect(await runTool(node, ["-e", script], options())).toEqual({ stdout: "", stderr: "bad config", exitCode: 3 })
   })
 
   test("a binary that is not there is the caller's own message", async () => {
