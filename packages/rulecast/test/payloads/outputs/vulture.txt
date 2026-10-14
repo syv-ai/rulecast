@@ -1,0 +1,4 @@
+a.py:1: unused import 'os' (90% confidence)
+a.py:7: unused function 'unused_func' (60% confidence)
+a.py:10: unused variable 'result' (60% confidence)
+b.py:2: unused variable 'z' (60% confidence)

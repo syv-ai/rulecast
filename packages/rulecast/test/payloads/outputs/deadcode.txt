@@ -1,0 +1,1 @@
+main.go:8:6: unreachable func: unused

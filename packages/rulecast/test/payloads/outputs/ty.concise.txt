@@ -1,0 +1,5 @@
+a.py:10:15: error[invalid-assignment] Object of type `int` is not assignable to `str`
+a.py:11:7: error[unresolved-reference] Name `undefined_name` used when not defined
+b.py:2:10: error[invalid-assignment] Object of type `int` is not assignable to `str`
+b.py:2:17: error[invalid-argument-type] Argument to function `add` is incorrect: Expected `int`, found `Literal["x"]`
+Found 4 diagnostics

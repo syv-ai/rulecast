@@ -1,0 +1,3 @@
+main.go:8:6: func unused is unused (U1000)
+main.go:12:5: should use strings.Contains(s, "a") instead (S1003)
+main.go:13:14: Printf format %d has arg #1 of wrong type string (SA5009)

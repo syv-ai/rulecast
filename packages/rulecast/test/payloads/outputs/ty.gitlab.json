@@ -1,0 +1,78 @@
+[
+  {
+    "check_name": "invalid-assignment",
+    "description": "invalid-assignment: Object of type `int` is not assignable to `str`",
+    "severity": "major",
+    "fingerprint": "77ae48826b9bcd8b",
+    "location": {
+      "path": "a.py",
+      "positions": {
+        "begin": {
+          "line": 10,
+          "column": 15
+        },
+        "end": {
+          "line": 10,
+          "column": 24
+        }
+      }
+    }
+  },
+  {
+    "check_name": "unresolved-reference",
+    "description": "unresolved-reference: Name `undefined_name` used when not defined",
+    "severity": "major",
+    "fingerprint": "4057ceea5997efad",
+    "location": {
+      "path": "a.py",
+      "positions": {
+        "begin": {
+          "line": 11,
+          "column": 7
+        },
+        "end": {
+          "line": 11,
+          "column": 21
+        }
+      }
+    }
+  },
+  {
+    "check_name": "invalid-assignment",
+    "description": "invalid-assignment: Object of type `int` is not assignable to `str`",
+    "severity": "major",
+    "fingerprint": "469f5bcd58512f4a",
+    "location": {
+      "path": "b.py",
+      "positions": {
+        "begin": {
+          "line": 2,
+          "column": 10
+        },
+        "end": {
+          "line": 2,
+          "column": 21
+        }
+      }
+    }
+  },
+  {
+    "check_name": "invalid-argument-type",
+    "description": "invalid-argument-type: Argument to function `add` is incorrect: Expected `int`, found `Literal[\"x\"]`",
+    "severity": "major",
+    "fingerprint": "488318fc7afadcf6",
+    "location": {
+      "path": "b.py",
+      "positions": {
+        "begin": {
+          "line": 2,
+          "column": 17
+        },
+        "end": {
+          "line": 2,
+          "column": 20
+        }
+      }
+    }
+  }
+]

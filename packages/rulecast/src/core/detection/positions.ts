@@ -24,3 +24,26 @@ export function offsetAt(starts: number[], line: number, column: number, length:
   const offset = starts[index]! + Math.max(column, 1) - 1
   return Math.min(Math.max(offset, 0), length)
 }
+
+/**
+ * The source a tool's finding points at; "" when the file is gone or the range is empty. An end
+ * column of null takes the rest of the line.
+ */
+export function excerpt(
+  source: string | null,
+  range: { line: number; column: number; endLine: number; endColumn: number | null },
+): string {
+  if (source === null) return ""
+  const starts = lineStarts(source)
+  const from = offsetAt(starts, range.line, range.column, source.length)
+  let to: number
+  if (range.endColumn === null) {
+    // Not the start of the next line: a last line with no trailing newline has no next line to
+    // start, and offsetAt would clamp back to this line's start, leaving the excerpt empty.
+    const newline = source.indexOf("\n", from)
+    to = newline === -1 ? source.length : newline
+  } else {
+    to = offsetAt(starts, range.endLine, range.endColumn, source.length)
+  }
+  return source.slice(from, Math.max(from, to)).replace(/\n$/, "")
+}

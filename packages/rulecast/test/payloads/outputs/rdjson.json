@@ -1,0 +1,19 @@
+{
+  "source": { "name": "example-linter", "url": "https://example.com" },
+  "severity": "WARNING",
+  "diagnostics": [
+    {
+      "message": "Use a template literal instead of string concatenation.",
+      "location": {
+        "path": "src/a.ts",
+        "range": { "start": { "line": 3, "column": 9 }, "end": { "line": 3, "column": 21 } }
+      },
+      "severity": "ERROR",
+      "code": { "value": "prefer-template", "url": "https://example.com/rules/prefer-template" }
+    },
+    {
+      "message": "File has no license header.",
+      "location": { "path": "src/b.ts" }
+    }
+  ]
+}

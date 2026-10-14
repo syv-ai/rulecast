@@ -1,0 +1,5 @@
+3 issue(s) found:
+
+main.tf:5:1: Warning - Missing version constraint for provider "aws" in `required_providers` (terraform_required_providers)
+main.tf:4:1: Warning - `unused` variable has no type (terraform_typed_variables)
+main.tf:4:1: Warning - variable "unused" is declared but not used (terraform_unused_declarations)

@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<checkstyle version='4.3'>
+<file name='s.sh' >
+<error line='2' column='8' severity='warning' message='Use &#34;&#36;&#123;var&#58;&#63;&#125;&#34; to ensure this never expands to /&#42; .' source='ShellCheck.SC2115' />
+<error line='2' column='8' severity='info' message='Double quote to prevent globbing and word splitting.' source='ShellCheck.SC2086' />
+<error line='3' column='10' severity='error' message='Iterating over ls output is fragile. Use globs.' source='ShellCheck.SC2045' />
+<error line='3' column='15' severity='info' message='Use ./&#42;glob&#42; or &#45;&#45; &#42;glob&#42; so names with dashes won&#39;t become options.' source='ShellCheck.SC2035' />
+<error line='3' column='31' severity='info' message='Double quote to prevent globbing and word splitting.' source='ShellCheck.SC2086' />
+<error line='4' column='1' severity='warning' message='Use &#39;cd ... &#124;&#124; exit&#39; or &#39;cd ... &#124;&#124; return&#39; in case cd fails.' source='ShellCheck.SC2164' />
+</file>
+</checkstyle>

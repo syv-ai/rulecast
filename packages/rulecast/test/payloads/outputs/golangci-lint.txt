@@ -1,0 +1,4 @@
+main.go:13:15: printf: fmt.Printf format %d has arg "x" of wrong type string (govet)
+main.go:17:2: ineffectual assignment to x (ineffassign)
+main.go:12:5: S1003: should use strings.Contains(s, "a") instead (staticcheck)
+main.go:8:6: func unused is unused (unused)

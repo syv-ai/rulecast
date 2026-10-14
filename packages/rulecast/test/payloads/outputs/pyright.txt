@@ -1,0 +1,10 @@
+__ROOT__/a.py
+  __ROOT__/a.py:10:15 - error: Type "int" is not assignable to declared type "str"
+    "int" is not assignable to "str" (reportAssignmentType)
+  __ROOT__/a.py:11:7 - error: "undefined_name" is not defined (reportUndefinedVariable)
+__ROOT__/b.py
+  __ROOT__/b.py:2:10 - error: Type "int" is not assignable to declared type "str"
+    "int" is not assignable to "str" (reportAssignmentType)
+  __ROOT__/b.py:2:17 - error: Argument of type "Literal['x']" cannot be assigned to parameter "y" of type "int" in function "add"
+    "Literal['x']" is not assignable to "int" (reportArgumentType)
+4 errors, 0 warnings, 0 informations

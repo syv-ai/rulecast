@@ -1,29 +1,11 @@
 import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
-import { lineStarts, offsetAt } from "../../core/detection/positions"
+import { excerpt } from "../../core/detection/positions"
 import { runTool } from "../../core/detection/tool"
 import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import { describeTool, resolveTool } from "./resolve"
 import { type LinterConfig, linterSchema, type ToolName } from "./schema"
 import { type LinterFinding, TOOLS } from "./tools"
-
-/** The source a finding points at; "" when the file is gone or the range is empty. */
-function excerpt(source: string | null, finding: LinterFinding): string {
-  if (source === null) return ""
-  const starts = lineStarts(source)
-  const from = offsetAt(starts, finding.line, finding.column, source.length)
-  let to: number
-  if (finding.endColumn === null) {
-    // No end column: take the rest of the line. Not the start of the next one — a last line with
-    // no trailing newline has no next line to start, and offsetAt would clamp back to this line's
-    // start, leaving the excerpt empty.
-    const newline = source.indexOf("\n", from)
-    to = newline === -1 ? source.length : newline
-  } else {
-    to = offsetAt(starts, finding.endLine, finding.endColumn, source.length)
-  }
-  return source.slice(from, Math.max(from, to)).replace(/\n$/, "")
-}
 
 async function runLinter(
   tool: ToolName,

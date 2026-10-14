@@ -1,11 +1,12 @@
 import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
+import { readOutput, type ToolFinding } from "../../core/detection/outputs"
 import { perRule } from "../../core/detection/per-rule"
+import { excerpt } from "../../core/detection/positions"
 import { runTool } from "../../core/detection/tool"
-import type { CheckResult, Detector } from "../../core/types"
+import type { CheckResult, Detector, Match } from "../../core/types"
 import { onPath } from "../../core/which"
-import { matchesFromJson, matchesFromSarif } from "./results"
 import { type CommandConfig, commandSchema } from "./schema"
 
 const FILES = "{{files}}"
@@ -14,6 +15,46 @@ const FILES = "{{files}}"
 export function argvFor(run: string[], files: string[]): string[] {
   if (!run.includes(FILES)) return [...run, ...files]
   return run.flatMap((argument) => (argument === FILES ? files : [argument]))
+}
+
+/** What every finding carries, whatever the tool: a rule's message can always use them. */
+const ALWAYS = ["message", "ruleId", "severity"] as const
+
+/**
+ * Spec §6 and §14: "every declared capture must be a string field of every result; a missing one
+ * is a rule error". Unlike a pattern's unmatched group, a checker that does not emit a field it
+ * was told it emits is misconfigured, and silently delivering "" would hide it.
+ */
+function capturesOf(finding: ToolFinding, names: string[], where: string): Record<string, string> {
+  const captures: Record<string, string> = {
+    message: finding.message,
+    ruleId: finding.ruleId,
+    severity: finding.severity,
+  }
+  for (const name of names) {
+    if ((ALWAYS as readonly string[]).includes(name)) continue
+    const value = finding.properties[name]
+    if (typeof value !== "string") throw new Error(`${where}: capture "${name}" is not a string`)
+    captures[name] = value
+  }
+  return captures
+}
+
+/** A tool's finding as a match; `{{text}}` is the source at its range unless the tool gave its own. */
+export async function toMatch(
+  finding: ToolFinding,
+  index: number,
+  captures: string[],
+  read: (file: string) => Promise<string | null>,
+): Promise<Match> {
+  return {
+    file: finding.file,
+    line: finding.line,
+    endLine: finding.endLine,
+    column: finding.column,
+    text: finding.text ?? excerpt(await read(finding.file), finding),
+    captures: capturesOf(finding, captures, `result ${index + 1}`),
+  }
 }
 
 /**
@@ -48,7 +89,7 @@ async function reachable(
 export const commandDetector: Detector<CommandConfig> = {
   kind: "command",
   schema: commandSchema,
-  captures: (config) => config.captures,
+  captures: (config) => [...new Set([...ALWAYS, ...config.captures])],
   events: () => ["edit", "verify"],
   run: perRule(async (rule, input) => {
     if (rule.files.length === 0) return []
@@ -59,9 +100,8 @@ export const commandDetector: Detector<CommandConfig> = {
       signal: input.signal,
       notFound: `command not found: ${command}`,
     })
-    return rule.config.output === "sarif"
-      ? matchesFromSarif(stdout, rule.config.captures, input.cwd)
-      : matchesFromJson(stdout, rule.config.captures, input.cwd)
+    const findings = readOutput(rule.config.output, stdout, input.cwd)
+    return Promise.all(findings.map((finding, index) => toMatch(finding, index, rule.config.captures, input.read)))
   }),
   async check(input) {
     // One result per distinct command, not per rule: two rules calling the same script share a fate.

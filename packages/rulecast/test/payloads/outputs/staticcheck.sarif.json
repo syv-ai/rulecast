@@ -1,0 +1,165 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Staticcheck",
+          "version": "2026.2.2",
+          "informationUri": "https://staticcheck.dev",
+          "rules": [
+            {
+              "id": "U1000",
+              "shortDescription": {
+                "text": "Unused code",
+                "markdown": "Unused code"
+              },
+              "help": {
+                "text": "Unused code\n\n\n",
+                "markdown": "Unused code\n\n\n"
+              },
+              "helpUri": "https://staticcheck.dev/docs/checks#U1000",
+              "defaultConfiguration": {
+                "enabled": true,
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SA5009",
+              "shortDescription": {
+                "text": "Invalid Printf call",
+                "markdown": "Invalid Printf call"
+              },
+              "help": {
+                "text": "Invalid Printf call\n\n\n",
+                "markdown": "Invalid Printf call\n\n\n"
+              },
+              "helpUri": "https://staticcheck.dev/docs/checks#SA5009",
+              "defaultConfiguration": {
+                "enabled": true,
+                "level": "error"
+              }
+            },
+            {
+              "id": "S1003",
+              "shortDescription": {
+                "text": "Replace call to strings.Index with strings.Contains",
+                "markdown": "Replace call to `strings.Index` with `strings.Contains`"
+              },
+              "help": {
+                "text": "Replace call to strings.Index with strings.Contains\n\nBefore:\n\n```go\nif strings.Index(x, y) != -1 {}\n```\n\nAfter:\n\n```go\nif strings.Contains(x, y) {}\n```\n\n\n",
+                "markdown": "Replace call to `strings.Index` with `strings.Contains`\n\nBefore:\n\n```go\nif strings.Index(x, y) != -1 {}\n```\n\nAfter:\n\n```go\nif strings.Contains(x, y) {}\n```\n\n\n"
+              },
+              "helpUri": "https://staticcheck.dev/docs/checks#S1003",
+              "defaultConfiguration": {
+                "enabled": true,
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "U1000",
+          "kind": "fail",
+          "message": {
+            "text": "func unused is unused"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8,
+                  "startColumn": 6
+                }
+              }
+            }
+          ],
+          "suppressions": []
+        },
+        {
+          "ruleId": "S1003",
+          "kind": "fail",
+          "message": {
+            "text": "should use strings.Contains(s, \"a\") instead"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 5,
+                  "endLine": 12,
+                  "endColumn": 32
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Simplify use of strings.Index"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "main.go",
+                    "uriBaseId": "%SRCROOT%"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 12,
+                        "startColumn": 5,
+                        "endLine": 12,
+                        "endColumn": 32
+                      },
+                      "insertedContent": {
+                        "text": "strings.Contains(s, \"a\")"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "suppressions": []
+        },
+        {
+          "ruleId": "SA5009",
+          "kind": "fail",
+          "message": {
+            "text": "Printf format %d has arg #1 of wrong type string"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 13,
+                  "startColumn": 14,
+                  "endLine": 13,
+                  "endColumn": 20
+                }
+              }
+            }
+          ],
+          "suppressions": []
+        }
+      ]
+    }
+  ]
+}

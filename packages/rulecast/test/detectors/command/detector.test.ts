@@ -51,7 +51,7 @@ describe("command detector", () => {
   test("declares its captures and events", () => {
     const config = commandDetector.schema.parse({ run: ["./c"], captures: ["layer"] })
     expect(commandDetector.kind).toBe("command")
-    expect(commandDetector.captures(config)).toEqual(["layer"])
+    expect(commandDetector.captures(config)).toEqual(["message", "ruleId", "severity", "layer"])
     expect(commandDetector.events(config)).toEqual(["edit", "verify"])
   })
 
@@ -69,7 +69,14 @@ describe("command detector", () => {
     expect(result.findings).toEqual([
       {
         rule: "layers",
-        match: { file: "app/a.py", line: 2, endLine: 2, column: 1, text: "", captures: { layer: "crud" } },
+        match: {
+          file: "app/a.py",
+          line: 2,
+          endLine: 2,
+          column: 1,
+          text: "",
+          captures: { message: "", ruleId: "", severity: "", layer: "crud" },
+        },
       },
     ])
     expect(await readFile(path.join(root, "argv.txt"), "utf8")).toBe("--json app/a.py app/b.py\n")
@@ -83,8 +90,8 @@ describe("command detector", () => {
     expect(result.findings).toHaveLength(1)
   })
 
-  test("reads SARIF when output is sarif", async () => {
-    const root = await createProject({ "a.py": "x\n" })
+  test("reads SARIF when output is sarif; {{text}} is the source at the range", async () => {
+    const root = await createProject({ "a.py": "a\nb\nc\nbad_call()\n" })
     const sarif = JSON.stringify({
       runs: [
         {
@@ -100,7 +107,23 @@ describe("command detector", () => {
     const command = await script(root, "c.sh", `cat <<'JSON'\n${sarif}\nJSON`)
     const result = await run(root, [ruleFor("r", { run: [command], output: "sarif" }, ["a.py"])])
     expect(result.errors).toEqual([])
-    expect(result.findings[0]!.match).toMatchObject({ file: "a.py", line: 4, text: "bad" })
+    expect(result.findings[0]!.match).toMatchObject({
+      file: "a.py",
+      line: 4,
+      text: "bad_call()",
+      captures: { message: "bad", ruleId: "", severity: "warning" },
+    })
+  })
+
+  test("a declared capture the tool did not emit is an error naming the result", async () => {
+    const root = await createProject({ "a.py": "x\n" })
+    const command = await script(
+      root,
+      "c.sh",
+      `echo '[{"file":"a.py","line":1,"layer":"crud"},{"file":"a.py","line":1}]'`,
+    )
+    const result = await run(root, [ruleFor("r", { run: [command], captures: ["layer"] }, ["a.py"])])
+    expect(result.errors).toEqual([{ rule: "r", message: 'result 2: capture "layer" is not a string' }])
   })
 
   test("a rule selecting no files runs nothing", async () => {
