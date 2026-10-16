@@ -29,7 +29,7 @@ const steps: Step[] = [
   {
     when: "Tries to stop",
     hooks: "verify",
-    says: "It is held back while a new error stands, once per prompt by default. Changes no tool call explains are reported and never block.",
+    says: "It is held back while a new error stands: once per prompt by default, or up to ten times in an unattended run, after which what's left goes into the agent's final report. Changes no tool call explains are reported and never block.",
   },
 ]
 ---

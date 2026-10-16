@@ -15,15 +15,15 @@ const prompt = agentPrompt()
 const next = [
   { title: "Getting started", text: "One command sets it up.", route: "getting-started" },
   { title: "Writing rules", text: "A check, a message, a doc section.", route: "guides/writing-rules" },
-  { title: "Detectors", text: "From a regex to a model.", route: "reference/detectors" },
   { title: "Git hooks and CI", text: "The same rules, everywhere.", route: "guides/git-hooks-ci" },
+  { title: "Agent loops", text: "For /goal, headless and CI runs.", route: "guides/agent-loops" },
 ]
 ---
 
 <div class="rc-landing not-content">
   <header class="rc-hero">
     <h1>rulecast</h1>
-    <p class="rc-hero-tagline">Make your rules and conventions enforceable. Inject them when they matter.</p>
+    <p class="rc-hero-tagline">Your project's conventions, checked while your coding agent works.</p>
     <div class="rc-hero-actions">
       <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
         <span class="rc-install-prompt" aria-hidden="true">$</span>
@@ -39,15 +39,18 @@ const next = [
 
   <section class="rc-why">
     <p>
-      Rulecast helps enforce your conventions in your codebase. It taps into agent hooks and injects your conventions
-      when they are relevant. You can think of it as guardrails + progressive disclosure of rules. Could we just write
-      everything down directly in agent hooks? Yes, absolutely. But with rulecast we can tie in our documented
-      conventions and limit repeat instructions too.
+      rulecast runs as your coding agent's hooks. When an edit breaks one of your project's rules, the agent is told in
+      the same turn, along with the part of your docs the rule comes from, so it can fix the code before it moves on.
     </p>
     <p>
-      Ideally, each convention becomes a rule. When, for example, an edit breaks one, the agent hears about it right
-      away, with the part of your docs that explains why, and fixes the code before it moves on. The same rules can run
-      in your git hooks and CI, so nothing slips past there either.
+      A rule is a check, such as a regex, an ast-grep pattern, a linter or a command, together with a message and a
+      section of your docs. The same rules run in git hooks and CI.
+    </p>
+    <p>
+      It also works when nobody is watching, in a <code>/goal</code> run, under <code>claude -p</code> or in CI. There
+      rulecast holds the agent at each stop, up to a limit, until its findings are fixed or written into its final
+      report. <code>rulecast run</code> also gives the loop an exit code to stop on. You still decide which conventions
+      become rules. <a class="rc-link" href={routeUrl("guides/agent-loops")}>Agent loops guide <span aria-hidden="true">→</span></a>
     </p>
     <p>
       <a class="rc-quiet-link" href="#agent-setup">
@@ -243,6 +246,9 @@ const next = [
     line-height: 1.65;
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
+  }
+  .rc-why code {
+    font-size: 0.88em;
   }
 
   /* A link in the prose's own colour: the underline and the icon say it is one. */
