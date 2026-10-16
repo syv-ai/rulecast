@@ -125,7 +125,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | Key | Meaning |
 |---|---|
 | `dryRun` | Whether `--dry-run` was given. |
-| `fixed` | `id`, `rule`, `file`, `line` of each finding a fix was applied to. The id and line are the finding's before the fix. |
+| `fixed` | `id`, `rule`, `file`, `line` of each finding a fix was applied to. The id is the one `run` reports on the files as they were, even for a finding fixed in a later pass after another rule's fix changed its line; the line is where it was when its fix was applied. |
 | `changedFiles` | The files the fixes changed (or would change). |
 | `unresolved` | Findings whose fix left the rule matching the text it wrote: the fix was undone. Same shape as `fixed`. |
 | `diff` | With `--dry-run` only: a unified diff of every change. |
