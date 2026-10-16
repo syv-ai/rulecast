@@ -29,7 +29,7 @@ export interface FindingLife {
   blocks: number
   /** Writes refused, or shell writes the agent was told to revert, over it. */
   refusals: number
-  /** Events at which it carried a `rulecast-ignore` the agent wrote that silenced nothing (unattended). */
+  /** Events at which it was under one of the ignores the agent added or changed, which silenced nothing (unattended). */
   suppressAttempts: number
   /** For a fixed one: the agent's stops between its first report and the fix; 0 is the same turn. */
   turnsToFix: number | null
@@ -160,7 +160,7 @@ export interface RuleStats {
   ignored: number
   suppressed: number
   /**
-   * Findings the agent wrote a `rulecast-ignore` for that silenced nothing, as in unattended mode.
+   * Findings under ignores the agent added or changed that silenced nothing, as in unattended mode.
    * Apart from `suppressed`, but counted with it in `suppressionRate` (D55).
    */
   suppressAttempted: number

@@ -60,6 +60,23 @@ describe("gate, unattended", () => {
     expect(stops([same, same, same, same], 10, [[], [], [], prompt])).toEqual(["block", "block", "report", "report"])
   })
 
+  test("captures a match marks volatile are not part of the key, even where captures are", () => {
+    const counted = (text: string, message: string) => ({
+      ...finding("a/hook", text),
+      match: {
+        file: "a.py",
+        line: 1,
+        endLine: 1,
+        column: 1,
+        text,
+        captures: { ruleId: "r", message },
+        volatileCaptures: ["message"],
+      },
+    })
+    expect(findingKey(counted("", "1 of 3"))).toBe(findingKey(counted("", "2 of 3")))
+    expect(findingKey(counted("removed", "1 of 3"))).toBe(findingKey(counted("removed", "2 of 3")))
+  })
+
   test("findings whose text says nothing about them are told apart by what the tool said, and where", () => {
     const secret = (line: number, ruleId: string) => ({
       ...finding("a/secrets", "[redacted]", line),

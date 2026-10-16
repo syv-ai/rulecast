@@ -102,6 +102,7 @@ async function handleEvent(context: EventContext): Promise<void> {
     maxContextChars: adapter.maxContextChars,
     restoredFiles: adapter.restoredFiles,
     stopGate: projectEvent.kind === "verify",
+    recordMode: true,
     log,
   })
   const output = adapter.format(result.delivery, projectEvent, { maxMatchesPerRule: project.config.maxMatchesPerRule })

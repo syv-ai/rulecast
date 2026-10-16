@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
+import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { removedFindings } from "./baseline/removed"
@@ -81,6 +82,11 @@ export interface PipelineOptions {
   reportDisabled?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
+  /**
+   * The hook: the session's mode is recorded, so `rulecast run --session` judges the session in the
+   * mode its hooks did. The CLI's own runs never record one.
+   */
+  recordMode?: boolean
 }
 
 export interface PipelineResult {
@@ -326,6 +332,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
+  if (session && options.recordMode === true) {
+    const { mode, source, detail } = project.mode
+    const recorded = view.work.mode
+    if (recorded === null || recorded.mode !== mode || recorded.source !== source || recorded.detail !== detail) {
+      await appendWork(session.dir, [{ t: "mode", mode, source, detail }])
+    }
+  }
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
@@ -348,18 +361,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    // Another agent's shell call ran during this one, in the same tree: each takes the other's
-    // writes for its own (README, Agents). Told once per agent, on the hook that can reach it.
+    const call = reference === null ? null : treeChanges(reference, now)
+    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    // Another agent's shell call ran during this one, and this one is held to files: those may be the
+    // other's writes (README, Agents). Hooks key on the session's directory, so an overlap alone may be
+    // a command that ran elsewhere; with no files there is nothing to misattribute. Told once per agent.
     const sharedKey = `shared-tree:${open.agent}`
-    const shared = sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    const shared =
+      files.length > 0 && sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
     if (shared) agentNotices.push(SHARED_TREE)
     await appendWork(open.dir, [
       { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
       ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
     ])
-    const call = reference === null ? null : treeChanges(reference, now)
-    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
-    if (files.length === 0) return { delivery: { ...emptyDelivery(), ...withAgentNotices() }, failed, deadlineMissed }
+    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
     event = { ...event, kind: "edit", files }
@@ -407,7 +422,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
-  /** Unattended: ignores the agent wrote, which silenced nothing. The findings log keeps the attempt. */
+  /**
+   * Unattended: ignores the agent added or changed, on findings they did not silence (D49). The
+   * findings log keeps them as the agent's attempts; an unchanged comment over changed code is none.
+   */
   let tried: IgnoredFinding[] = []
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
@@ -618,7 +636,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     const kept = new Set(unsilenced.map(({ match }) => match))
-    tried = unsilenced.map(({ status: _, ...item }) => item)
+    // An attempt only when the comment's own line changed this session: the agent wrote or edited
+    // the ignore. Over code the agent changed under a comment it left alone, the finding is not
+    // silenced, but no ignore was tried.
+    const commentChanged = ({ match, ignoreLine }: IgnoredFinding) =>
+      isNew({ ...match, line: ignoreLine, endLine: ignoreLine }, changes)
+    tried = unsilenced.filter(commentChanged).map(({ status: _, ...item }) => item)
     ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),

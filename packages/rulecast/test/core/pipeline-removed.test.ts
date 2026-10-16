@@ -20,7 +20,7 @@ const keepAssertions = (scope: "removed" | "instance" = "removed") => ({
   severity: "warning",
   scope,
   detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
-  message: "{{file}}:{{line}} removes assertions ({{text}}).",
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed).",
 })
 
 const BEFORE = [
@@ -69,6 +69,31 @@ describe("pipeline: removed scope", () => {
     ])
     // A warning: attended, it does not hold the stop.
     expect(stop.stop).toBe("allow")
+  })
+
+  test("one more assert removed at each stop keeps the finding's id, and its message says the current counts", async () => {
+    const { send, write } = await scenario()
+    await send({ kind: "touch", files: [TEST], completeRead: true })
+    const seen: { id: string; message: string }[] = []
+    let content = BEFORE
+    for (const assert of [
+      "    assert total([1, 2]) == 3\n",
+      "    assert total([]) == 0\n",
+      "    assert discount(100, 15) == 85\n",
+    ]) {
+      content = content.replace(assert, "")
+      await write(content)
+      await send({ kind: "edit", files: [TEST] })
+      const [finding, ...rest] = (await send({ kind: "verify", files: [] })).findings
+      expect(rest).toEqual([])
+      seen.push({ id: finding!.id, message: finding!.message })
+    }
+    expect(seen.map(({ message }) => message)).toEqual([
+      "tests/test_pricing.py:2 removes assertions (1 of 3 removed).",
+      "tests/test_pricing.py:2 removes assertions (2 of 3 removed).",
+      "tests/test_pricing.py:2 removes assertions (3 of 3 removed).",
+    ])
+    expect(new Set(seen.map(({ id }) => id)).size).toBe(1)
   })
 
   test("adding, moving or rewriting asserts is nothing, and no assert is ever a finding by itself", async () => {

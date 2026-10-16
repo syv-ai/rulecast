@@ -42,10 +42,11 @@ function withoutIgnore(line: string): string {
  * different finding, and no whole file is hashed. So does a redacted match, whose line is a secret,
  * and a match whose file could not be read. Captures a detector declared volatile (a model's
  * `reason`, which differs between two runs over the same line) are left out, or the same finding
- * would get a new id on every run.
+ * would get a new id on every run; so are those the match marks volatile (a removed finding's counts,
+ * which grow as more matches go while the finding stays the same).
  */
 function contentOf(match: Match, source: readonly string[] | null, kind: IdTraits) {
-  const volatile = kind.volatileCaptures ?? []
+  const volatile = [...(kind.volatileCaptures ?? []), ...(match.volatileCaptures ?? [])]
   const captures = Object.keys(match.captures)
     .filter((name) => !volatile.includes(name))
     .sort()
