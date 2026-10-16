@@ -1,4 +1,11 @@
 import { ADAPTERS } from "../adapters"
+import {
+  BASELINE_FILE,
+  baselineAge,
+  baselineSize,
+  type CommittedBaseline,
+  readCommittedBaseline,
+} from "../core/baseline/committed"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
@@ -12,6 +19,7 @@ import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
+import { FINDING_ID_VERSION } from "../core/finding-id"
 import { allFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
@@ -114,6 +122,14 @@ export async function doctorCommand(
     )
   }
 
+  const baseline = await baselineReport(root)
+  if (baseline.level === "ok") io.stdout(`baseline   ${baseline.text}\n`)
+  else {
+    count(baseline.level)
+    io.stdout(`baseline   ${BASELINE_FILE} — cannot be used\n`)
+    io.stdout(line(baseline.level, baseline.text, ""))
+  }
+
   const results = await checkDetectors({
     project,
     registry,
@@ -181,6 +197,47 @@ export async function doctorCommand(
     `\n${errors + warnings === 0 ? "no problems found" : [plural(errors, "error"), plural(warnings, "warning")].join(", ")}\n`,
   )
   return errors > 0 ? 2 : 0
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** "2026-03-02 (228 days ago)": a date says when, the count says whether to worry. */
+function dated(date: Date, now: Date): string {
+  const days = Math.max(0, Math.floor((now.getTime() - date.getTime()) / DAY_MS))
+  const ago = days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`
+  return `${date.toISOString().slice(0, 10)} (${ago})`
+}
+
+/**
+ * The committed baseline's size and age. Information, not a warning: a big old baseline is a
+ * team's choice to see, and only a file that cannot be used is a problem.
+ */
+async function baselineReport(root: string, now = new Date()): Promise<{ level: "ok" | "warning"; text: string }> {
+  let baseline: CommittedBaseline | null
+  try {
+    baseline = await readCommittedBaseline(root)
+  } catch (error) {
+    return { level: "warning", text: errorMessage(error) }
+  }
+  if (baseline === null) {
+    return { level: "ok", text: "none (rulecast baseline writes one; --from-ref is preferred wherever a ref exists)" }
+  }
+  if (baseline.findingIdVersion !== FINDING_ID_VERSION) {
+    return {
+      level: "warning",
+      text: `${BASELINE_FILE} holds ids of scheme v${baseline.findingIdVersion} and this rulecast computes v${FINDING_ID_VERSION}, so it matches nothing; run rulecast baseline --force`,
+    }
+  }
+  const size = baselineSize(baseline)
+  const age = await baselineAge(root)
+  const when =
+    age.added === null || age.changed === null
+      ? "not committed yet"
+      : `added ${dated(age.added, now)}, last changed ${dated(age.changed, now)}${age.dirty ? "; uncommitted changes" : ""}`
+  return {
+    level: "ok",
+    text: `${BASELINE_FILE} — ${plural(size.entries, "finding")}, ${plural(size.rules, "rule")}, ${plural(size.files, "file")}; ${when}`,
+  }
 }
 
 interface DryRunLine {

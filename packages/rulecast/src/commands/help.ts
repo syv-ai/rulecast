@@ -75,7 +75,27 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm", "Include metered (llm) rules in a staged run, which skips them by default"],
       ["--no-llm", "Skip metered (llm) rules in any run"],
     ],
-    notes: EXIT_NOTES,
+    notes: [
+      "With --all-files or --files, findings listed in a committed .rulecast/baseline.json are",
+      "pre-existing (see rulecast baseline).",
+      ...EXIT_NOTES,
+    ],
+  },
+  {
+    name: "baseline",
+    synopsis: "rulecast baseline [--prune | --force] [--no-llm]",
+    summary: "Record today's findings, so full-repo runs fail only on new ones",
+    flags: [
+      ["--prune", "Drop the entries that are no longer found; never adds one"],
+      ["--force", "Rewrite the file: every current finding becomes pre-existing"],
+      ["--no-llm", "Skip metered (llm) rules; with --prune their entries are kept"],
+    ],
+    notes: [
+      "Writes .rulecast/baseline.json. Commit it. run --all-files and run --files then treat the",
+      "findings it lists as pre-existing. Sessions and --from-ref keep their own baseline, and",
+      "wherever a ref exists --from-ref is the better one: it never needs maintaining.",
+      "Exits 3 and writes nothing when a rule could not run.",
+    ],
   },
   {
     name: "list",

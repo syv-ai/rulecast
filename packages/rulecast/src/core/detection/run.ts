@@ -27,12 +27,14 @@ export interface DetectionOutput {
   ignored: IgnoredFinding[]
   /** Ignores written without a reason, which suppressed nothing, and rules a staged run skipped. */
   warnings: string[]
+  /** Rules a staged run did not run at all (materialise.ts); each also has a warning. */
+  skipped: string[]
 }
 
 const TIMED_OUT = Symbol("timed out")
 
 export async function runDetection(input: DetectionInput): Promise<DetectionOutput> {
-  const output: DetectionOutput = { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
+  const output: DetectionOutput = { findings: [], errors: [], timedOut: [], ignored: [], warnings: [], skipped: [] }
   const byKind = new Map<string, Selection[]>()
   for (const selection of input.selections) {
     const kind = selection.rule.detector.kind
