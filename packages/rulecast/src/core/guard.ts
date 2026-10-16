@@ -9,7 +9,7 @@ import { selectDetectorRules } from "./detection/select"
 import { findingIds } from "./finding-id"
 import { assemble, trim } from "./session/decide"
 import { type ContextRecord, refusalKey, type WorkRecord, type WorkState } from "./session/state"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface GuardInput {
   /** The project's detection context (detection/context.ts). */
@@ -29,6 +29,8 @@ export interface GuardInput {
   record: (records: WorkRecord[]) => Promise<void>
   /** Appends to the agent's context memory: the sections a refusal delivered. */
   recordContext: (records: ContextRecord[]) => Promise<void>
+  /** The findings a refusal rests on, for the findings log (core/stats/log.ts); absent without a session. */
+  recordFindings?: (refusing: { id: string; rule: CompiledRule; match: Match }[]) => Promise<void>
 }
 
 /**
@@ -115,5 +117,6 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   await input.record(
     [...new Set(refusing.map(({ rule }) => rule.id))].map((rule) => ({ t: "refused" as const, rule, file })),
   )
+  await input.recordFindings?.(refusing)
   return delivery
 }

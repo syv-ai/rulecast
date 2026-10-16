@@ -1,6 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. Also the JSON of [`rulecast stats`](#rulecast-stats). The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -150,3 +150,85 @@ The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v
 | `invocations[0]` | `executionSuccessful` is `complete`; `toolExecutionNotifications` are the `warnings`. |
 
 `artifactLocation.uri` is relative to the project root. For a project below the repository's top, code scanning needs paths relative to the repository; until rulecast writes them, run it from a project at the repository's top.
+
+## rulecast stats
+
+`rulecast stats --format json` says, per rule, what became of the findings agent hooks reported: whether the agent fixed them, kept being blocked on them, or silenced them. A loop that improves rules reads it to find rules that are noisy and rules that never fire.
+
+```sh
+rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "window": {
+    "since": "2026-09-16T12:00:00.000Z",
+    "firstRecord": "2026-10-01T10:00:00.000Z",
+    "lastRecord": "2026-10-05T09:01:00.000Z",
+    "truncated": false
+  },
+  "sessions": 2,
+  "rules": [
+    {
+      "rule": "backend/no-httpexception",
+      "fired": 1,
+      "blocked": 1,
+      "refused": 0,
+      "fixed": 1,
+      "ignored": 0,
+      "suppressed": 0,
+      "open": 0,
+      "repeated": 0,
+      "medianTurnsToFix": 1,
+      "repeatRate": 0,
+      "suppressionRate": 0,
+      "noisy": []
+    }
+  ],
+  "neverFired": ["frontend/no-generated-edits"],
+  "unknownRules": []
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `schemaVersion` | The version of this shape. It is versioned apart from `run`'s document, with the same policy: adding a field leaves it at `1`, and removing, renaming or changing the meaning of one bumps it. |
+| `window.since` | The `--since` cut-off, or `null` for everything in the log. Only findings first reported at or after it are counted. |
+| `window.firstRecord`, `window.lastRecord` | The oldest and newest record in the log, or `null` when it is empty. |
+| `window.truncated` | The log has been rotated and does not reach back to `since`, so older findings may be missing. |
+| `sessions` | Agent sessions with a record in the window. |
+| `rules` | One entry per rule with a finding in the window, most fired first. |
+| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. |
+| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. |
+| `skippedLines` | Lines of the log that could not be read. Present only when there were any. |
+
+Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
+
+| Key | Meaning |
+|---|---|
+| `fired` | Findings first reported in the window. |
+| `blocked` | Of those, findings that kept a stop from going through at least once. |
+| `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
+| `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
+| `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
+| `suppressed` | Dropped by a `rulecast-ignore` comment. |
+| `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
+| `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
+| `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
+| `repeatRate`, `suppressionRate` | `repeated / fired` and `suppressed / fired`, to two decimals. |
+| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and at least 20% were suppressed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
+
+Things to know when reading the counts:
+
+- A finding's identity is its [id](#finding-ids). Editing the offending text without fixing it changes the id, so it counts as one fixed finding and one new one.
+- A finding the context budget kept out of a delivery still counts as reported.
+- Only agent hooks write the log. `rulecast run`, git hooks and CI do not, and findings that were there before the session or are in files the user changed during it are not counted.
+
+### The findings log
+
+The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
+
+The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Two hooks that rotate at the same moment can drop the older history. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+
+Its format is internal and can change in any release. The `stats` JSON above is the contract.

@@ -10,6 +10,12 @@
  */
 export const SCHEMA_VERSION = 1
 
+/**
+ * `schemaVersion` of `rulecast stats --format json`: a different document from `run`'s, so its
+ * own version, with the same policy.
+ */
+export const STATS_SCHEMA_VERSION = 1
+
 /** `rulecast run` and `try-repo`. Other commands use 2 for whatever they found wrong. */
 export const EXIT = {
   /** Every rule ran, and no new finding is an error. */
