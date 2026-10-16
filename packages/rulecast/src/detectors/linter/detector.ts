@@ -96,6 +96,7 @@ export const linterDetector: Detector<LinterConfig> = {
               column: finding.column,
               text: TOOLS[tool].redacts ? "[redacted]" : excerpt(await read(finding.file), finding),
               captures: { message: finding.message, ruleId: finding.ruleId },
+              ...(TOOLS[tool].redacts && { redacted: true }),
             }
             for (const rule of rules) {
               if (!rule.files.includes(finding.file)) continue

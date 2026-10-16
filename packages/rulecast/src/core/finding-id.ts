@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 
-import { IGNORE } from "./suppress"
+import { IGNORE, type SourceLines } from "./suppress"
 import type { Match } from "./types"
 
 /** What an id needs to know about a detector kind (its `Detector` fields of the same names). */
@@ -15,24 +15,34 @@ export const FINDING_ID_VERSION = 1
 /** Re-indenting a line or a CRLF checkout must not change what a finding is. */
 const normalise = (value: string) => value.replace(/\s+/g, " ").trim()
 
-/** The comment marker that introduces an inline ignore: `#`, `//`, `/*`, `<!--` or `--`. */
-const MARKER = /\s*(?:#|\/\/|\/\*|<!--|--)\s*$/
+/**
+ * What opens the comment an inline ignore is written in, in any syntax: the run of punctuation
+ * right before it (`#`, `//`, `/*`, `/**`, `{/*`, `<!--`, `--`, `;`). Quotes are not part of it, so
+ * an ignore inside a string literal is not taken for a comment.
+ */
+const OPENER = /[^\w\s"'`]+\s*$/
 
-/** A source line without a trailing `rulecast-ignore` comment, so writing one keeps the finding's id. */
+/**
+ * A source line without a trailing `rulecast-ignore` comment, so writing one keeps the finding's id.
+ * Only an ignore that a comment opener introduces is taken off; any other is part of the line.
+ */
 function withoutIgnore(line: string): string {
   const ignore = IGNORE.exec(line)
-  return ignore === null ? line : line.slice(0, ignore.index).replace(MARKER, "")
+  if (ignore === null) return line
+  const before = line.slice(0, ignore.index)
+  return OPENER.test(before) ? before.replace(OPENER, "") : line
 }
 
 /**
  * What a finding is, apart from where it is: the source lines it spans, then its captures by name.
  *
  * Its lines, not its matched text: a short match (`eval(`, `TODO`) says little about which of
- * several it is, and the line does. A match about the whole file (a `path` rule's, a hook's own
- * finding, which spans the file) hashes its text instead, so an edit anywhere in the file does not
- * make it a different finding, and no whole file is hashed. So does a match whose file could not be
- * read. Captures a detector declared volatile (a model's `reason`, which differs between two runs
- * over the same line) are left out, or the same finding would get a new id on every run.
+ * several it is, and the line does. A match that says it is about the whole file (a `path` rule's,
+ * a hook's own finding) hashes its text instead, so an edit anywhere in the file does not make it a
+ * different finding, and no whole file is hashed. So does a redacted match, whose line is a secret,
+ * and a match whose file could not be read. Captures a detector declared volatile (a model's
+ * `reason`, which differs between two runs over the same line) are left out, or the same finding
+ * would get a new id on every run.
  */
 function contentOf(match: Match, source: readonly string[] | null, kind: IdTraits) {
   const volatile = kind.volatileCaptures ?? []
@@ -40,9 +50,9 @@ function contentOf(match: Match, source: readonly string[] | null, kind: IdTrait
     .filter((name) => !volatile.includes(name))
     .sort()
     .map((name) => `${name}=${normalise(match.captures[name] ?? "")}`)
-  const spansFile = source !== null && source.length > 1 && match.line === 1 && match.endLine >= source.length
+  const byText = kind.wholeFile === true || match.wholeFile === true || match.redacted === true
   const lines =
-    kind.wholeFile === true || spansFile || source === null || match.line < 1 || match.line > source.length
+    byText || source === null || match.line < 1 || match.line > source.length
       ? null
       : source.slice(match.line - 1, Math.max(match.line, match.endLine)).map(withoutIgnore)
   return [lines === null ? normalise(match.text) : normalise(lines.join("\n")), ...captures].join("\u0000")
@@ -60,23 +70,14 @@ function contentOf(match: Match, source: readonly string[] | null, kind: IdTrait
  *
  * `items` should include ignored matches too, so a `rulecast-ignore` on the first of two
  * duplicates does not renumber the second. `detector` looks up a kind's `volatileCaptures` and
- * `wholeFile`. `read` must give the content detection judged (staged in a staged run, the proposal
- * in a guard); each file is read once.
+ * `wholeFile`. `linesOf` must give the content detection judged (staged in a staged run, the
+ * proposal in a guard): the `lines` detection was given, so no file is read a second time.
  */
 export async function findingIds(
   items: readonly { rule: { id: string; detector: { kind: string } }; match: Match }[],
   detector: (kind: string) => IdTraits | undefined,
-  read: (file: string) => Promise<string | null>,
+  linesOf: SourceLines,
 ): Promise<string[]> {
-  const sources = new Map<string, Promise<string[] | null>>()
-  const linesOf = (file: string) => {
-    if (!sources.has(file))
-      sources.set(
-        file,
-        read(file).then((text) => text?.split("\n") ?? null),
-      )
-    return sources.get(file)!
-  }
   const keys = await Promise.all(
     items.map(
       async ({ rule, match }) =>

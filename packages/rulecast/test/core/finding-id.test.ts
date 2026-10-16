@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { findingIds } from "../../src/core/finding-id"
+import { sourceLines, suppress } from "../../src/core/suppress"
 import type { Match } from "../../src/core/types"
 import { rule } from "../helpers/rules"
 
@@ -26,7 +27,11 @@ const detectors = (kind: string) =>
   kind === "llm" ? { volatileCaptures: ["reason"] } : kind === "path" ? { wholeFile: true } : {}
 /** The ids of `items`, judged against `source` as the content of FILE. */
 const ids = (source: string | null, ...items: { rule: typeof regex; match: Match }[]) =>
-  findingIds(items, detectors, async (file) => (file === FILE ? source : null))
+  findingIds(
+    items,
+    detectors,
+    sourceLines(async (file) => (file === FILE ? source : null)),
+  )
 const one = async (source: string | null, item: { rule: typeof regex; match: Match }) => (await ids(source, item))[0]
 const lines = (...source: string[]) => `${source.join("\n")}\n`
 
@@ -71,10 +76,33 @@ describe("findingIds", () => {
       "x = load() // rulecast-ignore: py/judged loads lazily in tests",
       "x = load() /* rulecast-ignore: py/judged loads lazily in tests */",
       "x = load() <!-- rulecast-ignore: py/judged loads lazily in tests -->",
+      "x = load() -- rulecast-ignore: py/judged loads lazily in tests",
       "x = load()  # rulecast-ignore: py/judged",
     ]) {
       expect(await judged(ignored)).toBe(base)
     }
+  })
+
+  test("so does an ignore in JSX, a doc comment or a `;` comment, and code punctuation before it stays", async () => {
+    const judged = (line: string) => one(lines(line), { rule: llm, match: match(1, line, { reason: "r" }) })
+    for (const [base, ignored] of [
+      ["<Foo />", "<Foo /> {/* rulecast-ignore: py/judged legacy */}"],
+      ["x = load()", "x = load() /** rulecast-ignore: py/judged legacy */"],
+      ["(load x)", "(load x) ; rulecast-ignore: py/judged legacy"],
+      ["x = load();", "x = load(); // rulecast-ignore: py/judged legacy"],
+    ] as const) {
+      expect(await judged(ignored)).toBe(await judged(base))
+    }
+  })
+
+  test("an ignore that no comment opener introduces, as in a string literal, is part of the line", async () => {
+    const judged = (line: string) => one(lines(line), { rule: llm, match: match(1, line, { reason: "r" }) })
+    expect(await judged('print("rulecast-ignore: py/judged one")')).not.toBe(
+      await judged('print("rulecast-ignore: py/judged two")'),
+    )
+    expect(await judged("x = 1 rulecast-ignore: py/judged one")).not.toBe(
+      await judged("x = 2 rulecast-ignore: py/judged one"),
+    )
   })
 
   test("re-indenting the lines or a CRLF checkout does not change the id", async () => {
@@ -101,7 +129,7 @@ describe("findingIds", () => {
     const elsewhere = await findingIds(
       [{ rule: regex, match: { ...match(1, "eval("), file: "app/b.py" } }],
       detectors,
-      async () => source,
+      sourceLines(async () => source),
     )
     expect(elsewhere[0]).not.toBe(base)
   })
@@ -167,9 +195,14 @@ describe("findingIds", () => {
     const whole = (source: string) =>
       one(source, {
         rule: hook,
-        match: match(1, "", { message: "would reformat", ruleId: "black" }, 1, source.split("\n").length),
+        match: {
+          ...match(1, "", { message: "would reformat", ruleId: "black" }, 1, source.split("\n").length),
+          wholeFile: true,
+        },
       })
     expect(await whole(lines("a = 1", "b = 2"))).toBe(await whole(lines("a = 1", "b = 3")))
+    // A one-line file without a trailing newline is whole-file too: the match says so.
+    expect(await whole("a = 1")).toBe(await whole("a = 2"))
     const source = lines("a = 1", "b: int = ''", "c = 3", "def f() -> int: pass")
     const [a, b] = await ids(
       source,
@@ -179,24 +212,49 @@ describe("findingIds", () => {
     expect(a).not.toBe(b)
   })
 
+  test("a match over every line of a file without a trailing newline still hashes its lines", async () => {
+    const twoLines = (second: string) =>
+      one(`x = eval(\n${second})`, { rule: regex, match: match(1, "eval(\n", {}, 5, 2) })
+    expect(await twoLines("a")).not.toBe(await twoLines("b"))
+  })
+
+  test("a redacted match hashes its text and captures, never the line its secret is on", async () => {
+    const leaks = rule({ id: "secrets", detector: { kind: "linter", config: {}, captures: [] } })
+    const leak = (line: number): Match => ({
+      ...match(line, "[redacted]", { message: "API key", ruleId: "generic-api-key" }),
+      redacted: true,
+    })
+    const first = await one(lines('KEY = "sk-aaaa"'), { rule: leaks, match: leak(1) })
+    expect(await one(lines('KEY = "sk-bbbb"'), { rule: leaks, match: leak(1) })).toBe(first)
+    // As if the file could not be read: nothing of the line goes in.
+    expect(await one(null, { rule: leaks, match: leak(1) })).toBe(first)
+    // Two secrets in one file stay apart by their order.
+    const [a, b] = await ids(
+      lines('KEY = "sk-aaaa"', "pass", 'KEY = "sk-bbbb"'),
+      { rule: leaks, match: leak(1) },
+      { rule: leaks, match: leak(3) },
+    )
+    expect(a).toBe(first)
+    expect(b).not.toBe(a)
+  })
+
   test("a file that cannot be read falls back to the match's own text", async () => {
     const first = await one(null, { rule: regex, match: match(3, "eval(") })
     expect(await one(null, { rule: regex, match: match(9, "eval(") })).toBe(first)
   })
 
-  test("reads each file once", async () => {
+  test("reads each file once, sharing the lines suppression read", async () => {
     let reads = 0
-    await findingIds(
-      [
-        { rule: regex, match: match(1, "eval(") },
-        { rule: regex, match: match(2, "eval(") },
-      ],
-      detectors,
-      async () => {
-        reads++
-        return lines("eval(a)", "eval(b)")
-      },
-    )
+    const shared = sourceLines(async () => {
+      reads++
+      return lines("eval(a)", "eval(b)")
+    })
+    const items = [
+      { rule: regex, match: match(1, "eval(") },
+      { rule: regex, match: match(2, "eval(") },
+    ]
+    await suppress(items, shared)
+    await findingIds(items, detectors, shared)
     expect(reads).toBe(1)
   })
 })

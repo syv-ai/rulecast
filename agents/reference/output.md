@@ -119,7 +119,7 @@ A loop needs to tell "the same finding as last run" from a new one, across runs,
 
 - the rule id (the alias, when one is set),
 - the file path,
-- the source line or lines the match spans, with runs of whitespace collapsed to one space and the ends trimmed, and with a trailing `rulecast-ignore` comment (and the `#`, `//`, `/*` or `<!--` that starts it) left out,
+- the source line or lines the match spans, with runs of whitespace collapsed to one space and the ends trimmed, and with a trailing `rulecast-ignore` comment left out, together with the punctuation that opens it in whatever syntax (`#`, `//`, `/*`, `/**`, `{/*`, `<!--`, `--`, `;`),
 - the detector's captures, sorted by name (a tool rule's `ruleId` and `message`, a regex's named groups), except captures whose value changes from run to run: an `llm` rule's `reason`,
 - the finding's position among findings of the same rule in the file whose lines and captures are identical (0 for the first, 1 for the second, …).
 
@@ -130,7 +130,9 @@ The line number is **not** part of it, so a finding keeps its id when lines are 
 - Renaming the rule's alias, or moving the file.
 - A tool message that contains a number that moves, such as a line count. The message is part of what the tool reports.
 
-A finding about a whole file hashes its text and captures instead of the file's lines, so an edit to the file keeps its id: a `path` rule's finding (its text is the path), and a hook's finding that covers the whole file (it would reformat the file, or failed without a location). If the file cannot be read, the matched text is hashed in place of its lines.
+Only an ignore that comment punctuation introduces is left out. One inside a string literal (`"rulecast-ignore: …"`) is part of the line, unless the string itself starts with comment punctuation (`"# rulecast-ignore: …"`). The punctuation run is taken whole, so write a space before the comment: in `f();// rulecast-ignore: …` the `);` goes with the `//`, and adding that comment changes the id.
+
+A finding about a whole file hashes its text and captures instead of the file's lines, so an edit to the file keeps its id: a `path` rule's finding (its text is the path), and a hook's finding that covers the whole file (it would reformat the file, or failed without a location). Such a finding says it is about the whole file; one that merely spans every line of its file still hashes its lines. A secret a tool reports (gitleaks) hashes its redacted text and captures, never its line, so no part of the secret goes into the id; two secrets of one rule in one file are told apart by their order. If the file cannot be read, the matched text is hashed in place of its lines.
 
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
 

@@ -101,7 +101,13 @@ describe("linter detector", () => {
     const result = await run(root, [ruleFor("secrets", { tool: "gitleaks" }, ["app/conf.py"])], "edit")
     expect(result.errors).toEqual([])
     expect(result.findings).toHaveLength(1)
-    expect(result.findings[0]!.match).toMatchObject({ file: "app/conf.py", line: 1, text: "[redacted]" })
+    expect(result.findings[0]!.match).toMatchObject({
+      file: "app/conf.py",
+      line: 1,
+      text: "[redacted]",
+      // So its id does not hash the line the secret is on either.
+      redacted: true,
+    })
     expect(result.findings[0]!.match.captures.ruleId).toBe("generic-api-key")
   })
 

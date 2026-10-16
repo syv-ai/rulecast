@@ -25,7 +25,7 @@ import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
-import type { IgnoredFinding } from "./suppress"
+import { type IgnoredFinding, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface PipelineOptions {
@@ -449,6 +449,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
+    const lines = sourceLines(read)
     const output = await runDetectionFrom(
       {
         detection,
@@ -456,14 +457,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         selections,
         changes,
         read,
+        lines,
         timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
       },
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    // Through `read`, the content detection judged: staged in a staged run, not the working tree.
-    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), read)
+    // From the lines suppression read through `read`, the content detection judged: staged in a
+    // staged run, not the working tree. No file is read again.
+    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
     findings = output.findings.map(({ rule, match }, index) => ({
       id: ids[index]!,
       rule,

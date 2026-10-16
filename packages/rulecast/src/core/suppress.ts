@@ -31,6 +31,26 @@ export function parseIgnore(line: string): Ignore | null {
   return { rule: match.groups.rule!, reason: match.groups.reason ?? null }
 }
 
+/**
+ * A file's lines, read through the reader detection judged and split on "\n". Each file is read
+ * once per run: `suppress` reads the lines it needs, and finding ids (core/finding-id.ts) are built
+ * from the same ones, which in a staged run saves a `git show` per file.
+ */
+export type SourceLines = (file: string) => Promise<string[] | null>
+
+/** `read`, as lines, memoised for one run. */
+export function sourceLines(read: (file: string) => Promise<string | null>): SourceLines {
+  const lines = new Map<string, Promise<string[] | null>>()
+  return (file) => {
+    let cached = lines.get(file)
+    if (cached === undefined) {
+      cached = read(file).then((text) => text?.split("\n") ?? null)
+      lines.set(file, cached)
+    }
+    return cached
+  }
+}
+
 export interface IgnoredFinding {
   rule: DetectorRule
   match: Match
@@ -50,20 +70,16 @@ export interface Suppressed {
  * Drops each finding whose matched line, or the line above it, carries `rulecast-ignore: <its id>
  * <reason>` (spec §8, Ignores), and records it as ignored.
  *
- * The comment is read through the same `read` the detector judged, so an ignore counts only in the
- * content being judged: staged in a staged run, proposed in a guard, on disk in a hook.
+ * The comment is read through `linesOf`, over the same `read` the detector judged, so an ignore
+ * counts only in the content being judged: staged in a staged run, proposed in a guard, on disk in
+ * a hook.
  */
 export async function suppress(
   findings: readonly { rule: DetectorRule; match: Match }[],
-  read: (file: string) => Promise<string | null>,
+  linesOf: SourceLines,
 ): Promise<Suppressed> {
   const result: Suppressed = { findings: [], ignored: [], warnings: [] }
   if (findings.length === 0) return result
-  const lines = new Map<string, string[] | null>()
-  const linesOf = async (file: string) => {
-    if (!lines.has(file)) lines.set(file, (await read(file))?.split("\n") ?? null)
-    return lines.get(file)!
-  }
   const warned = new Set<string>()
   for (const finding of findings) {
     const source = await linesOf(finding.match.file)

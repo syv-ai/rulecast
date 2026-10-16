@@ -9,6 +9,7 @@ import { selectDetectorRules } from "./detection/select"
 import { findingIds } from "./finding-id"
 import { assemble, trim } from "./session/decide"
 import { type ContextRecord, refusalKey, type WorkRecord, type WorkState } from "./session/state"
+import { sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface GuardInput {
@@ -71,12 +72,14 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
 
   // The proposed file for the one being written; anything else a detector reaches for is real.
   const read = async (name: string) => (name === file ? proposal.content : readSourceFile(input.detection.root, name))
+  const lines = sourceLines(read)
   const output = await runDetection({
     detection: input.detection,
     event: "edit",
     selections,
     changes: new Map(),
     read,
+    lines,
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
@@ -86,7 +89,7 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const ids = await findingIds(
     [...output.findings, ...output.ignored],
     (kind) => input.detection.registry.get(kind),
-    read,
+    lines,
   )
   const evidence = output.findings
     .map((finding, index) => ({ ...finding, id: ids[index]! }))
