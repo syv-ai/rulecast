@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto"
 import path from "node:path"
 
 import type { CompiledRule } from "../compile/rule"
+import type { Mode } from "../config/schema"
 import { deliveryCost, measureRuleBlock, SWEPT_BLOCK } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { ReferenceSpec } from "../references"
 import { renderTemplate, templateBindings } from "../template"
 import { type DeliveredReference, type Delivery, emptyDelivery, type Finding, type Match } from "../types"
 import {
+  blockedKey,
   type ContextRecord,
   type ContextState,
   emptyContext,
@@ -37,8 +40,10 @@ export interface DecideInput {
   maxContextChars: number | null
   /** The renderer's cap per rule: the budget stops filling a rule's block at it. */
   maxMatchesPerRule: number
-  /** verify from a stop: decide block / allow / capReached. */
+  /** verify from a stop: decide block / allow / capReached, and in unattended mode report. */
   stopGate: boolean
+  /** Default: attended. Unattended changes the stop gate (`gate`) and what the adapter says. */
+  mode?: Mode
   /** The findings are in files the agent's shell command changed (Delivery.via). */
   via?: "shell"
   /** Files changed outside the agent's tool calls, verified at this stop: reported, never blocking. */
@@ -516,12 +521,32 @@ export function trim(
 }
 
 /**
- * The stop gate: block / allow / capReached.
+ * How many stops one finding may block in unattended mode. After that it is reported, not blocked:
+ * an agent that could not fix it in two tries is not fixing it on a third, and a false positive,
+ * which nobody is there to overrule, must not spend the whole budget.
+ */
+export const REPEAT_LIMIT = 2
+
+/**
+ * What makes two stops' findings the same finding: rule, file and the matched text. Not the line,
+ * which any edit above it moves; not the message, which usually carries the line.
+ */
+export function findingKey({ rule, match }: ClassifiedFinding): string {
+  return createHash("sha256").update(`${rule.id}\n${match.file}\n${match.text.trim()}`).digest("hex").slice(0, 16)
+}
+
+/**
+ * The stop gate: block / allow / capReached, and in unattended mode report.
  *
  * It takes what was *found*, and nothing that could carry what survived the budget: a rule the
  * floor could not hold is still an unresolved error, and reading the trimmed list would let the
  * agent stop because its findings did not fit — which is the one thing the gate exists to prevent.
  * That used to be a comment; it is now the signature.
+ *
+ * Attended, a capped stop is let through and the user is told. Unattended there is no user, and a
+ * stop the gate lets through ends the run, so what is left is said to the agent instead, by one more
+ * block (`report`) asking it to record the findings as unresolved and finish. A finding that has
+ * blocked REPEAT_LIMIT stops no longer counts towards blocking, only towards that report.
  */
 export function gate(
   fresh: readonly ClassifiedFinding[],
@@ -530,15 +555,25 @@ export function gate(
   maxBlocks: number,
   /** Files changed outside the agent's tool calls: the user's edits must never trap the agent. */
   swept: ReadonlySet<string> = new Set(),
+  mode: Mode = "attended",
 ): { stop: Exclude<Delivery["stop"], null>; work: WorkRecord[] } {
   const blocking = fresh.filter(({ match }) => !swept.has(match.file))
   // A protected file changed with the shell could not be refused before the write, so it blocks
   // until it is reverted, whatever the rule's severity.
   const refused = ({ rule, match }: ClassifiedFinding) => rule.refuseWrite && work.editedVia.get(match.file) === "shell"
-  if (!blocking.some((finding) => finding.rule.severity === "error" || refused(finding))) {
-    return { stop: "allow", work: [] }
+  const failing = blocking.filter((finding) => finding.rule.severity === "error" || refused(finding))
+  if (failing.length === 0) return { stop: "allow", work: [] }
+  const blocks = work.stopBlocks.get(agent) ?? 0
+  if (mode === "attended") {
+    if (blocks < maxBlocks) return { stop: "block", work: [{ t: "stopBlock", agent }] }
+    return { stop: "capReached", work: [] }
   }
-  if ((work.stopBlocks.get(agent) ?? 0) < maxBlocks) return { stop: "block", work: [{ t: "stopBlock", agent }] }
+  const keys = [...new Set(failing.map(findingKey))]
+  const unrepeated = keys.filter((key) => (work.blockedFindings.get(blockedKey(agent, key)) ?? 0) < REPEAT_LIMIT)
+  if (unrepeated.length > 0 && blocks < maxBlocks) {
+    return { stop: "block", work: [{ t: "stopBlock", agent, findings: keys }] }
+  }
+  if (!work.stopReports.has(agent)) return { stop: "report", work: [{ t: "stopReport", agent }] }
   return { stop: "capReached", work: [] }
 }
 
@@ -552,11 +587,16 @@ export async function decide(input: DecideInput): Promise<Decision> {
   const context = [...assembled.context, ...trimmed.context]
   if (!input.stopGate) return { delivery: trimmed.delivery, overflow: trimmed.overflow, work: [], context }
 
-  const gated = gate(assembled.fresh, input.work, input.agent, input.maxBlocks, new Set(input.swept ?? []))
-  const delivery = { ...trimmed.delivery, stop: gated.stop }
-  // Only a block reaches the agent as context; anything else must not count as delivered. A
-  // capReached still prints its delivery as a system message, so it keeps the overflow file — the
-  // message says rules did not fit, and the file is where they went.
+  const mode = input.mode ?? "attended"
+  const gated = gate(assembled.fresh, input.work, input.agent, input.maxBlocks, new Set(input.swept ?? []), mode)
+  const delivery: Delivery = {
+    ...trimmed.delivery,
+    stop: gated.stop,
+    ...(mode === "unattended" ? { unattended: true as const } : {}),
+  }
+  // Only a block or a report reaches the agent as context; anything else must not count as
+  // delivered. A capReached still prints its delivery as a system message, so it keeps the overflow
+  // file — the message says rules did not fit, and the file is where they went.
   if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: [] }
   if (gated.stop === "capReached") return { delivery, overflow: trimmed.overflow, work: gated.work, context: [] }
   return { delivery, overflow: trimmed.overflow, work: gated.work, context }

@@ -14,6 +14,8 @@ const DEFAULTS = {
   timeouts: { editDeadlineMs: 350, verifyMs: 60000 },
   stopGate: { maxBlocks: 1 },
   refuseGate: { maxRefusals: 1 },
+  mode: null,
+  unattended: { maxBlocks: 10, escalate: [] },
   llm: {
     provider: "claude-code",
     baseUrl: null,
@@ -39,6 +41,8 @@ describe("configSchema", () => {
       max_file_bytes: 2048,
       timeouts: { edit_deadline_ms: 200, verify_ms: 5000 },
       stop_gate: { max_blocks: 2 },
+      mode: "unattended",
+      unattended: { max_blocks: 4, escalate: ["a/rule"] },
       llm: {
         provider: "openai-compatible",
         base_url: "http://localhost:11434/v1",
@@ -65,6 +69,8 @@ describe("configSchema", () => {
       timeouts: { editDeadlineMs: 200, verifyMs: 5000 },
       stopGate: { maxBlocks: 2 },
       refuseGate: { maxRefusals: 1 },
+      mode: "unattended",
+      unattended: { maxBlocks: 4, escalate: ["a/rule"] },
       llm: {
         provider: "openai-compatible",
         baseUrl: "http://localhost:11434/v1",
@@ -84,6 +90,12 @@ describe("configSchema", () => {
     expect(configSchema.safeParse({ repos: [{ repo: "local", rules: [], hooks: [] }] }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], minimum_rulecast_version: "v1" }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], default_stages: ["commit"] }).success).toBe(false)
+  })
+
+  test("mode is attended or unattended, and unattended takes only its own keys", () => {
+    expect(configSchema.safeParse({ repos: [], mode: "interactive" }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], unattended: { maxBlocks: 3 } }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], unattended: { escalate: ["Not An Id"] } }).success).toBe(false)
   })
 
   test("llm names the four providers and has no project-wide model", () => {
@@ -125,6 +137,11 @@ describe("rule schemas", () => {
     expect(overrideSchema.safeParse({ id: "a" }).success).toBe(true)
     expect(overrideSchema.safeParse({ id: "a", files: "^app/", context: ["@AGENTS.md#errors"] }).success).toBe(true)
     expect(overrideSchema.safeParse({ files: "^app/" }).success).toBe(false)
+  })
+
+  test("refuse_write is a boolean or unattended", () => {
+    expect(ruleSchema.safeParse({ ...complete, refuse_write: "unattended" }).success).toBe(true)
+    expect(ruleSchema.safeParse({ ...complete, refuse_write: "always" }).success).toBe(false)
   })
 
   test("applies no defaults, so overrides can merge over manifest rules", () => {

@@ -13,6 +13,18 @@ const BLOCK_PREAMBLE =
   "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
   'If you believe a finding is wrong, say so to the user rather than changing .rulecast-config.yaml; add a "rulecast-ignore: <rule> <reason>" comment only if they agree.'
 
+/** Nobody is there to ask: a disputed finding is written down where the run's results are read. */
+const UNATTENDED_BLOCK_PREAMBLE =
+  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
+  "Nobody is watching this run to ask. If you believe a finding is wrong, leave that code as it is, record the finding and your reason in this run's decisions file or final report, and carry on with the rest. " +
+  'Do not change .rulecast-config.yaml or add "rulecast-ignore" comments.'
+
+/** Unattended, once per prompt: the last block, which turns what is left into the run's report. */
+const REPORT_PREAMBLE =
+  "This project's rulecast rules (.rulecast-config.yaml) still find these problems, and rulecast will not block this run for them again " +
+  "(its stop limit is reached, or they have already blocked twice). Do not keep retrying them. " +
+  "Record each one as unresolved in your final report, and in this run's decisions file if it keeps one, with why it is unresolved. Then finish."
+
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
 const SWEPT_PREAMBLE =
@@ -119,10 +131,19 @@ export const claudeCodeAdapter: Adapter = {
           }),
         )
       case "verify":
-        if (delivery.stop === "block")
+        // A Stop hook reaches the agent only by blocking: Claude Code takes no additionalContext from
+        // Stop, and a stop that is let through ends a headless run. So the unattended report is a block.
+        if (delivery.stop === "block" || delivery.stop === "report") {
+          const preamble =
+            delivery.stop === "report"
+              ? REPORT_PREAMBLE
+              : delivery.unattended === true
+                ? UNATTENDED_BLOCK_PREAMBLE
+                : BLOCK_PREAMBLE
           return json(
-            withNotices({ decision: "block", reason: withinLimit(`${BLOCK_PREAMBLE}\n\n${text}`, delivery, event) }),
+            withNotices({ decision: "block", reason: withinLimit(`${preamble}\n\n${text}`, delivery, event) }),
           )
+        }
         if (delivery.stop === "capReached") {
           const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
           return json({ systemMessage: notices === "" ? cap : `${notices}\n\n${cap}` })

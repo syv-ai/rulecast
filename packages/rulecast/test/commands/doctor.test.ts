@@ -8,7 +8,7 @@ import { stringify } from "yaml"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
-import { stateDirFor, TEST_HOME } from "../helpers/home"
+import { stateDirFor, TEST_HOME, testEnv } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
 import { createProject } from "../helpers/project"
@@ -41,6 +41,36 @@ const RULE = (id: string) => ({
 })
 
 describe("rulecast doctor", () => {
+  test("reports the mode and where it came from", async () => {
+    const mode = async (settings: Record<string, unknown>, env: Record<string, string> = {}) => {
+      const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")], settings) })
+      const result = await runCli(root, ["doctor"], "", { ...testEnv, ...env })
+      return result.stdout.split("\n").find((text) => text.startsWith("mode "))
+    }
+    expect(await mode({})).toBe(
+      "mode       attended — default (no RULECAST_MODE, mode or CI); up to 1 blocked stop per prompt",
+    )
+    expect(await mode({}, { RULECAST_MODE: "unattended" })).toBe(
+      "mode       unattended — from RULECAST_MODE=unattended; up to 10 blocked stops per prompt",
+    )
+    expect(await mode({ mode: "unattended", unattended: { max_blocks: 4 } })).toBe(
+      "mode       unattended — from mode: unattended in .rulecast-config.yaml; up to 4 blocked stops per prompt",
+    )
+    expect(await mode({ mode: "attended" }, { RULECAST_MODE: "unattended" })).toContain("from RULECAST_MODE=unattended")
+    expect(await mode({}, { CI: "true" })).toBe(
+      "mode       unattended — detected from CI=true; up to 10 blocked stops per prompt",
+    )
+  })
+
+  test("an unknown RULECAST_MODE is a warning", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]) })
+    const result = await runCli(root, ["doctor"], "", { ...testEnv, RULECAST_MODE: "headless" })
+    expect(result.stdout).toContain("mode       attended — default")
+    expect(result.stdout).toContain(
+      "  warning  RULECAST_MODE=headless is ignored — use attended, interactive or unattended",
+    )
+  })
+
   test("reports the project, a clean config and the cache paths, and exits 0", async () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a"), RULE("b")]),

@@ -2,10 +2,12 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { CONFIG_FILE, MANIFEST_FILE, parseConfig, readConfigData, readManifest } from "../config/load"
+import { type ActiveMode, ATTENDED, resolveMode } from "../config/mode"
 import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError, isNotFound } from "../errors"
 import { compileFilter } from "../files"
+import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
 import type { RepoProvider } from "../repos/provider"
 import { isOlder, VERSION } from "../version"
@@ -32,6 +34,8 @@ export interface CompiledProject {
   config: Config
   rules: CompiledRule[]
   diagnostics: Diagnostic[]
+  /** What the rules were compiled for: escalated severities and `refuse_write: unattended` follow it. */
+  mode: ActiveMode
 }
 
 export interface CompileOptions {
@@ -40,6 +44,12 @@ export interface CompileOptions {
   repos: RepoProvider
   /** Config data to compile instead of the project's .rulecast-config.yaml (try-repo). */
   configData?: unknown
+  /**
+   * The environment the mode is resolved from (config/mode.ts): an agent hook's, or doctor's, which
+   * reports it. Absent: attended, whatever the config says — the mode is about whether anyone
+   * answers an agent, and a commit or a CI job run by `rulecast run` has no agent to answer.
+   */
+  env?: Env
 }
 
 /** Reads each absolute path at most once per compile; null when missing. */
@@ -90,6 +100,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     config,
     rules: [],
     diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
+    mode: options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env),
   })
 
   const data =
@@ -110,9 +121,10 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   })
   if (typeof global === "string") return configFailure(global, config)
 
+  const mode = options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env)
   const diagnostics: Diagnostic[] = []
   const compiled: Compiled[] = []
-  const context: RuleContext = { config, registry: options.registry, global, read: createReader() }
+  const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }
   const project: ReferenceRoot = { dir: root, label: null }
   const error = (source: string, rule: string | null, message: string, hint?: string) =>
     diagnostics.push({ source, rule, message, level: "error", ...(hint === undefined ? {} : { hint }) })
@@ -197,7 +209,17 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     diagnostics,
     (id) => `rule "${id}" is configured more than once: give one an alias`,
   )
-  return { root, config, rules, diagnostics }
+  // Said in every mode, so `rulecast validate` catches a typo before the unattended run that needs it.
+  for (const id of config.unattended.escalate) {
+    if (rules.some((rule) => rule.id === id)) continue
+    diagnostics.push({
+      source: CONFIG_FILE,
+      rule: id,
+      message: "unattended.escalate names no configured rule",
+      level: "warning",
+    })
+  }
+  return { root, config, rules, diagnostics, mode }
 }
 
 /** A manifest on its own (validate, the init catalog): references resolve against `dir`. */

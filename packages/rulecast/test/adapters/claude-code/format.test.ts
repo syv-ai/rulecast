@@ -75,6 +75,29 @@ describe("Claude Code adapter: format", () => {
     expect(output.reason).toContain("raises HTTPException(500)")
   })
 
+  test("attended, a disputed finding goes to the user; unattended, to the run's decisions file or report", () => {
+    const attended = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout).reason
+    expect(attended).toContain("say so to the user")
+    const value = delivery({ findings: [finding()], stop: "block", unattended: true })
+    const output = JSON.parse(format(value, "verify").stdout)
+    expect(output.decision).toBe("block")
+    expect(output.reason).toMatch(/^This project's rulecast rules/)
+    expect(output.reason).toContain("decisions file or final report")
+    expect(output.reason).not.toContain("say so to the user")
+    expect(output.reason).toContain("raises HTTPException(500)")
+  })
+
+  test("an unattended report holds the agent once more, to record what is left as unresolved", () => {
+    const notice = "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced."
+    const value = delivery({ findings: [finding()], stop: "report", unattended: true, notices: [notice] })
+    const output = JSON.parse(format(value, "verify").stdout)
+    // Context for the agent, not only a message for a user who is not there.
+    expect(output.decision).toBe("block")
+    expect(output.reason).toContain("Record each one as unresolved in your final report")
+    expect(output.reason).toContain("raises HTTPException(500)")
+    expect(output.systemMessage).toBe(notice)
+  })
+
   test("an allowed stop prints nothing", () => {
     const value = delivery({ findings: [finding({ severity: "warning" })], stop: "allow" })
     expect(format(value, "verify")).toEqual({ stdout: "", exitCode: 0 })

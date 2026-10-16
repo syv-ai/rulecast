@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import { generateManifest } from "../scripts/manifest"
 import { compileManifest } from "../src/core/compile/project"
 import { type CompiledRule, isDetectorRule } from "../src/core/compile/rule"
+import { ATTENDED } from "../src/core/config/mode"
 import { defaultConfig } from "../src/core/config/schema"
 import { memoryCache } from "../src/core/detection/cache"
 import { runExamples } from "../src/core/examples"
@@ -258,7 +259,7 @@ describe("catalog rules", () => {
     const root = await createProject({ [file]: content })
     await stubAgentCli(root, "claude")
     const { delivery } = await runPipeline({
-      project: { root, config: defaultConfig(), rules, diagnostics: [] },
+      project: { root, config: defaultConfig(), rules, diagnostics: [], mode: ATTENDED },
       stateDir: stateDirFor(root),
       event: { kind, files: [file], cwd: root },
       registry,

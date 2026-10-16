@@ -532,3 +532,52 @@ describe("compileManifest", () => {
     ])
   })
 })
+
+describe("compile: unattended mode", () => {
+  const config = {
+    unattended: { escalate: ["loud", "nope"] },
+    ...local(
+      detectRule("loud", { severity: "warning" }),
+      detectRule("quiet", { severity: "warning" }),
+      detectRule("guarded", { detect: { guarding: {} }, refuse_write: "unattended" }),
+      detectRule("always", { detect: { guarding: {} }, refuse_write: true }),
+    ),
+  }
+  const compiled = async (env?: Record<string, string>) => {
+    const root = await createProject({ "docs/api.md": conventions, ".rulecast-config.yaml": stringify(config) })
+    return compile({ root, registry, repos: cachedRepos(TEST_HOME), ...(env === undefined ? {} : { env }) })
+  }
+  const shape = (project: Awaited<ReturnType<typeof compiled>>) =>
+    project.rules.map((r) => [r.id, r.severity, r.refuseWrite])
+
+  test("escalates the named warning rules and arms refuse_write: unattended", async () => {
+    const project = await compiled({ RULECAST_MODE: "unattended" })
+    expect(project.mode).toEqual({ mode: "unattended", source: "env", detail: "RULECAST_MODE=unattended" })
+    expect(shape(project)).toEqual([
+      ["loud", "error", false],
+      ["quiet", "warning", false],
+      ["guarded", "error", true],
+      ["always", "error", true],
+    ])
+  })
+
+  test("attended, the rules are as written; without an environment, attended whatever is set", async () => {
+    const attended = [
+      ["loud", "warning", false],
+      ["quiet", "warning", false],
+      ["guarded", "error", false],
+      ["always", "error", true],
+    ]
+    expect(shape(await compiled({}))).toEqual(attended)
+    expect(shape(await compiled())).toEqual(attended)
+    expect((await compiled()).mode.source).toBe("default")
+  })
+
+  test("an escalation naming no rule is a warning in every mode", async () => {
+    for (const env of [{}, { CI: "true" }] as Record<string, string>[]) {
+      expect((await compiled(env)).diagnostics.map((d) => [d.rule, d.message, d.level])).toEqual([
+        ["nope", "unattended.escalate names no configured rule", "warning"],
+      ])
+    }
+  })
+})

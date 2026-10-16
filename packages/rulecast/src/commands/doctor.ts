@@ -3,6 +3,7 @@ import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
+import type { ActiveMode } from "../core/config/mode"
 import { createReferenceResolver } from "../core/delivery/resolve"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
@@ -48,6 +49,20 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`
 }
 
+/** "unattended — from RULECAST_MODE=unattended; up to 10 blocked stops per prompt". */
+function modeText(mode: ActiveMode, config: CompiledProject["config"]): string {
+  const source =
+    mode.source === "env"
+      ? `from ${mode.detail}`
+      : mode.source === "config"
+        ? `from ${mode.detail} in ${CONFIG_FILE}`
+        : mode.source === "ci"
+          ? `detected from ${mode.detail}`
+          : "default (no RULECAST_MODE, mode or CI)"
+  const blocks = mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks
+  return `${mode.mode} — ${source}; up to ${plural(blocks, "blocked stop")} per prompt`
+}
+
 /**
  * Compile, check the environment, report where things live, and dry-run every rule (spec §5).
  * Errors exit 2; warnings do not — an uninstalled adapter is worth saying and is not a broken
@@ -79,7 +94,8 @@ export async function doctorCommand(
   const stateDir = ensureProjectState(home, root)
   io.stdout(`project    ${root}\n`)
 
-  const project = await compile({ root, registry, repos: fetchingRepos(home) })
+  // With doctor's own environment: the mode a hook would run in when started from this shell.
+  const project = await compile({ root, registry, repos: fetchingRepos(home), env: io.env })
   const configErrors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error").length
   const configWarnings = project.diagnostics.length - configErrors
   io.stdout(
@@ -89,6 +105,13 @@ export async function doctorCommand(
   for (const diagnostic of project.diagnostics) {
     count(diagnostic.level)
     io.stdout(line(diagnostic.level, diagnosticText(diagnostic), ""))
+  }
+  io.stdout(`mode       ${modeText(project.mode, project.config)}\n`)
+  if (project.mode.ignored !== undefined) {
+    count("warning")
+    io.stdout(
+      line("warning", `RULECAST_MODE=${project.mode.ignored} is ignored`, "use attended, interactive or unattended"),
+    )
   }
 
   const results = await checkDetectors({

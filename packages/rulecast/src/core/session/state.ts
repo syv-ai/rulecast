@@ -4,7 +4,10 @@ export type WorkRecord =
   /** `via: "shell"`: changed during the agent's shell call, not by an edit tool. */
   | { t: "edited"; file: string; via?: "shell" }
   | { t: "accessed"; agent: string; file: string }
-  | { t: "stopBlock"; agent: string }
+  /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
+  | { t: "stopBlock"; agent: string; findings?: string[] }
+  /** Unattended mode: the stop that told the agent to record what is left as unresolved, once per prompt. */
+  | { t: "stopReport"; agent: string }
   | { t: "refused"; rule: string; file: string }
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
@@ -25,6 +28,10 @@ export interface WorkState {
   /** Unique, least recently edited first. */
   edited: string[]
   stopBlocks: Map<string, number>
+  /** How many stops each finding has blocked, by `blockedKey(agent, finding)`. Never reset: a prompt does not make a false positive true. */
+  blockedFindings: Map<string, number>
+  /** Agents told to record their unresolved findings since their last prompt. */
+  stopReports: Set<string>
   /** How often each rule has refused a write to each file: the refuse gate's counter. */
   refusals: Map<string, number>
   disabled: Map<string, string>
@@ -57,6 +64,11 @@ export function preexistingKey(rule: string, file: string): string {
   return `${rule} ${file}`
 }
 
+/** A finding's stop-block count is kept per agent: a subagent's blocks are not the main agent's. */
+export function blockedKey(agent: string, finding: string): string {
+  return `${agent}\n${finding}`
+}
+
 /** A refusal is counted per rule and file: one rule may legitimately refuse several files. */
 export const refusalKey = preexistingKey
 
@@ -64,6 +76,8 @@ export function emptyWork(): WorkState {
   return {
     edited: [],
     stopBlocks: new Map(),
+    blockedFindings: new Map(),
+    stopReports: new Set(),
     refusals: new Map(),
     disabled: new Map(),
     accessed: new Map(),
@@ -109,6 +123,13 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       }
       case "stopBlock":
         state.stopBlocks.set(record.agent, (state.stopBlocks.get(record.agent) ?? 0) + 1)
+        for (const finding of record.findings ?? []) {
+          const key = blockedKey(record.agent, finding)
+          state.blockedFindings.set(key, (state.blockedFindings.get(key) ?? 0) + 1)
+        }
+        break
+      case "stopReport":
+        state.stopReports.add(record.agent)
         break
       case "refused": {
         const key = refusalKey(record.rule, record.file)
@@ -117,6 +138,7 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       }
       case "prompt":
         state.stopBlocks.delete(record.agent)
+        state.stopReports.delete(record.agent)
         break
       case "disabled":
         if (!state.disabled.has(record.rule)) state.disabled.set(record.rule, record.reason)

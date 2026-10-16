@@ -285,7 +285,13 @@ export interface Delivery {
   preexistingSummary: { rule: string; file: string; count: number }[]
   references: DeliveredReference[]
   touches: string[]
-  stop: "block" | "allow" | "capReached" | null
+  /**
+   * At an agent's stop. `report`: unattended only — the gate will not block for these findings
+   * again, so the agent is held once more to record them as unresolved (session/decide.ts `gate`).
+   */
+  stop: "block" | "allow" | "capReached" | "report" | null
+  /** Decided in unattended mode: nobody answers the agent, so the adapter words its stop for that. */
+  unattended?: true
   warnings: string[]
   /** `message` template per rule with findings: the skeleton a grouped rendering prints once. */
   templates: Record<string, string>

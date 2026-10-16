@@ -37,7 +37,8 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     const stateDir = ensureProjectState(home, root)
     log = debugLogger(stateDir)
     // Hooks never fetch: a pinned repo missing from the cache disables its rules with a warning (spec §4).
-    const compileProject = () => compile({ root, registry, repos: cachedRepos(home) })
+    // The hook's environment is the agent's: RULECAST_MODE or CI there picks unattended mode.
+    const compileProject = () => compile({ root, registry, repos: cachedRepos(home), env: io.env })
     if (parsed.warmup) {
       const kinds = warmableKinds(await compileProject(), registry)
       if (kinds.length > 0) io.startWarm(root, kinds)

@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { sectionRange } from "../anchors"
-import type { Config, RuleEntry, RuleExamples, RuleScope, Stage } from "../config/schema"
+import type { Config, Mode, RuleEntry, RuleExamples, RuleScope, Stage } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
@@ -23,6 +23,7 @@ export interface CompiledRule {
   description: string | null
   /** "local", or the rule repo label ("syv-ai/rulecast@v0.2.0"). */
   source: string
+  /** In unattended mode, `error` for a warning rule the config's `unattended.escalate` names. */
   severity: Severity
   /**
    * How a finding of this rule is classified against the baseline (spec §8). `instance` — the
@@ -30,7 +31,10 @@ export interface CompiledRule {
    * is new when the node the match spans was not already violating the rule at the baseline.
    */
   scope: RuleScope
-  /** Refuse the agent's write when this rule fires on what it is writing (spec §9, Guard). */
+  /**
+   * Refuse the agent's write when this rule fires on what it is writing (spec §9, Guard). A rule
+   * with `refuse_write: unattended` has it only when compiled for unattended mode.
+   */
   refuseWrite: boolean
   /** false: switched off with `enabled: false`; never selected for an event (spec §4). */
   enabled: boolean
@@ -78,6 +82,8 @@ export interface RuleContext {
   global: FileFilter
   /** Reads an absolute path once per compile; null when missing. */
   read(file: string): Promise<string | null>
+  /** Default: attended. */
+  mode?: Mode
 }
 
 /** A reference's ref without its anchor, for messages. */
@@ -167,14 +173,16 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
   }
 
   const { global } = context
+  const id = data.alias ?? data.id
+  const unattended = context.mode === "unattended"
   return {
-    id: data.alias ?? data.id,
+    id,
     name: data.name,
     description: data.description ?? null,
     source: input.source,
-    severity: data.severity ?? "error",
+    severity: unattended && context.config.unattended.escalate.includes(id) ? "error" : (data.severity ?? "error"),
     scope: data.scope ?? "instance",
-    refuseWrite: data.refuse_write === true,
+    refuseWrite: data.refuse_write === true || (unattended && data.refuse_write === "unattended"),
     enabled: data.enabled !== false,
     stages,
     patterns: { files: data.files ?? "", exclude: data.exclude ?? "^$" },
