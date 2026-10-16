@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { parseReference } from "../../../src/core/references"
-import { assemble, gate, trim } from "../../../src/core/session/decide"
+import { assemble, findingKey, gate, trim } from "../../../src/core/session/decide"
 import { emptyWork } from "../../../src/core/session/state"
 import type { Match } from "../../../src/core/types"
 import { fakeResolver } from "../../helpers/resolver"
@@ -78,9 +78,11 @@ describe("trim", () => {
 
 describe("gate", () => {
   test("blocks on a new error, and records the block", () => {
-    expect(gate([finding("a/rule", 1)], emptyWork(), "main", 3)).toEqual({
+    const fresh = finding("a/rule", 1)
+    expect(gate([fresh], emptyWork(), "main", 3)).toEqual({
       stop: "block",
       work: [{ t: "stopBlock", agent: "main" }],
+      blocking: [findingKey(fresh)],
     })
   })
 

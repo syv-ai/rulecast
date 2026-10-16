@@ -64,6 +64,11 @@ export interface FindingsRecord {
   found: LoggedFinding[]
   /** Matches a `rulecast-ignore` dropped this event. */
   ign: LoggedMatch[]
+  /**
+   * Unattended: matches whose `rulecast-ignore` the agent wrote this session, which silenced
+   * nothing (they are in `found` as well). Absent when there are none.
+   */
+  tried?: LoggedMatch[]
 }
 
 const located = (rule: { id: string }, match: Match, id: string): LoggedMatch => ({
@@ -81,6 +86,8 @@ export interface EventFindings {
   at: Date
   findings: readonly { id: string; rule: { id: string }; match: Match; outcome: WriteOutcome }[]
   ignored: readonly { id?: string; rule: { id: string }; match: Match }[]
+  /** Ignores that silenced nothing (unattended). */
+  tried?: readonly { id?: string; rule: { id: string }; match: Match }[]
   ran: ReadonlyMap<string, readonly string[]>
 }
 
@@ -103,6 +110,9 @@ export function findingsRecord(event: EventFindings): FindingsRecord | null {
     })
   }
   if (event.ev !== "stop" && files.length === 0 && event.findings.length === 0) return null
+  const tried = (event.tried ?? []).flatMap(({ id, rule, match }) =>
+    id === undefined ? [] : [located(rule, match, id)],
+  )
   return {
     v: FINDINGS_LOG_VERSION,
     at: event.at.toISOString(),
@@ -114,6 +124,7 @@ export function findingsRecord(event: EventFindings): FindingsRecord | null {
     ran,
     found: event.findings.map(({ id, rule, match, outcome }) => ({ ...located(rule, match, id), o: outcome })),
     ign: event.ignored.flatMap(({ id, rule, match }) => (id === undefined ? [] : [located(rule, match, id)])),
+    ...(tried.length === 0 ? {} : { tried }),
   }
 }
 
@@ -151,6 +162,7 @@ const recordSchema = z.object({
   ran: z.record(z.array(z.number().int().nonnegative())),
   found: z.array(loggedMatchSchema.extend({ o: z.enum(["delivered", "blocked", "refused"]) })),
   ign: z.array(loggedMatchSchema),
+  tried: z.array(loggedMatchSchema).optional(),
 }) satisfies z.ZodType<FindingsRecord>
 
 export interface FindingsLog {

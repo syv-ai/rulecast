@@ -22,7 +22,7 @@ import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
-import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import {
@@ -432,6 +432,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  /** Unattended: ignores the agent wrote, which silenced nothing. The findings log keeps the attempt. */
+  let tried: IgnoredFinding[] = []
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
@@ -621,6 +623,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     const kept = new Set(unsilenced.map(({ match }) => match))
+    tried = unsilenced.map(({ status: _, ...item }) => item)
     ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),
@@ -789,18 +792,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
    * CLI run has no session, and `run --session` replays a stop that was already logged. After the
    * decision, so a stop knows whether it blocked, and outside the session lock.
    */
-  async function logFindings(agent: string, stop: Delivery["stop"]): Promise<void> {
+  async function logFindings(agent: string, decision: Decision): Promise<void> {
     const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && options.stopGate === true ? "stop" : null
     if (ev === null || ran === undefined || event.session === undefined) return
     // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
     const theirs = new Set(swept)
     const protectedKeys = new Set(refused.map(({ rule, file }) => `${rule} ${file}`))
-    const outcome = ({ rule, match }: ClassifiedFinding): WriteOutcome => {
-      const reverting = protectedKeys.has(`${rule.id} ${match.file}`)
-      // The gate's own test (session/decide.ts). Once #24's unattended mode lands, its `report`
-      // stop is a block that ends the loop, and counts as blocked too.
-      if (ev === "stop") return stop === "block" && (rule.severity === "error" || reverting) ? "blocked" : "delivered"
-      return reverting ? "refused" : "delivered"
+    const outcome = (finding: ClassifiedFinding): WriteOutcome => {
+      // The gate's own verdict (session/decide.ts): a block or an unattended report, and only the
+      // findings it rests on, so not one past the repeat limit that merely rides along.
+      if (ev === "stop") return decision.blocking?.has(findingKey(finding)) === true ? "blocked" : "delivered"
+      return protectedKeys.has(`${finding.rule.id} ${finding.match.file}`) ? "refused" : "delivered"
     }
     const checked = new Map<string, string[]>()
     for (const [rule, files] of ran) {
@@ -819,6 +821,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           .filter(({ status, match }) => status === "new" && !theirs.has(match.file))
           .map((finding) => ({ ...finding, outcome: outcome(finding) })),
         ignored: ignored.filter(({ match }) => !theirs.has(match.file)),
+        tried: tried.filter(({ match }) => !theirs.has(match.file)),
         ran: checked,
       }),
       log,
@@ -843,6 +846,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     } else throw error
     decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
   }
-  await logFindings(session.agent, decision.delivery.stop)
+  await logFindings(session.agent, decision)
   return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
 }

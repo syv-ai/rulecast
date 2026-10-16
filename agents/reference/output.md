@@ -80,6 +80,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
   "checked": { "files": 1, "selection": "range" },
   "ignored": [],
   "notices": [],
+  "disabled": [],
   "stop": null,
   "baseline": null
 }
@@ -94,8 +95,9 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `backlog` | Counts per rule and per file, new and pre-existing together. |
 | `preexistingSummary` | Pre-existing findings counted per rule and file. |
 | `references` | The doc sections the new findings' rules cite, with their text when it was read. |
-| `warnings` | rulecast's own problems: a broken rule, a detector that failed, a timeout, an ignore without a reason. Not findings. |
+| `warnings` | rulecast's own problems other than the rules in `disabled`: a timeout, an ignore without a reason, a file budget. Not findings. |
 | `skipped` | `llm` rules a staged run or `--no-llm` left out, when they matched a checked file. |
+| `disabled` | Rules that did not run, grouped by why: `[{ "reason": "…: not in the cache (run rulecast install)", "rules": ["python/no-bare-except"] }]`. A rule repo that could not be fetched, a detector whose tool is missing, a rule that failed to compile, and with `--session` a rule the session disabled that would have run here. Each rule is named once, here and not again in `warnings`. With `RULE_ID`, only what concerns that rule. Empty when every rule ran. When it is not empty, `complete` is `false` and the exit code is 3. |
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |
@@ -318,6 +320,7 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
       "fixed": 1,
       "ignored": 0,
       "suppressed": 0,
+      "suppressAttempted": 0,
       "prevented": 0,
       "open": 0,
       "repeated": 0,
@@ -350,11 +353,12 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | Key | Meaning |
 |---|---|
 | `fired` | Findings first reported in the window. |
-| `blocked` | Of those, findings that kept a stop from going through at least once. |
+| `blocked` | Of those, findings that kept a stop from going through at least once. In unattended mode that includes the final stop that holds the agent to report what is left, and leaves out a finding that has already blocked twice and so no longer blocks. |
 | `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
 | `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
 | `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
 | `suppressed` | Dropped by a `rulecast-ignore` comment. That includes a comment on the finding's own line that changed its id, which happens when the match is the whole line, as with `llm` rules. |
+| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`, and not in `suppressionRate`. |
 | `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |

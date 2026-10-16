@@ -29,6 +29,8 @@ export interface FindingLife {
   blocks: number
   /** Writes refused, or shell writes the agent was told to revert, over it. */
   refusals: number
+  /** Events at which it carried a `rulecast-ignore` the agent wrote that silenced nothing (unattended). */
+  suppressAttempts: number
   /** For a fixed one: the agent's stops between its first report and the fix; 0 is the same turn. */
   turnsToFix: number | null
 }
@@ -78,10 +80,12 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
     // An inline `rulecast-ignore` can change the id it silences, when the match is the whole line
     // (llm, or an excerpt): the same rule ignored on the line it was last reported on is it.
     const ignoredAt = new Set(record.ign.map((match) => `${match.r}\u0000${match.f}\u0000${match.l}`))
-    const seen = (life: Open, finding: { o: string; l: number }) => {
+    const tried = new Set((record.tried ?? []).map((match) => match.id))
+    const seen = (life: Open, finding: { id: string; o: string; l: number }) => {
       const outcome = finding.o
       life.line = finding.l
       life.deliveries++
+      if (tried.has(finding.id)) life.suppressAttempts++
       if (record.ev === "stop") life.stopsPresent++
       if (outcome === "blocked") life.blocks++
       if (outcome === "refused") life.refusals++
@@ -116,6 +120,7 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
         stopsPresent: 0,
         blocks: 0,
         refusals: 0,
+        suppressAttempts: 0,
         turnsToFix: null,
         stopsAtOpen: stopsOf(record.a),
         line: finding.l,
@@ -153,6 +158,8 @@ export interface RuleStats {
   fixed: number
   ignored: number
   suppressed: number
+  /** Findings the agent wrote a `rulecast-ignore` for that silenced nothing, as in unattended mode. */
+  suppressAttempted: number
   prevented: number
   open: number
   repeated: number
@@ -198,6 +205,7 @@ export function ruleStats(lives: readonly FindingLife[]): RuleStats[] {
       fixed: count((life) => life.state === "fixed"),
       ignored: count((life) => life.state === "ignored"),
       suppressed,
+      suppressAttempted: count((life) => life.suppressAttempts > 0),
       prevented: count((life) => life.state === "prevented"),
       open: count((life) => life.state === "open"),
       repeated,
