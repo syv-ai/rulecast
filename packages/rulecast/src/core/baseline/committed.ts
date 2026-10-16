@@ -163,7 +163,8 @@ export async function writeCommittedBaseline(root: string, baseline: CommittedBa
  * What a run can say about one baseline entry's rule and file:
  *
  * - `checked`: the rule ran on the file to completion, so an id it did not find is gone.
- * - `gone`: the rule or the file no longer exists, or the rule no longer applies to the file.
+ * - `gone`: the rule or the file no longer exists, the rule no longer applies to the file, or it no
+ *   longer has the `verify` stage, so no run will ever check the entry again.
  * - `unchecked`: nothing is known — the rule is disabled, skipped, failed, or the file was not in
  *   this run. Its entries are kept.
  */
@@ -214,7 +215,7 @@ export function pruneBaseline(
  * be fetched, or a rule with an error, is missing from `rules` without having been removed.
  */
 export function entryVerdict(options: {
-  rules: readonly { id: string; enabled: boolean; matches(file: string): boolean }[]
+  rules: readonly { id: string; enabled: boolean; stages: readonly string[]; matches(file: string): boolean }[]
   compiledCleanly: boolean
   ran: ReadonlyMap<string, readonly string[]>
   exists: (file: string) => boolean
@@ -226,7 +227,7 @@ export function entryVerdict(options: {
     if (rule === undefined) return options.compiledCleanly ? "gone" : "unchecked"
     if (!options.exists(file)) return "gone"
     if (!rule.enabled) return "unchecked"
-    if (!rule.matches(file)) return "gone"
+    if (!rule.matches(file) || !rule.stages.includes("verify")) return "gone"
     return ran.get(id)?.has(file) === true ? "checked" : "unchecked"
   }
 }

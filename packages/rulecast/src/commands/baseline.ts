@@ -5,6 +5,7 @@ import { parseArgs } from "node:util"
 import { EXIT } from "../adapters/cli/contract"
 import {
   BASELINE_FILE,
+  BaselineFileError,
   baselineHas,
   baselineSize,
   buildBaseline,
@@ -17,7 +18,7 @@ import {
 } from "../core/baseline/committed"
 import { type CompiledProject, compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
-import { agentDir } from "../core/delivery/persist"
+import { AGENT_DIR, agentDir } from "../core/delivery/persist"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { FINDING_ID_VERSION } from "../core/finding-id"
 import { allFiles, git } from "../core/git"
@@ -43,8 +44,9 @@ const sizeText = (baseline: CommittedBaseline) => {
  *   which should be a deliberate `--force`, not a habit.
  * - `--prune`: drop the entries this run shows are gone. Never adds one.
  *
- * Nothing is written from a run where a rule failed: a baseline missing a broken rule's findings
- * would make every one of them new once the rule works again.
+ * Create and `--force` write nothing from a run where a rule failed: a baseline missing a broken
+ * rule's findings would make every one of them new once the rule works again. Rules `--no-llm`
+ * left out are named, and `--force` keeps the old file's entries of every rule that did not run.
  */
 export async function baselineCommand(
   root: string,
@@ -89,7 +91,9 @@ export async function baselineCommand(
     return EXIT.failed
   }
 
-  const result = await everything(project, registry, io, values["no-llm"])
+  const files = await allFiles(root)
+  const metered = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
+  const result = await everything(project, registry, io, files, values["no-llm"] ? metered : null)
   for (const warning of result.delivery.warnings) io.stdout(`rulecast problem: ${warning}\n`)
   const complete = !result.failed
 
@@ -101,31 +105,83 @@ export async function baselineCommand(
     )
     return EXIT.incomplete
   }
-  const baseline = buildBaseline(
-    (result.findings ?? []).map(({ id, rule, match }) => ({ id, rule: rule.id, file: match.file })),
-  )
+  // --no-llm is the one way a complete run leaves rules out. Their findings are not in this run,
+  // so --force keeps what the old file had for them rather than forgiving nothing.
+  const leftOut = values["no-llm"]
+    ? project.rules
+        .filter((rule) => rule.enabled && rule.detector !== null && metered.has(rule.detector.kind))
+        .filter((rule) => rule.stages.includes("verify") && files.some((file) => rule.matches(file)))
+        .map((rule) => rule.id)
+    : []
+  const found = (result.findings ?? []).map(({ id, rule, match }) => ({ id, rule: rule.id, file: match.file }))
+  const kept = values.force ? await unchecked(project, result) : []
+  const baseline = buildBaseline([...found, ...kept])
   await writeCommittedBaseline(root, baseline)
   agentDir(root)
   io.stdout(`wrote ${BASELINE_FILE}: ${sizeText(baseline)}. Commit it; prefer --from-ref wherever a ref exists.\n`)
+  const keptRules = [...new Set(kept.map((entry) => entry.rule))]
+  if (keptRules.length > 0) {
+    io.stdout(`kept from the old baseline, for rules that did not run: ${keptRules.join(", ")}\n`)
+  }
+  const missing = leftOut.filter((rule) => !keptRules.includes(rule))
+  if (missing.length > 0) io.stdout(`not in the baseline (--no-llm): ${missing.join(", ")}\n`)
   await warnIfIgnored(root, io)
   return EXIT.clean
 }
 
-/** One verify over every file, with no baseline at all: every finding comes back new. */
+/**
+ * The old file's entries this run could not check (a rule skipped or disabled), for --force to
+ * carry over. None from a file that is unreadable or of another id scheme: no id in it can match.
+ */
+async function unchecked(
+  project: CompiledProject,
+  result: PipelineResult,
+): Promise<{ id: string; rule: string; file: string }[]> {
+  let old: CommittedBaseline | null
+  try {
+    old = await readCommittedBaseline(project.root)
+  } catch (error) {
+    if (error instanceof BaselineFileError) return []
+    throw error
+  }
+  if (old === null || old.findingIdVersion !== FINDING_ID_VERSION) return []
+  const verdict = verdictFor(project, result)
+  const kept: { id: string; rule: string; file: string }[] = []
+  for (const [rule, byFile] of old.rules) {
+    for (const [file, ids] of byFile) {
+      if (verdict(rule, file) === "unchecked") for (const id of ids) kept.push({ id, rule, file })
+    }
+  }
+  return kept
+}
+
+const verdictFor = (project: CompiledProject, result: PipelineResult) =>
+  entryVerdict({
+    rules: project.rules,
+    compiledCleanly: !project.diagnostics.some((diagnostic) => diagnostic.level === "error"),
+    ran: result.ran ?? new Map(),
+    exists: fileExists(project.root),
+  })
+
+/**
+ * One verify over every file, with no baseline at all: every finding comes back new. No file
+ * budget: a budget would leave a metered rule's other files out of the baseline unremarked.
+ */
 async function everything(
   project: CompiledProject,
   registry: DetectorRegistry,
   io: CliIo,
-  noLlm: boolean,
+  files: string[],
+  skip: ReadonlySet<string> | null,
 ): Promise<PipelineResult> {
-  const metered = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
   return runPipeline({
     project,
     stateDir: ensureProjectState(cacheHome(io.env), project.root),
-    event: { kind: "verify", files: await allFiles(project.root), cwd: project.root },
+    event: { kind: "verify", files, cwd: project.root },
     registry,
     maxContextChars: null,
-    ...(noLlm ? { skipDetectorKinds: metered } : {}),
+    ignoreFileBudgets: true,
+    ...(skip === null ? {} : { skipDetectorKinds: skip }),
   })
 }
 
@@ -138,13 +194,7 @@ async function prune(
 ): Promise<number> {
   const findings = result.findings ?? []
   const found = new Set([...findings, ...(result.ignored ?? [])].flatMap(({ id }) => (id === undefined ? [] : [id])))
-  const verdict = entryVerdict({
-    rules: project.rules,
-    compiledCleanly: !project.diagnostics.some((diagnostic) => diagnostic.level === "error"),
-    ran: result.ran ?? new Map(),
-    exists: fileExists(project.root),
-  })
-  const { next, removed } = pruneBaseline(existing, found, verdict)
+  const { next, removed } = pruneBaseline(existing, found, verdictFor(project, result))
   // Only when something went: an unchanged baseline is not rewritten, so a prune that found
   // nothing leaves no diff even if the file was formatted by hand.
   if (removed.length > 0) await writeCommittedBaseline(project.root, next)
@@ -177,7 +227,13 @@ async function warnIfIgnored(root: string, io: CliIo): Promise<void> {
   if (!(await git(root, ["check-ignore", "-q", "--", BASELINE_FILE])).ok) return
   const ignored = await git(root, ["check-ignore", "-v", "--", BASELINE_FILE])
   const source = ignored.ok ? (ignored.stdout.split("\t")[0]?.trim() ?? "") : ""
-  io.stdout(
-    `git ignores ${BASELINE_FILE}${source === "" ? "" : ` (${source})`}: add !baseline.json to .rulecast/.gitignore, or commit it with git add -f\n`,
-  )
+  // A pattern from anywhere else may exclude .rulecast/ itself, and git never re-includes a file
+  // under an excluded directory: a !baseline.json in .rulecast/.gitignore would not be read.
+  // The source is `file:line:pattern`, its file relative to the repository's top, not the project's.
+  const file = /^(.*?):\d+:/.exec(source)?.[1] ?? ""
+  const fix =
+    file === "" || `/${file}`.endsWith(`/${AGENT_DIR}/.gitignore`)
+      ? "add !baseline.json to .rulecast/.gitignore, or commit it with git add -f"
+      : `narrow or remove that pattern, or commit it with git add -f ${BASELINE_FILE}`
+  io.stdout(`git ignores ${BASELINE_FILE}${source === "" ? "" : ` (${source})`}: ${fix}\n`)
 }
