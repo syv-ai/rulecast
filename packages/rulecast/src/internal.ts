@@ -7,7 +7,7 @@
  * outside it, can drive a pipeline without reaching into `dist/` by path.
  */
 
-export { EXIT, EXIT_CODES, SCHEMA_VERSION } from "./adapters/cli/contract"
+export { EXIT, EXIT_CODES, SCHEMA_VERSION, TEST_SCHEMA_VERSION } from "./adapters/cli/contract"
 export {
   type CompiledProject,
   type CompileOptions,

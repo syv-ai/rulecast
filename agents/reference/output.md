@@ -1,6 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) has its own document, for loops that draft rules. The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -22,7 +22,7 @@ rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
-Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example.
+Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example or a rule over `--max-rate` ([below](#rulecast-test)).
 
 ## JSON
 
@@ -150,3 +150,104 @@ The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v
 | `invocations[0]` | `executionSuccessful` is `complete`; `toolExecutionNotifications` are the `warnings`. |
 
 `artifactLocation.uri` is relative to the project root. For a project below the repository's top, code scanning needs paths relative to the repository; until rulecast writes them, run it from a project at the repository's top.
+
+## rulecast test
+
+`rulecast test` runs each rule's examples ([rule-format.md](rule-format.md#examples)); with `--against` it fires each rule over real files instead. It is the gate for a rule an agent drafted: the examples pass, and the rule does not flag most of the files it matches.
+
+```sh
+rulecast test <rule-id> --format json
+rulecast test <rule-id> --against . --max-rate 0.5 --format json
+```
+
+| Code | Meaning | stdout |
+|---|---|---|
+| `0` | Every example that ran passed, and no rule is over `--max-rate`. | the report |
+| `1` | An example failed, or a rule is over `--max-rate`. | the report |
+| `2` | rulecast could not run: a usage error, no config, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
+
+A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`.
+
+`--format json` prints one document:
+
+```json
+{
+  "schemaVersion": 1,
+  "passed": false,
+  "rules": [
+    {
+      "rule": "backend/no-print",
+      "detector": "regex",
+      "scope": "instance",
+      "status": "failed",
+      "examples": {
+        "outcomes": [
+          {
+            "kind": "bad",
+            "index": 0,
+            "path": "backend/app/services/users.py",
+            "passed": false,
+            "expected": { "fires": true, "lines": [2, 4] },
+            "findings": [
+              { "line": 2, "endLine": 2, "column": 1, "text": "print(", "message": "backend/app/services/users.py:2 prints. Use the logger instead." }
+            ],
+            "failures": ["expected lines [2, 4], found [2]"]
+          }
+        ],
+        "precision": { "correct": 1, "total": 1 },
+        "recall": { "matched": 1, "total": 1 }
+      },
+      "against": null
+    }
+  ]
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `schemaVersion` | The version of this document. It is versioned on its own, apart from `run`'s, under the same [policy](#version-policy). |
+| `passed` | `true` exactly when the exit code is 0. |
+| `rules` | One entry per rule tested: every detector rule, or the one named. |
+| `rules[].rule`, `detector`, `scope` | The rule's id, its detector kind (`null` for a touch rule) and its `scope`. |
+| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money); `touch` (a named touch rule: nothing to test). |
+| `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
+| `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
+
+### An outcome
+
+| Field | Meaning |
+|---|---|
+| `kind`, `index` | `good`, `bad` or `baseline`, and the 0-based position in that list: `bad[1]`. |
+| `path` | The example's `path`. |
+| `passed` | `true` exactly when `failures` is empty. |
+| `expected` | `{ "fires": false }` for `good`. `{ "fires": true }` for `bad`, with `count` and `lines` when its `expect` pins them. `{ "new": [...], "preexisting": [...] }` for `baseline`. |
+| `findings` | What the rule found, passing or not: `line`, `endLine`, `column`, `text` (what the detector matched), `message`. One per match, not merged. A baseline example's findings also have `status`: `new` or `preexisting`. |
+| `failures` | Why the example failed, one sentence each, such as `expected lines [2, 4], found [2]` or `line 3: expected new, was pre-existing`. The wording can change; `passed` cannot. |
+| `error` | Present when the detector failed or timed out on the example. The example fails. |
+
+### `against`
+
+```json
+{
+  "paths": ["."],
+  "matchingFiles": 120,
+  "violatingFiles": 70,
+  "violations": 212,
+  "rate": 0.5833333333333334,
+  "maxRate": 0.5,
+  "exceeded": true,
+  "smallSample": false,
+  "files": [{ "file": "backend/app/a.py", "count": 31 }]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `paths` | The `--against` paths, as given. |
+| `matchingFiles` | Files under the paths that the rule's own `files` and `exclude` match: the denominator. |
+| `violatingFiles`, `violations` | Matching files with at least one finding, and the findings in them. |
+| `rate` | `violatingFiles / matchingFiles`; `null` when no file matches. |
+| `maxRate` | The `--max-rate` given, or `null`. |
+| `exceeded` | `rate` is over `maxRate`, and `smallSample` is `false`. This is what fails the rule. |
+| `smallSample` | Under 25 matching files. `--max-rate` is not applied: a share of a handful of files says nothing about the rule. |
+| `files` | Every violating file with its count, worst first. |

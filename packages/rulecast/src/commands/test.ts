@@ -1,15 +1,17 @@
 import path from "node:path"
 import { parseArgs } from "node:util"
 
+import { TEST_SCHEMA_VERSION } from "../adapters/cli/contract"
 import { compile } from "../core/compile/project"
 import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
+import type { RuleScope } from "../core/config/schema"
 import { createReferenceResolver } from "../core/delivery/resolve"
 import { type DetectionContext, detectionFor } from "../core/detection/context"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
-import { type ExampleResult, runExamples, skippedResult } from "../core/examples"
+import { type ExampleOutcome, type ExampleResult, runExamples, skippedResult } from "../core/examples"
 import { allFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { fetchingRepos } from "../core/repos/provider"
@@ -21,18 +23,36 @@ interface TestArgs {
   ruleId: string | null
   /** Paths to fire the rule over for real; empty when --against was not given. */
   against: string[]
+  /** With --against: the share of matching files a rule may violate in; null when not given. */
+  maxRate: number | null
+  format: "terminal" | "json"
 }
 
 export function parseTestArgs(args: string[]): TestArgs {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { against: { type: "string", multiple: true } },
+    options: {
+      against: { type: "string", multiple: true },
+      "max-rate": { type: "string" },
+      format: { type: "string", default: "terminal" },
+    },
   })
   if (positionals.length > 1) throw new UsageError(`unexpected arguments: ${positionals.slice(1).join(" ")}`)
+  if (values.format !== "terminal" && values.format !== "json") {
+    throw new UsageError(`unknown format "${values.format}" (use terminal or json)`)
+  }
   const against = values.against ?? []
+  let maxRate: number | null = null
+  if (values["max-rate"] !== undefined) {
+    if (against.length === 0) throw new UsageError("--max-rate needs --against")
+    maxRate = values["max-rate"].trim() === "" ? Number.NaN : Number(values["max-rate"])
+    if (!Number.isFinite(maxRate) || maxRate < 0 || maxRate > 1) {
+      throw new UsageError("--max-rate takes a share of files between 0 and 1, such as 0.2")
+    }
+  }
   const ruleId = positionals[0] ?? null
-  return { ruleId, against }
+  return { ruleId, against, maxRate, format: values.format }
 }
 
 /** Under this many violations a rule is one "nobody breaks" (8 of 15 measured conventions were). */
@@ -119,17 +139,31 @@ function failureLines(rule: DetectorRule, result: ExampleResult): string[] {
       out.push(`      ${name} — ${rule.detector.kind} failed: ${outcome.error}`)
       continue
     }
-    if (outcome.kind === "bad") {
+    if (outcome.kind === "bad" && outcome.findings.length === 0) {
       out.push(`      ${name} — no finding`)
       continue
     }
-    const source = (rule.examples?.good[outcome.index]?.code ?? "").split(/\r?\n/)
+    // A good example that fired is explained by where it fired. A pinned bad example and a baseline
+    // one are explained by what they expected, and then where it fired.
+    if (outcome.kind !== "good") out.push(...outcome.failures.map((failure) => `      ${name} — ${failure}`))
+    const source = sourceOf(rule, outcome).split(/\r?\n/)
     for (const finding of outcome.findings) {
-      out.push(`      ${name} — fired at line ${finding.line}`, `        ${source[finding.line - 1]?.trim() ?? ""}`)
+      const status = finding.status === undefined ? "" : ` (${finding.status === "new" ? "new" : "pre-existing"})`
+      out.push(
+        `      ${name} — fired at line ${finding.line}${status}`,
+        `        ${source[finding.line - 1]?.trim() ?? ""}`,
+      )
       out.push(`        ${matchedLine(finding.text)}`)
     }
   }
   return out
+}
+
+/** The code an outcome's findings are in: a baseline example's is its `after`. */
+function sourceOf(rule: DetectorRule, outcome: ExampleOutcome): string {
+  const examples = rule.examples
+  if (outcome.kind === "baseline") return examples?.baseline[outcome.index]?.after ?? ""
+  return examples?.[outcome.kind][outcome.index]?.code ?? ""
 }
 
 /** The worst files named, then the rest counted: enough to pick one to look at. */
@@ -138,9 +172,10 @@ const AGAINST_TOP_FILES = 10
 /**
  * `--against`: fire the rule over real files and say how much it would produce.
  *
- * It reports and never fails, whatever it finds (see `againstNote`). The denominator is the files
- * the rule *matches* under the given paths, not every file walked: a rule scoped to `routes/` must
- * not be diluted by the rest of the repository.
+ * It reports, and fails only past a `--max-rate` the caller chose (see `againstNote` for why no
+ * threshold is built in). The denominator is the files the rule *matches* under the given paths,
+ * not every file walked: a rule scoped to `routes/` must not be diluted by the rest of the
+ * repository.
  */
 function againstPrefixes(root: string, paths: string[], io: CliIo): (file: string) => boolean {
   const prefixes = paths.map((given) => {
@@ -154,99 +189,129 @@ function againstPrefixes(root: string, paths: string[], io: CliIo): (file: strin
   return (file) => prefixes.some((prefix) => prefix === "" || file === prefix || file.startsWith(`${prefix}/`))
 }
 
-interface AgainstCount {
+/** What `--against` measured for one rule: the `against` object of `test --format json`. */
+interface AgainstReport {
+  paths: string[]
   /** Files under the paths that the rule matches: the denominator. */
-  files: number
+  matchingFiles: number
+  violatingFiles: number
   violations: number
-  byFile: Map<string, number>
+  /** `violatingFiles / matchingFiles`; null when no file matches. */
+  rate: number | null
+  maxRate: number | null
+  /** Over `--max-rate`. Never on a small sample, where the rate is not applied. */
+  exceeded: boolean
+  /** Under `SMALL_SAMPLE` matching files: too few for a rate to mean anything. */
+  smallSample: boolean
+  /** Every violating file, worst first. */
+  files: { file: string; count: number }[]
 }
 
-async function countAgainst(
+async function measureAgainst(
   root: string,
   rule: DetectorRule,
   candidates: readonly string[],
+  paths: string[],
+  maxRate: number | null,
   detection: DetectionContext,
   timeoutMs: number,
-): Promise<AgainstCount> {
+): Promise<AgainstReport> {
   const files = candidates.filter((file) => rule.matches(file))
-  if (files.length === 0) return { files: 0, violations: 0, byFile: new Map() }
-  const output = await runDetection({
-    detection,
-    event: "verify",
-    selections: [{ rule, files }],
-    changes: new Map(),
-    read: (file) => readSourceFile(root, file),
-    timeoutMs,
-  })
-  const failure = output.errors[0]
-  if (failure !== undefined) throw new Error(`${rule.detector.kind} detector failed: ${failure.message}`)
   const byFile = new Map<string, number>()
-  for (const { match } of output.findings) byFile.set(match.file, (byFile.get(match.file) ?? 0) + 1)
-  return { files: files.length, violations: output.findings.length, byFile }
+  let violations = 0
+  if (files.length > 0) {
+    const output = await runDetection({
+      detection,
+      event: "verify",
+      selections: [{ rule, files }],
+      changes: new Map(),
+      read: (file) => readSourceFile(root, file),
+      timeoutMs,
+    })
+    const failure = output.errors[0]
+    if (failure !== undefined) throw new Error(`${rule.detector.kind} detector failed: ${failure.message}`)
+    for (const { match } of output.findings) byFile.set(match.file, (byFile.get(match.file) ?? 0) + 1)
+    violations = output.findings.length
+  }
+  const rate = files.length === 0 ? null : byFile.size / files.length
+  // A rate over a handful of files is noise, and failing a rule on it would fail rules at random
+  // in a small repository; the terminal note already refuses to read anything into it.
+  const smallSample = files.length < SMALL_SAMPLE
+  return {
+    paths,
+    matchingFiles: files.length,
+    violatingFiles: byFile.size,
+    violations,
+    rate,
+    maxRate,
+    exceeded: maxRate !== null && !smallSample && rate !== null && rate > maxRate,
+    smallSample,
+    files: [...byFile].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([file, count]) => ({ file, count })),
+  }
 }
 
-async function reportAgainst(
-  root: string,
-  rule: DetectorRule,
-  paths: string[],
-  detection: DetectionContext,
-  timeoutMs: number,
-  io: CliIo,
-): Promise<number> {
-  const under = againstPrefixes(root, paths, io)
-  const count = await countAgainst(root, rule, (await allFiles(root)).filter(under), detection, timeoutMs)
-  if (count.files === 0) {
-    io.stdout(`\n  no files under ${paths.join(", ")} match ${rule.id}\n\n`)
-    return 0
+/** The `--max-rate` verdict, for the terminal. */
+function rateLine(against: AgainstReport): string {
+  if (against.smallSample) {
+    return `  --max-rate not applied: only ${plural(against.matchingFiles, "matching file")}`
   }
-  const { byFile, violations } = count
-  const worst = [...byFile].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, AGAINST_TOP_FILES)
-  const width = Math.max(...worst.map(([file]) => file.length), 0)
+  return `  rate ${against.rate?.toFixed(2)}: ${against.exceeded ? "over" : "within"} --max-rate ${against.maxRate}`
+}
 
-  const out = ["", `  ${plural(violations, "violation")} in ${byFile.size} of ${count.files} matching files`]
+function againstText(rule: DetectorRule, against: AgainstReport): string {
+  if (against.matchingFiles === 0) return `\n  no files under ${against.paths.join(", ")} match ${rule.id}\n\n`
+  const worst = against.files.slice(0, AGAINST_TOP_FILES)
+  const width = Math.max(...worst.map(({ file }) => file.length), 0)
+
+  const out = [
+    "",
+    `  ${plural(against.violations, "violation")} in ${against.violatingFiles} of ${against.matchingFiles} matching files`,
+  ]
+  if (against.maxRate !== null) out.push(rateLine(against))
   if (worst.length > 0) {
-    out.push("", ...worst.map(([file, n]) => `  ${file.padEnd(width + 2)}${n}`))
-    if (byFile.size > worst.length) out.push(`  …and ${byFile.size - worst.length} more files`)
+    out.push("", ...worst.map(({ file, count }) => `  ${file.padEnd(width + 2)}${count}`))
+    if (against.files.length > worst.length) out.push(`  …and ${against.files.length - worst.length} more files`)
   }
-  const note = againstNote(violations, byFile.size, count.files)
+  const note = againstNote(against.violations, against.violatingFiles, against.matchingFiles)
   if (note.length > 0) out.push("", ...note)
   out.push("")
-  io.stdout(out.join("\n"))
-  return 0
+  return out.join("\n")
 }
 
 /**
  * `--against` with no rule: one line per rule, so drafting a whole config is one command rather than
  * a shell loop over ids. Metered rules are named and not run, as in bare `rulecast test`.
  */
-async function reportAgainstAll(
-  root: string,
-  rules: readonly DetectorRule[],
-  paths: string[],
-  detection: DetectionContext,
-  timeoutMs: number,
-  isMetered: (rule: DetectorRule) => boolean,
-  io: CliIo,
-): Promise<number> {
-  const under = againstPrefixes(root, paths, io)
-  const candidates = (await allFiles(root)).filter(under)
-  const rows: [string, string, string][] = [["rule", "violations", "files"]]
+function againstAllText(reports: readonly RuleReport[], maxRate: number | null): string {
+  const header = maxRate === null ? ["rule", "violations", "files"] : ["rule", "violations", "files", "rate"]
+  const rows: string[][] = [header]
   const notRun: string[] = []
-  for (const rule of rules) {
-    if (isMetered(rule)) {
-      notRun.push(rule.id)
+  for (const report of reports) {
+    const against = report.against
+    if (against === null) {
+      notRun.push(report.rule)
       continue
     }
-    const count = await countAgainst(root, rule, candidates, detection, timeoutMs)
-    rows.push([
-      rule.id,
-      String(count.violations),
-      count.files === 0 ? "no files match" : `${count.byFile.size} of ${count.files}`,
-    ])
+    const files =
+      against.matchingFiles === 0 ? "no files match" : `${against.violatingFiles} of ${against.matchingFiles}`
+    const row = [report.rule, String(against.violations), files]
+    if (maxRate !== null) {
+      row.push(
+        against.matchingFiles === 0
+          ? ""
+          : against.smallSample
+            ? "not applied (too few files)"
+            : `${against.rate?.toFixed(2)}${against.exceeded ? " over" : ""}`,
+      )
+    }
+    rows.push(row)
   }
-  const idWidth = Math.max(...rows.map(([id]) => id.length))
-  const countWidth = Math.max(...rows.map(([, n]) => n.length))
-  const out = ["", ...rows.map(([id, n, files]) => `  ${id.padEnd(idWidth + 2)}${n.padStart(countWidth)}  ${files}`)]
+  const idWidth = Math.max(...rows.map(([id]) => id!.length))
+  const countWidth = Math.max(...rows.map(([, n]) => n!.length))
+  const filesWidth = Math.max(...rows.map(([, , files]) => files!.length))
+  const line = ([id, n, files, rate]: string[]) =>
+    `  ${id!.padEnd(idWidth + 2)}${n!.padStart(countWidth)}  ${rate === undefined ? files : `${files!.padEnd(filesWidth)}  ${rate}`.trimEnd()}`
+  const out = ["", ...rows.map(line)]
   if (notRun.length > 0)
     out.push("", `  not run: ${notRun.join(", ")} (rulecast test <id> --against runs one; it costs money)`)
   out.push(
@@ -255,59 +320,64 @@ async function reportAgainstAll(
     "  shows one rule's worst files and what its count does and does not mean.",
     "",
   )
-  io.stdout(out.join("\n"))
-  return 0
+  return out.join("\n")
 }
 
-/**
- * `rulecast test [RULE_ID]` — run every rule's inline examples, or one rule's.
- *
- * Bare, it skips `llm` rules: running a rule's examples is the author asking for exactly that, so
- * there is no consent problem in `rulecast test <llm-rule>`, but `rulecast test` over a project
- * with several of them would be a surprise bill. Naming the rule runs it (§6, Consent).
- */
-export async function testCommand(
-  root: string,
-  args: string[],
-  registry: DetectorRegistry,
-  io: CliIo,
-): Promise<number> {
-  const { ruleId, against } = parseTestArgs(args)
-  if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
-  const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
-  if (ruleId !== null && !project.rules.some((rule) => rule.id === ruleId)) {
-    throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
-  }
+/** One rule's result: an entry of `rules` in `test --format json` (agents/reference/output.md). */
+interface RuleReport {
+  rule: string
+  /** The detector kind; null for a touch rule. */
+  detector: string | null
+  scope: RuleScope
+  /** `not-run`: a metered rule nobody named. `touch`: a rule with no detector, named. */
+  status: "passed" | "failed" | "no-examples" | "not-run" | "touch"
+  /** Null under `--against`, and when there was nothing run. */
+  examples: Pick<ExampleResult, "outcomes" | "precision" | "recall"> | null
+  /** Null unless `--against` was given and the rule ran. */
+  against: AgainstReport | null
+}
 
-  const rules = project.rules.filter(isDetectorRule).filter((rule) => ruleId === null || rule.id === ruleId)
-  if (ruleId !== null && rules.length === 0) {
-    io.stdout(touchRule(ruleId))
-    return 0
-  }
-  const stateDir = ensureProjectState(cacheHome(io.env), root)
-  const resolver = createReferenceResolver(root)
-  const detection = detectionFor(project, registry, stateDir, resolver)
-  const timeoutMs = project.config.timeouts.verifyMs
+interface TestReport {
+  schemaVersion: number
+  /** Exit 0 exactly when true: no example failed, and no rule is over `--max-rate`. */
+  passed: boolean
+  rules: RuleReport[]
+}
 
-  if (against.length > 0 && ruleId !== null)
-    return await reportAgainst(root, rules[0]!, against, detection, timeoutMs, io)
-  if (against.length > 0) {
-    const isMetered = (rule: DetectorRule) => registry.get(rule.detector.kind)?.metered === true
-    return await reportAgainstAll(root, rules, against, detection, timeoutMs, isMetered, io)
-  }
+const report = (rules: RuleReport[]): TestReport => ({
+  schemaVersion: TEST_SCHEMA_VERSION,
+  passed: rules.every((rule) => rule.status !== "failed"),
+  rules,
+})
 
+function againstReport(rule: DetectorRule, against: AgainstReport | null): RuleReport {
+  const status = against === null ? "not-run" : against.exceeded ? "failed" : "passed"
+  return { rule: rule.id, detector: rule.detector.kind, scope: rule.scope, status, examples: null, against }
+}
+
+function examplesReport(rule: DetectorRule, result: ExampleResult): RuleReport {
+  const report = (status: RuleReport["status"], examples: RuleReport["examples"]): RuleReport => ({
+    rule: rule.id,
+    detector: rule.detector.kind,
+    scope: rule.scope,
+    status,
+    examples,
+    against: null,
+  })
+  if (result.skipped) return report("not-run", null)
+  if (result.missing || result.empty) return report("no-examples", null)
+  const { outcomes, precision, recall } = result
+  return report(outcomes.every((outcome) => outcome.passed) ? "passed" : "failed", { outcomes, precision, recall })
+}
+
+function examplesText(results: readonly { rule: DetectorRule; result: ExampleResult }[]): string {
+  if (results.length === 0) return "no rules with a detector\n"
   const lines: string[] = [""]
   const noExamples: string[] = []
   const notRun: string[] = []
   let failedRules = 0
   let ranRules = 0
-
-  for (const rule of rules) {
-    const result =
-      // Spec §6: a metered rule runs only when asked for by id — never as part of "test them all".
-      ruleId === null && registry.get(rule.detector.kind)?.metered === true
-        ? skippedResult(rule.id)
-        : await runExamples({ detection, rule, timeoutMs })
+  for (const { rule, result } of results) {
     lines.push(summaryLine(rule, result))
     if (result.missing || result.empty) {
       noExamples.push(rule.id)
@@ -324,10 +394,6 @@ export async function testCommand(
     }
   }
 
-  if (rules.length === 0) {
-    io.stdout("no rules with a detector\n")
-    return 0
-  }
   if (noExamples.length > 0) lines.push("", `  no examples: ${noExamples.join(", ")}`)
   // A drafting agent took "1 rule passed" as the final check clean while its llm rule never ran.
   if (notRun.length > 0) {
@@ -342,6 +408,73 @@ export async function testCommand(
       : `  ${failedRules} of ${ranRules} rules failed`,
     "",
   )
-  io.stdout(lines.join("\n"))
-  return failedRules === 0 ? 0 : 1
+  return lines.join("\n")
+}
+
+/**
+ * `rulecast test [RULE_ID]` — run every rule's inline examples, or one rule's.
+ *
+ * Bare, it skips `llm` rules: running a rule's examples is the author asking for exactly that, so
+ * there is no consent problem in `rulecast test <llm-rule>`, but `rulecast test` over a project
+ * with several of them would be a surprise bill. Naming the rule runs it (§6, Consent).
+ *
+ * Everything is measured into one `TestReport` first and printed once, as JSON or as text, so a
+ * failure part-way (exit 2) leaves stdout empty in either format.
+ */
+export async function testCommand(
+  root: string,
+  args: string[],
+  registry: DetectorRegistry,
+  io: CliIo,
+): Promise<number> {
+  const { ruleId, against, maxRate, format } = parseTestArgs(args)
+  if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
+  const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
+  const named = ruleId === null ? undefined : project.rules.find((rule) => rule.id === ruleId)
+  if (ruleId !== null && named === undefined) throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
+
+  const print = (result: TestReport, text: () => string): number => {
+    io.stdout(format === "json" ? `${JSON.stringify(result, null, 2)}\n` : text())
+    return result.passed ? 0 : 1
+  }
+
+  const rules = project.rules.filter(isDetectorRule).filter((rule) => ruleId === null || rule.id === ruleId)
+  if (named !== undefined && rules.length === 0) {
+    const touch: RuleReport = {
+      rule: named.id,
+      detector: null,
+      scope: named.scope,
+      status: "touch",
+      examples: null,
+      against: null,
+    }
+    return print(report([touch]), () => touchRule(named.id))
+  }
+  const stateDir = ensureProjectState(cacheHome(io.env), root)
+  const resolver = createReferenceResolver(root)
+  const detection = detectionFor(project, registry, stateDir, resolver)
+  const timeoutMs = project.config.timeouts.verifyMs
+  // Spec §6: a metered rule runs only when asked for by id — never as part of "test them all".
+  const notAsked = (rule: DetectorRule) => ruleId === null && registry.get(rule.detector.kind)?.metered === true
+
+  if (against.length > 0) {
+    const under = againstPrefixes(root, against, io)
+    const candidates = (await allFiles(root)).filter(under)
+    const reports: RuleReport[] = []
+    for (const rule of rules) {
+      const measured = notAsked(rule)
+        ? null
+        : await measureAgainst(root, rule, candidates, against, maxRate, detection, timeoutMs)
+      reports.push(againstReport(rule, measured))
+    }
+    if (ruleId !== null) return print(report(reports), () => againstText(rules[0]!, reports[0]!.against!))
+    return print(report(reports), () => againstAllText(reports, maxRate))
+  }
+
+  const results: { rule: DetectorRule; result: ExampleResult }[] = []
+  for (const rule of rules) {
+    const result = notAsked(rule) ? skippedResult(rule.id) : await runExamples({ detection, rule, timeoutMs })
+    results.push({ rule, result })
+  }
+  return print(report(results.map(({ rule, result }) => examplesReport(rule, result))), () => examplesText(results))
 }
