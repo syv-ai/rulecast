@@ -25,6 +25,7 @@ export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
     files: { "app/a.py": PY },
     config: { pattern: "except (?<exception>\\w+):" },
     matching: ["app/a.py"],
+    fix: { config: { pattern: "except (?<exception>\\w+):", fix: "except ({{exception}}):" } },
     // A pattern the schema accepts cannot fail at run time, so there is no failing case.
   },
   path: {
@@ -36,6 +37,7 @@ export const DETECTOR_FIXTURES: Record<string, DetectorFixture> = {
     files: { "app/a.py": PY },
     config: { language: "python", rule: { pattern: "fetch($$$ARGS)" } },
     matching: ["app/a.py"],
+    fix: { config: { language: "python", rule: { pattern: "fetch($$$ARGS)" }, fix: "client.get($$$ARGS)" } },
   },
   command: {
     files: { "app/a.py": PY, "check.sh": CHECKER },

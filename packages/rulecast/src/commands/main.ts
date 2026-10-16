@@ -9,6 +9,7 @@ import { autoupdateCommand } from "./autoupdate"
 import { baselineCommand } from "./baseline"
 import { cleanCommand } from "./clean"
 import { doctorCommand } from "./doctor"
+import { fixCommand } from "./fix"
 import { commandHelp, usage } from "./help"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
@@ -75,6 +76,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await runCommand(root, args, registry, io)
       case "baseline":
         return await baselineCommand(root, args, registry, io)
+      case "fix":
+        return await fixCommand(root, args, registry, io)
       case "list":
         return await listCommand(root, args, registry, io)
       case "autoupdate":

@@ -26,6 +26,8 @@ export interface FormatOptions {
   rules?: RuleMetadata[]
   /** The committed baseline this run classified against; absent or null when it used none. */
   baseline?: BaselineUse | null
+  /** Keys a command adds after json's own (`rulecast fix`'s `fixed`, `changedFiles`). Additive only. */
+  extra?: Record<string, unknown>
 }
 
 /** What a run made of `.rulecast/baseline.json`: json's `baseline` key, and the stale line. */
@@ -203,6 +205,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       notices: delivery.notices ?? [],
       stop: delivery.stop,
       baseline: options.baseline ?? null,
+      ...options.extra,
     },
     null,
     2,

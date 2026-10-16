@@ -59,8 +59,9 @@ export interface IgnoredFinding {
   id?: string
 }
 
-export interface Suppressed {
-  findings: { rule: DetectorRule; match: Match }[]
+export interface Suppressed<F extends { rule: DetectorRule; match: Match } = { rule: DetectorRule; match: Match }> {
+  /** The findings kept, as they were given: a `fix` on one stays with it, and an ignored one has none to apply. */
+  findings: F[]
   ignored: IgnoredFinding[]
   /** Ignores written without a reason: they suppress nothing, and say so. */
   warnings: string[]
@@ -74,11 +75,11 @@ export interface Suppressed {
  * counts only in the content being judged: staged in a staged run, proposed in a guard, on disk in
  * a hook.
  */
-export async function suppress(
-  findings: readonly { rule: DetectorRule; match: Match }[],
+export async function suppress<F extends { rule: DetectorRule; match: Match }>(
+  findings: readonly F[],
   linesOf: SourceLines,
-): Promise<Suppressed> {
-  const result: Suppressed = { findings: [], ignored: [], warnings: [] }
+): Promise<Suppressed<F>> {
+  const result: Suppressed<F> = { findings: [], ignored: [], warnings: [] }
   if (findings.length === 0) return result
   const warned = new Set<string>()
   for (const finding of findings) {
@@ -106,7 +107,7 @@ export async function suppress(
       result.findings.push(finding)
       continue
     }
-    result.ignored.push({ ...finding, reason: ignore.reason })
+    result.ignored.push({ rule: finding.rule, match: finding.match, reason: ignore.reason })
   }
   return result
 }

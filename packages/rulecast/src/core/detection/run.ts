@@ -1,7 +1,7 @@
 import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
 import { type IgnoredFinding, type SourceLines, sourceLines, suppress } from "../suppress"
-import type { ChangeSet, DetectorEvent, DetectorResult, Match } from "../types"
+import type { ChangeSet, DetectorEvent, DetectorResult, Match, TextEdit } from "../types"
 import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
 
@@ -22,10 +22,16 @@ export interface DetectionInput {
   fromDisk?: boolean
   /** Per run, not per project: the edit deadline on edit, verify_ms on verify (§13). */
   timeoutMs: number
+  /**
+   * Ask detectors for each finding's `fix` (`DetectorRun.fixes`). Only `rulecast fix` and
+   * `rulecast test` set it (core/fix/); no `PipelineOptions` key reaches it, so a hook never does.
+   */
+  fixes?: boolean
 }
 
 export interface DetectionOutput {
-  findings: { rule: DetectorRule; match: Match }[]
+  /** `fix`: only when the input asked for `fixes`. */
+  findings: { rule: DetectorRule; match: Match; fix?: TextEdit }[]
   errors: { kind: string; rules: string[]; message: string }[]
   timedOut: { kind: string; rules: string[] }[]
   /** Findings dropped by a `rulecast-ignore` comment (core/suppress.ts). */
@@ -88,6 +94,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
           cwd: input.detection.root,
           signal: controller.signal,
           deadlineAt,
+          ...(input.fixes === true ? { fixes: true } : {}),
         }),
         deadline,
       ])
@@ -135,7 +142,11 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     }
     for (const [rule, message] of failed) output.errors.push({ kind: outcome.kind, rules: [rule], message })
     for (const finding of result.findings) {
-      if (!failed.has(finding.rule)) output.findings.push({ rule: rulesById.get(finding.rule)!, match: finding.match })
+      if (failed.has(finding.rule)) continue
+      const rule = rulesById.get(finding.rule)!
+      // A fix is handed on only when it was asked for, so nothing past here can apply one by accident.
+      const fix = input.fixes === true ? finding.fix : undefined
+      output.findings.push({ rule, match: finding.match, ...(fix === undefined ? {} : { fix }) })
     }
   }
   // Last, so every caller — pipeline, guard, examples, doctor, test --against — honours ignores.

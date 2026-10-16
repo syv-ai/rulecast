@@ -37,3 +37,9 @@ test("collapsing does not disturb a value that is already one line", () => {
 test("tabs and carriage returns collapse too, and the value is trimmed", () => {
   expect(renderTemplate("[{{text}}]", { text: "  a\r\n\tb  " })).toBe("[a b]")
 })
+
+test("raw rendering keeps a value's line breaks and spacing, for a fix", () => {
+  expect(renderTemplate("f({{args}})", { args: "a,\n  b" })).toBe("f(a, b)")
+  expect(renderTemplate("f({{args}})", { args: "a,\n  b" }, { raw: true })).toBe("f(a,\n  b)")
+  expect(() => renderTemplate("{{x}}", {}, { raw: true })).toThrow(UnknownTemplateVariable)
+})
