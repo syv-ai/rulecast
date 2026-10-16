@@ -23,7 +23,7 @@ export interface CompiledRule {
   description: string | null
   /** "local", or the rule repo label ("syv-ai/rulecast@v0.2.0"). */
   source: string
-  /** In unattended mode, `error` for a warning rule the config's `unattended.escalate` names. */
+  /** In unattended mode, `error` for a rule with `escalate: true` or one the config's `unattended.escalate` names. */
   severity: Severity
   /**
    * How a finding of this rule is classified against the baseline (spec §8). `instance` — the
@@ -91,13 +91,21 @@ function fileOf(spec: ReferenceSpec): string {
   return spec.anchor === null ? spec.ref : spec.ref.slice(0, spec.ref.length - spec.anchor.length - 1)
 }
 
+/**
+ * The diagnostic for a rule that needs a newer rulecast, read from the raw rule before the strict
+ * parse: a rule using a key added after this version must say "upgrade", not "unrecognized key".
+ */
+export function requiresNewer(raw: unknown): string | null {
+  const minimum = (raw as { minimum_rulecast_version?: unknown } | null)?.minimum_rulecast_version
+  if (typeof minimum !== "string" || !isOlder(VERSION, minimum)) return null
+  return `requires rulecast ${minimum} or newer (running ${VERSION})`
+}
+
 /** A ready rule, or the diagnostic message that disables it. */
 export async function compileRule(input: RuleInput, context: RuleContext): Promise<CompiledRule | string> {
   const { data } = input
-  const minimum = data.minimum_rulecast_version
-  if (minimum !== undefined && isOlder(VERSION, minimum)) {
-    return `requires rulecast ${minimum} or newer (running ${VERSION})`
-  }
+  const tooNew = requiresNewer(data)
+  if (tooNew !== null) return tooNew
 
   let detector: CompiledDetector | null = null
   let defaultStages: Stage[] = ["touch"]
@@ -175,12 +183,13 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
   const { global } = context
   const id = data.alias ?? data.id
   const unattended = context.mode === "unattended"
+  const escalated = data.escalate === true || context.config.unattended.escalate.includes(id)
   return {
     id,
     name: data.name,
     description: data.description ?? null,
     source: input.source,
-    severity: unattended && context.config.unattended.escalate.includes(id) ? "error" : (data.severity ?? "error"),
+    severity: unattended && escalated ? "error" : (data.severity ?? "error"),
     scope: data.scope ?? "instance",
     refuseWrite: data.refuse_write === true || (unattended && data.refuse_write === "unattended"),
     enabled: data.enabled !== false,

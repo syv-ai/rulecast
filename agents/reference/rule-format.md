@@ -71,6 +71,7 @@ repos:
 | `exclude_types` | no | The file has none of these |
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
+| `escalate` | no, default `false` | `true`: `error` in [unattended mode](#unattended-mode), whatever `severity` says. The same as listing the id in `unattended.escalate`. A catalog rule's `escalate: true` is turned off with `escalate: false` on its entry |
 | `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
 | `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
@@ -78,7 +79,7 @@ repos:
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
-| `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos |
+| `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos. Read before the rest of the rule, so an older rulecast says to upgrade rather than rejecting a key it does not know |
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
 
@@ -197,8 +198,8 @@ In unattended mode:
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
-- **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, and
-  `refuse_write: unattended` rules refuse writes.
+- **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, as does
+  `escalate: true` on the rule itself, and `refuse_write: unattended` rules refuse writes.
 
 The mode is decided in this order:
 

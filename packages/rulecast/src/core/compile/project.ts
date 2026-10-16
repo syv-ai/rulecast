@@ -11,7 +11,7 @@ import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
 import type { RepoProvider } from "../repos/provider"
 import { isOlder, VERSION } from "../version"
-import { type CompiledRule, compileRule, type RuleContext, type RuleInput } from "./rule"
+import { type CompiledRule, compileRule, type RuleContext, type RuleInput, requiresNewer } from "./rule"
 
 export interface Diagnostic {
   /** ".rulecast-config.yaml", ".rulecast-rules.yaml", or "<repo url>@<rev>" for a rule repo. */
@@ -147,6 +147,11 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
         continue
       }
       for (const raw of entry.rules) {
+        const tooNew = requiresNewer(raw)
+        if (tooNew !== null) {
+          error(CONFIG_FILE, idOf(raw), tooNew)
+          continue
+        }
         const rule = ruleSchema.safeParse(raw)
         if (!rule.success) error(CONFIG_FILE, idOf(raw), formatZodError(rule.error, { schema: ruleSchema }))
         else await add({ data: rule.data, source: "local", contextRoot: project }, CONFIG_FILE)
@@ -198,6 +203,11 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
         error(source, id, candidates.length === 0 ? "not in the manifest" : "defined more than once in the manifest")
         continue
       }
+      const tooNew = requiresNewer(candidates[0])
+      if (tooNew !== null) {
+        error(source, id, tooNew)
+        continue
+      }
       const base = ruleSchema.safeParse(candidates[0])
       if (!base.success) {
         error(source, id, formatZodError(base.error, { prefix: "manifest", schema: ruleSchema }))
@@ -246,6 +256,11 @@ export async function compileManifest(
   const compiled: Compiled[] = []
   const context: RuleContext = { config: defaultConfig(), registry, global: () => true, read: createReader() }
   for (const raw of manifest.value) {
+    const tooNew = requiresNewer(raw)
+    if (tooNew !== null) {
+      diagnostics.push({ source, rule: idOf(raw), message: tooNew, level: "error" })
+      continue
+    }
     const rule = ruleSchema.safeParse(raw)
     if (!rule.success) {
       diagnostics.push({

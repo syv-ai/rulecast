@@ -262,6 +262,7 @@ Agents running in parallel in one working tree can't be told apart when both cha
 the shell: each is held to what the other wrote during its command. A file one of them writes with
 its Edit or Write tool stays that agent's. For parallel agents that use the shell, give each its
 own worktree (in Claude Code, a subagent with `isolation: worktree`).
+If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md).
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 

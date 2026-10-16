@@ -1,0 +1,252 @@
+# Published with the "loop-safety/" id prefix. "@" paths in context are relative to this directory.
+#
+# The shortcuts an agent takes when its goal is "the tests pass": skip the test, silence the
+# checker, lower the bar, or change what judges the run. Every rule is a warning while someone is
+# watching and, through `escalate: true`, an error in unattended mode. All are `scope: instance`,
+# so only what the change adds is flagged; an `it.skip` that was already there is pre-existing.
+#
+# Skipped and focused tests use ast-grep, not a linter. A linter rule exists (oxlint's jest and
+# vitest no-disabled-tests and no-focused-tests), but it reports nothing unless its plugin is
+# enabled, which the linter detector does not do, and ruff has no rule against pytest skips.
+# ast-grep runs in-process, so the pack works in a project with nothing installed.
+- id: no-skipped-tests-python
+  name: No new skipped or expected-to-fail Python tests
+  description: "For agents that run unattended: flags a new pytest skip or xfail, or a unittest skip, in a test file. Skipping a red test is the cheapest way for a loop to make pytest pass."
+  files: '(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$|(^|/)tests?/.*\.py$'
+  severity: warning
+  escalate: true
+  detect:
+    ast-grep:
+      language: python
+      rule:
+        any:
+          - pattern: $MARK.$KIND
+          - pattern: $SELF.skipTest($$$)
+      constraints:
+        MARK:
+          regex: '^(pytest\.)?mark$|^(unittest|pytest)$'
+        KIND:
+          regex: '^(skip|skipif|xfail|skipIf|skipUnless|expectedFailure|SkipTest)$'
+  message: "{{file}}:{{line}} skips a test ({{text}}). Make the test pass by fixing the code. If you believe the test is wrong, leave it running and report which test and why."
+  context:
+    - "@loop-safety.md#skipped-and-focused-tests"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: tests/test_pricing.py
+        code: |
+          @pytest.mark.parametrize("percent", [10, 25])
+          def test_discount(percent):
+              assert discount(100, percent) == 100 - percent
+      - path: tests/conftest.py
+        code: |
+          SKIP_SLOW = os.environ.get("SKIP_SLOW") == "1"
+          pytest_plugins = ["fixtures.db"]
+    bad:
+      - path: tests/test_pricing.py
+        code: |
+          @pytest.mark.skip(reason="flaky")
+          def test_total():
+              assert total([1, 2]) == 3
+      - path: app/rates_test.py
+        code: |
+          def test_rates_fresh():
+              pytest.xfail("no rates service in CI")
+              assert rates.age() < 3600
+# Two rules because one parser cannot do both: the tsx parser reads `<T>(x: T) => x` or `<Foo>bar`
+# in a .ts file as JSX and loses the matches after it, and the typescript parser cannot read JSX.
+- id: no-skipped-tests-ts
+  name: No new skipped or focused TypeScript tests
+  description: "For agents that run unattended: flags a new .skip, .only, .todo, xit or fit in a .ts test file. Skipping a red test, or focusing on the green ones, makes a test run pass without fixing anything."
+  files: '\.(test|spec|cy|e2e)\.[cm]?ts$|(^|/)(__tests__|tests?|e2e|cypress)/.*\.[cm]?ts$'
+  severity: warning
+  escalate: true
+  detect:
+    ast-grep:
+      language: typescript
+      rule:
+        any:
+          - pattern: $FN.$MOD
+          - pattern: $X($$$)
+      constraints:
+        FN:
+          regex: '^(describe|it|test|suite|context|specify|bench)(\.[A-Za-z]+)*$'
+        MOD:
+          regex: '^(skip|only|todo|fixme|skipIf)$'
+        X:
+          regex: '^(xit|xdescribe|xtest|xcontext|xspecify|fit|fdescribe|ftest)$'
+  message: "{{file}}:{{line}} skips or focuses tests ({{text}}). Run every test and make it pass by fixing the code. If you believe a test is wrong, leave it running and report which test and why."
+  context:
+    - "@loop-safety.md#skipped-and-focused-tests"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: src/cart.test.ts
+        code: |
+          it("totals the lines", () => {
+            expect(total([1, 2])).toBe(3)
+          })
+      - path: tests/queue.spec.ts
+        code: |
+          const only = queue.skip(1).filter(isReady)
+          test("takes the ready items", () => expect(only).toHaveLength(2))
+    bad:
+      - path: src/cart.test.ts
+        code: |
+          const id = <T>(x: T) => x
+          describe.only("cart", () => {
+            it("totals the lines", () => expect(id(3)).toBe(3))
+          })
+      - path: tests/rates.spec.mts
+        code: |
+          it.skip("rates are fresh", async () => {
+            expect(await rates.age()).toBeLessThan(3600)
+          })
+- id: no-skipped-tests-js
+  name: No new skipped or focused JavaScript and TSX tests
+  description: "For agents that run unattended: flags a new .skip, .only, .todo, xit or fit in a .js, .jsx or .tsx test file. Skipping a red test, or focusing on the green ones, makes a test run pass without fixing anything."
+  files: '\.(test|spec|cy|e2e)\.([cm]?js|jsx|tsx)$|(^|/)(__tests__|tests?|e2e|cypress)/.*\.([cm]?js|jsx|tsx)$'
+  severity: warning
+  escalate: true
+  detect:
+    ast-grep:
+      language: tsx
+      rule:
+        any:
+          - pattern: $FN.$MOD
+          - pattern: $X($$$)
+      constraints:
+        FN:
+          regex: '^(describe|it|test|suite|context|specify|bench)(\.[A-Za-z]+)*$'
+        MOD:
+          regex: '^(skip|only|todo|fixme|skipIf)$'
+        X:
+          regex: '^(xit|xdescribe|xtest|xcontext|xspecify|fit|fdescribe|ftest)$'
+  message: "{{file}}:{{line}} skips or focuses tests ({{text}}). Run every test and make it pass by fixing the code. If you believe a test is wrong, leave it running and report which test and why."
+  context:
+    - "@loop-safety.md#skipped-and-focused-tests"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: src/Cart.test.tsx
+        code: |
+          test("shows the total", () => {
+            render(<Cart lines={[1, 2]} />)
+            expect(screen.getByText("3")).toBeTruthy()
+          })
+      - path: __tests__/flags.js
+        code: |
+          const only = flags.filter((flag) => flag.on)
+          it("keeps the flags that are on", () => expect(only).toEqual([on]))
+    bad:
+      - path: src/Cart.test.jsx
+        code: |
+          xit("shows the total", () => {
+            render(<Cart lines={[1, 2]} />)
+          })
+      - path: e2e/checkout.cjs
+        code: |
+          test.todo("pays with a saved card")
+# Comment markers, so regex. A linter rule covers one tool's own markers at most, and it obeys
+# inline disables itself. `rulecast-ignore:` is not matched: an ignore suppresses findings on its
+# own line, so it would suppress this rule's finding on it. Session oversight reports every new one.
+- id: no-new-suppressions
+  name: No new checker suppressions
+  description: "For agents that run unattended: flags a new noqa, type: ignore, eslint-disable, @ts-ignore, biome-ignore or coverage pragma. Silencing the checker is how a loop makes lint, types or coverage pass without fixing the code."
+  files: '\.(py|pyi|[cm]?[jt]sx?)$'
+  severity: warning
+  escalate: true
+  detect:
+    regex:
+      pattern: '#\s*(noqa\b|type:\s*ignore\b|pyright:\s*(ignore|basic)\b|mypy:\s*(ignore-errors|disable-error-code)\b|pylint:\s*disable\b|ruff:\s*noqa\b|pyre-(ignore|fixme)\b|nosec\b|nosemgrep\b|pragma:\s*no\s*(cover|branch)\b)|(//|/\*)\s*(eslint-disable(-next-line|-line)?\b|@ts-(ignore|expect-error|nocheck)\b|biome-ignore(-all|-start)?\b|oxlint-disable(-next-line|-line)?\b|deno-lint-ignore(-file)?\b|(istanbul|c8|v8)\s+ignore\b)'
+  message: "{{file}}:{{line}} silences a checker ({{text}}). Fix what the checker reports. If you believe it is wrong here, leave the finding and report it."
+  context:
+    - "@loop-safety.md#checker-suppressions"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: app/pricing.py
+        code: |
+          # We never use noqa here: fix what ruff reports instead.
+          def discount(price: float, percent: float) -> float:
+              return price * (1 - percent / 100)
+      - path: src/cart.ts
+        code: |
+          // typed: see the eslint config for why lines are numbers
+          export const total = (lines: number[]) => lines.reduce((a, b) => a + b, 0)
+    bad:
+      - path: app/rates.py
+        code: |
+          import requests  # type: ignore[import]
+      - path: src/cart.ts
+        code: |
+          // eslint-disable-next-line no-console
+          console.log(total(lines))
+# Thresholds sit in TOML, INI, YAML, JSON and JS config, and no AST detector reads all of them.
+# A detector never sees the baseline's text, so raising a threshold fires as well as lowering it.
+- id: no-lowered-thresholds
+  name: No changed coverage or failure thresholds
+  description: "For agents that run unattended: flags an edit to a coverage threshold (fail_under, --cov-fail-under, coverageThreshold, thresholds) or to --max-warnings. Lowering the bar is how a loop makes a coverage or lint gate pass."
+  files: '(^|/)(pyproject\.toml|setup\.cfg|tox\.ini|\.coveragerc|pytest\.ini|noxfile\.py|Makefile|package\.json|(jest|vitest|vite)\.config\.[cm]?[jt]s|\.nycrc(\.json|\.ya?ml)?|\.c8rc(\.json)?|codecov\.ya?ml)$'
+  severity: warning
+  escalate: true
+  detect:
+    regex:
+      pattern: '\bfail_under\s*=\s*\d+(\.\d+)?|--cov-fail-under[= ]+\d+|--fail-under[= ]+\d+|\bcoverageThreshold\b|\bthresholds\s*:|"?\b(branches|functions|lines|statements)"?\s*:\s*\d+(\.\d+)?|--max-warnings[= ]+\d+'
+  message: "{{file}}:{{line}} changes a quality threshold ({{text}}). Never lower one to make a run pass: fix the code, or report that the threshold cannot be met."
+  context:
+    - "@loop-safety.md#quality-thresholds"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: pyproject.toml
+        code: |
+          [tool.coverage.run]
+          branch = true
+          source = ["app"]
+      - path: vitest.config.ts
+        code: |
+          export default defineConfig({ test: { coverage: { provider: "v8", reporter: ["text"] } } })
+    bad:
+      - path: pyproject.toml
+        code: |
+          [tool.coverage.report]
+          fail_under = 70
+      - path: jest.config.ts
+        code: |
+          export default { coverageThreshold: { global: { lines: 60 } } }
+# The one rule that refuses, and only in unattended mode: a run that edits what judges it can make
+# any check pass. A path rule never sees a deleted file, so removing a workflow is not caught.
+- id: protected-loop-config
+  name: The checks that judge a run are not changed by it
+  description: "For agents that run unattended: flags edits to CI workflows, git hooks, .rulecast-config.yaml and .claude/settings*.json, and refuses them in unattended mode. These decide what done means, so the run being judged must not change them."
+  files: '^\.github/workflows/|^\.gitlab-ci\.yml$|^\.circleci/|^azure-pipelines\.ya?ml$|^\.buildkite/|^Jenkinsfile$|(^|/)lefthook(-local)?\.ya?ml$|^\.lefthook/|^\.husky/|^\.pre-commit-config\.yaml$|^\.rulecast-config\.yaml$|^\.claude/settings(\.local)?\.json$'
+  severity: warning
+  escalate: true
+  refuse_write: unattended
+  detect:
+    path: {}
+  message: "{{file}} configures the checks that judge this run. Leave it unchanged. If it is wrong, report what and why instead of editing it."
+  context:
+    - "@loop-safety.md#loop-configuration"
+    - "@loop-safety.md#when-a-test-is-wrong"
+    - "@loop-safety.md#changing-these-on-purpose"
+  # No good example, as with generated-code: every file `files` matches is a violation.
+  examples:
+    bad:
+      - path: .github/workflows/test.yml
+        code: |
+          jobs:
+            test:
+              steps:
+                - run: pytest -q --deselect tests/test_rates.py
+      - path: lefthook.yml
+        code: |
+          pre-commit:
+            commands: {}
+      - path: .rulecast-config.yaml
+        code: |
+          repos: []
+      - path: .claude/settings.json
+        code: |
+          { "hooks": {} }
