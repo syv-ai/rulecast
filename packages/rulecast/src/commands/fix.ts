@@ -1,4 +1,5 @@
-import { chmod, lstat, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { randomBytes } from "node:crypto"
+import { chmod, lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import { exitCodeFor } from "../adapters/cli/format"
@@ -63,44 +64,74 @@ function summaryLine(fixed: readonly FixSite[], files: number, dryRun: boolean):
   return `${dryRun ? "would fix" : "fixed"} ${plural(fixed.length, "finding")} in ${plural(files, "file")} (${rules.join(", ")})`
 }
 
+/** A file `inspect` found writable: where it is and which file it was. */
+interface Writable {
+  target: string
+  dev: number
+  ino: number
+  mode: number
+}
+
 /**
- * Why a file a fix changed must not be written, or null. A symlink is not written through, even to
- * a file inside the project: the file it names is not the one git tracks under this path, and it may
- * be outside the project, where nothing would show the change. A file below a symlinked directory
- * that leads out of the project is refused too. A file that is not UTF-8 was mangled by reading it
- * as text, so its fix is no fix. Asked under --dry-run too, so the diff shows only what a real run
- * would write.
+ * Why a file a fix changed must not be written, or where to write it. A symlink is not written
+ * through, even to a file inside the project: the file it names is not the one git tracks under this
+ * path, and it may be outside the project, where nothing would show the change. Nor is a file with a
+ * symlinked directory anywhere in its path, inside the project or out. A file that is not UTF-8 was
+ * mangled by reading it as text, so its fix is no fix. Asked under --dry-run too, so the diff shows
+ * only what a real run would write.
  */
-async function unwritable(root: string, file: string, before: string): Promise<string | null> {
+async function inspect(root: string, file: string, before: string): Promise<string | Writable> {
   const absolute = path.join(root, file)
-  if ((await lstat(absolute)).isSymbolicLink()) return "a symlink"
+  const stats = await lstat(absolute)
+  if (stats.isSymbolicLink()) return "a symlink"
+  const realRoot = await realpath(root)
   const target = await realpath(absolute)
-  if (path.relative(await realpath(root), target).split(path.sep)[0] === "..") return "outside the project"
+  if (path.relative(realRoot, target).split(path.sep)[0] === "..") return "outside the project"
+  if (target !== path.join(realRoot, file)) return "a symlink in its path"
   const bytes = await readFile(target)
   if (!Buffer.from(bytes.toString("utf8"), "utf8").equals(bytes)) return "not UTF-8"
   if (!Buffer.from(before, "utf8").equals(bytes)) return "changed while fixing"
-  return null
+  return { target, dev: stats.dev, ino: stats.ino, mode: stats.mode }
+}
+
+/** Whether `target` is still the regular, unlinked file `inspect` read, with the text it read. */
+async function unchanged(root: string, file: string, checked: Writable, before: string): Promise<boolean> {
+  const again = await inspect(root, file, before)
+  return (
+    typeof again !== "string" &&
+    again.target === checked.target &&
+    again.dev === checked.dev &&
+    again.ino === checked.ino
+  )
+}
+
+/** Why a file a fix changed must not be written, or null (`inspect`). */
+async function unwritable(root: string, file: string, before: string): Promise<string | null> {
+  const problem = await inspect(root, file, before)
+  return typeof problem === "string" ? problem : null
 }
 
 /**
  * Replaces the file's content through a temporary file and a rename, so a reader never sees half of
- * it, keeping its mode. The rename gives the path a new inode: another hard link to the file keeps
- * the old content. Null when it was written; otherwise why it was not (`unwritable`), and it is left
+ * it, keeping its mode. The temporary file is created afresh (never opened through anything already
+ * at its name), and the file is checked again just before the rename: one that changed or was
+ * swapped meanwhile is left alone. The rename gives the path a new inode: another hard link to the
+ * file keeps the old content. Null when it was written; otherwise why it was not, and it is left
  * alone. A failure to write throws, with the file as it was.
  */
 export async function writeFixed(root: string, file: string, before: string, after: string): Promise<string | null> {
-  const problem = await unwritable(root, file, before)
-  if (problem !== null) return `${file}: ${problem}; left unchanged`
-  const target = await realpath(path.join(root, file))
-  const { mode } = await stat(target)
-  const temporary = `${target}.rulecast-fix-${process.pid}`
+  const checked = await inspect(root, file, before)
+  if (typeof checked === "string") return `${file}: ${checked}; left unchanged`
+  const temporary = `${checked.target}.rulecast-fix-${randomBytes(8).toString("hex")}`
+  let renamed = false
   try {
-    await writeFile(temporary, after)
-    await chmod(temporary, mode & 0o7777)
-    await rename(temporary, target)
-  } catch (error) {
-    await rm(temporary, { force: true })
-    throw error
+    await writeFile(temporary, after, { flag: "wx", mode: 0o600 })
+    await chmod(temporary, checked.mode & 0o7777)
+    if (!(await unchanged(root, file, checked, before))) return `${file}: changed while fixing; left unchanged`
+    await rename(temporary, checked.target)
+    renamed = true
+  } finally {
+    if (!renamed) await rm(temporary, { force: true })
   }
   return null
 }
@@ -182,7 +213,17 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
   for (const error of passes.errors) warnings.push(`fixes not applied: ${error}`)
   for (const file of passes.unsettled) {
     warnings.push(
-      `fixes were still pending after ${MAX_PASSES} passes, so ${file} was left unchanged: two rules' fixes may undo each other`,
+      `fixes were still pending after ${MAX_PASSES} passes, so ${file} was left unchanged: two rules' fixes undo each other`,
+    )
+  }
+  for (const file of passes.unfinished) {
+    warnings.push(
+      `fixes were still pending in ${file} after ${MAX_PASSES} passes: not finished; run rulecast fix again`,
+    )
+  }
+  for (const site of passes.uncovered) {
+    warnings.push(
+      `a fix would move the rulecast-ignore for ${site.rule} away from ${site.file}:${site.line}, so ${site.file} was left unchanged`,
     )
   }
 

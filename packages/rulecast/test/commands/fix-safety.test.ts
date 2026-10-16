@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -118,7 +118,7 @@ describe("rulecast fix: what it will not write", () => {
       expect(parsed.fixed.every((site: { file: string }) => site.file === "ok.py")).toBe(true)
       expect(parsed.unresolved).toEqual([expect.objectContaining({ rule: "py/ab", file: "cycle.py", line: 1 })])
       expect(parsed.warnings).toContain(
-        "fixes were still pending after 10 passes, so cycle.py was left unchanged: two rules' fixes may undo each other",
+        "fixes were still pending after 10 passes, so cycle.py was left unchanged: two rules' fixes undo each other",
       )
       if (dryRun.length > 0) expect(parsed.diff).not.toContain("cycle.py")
       expect(await read(root, "cycle.py")).toBe("aa\n")
@@ -126,12 +126,79 @@ describe("rulecast fix: what it will not write", () => {
     expect(await read(root, "ok.py")).toBe('log.info("a")\n')
   })
 
-  test("a finding ignored before the fixes stays unfixed when another fix moves its ignore away", async () => {
+  test("a fix that would move an ignore away from its finding leaves the file as it was, run after run", async () => {
     const blank = replace("py/blank", "(?<=\\S)\\n(?=print)", "\n\n", 'x = 1\nprint("a")\n', 'x = 1\n\nprint("a")\n')
     const source = 'x = 1\n# rulecast-ignore: py/logger keep this one\nprint("keep")\n'
-    const root = await repo([LOGGER, blank], { "app.py": source })
-    await fix(root, "--all-files")
-    expect(await read(root, "app.py")).toBe('x = 1\n# rulecast-ignore: py/logger keep this one\n\nprint("keep")\n')
+    const root = await repo([LOGGER, blank], { "app.py": source, "ok.py": 'print("ok")\n' })
+    for (const _ of [1, 2]) {
+      const result = await fix(root, "--all-files", "--format", "json")
+      expect(result.code).toBe(1)
+      const parsed = JSON.parse(result.stdout)
+      expect(parsed.warnings).toContain(
+        "a fix would move the rulecast-ignore for py/logger away from app.py:3, so app.py was left unchanged",
+      )
+      expect(parsed.changedFiles).not.toContain("app.py")
+      expect(parsed.fixed.every((site: { file: string }) => site.file === "ok.py")).toBe(true)
+      expect(parsed.unresolved).toEqual([expect.objectContaining({ rule: "py/blank", file: "app.py", line: 2 })])
+      expect(await read(root, "app.py")).toBe(source)
+    }
+    expect(await read(root, "ok.py")).toBe('log.info("ok")\n')
+  })
+
+  test("a finding inside an ignored multi-line match is left unfixed, and the file is still written", async () => {
+    const consoleRule = {
+      id: "ts/console",
+      name: "Console",
+      files: "\\.ts$",
+      detect: {
+        "ast-grep": { language: "typescript", rule: { pattern: "console.log($$$ARGS)" }, fix: "logger.debug($$$ARGS)" },
+      },
+      message: "{{file}}:{{line}} console.log",
+      examples: { bad: [{ path: "a.ts", code: "console.log(a)\n", fixed: "logger.debug(a)\n" }] },
+    }
+    const source = "// rulecast-ignore: ts/console kept\nconsole.log(\n  console.log(1),\n)\nconsole.log(2)\n"
+    const root = await repo([consoleRule], { "x.ts": source })
+    const result = await fix(root, "--all-files", "--format", "json")
+    expect(JSON.parse(result.stdout).warnings).toEqual([])
+    expect(await read(root, "x.ts")).toBe(
+      "// rulecast-ignore: ts/console kept\nconsole.log(\n  console.log(1),\n)\nlogger.debug(2)\n",
+    )
+  })
+
+  test("fixes that settle slowly are kept after the last pass, and a second run finishes them", async () => {
+    const shorten = replace("py/shorten", "aa", "a", "aa\n", "a\n")
+    const root = await repo([shorten, LOGGER], { "app.py": `${"a".repeat(2048)}\nprint("x")\n` })
+    const first = await fix(root, "--all-files", "--format", "json")
+    expect(first.code).toBe(1)
+    expect(JSON.parse(first.stdout).warnings).toContain(
+      "fixes were still pending in app.py after 10 passes: not finished; run rulecast fix again",
+    )
+    expect(await read(root, "app.py")).toBe('aa\nlog.info("x")\n')
+    const second = await fix(root, "--all-files", "--format", "json")
+    expect(second.code).toBe(0)
+    expect(await read(root, "app.py")).toBe('a\nlog.info("x")\n')
+  })
+
+  test("a file below a symlinked directory is not written, even when the directory is inside the project", async () => {
+    const root = await repo([LOGGER], { "real/x.py": 'print("x")\n' })
+    await symlink("real", path.join(root, "sub"))
+    for (const dryRun of [["--dry-run"], []]) {
+      const result = await fix(root, "--files", "sub/x.py", ...dryRun)
+      expect(result.stdout).toContain("sub/x.py: a symlink in its path; left unchanged")
+    }
+    expect(await read(root, "real/x.py")).toBe('print("x")\n')
+  })
+
+  test("the temporary file is created afresh, never through a symlink planted at its name", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rulecast-write-"))
+    const outside = await mkdtemp(path.join(tmpdir(), "rulecast-outside-"))
+    await writeFile(path.join(outside, "victim.py"), "victim\n")
+    await writeFile(path.join(root, "a.py"), "before\n")
+    await symlink(path.join(outside, "victim.py"), path.join(root, `a.py.rulecast-fix-${process.pid}`))
+    expect(await writeFixed(root, "a.py", "before\n", "after\n")).toBeNull()
+    expect(await readFile(path.join(outside, "victim.py"), "utf8")).toBe("victim\n")
+    expect((await lstat(path.join(root, "a.py"))).isSymbolicLink()).toBe(false)
+    expect(await read(root, "a.py")).toBe("after\n")
   })
 
   test("adjacent fixes whose results merge into a new match are applied, not reverted", async () => {
