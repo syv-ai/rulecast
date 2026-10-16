@@ -179,7 +179,7 @@ describe("the findings log", () => {
     ])
   })
 
-  test("unattended: an ignore the agent writes silences nothing, and stats counts the attempt", async () => {
+  test("unattended: an ignore on a changed line silences nothing, and stats counts the attempt", async () => {
     const root = await createFixture()
     const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
     const ignore = "  # rulecast-ignore: backend/no-httpexception the caller wants it"

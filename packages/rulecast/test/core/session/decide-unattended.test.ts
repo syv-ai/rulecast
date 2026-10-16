@@ -91,6 +91,18 @@ describe("gate, unattended", () => {
     ])
   })
 
+  test("a refuse_write finding the shell put there still ends at the budget: blocked, then reported", () => {
+    const refused = { ...finding("a/protected", "x"), rule: rule({ id: "a/protected", refuseWrite: true }) }
+    const shell: WorkRecord[] = [{ t: "edited", file: "a.py", via: "shell" }]
+    expect(stops([[refused], [refused], [refused], [refused], [refused]], 3, [shell])).toEqual([
+      "block",
+      "block",
+      "block",
+      "report",
+      "capReached",
+    ])
+  })
+
   test("warnings never block, and a budget of 0 goes straight to the report", () => {
     expect(stops([[finding("a/rule", "w", 1, "warning")]], 3)).toEqual(["allow"])
     expect(stops([[finding("a/rule", "e")], [finding("a/rule", "e")]], 0)).toEqual(["report", "capReached"])

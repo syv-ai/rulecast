@@ -1,9 +1,10 @@
+import { diffLines } from "./baseline/changes"
+import { hashLines } from "./baseline/hash"
 import type { CompiledRule } from "./compile/rule"
 import type { Config, Mode } from "./config/schema"
 import type { ReferenceResolver } from "./delivery/resolve"
 import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
-import { lineStarts } from "./detection/positions"
 import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
@@ -19,7 +20,7 @@ export interface GuardInput {
   event: Event
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
-  /** Unattended, an ignore comment the proposal writes silences nothing, as in the pipeline. */
+  /** Unattended, an ignore does not silence a finding on a line the write changes, as in the pipeline. */
   mode: Mode
   work: WorkState
   /**
@@ -52,7 +53,8 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const rules = input.rules.filter((rule) => rule.refuseWrite && !input.disabled.has(rule.id) && rule.matches(file))
   if (rules.length === 0) return emptyDelivery()
 
-  const proposal = propose(await readSourceFile(input.detection.root, file), intent)
+  const current = await readSourceFile(input.detection.root, file)
+  const proposal = propose(current, intent)
   if (proposal === null) {
     input.log(`guard: ${file} could not be reconstructed from the tool call; allowing the write`)
     return emptyDelivery()
@@ -84,16 +86,16 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
-  // Unattended, nobody agreed to an ignore comment on a line this write adds or changes: the
-  // finding it would silence is judged as if it were not there. A comment already in the file
-  // still counts, even when the write changes the code under it.
-  const starts = lineStarts(proposal.content)
-  const written = (line: number) => {
-    const from = starts[line - 1]
-    if (from === undefined) return false
-    const to = starts[line] ?? proposal.content.length
-    return proposal.inserts.some(([start, end]) => from < end && to > start)
-  }
+  // Unattended, an ignore does not silence a finding on a line this write changes, whoever wrote the
+  // comment: nobody agreed to it for this code. Changed is measured against the file as it is, so a
+  // Write restating a line, or an Edit's context, changes nothing.
+  const judged = input.mode === "unattended" ? output.ignored : []
+  const changed =
+    judged.length === 0 || current === null ? null : diffLines(hashLines(current), hashLines(proposal.content)).changed
+  const unsilenced = (match: Match) =>
+    input.mode === "unattended" &&
+    (changed === null || changed.some(([start, end]) => match.line <= end && match.endLine >= start))
+
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
   // Over ignored matches too, as the pipeline numbers them, so a match has one id at guard and verify.
   const ids = findingIds(
@@ -103,14 +105,8 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const findings = [
     ...output.findings.map((finding, index) => ({ ...finding, id: ids[index]! })),
     ...output.ignored
-      .map(({ rule, match, commentLine }, index) => ({
-        rule,
-        match,
-        commentLine,
-        id: ids[output.findings.length + index]!,
-      }))
-      .filter(({ commentLine }) => input.mode === "unattended" && written(commentLine))
-      .map(({ commentLine: _, ...finding }) => finding),
+      .map(({ rule, match }, index) => ({ rule, match, id: ids[output.findings.length + index]! }))
+      .filter(({ match }) => unsilenced(match)),
   ]
   const evidence = findings.filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
   if (evidence.length === 0) return emptyDelivery()
