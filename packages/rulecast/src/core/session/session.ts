@@ -31,11 +31,6 @@ export async function appendContext(dir: string, agent: string, records: Context
   await appendRecords(contextFile(dir, agent), records)
 }
 
-/** The work store alone: what every agent did, without this agent's context. */
-export async function readWork(dir: string): Promise<WorkState> {
-  return foldWork(await readRecords<WorkRecord>(workFile(dir)))
-}
-
 export async function openSession(dir: string, agent: string): Promise<SessionView> {
   const [work, context] = await Promise.all([
     readRecords<WorkRecord>(workFile(dir)),

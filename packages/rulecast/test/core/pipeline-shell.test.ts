@@ -1,11 +1,10 @@
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test } from "vitest"
 
 import { readBaseline } from "../../src/core/baseline/store"
 import { renderAgentText } from "../../src/core/delivery/render-agent"
 import { openSession, sessionDir } from "../../src/core/session/session"
-import { CLAIM_TTL_MS } from "../../src/core/session/state"
 import { type Event, emptyDelivery } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
@@ -347,144 +346,61 @@ describe("the Stop sweep", () => {
 
 describe("a shell call alongside another agent", () => {
   const violation = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
-  const claim = { kind: "guard" as const, files: [USERS], intent: { content: violation } }
+  const guard = { kind: "guard" as const, files: [USERS], intent: { content: violation } }
 
-  test("a sibling's Edit during the call is the sibling's, not the call's", async () => {
+  // The documented limitation: a tree diff has no writer, so a sibling's Edit during the call is
+  // held against the call too. Worktrees keep parallel agents apart.
+  test("a sibling's Edit during the call: held against the call as well as the sibling", async () => {
     const root = await createFixture()
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
-    // sub1 runs a long command; meanwhile sub2's Edit tool writes, PreToolUse to PostToolUse.
     const call = await session.shell(
       async () => {
-        await session.send({ ...claim, agentId: "sub2" })
+        await session.send({ ...guard, agentId: "sub2" })
         await session.write(USERS, violation)
         await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
       },
       { agentId: "sub1" },
     )
-    expect(call.findings).toEqual([])
+    expect(lines(call)).toEqual([`${USERS}:3`])
     expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("block")
   })
 
-  test("the sibling's PostToolUse after the call ends: its PreToolUse claim already says whose it is", async () => {
-    const root = await createFixture()
-    const session = sessionAt(root)
-    await session.send({ kind: "start", files: [] })
-    const call = await session.shell(
-      async () => {
-        await session.send({ ...claim, agentId: "sub2" })
-        await session.write(USERS, violation)
-      },
-      { agentId: "sub1" },
-    )
-    expect(call.findings).toEqual([])
-    await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
-  })
-
-  test("without a PreToolUse claim, the sibling's PostToolUse before the call ends is the claim", async () => {
-    const root = await createFixture()
-    const session = sessionAt(root)
-    await session.send({ kind: "start", files: [] })
-    const call = await session.shell(
-      async () => {
-        await session.write(USERS, violation)
-        await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
-      },
-      { agentId: "sub1" },
-    )
-    expect(call.findings).toEqual([])
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
-  })
-
-  // The guard claims, then judges for a while; the tool writes after it. A shell call that starts in
-  // between still sees the sibling's write.
-  test("a sibling's claim made before the call started, written during it, is the sibling's", async () => {
-    const root = await createFixture()
-    const session = sessionAt(root)
-    await session.send({ kind: "start", files: [] })
-    await session.send({ ...claim, agentId: "sub2" })
-    const call = await session.shell(() => session.write(USERS, violation), { agentId: "sub1" })
-    expect(call.findings).toEqual([])
-    await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
-  })
-
-  test("a claim ended by the sibling's PostToolUse before the call started is not the call's excuse", async () => {
-    const root = await createFixture()
-    const session = sessionAt(root)
-    await session.send({ kind: "start", files: [] })
-    await session.send({ ...claim, agentId: "sub2" })
-    await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
-    const call = await session.shell(() => session.write(USERS, `${violation}    raise HTTPException(503)\n`), {
-      agentId: "sub1",
-    })
-    expect(lines(call)).toEqual([`${USERS}:3`, `${USERS}:4`])
-  })
-
-  describe("a claim with no write after it", () => {
-    // sub2's Edit failed (old_string not found): PreToolUse fired, PostToolUse never does.
-    const failedEdit = async (act: (session: ReturnType<typeof sessionAt>) => Promise<unknown>) => {
+  // A sibling's Edit fails (old_string not found): its PreToolUse fired, its PostToolUse never does.
+  // The command's own write must still block a stop.
+  describe("a sibling's failed Edit of the file the command writes", () => {
+    const failedEdit = async (agentId?: string) => {
       const root = await createFixture()
       const session = sessionAt(root)
       await session.send({ kind: "start", files: [] })
       const call = await session.shell(
         async () => {
-          await session.send({ ...claim, agentId: "sub2" })
-          await act(session)
+          await session.send({ ...guard, agentId: "sub2" })
           await session.write(USERS, violation)
         },
-        { agentId: "sub1" },
+        { agentId },
       )
+      await session.send({ kind: "touch", files: ["app/main.py"], completeRead: true, agentId: "sub2" })
       return { session, call }
     }
 
-    test("still in flight: the call is not held to the file, and the main agent's stop is", async () => {
-      const { session, call } = await failedEdit(async () => {})
-      expect(call.findings).toEqual([])
+    test("a subagent's command: its stop and the main agent's block", async () => {
+      const { session, call } = await failedEdit("sub1")
+      expect(lines(call)).toEqual([`${USERS}:3`])
+      expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("block")
       const main = await session.send({ kind: "verify", files: [] })
-      expect(main.swept).toEqual([USERS])
+      expect(main.stop).toBe("block")
+      expect(lines(main)).toEqual([`${USERS}:3`])
     })
 
-    test("ended by the sibling's next tool call: the shell call's write is the call's", async () => {
-      const { call } = await failedEdit((session) =>
-        session.send({ kind: "touch", files: ["app/main.py"], agentId: "sub2" }),
-      )
+    test("the main agent's command: its stop blocks", async () => {
+      const { session, call } = await failedEdit()
       expect(lines(call)).toEqual([`${USERS}:3`])
+      const main = await session.send({ kind: "verify", files: [] })
+      expect(main.stop).toBe("block")
+      expect(lines(main)).toEqual([`${USERS}:3`])
     })
-
-    test("ended by the sibling's next claim, of another file", async () => {
-      const { call } = await failedEdit((session) =>
-        session.send({ ...claim, files: ["app/services/other.py"], agentId: "sub2" }),
-      )
-      expect(lines(call)).toEqual([`${USERS}:3`])
-    })
-
-    test("expired: no tool waits that long between its claim and its PostToolUse", async () => {
-      const real = Date.now
-      try {
-        const { call } = await failedEdit(async () => {
-          vi.spyOn(Date, "now").mockImplementation(() => real() + CLAIM_TTL_MS + 1000)
-        })
-        expect(lines(call)).toEqual([`${USERS}:3`])
-      } finally {
-        vi.restoreAllMocks()
-      }
-    })
-  })
-
-  test("a sibling's write still in flight at the next before hook is not swept", async () => {
-    const root = await createFixture()
-    const session = sessionAt(root)
-    await session.send({ kind: "start", files: [] })
-    await session.shell(async () => {}, { agentId: "sub1" })
-    await session.send({ ...claim, agentId: "sub2" })
-    await session.write(USERS, violation)
-    await session.shell(async () => {}, { agentId: "sub1" })
-    expect((await session.work()).swept).toEqual([])
   })
 
   // The documented limitation: a tree diff has no writer, so overlapping shell calls in one

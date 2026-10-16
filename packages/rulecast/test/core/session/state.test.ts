@@ -2,8 +2,6 @@ import { describe, expect, test } from "vitest"
 
 import {
   ANY_AGENT,
-  CLAIM_TTL_MS,
-  claimedByOther,
   dirtyAtStart,
   editedBy,
   emptyContext,
@@ -12,9 +10,9 @@ import {
   foldWork,
   MAIN_AGENT,
   preexistingKey,
-  referenceSeq,
   referenceState,
   sweptFor,
+  type WorkRecord,
 } from "../../../src/core/session/state"
 import type { TreeState } from "../../../src/core/session/tree"
 
@@ -138,23 +136,8 @@ describe("tree records, shell edits and swept files", () => {
     expect(work.swept).toEqual([])
     expect(work.startTree).toBeNull()
     expect(referenceState(work, "main")).toBeNull()
-    expect(referenceSeq(work, "main")).toBeNull()
     // An edit recorded without its agent is every agent's, so no stop verifies less than before.
     expect(editedBy(work, "sub1")).toEqual(["a.ts"])
-    expect(claimedByOther(work, "sub1", "a.ts", null)).toBe(false)
-  })
-
-  test("referenceSeq points at the state referenceState returns", () => {
-    const work = foldWork([
-      { t: "tree", phase: "before", agent: "main", toolUseId: "m1", state: tree("main-before") },
-      { t: "tree", phase: "before", agent: "sub", toolUseId: "s1", state: tree("sub-before") },
-      { t: "tree", phase: "after", agent: "main", toolUseId: "m1", state: tree("main-after") },
-    ])
-    expect(referenceSeq(work, "main", "m1")).toBe(0)
-    expect(referenceSeq(work, "main")).toBe(2)
-    expect(referenceSeq(work, "sub")).toBe(1)
-    expect(referenceSeq(work, "other")).toBe(2)
-    expect(referenceSeq(foldWork([]), "main", "t1")).toBeNull()
   })
 })
 
@@ -173,60 +156,17 @@ describe("edits by agent", () => {
     expect(editedBy(work, MAIN_AGENT)).toEqual(["b.ts", "c.ts", "d.ts", "a.ts"])
   })
 
-  test("another agent's write recorded after the reference state is its own; a shell edit is no write", () => {
-    const work = foldWork([
-      { t: "edited", file: "early.ts", agent: "sub2" },
-      { t: "tree", phase: "before", agent: "sub1", toolUseId: "s1", state: tree("before") },
+  // Written by unreleased builds that claimed files for edit tools (#28), in both of their shapes.
+  test("claim records in an older store are ignored", () => {
+    const records = [
+      { t: "claimed", agent: "sub2", file: "a.ts" },
       { t: "claimed", agent: "sub2", files: ["a.ts"], at: 0 },
-      { t: "accessed", agent: "sub2", file: "a.ts" },
-      { t: "edited", file: "a.ts", agent: "sub2" },
-      // PostToolUse without its PreToolUse claim (the guard not installed): the edit is the write.
-      { t: "edited", file: "b.ts", agent: "sub2" },
-      { t: "claimed", agent: "sub1", files: ["own.ts"], at: 0 },
-      { t: "edited", file: "own.ts", agent: "sub1" },
-      { t: "edited", file: "shell.ts", agent: "sub2", via: "shell" },
-    ])
-    const since = referenceSeq(work, "sub1", "s1")
-    const now = CLAIM_TTL_MS * 10
-    expect(claimedByOther(work, "sub1", "a.ts", since, now)).toBe(true)
-    expect(claimedByOther(work, "sub1", "b.ts", since, now)).toBe(true)
-    expect(claimedByOther(work, "sub1", "early.ts", since, now)).toBe(false)
-    expect(claimedByOther(work, "sub1", "own.ts", since, now)).toBe(false)
-    expect(claimedByOther(work, "sub1", "shell.ts", since, now)).toBe(false)
-    expect(claimedByOther(work, "sub2", "a.ts", since, now)).toBe(false)
-    // No reference state: every write is after it.
-    expect(claimedByOther(work, "sub1", "early.ts", null, now)).toBe(true)
-  })
-
-  test("a claim with no write yet is in flight, however early it was made, until it ends or expires", () => {
-    const claimed = { t: "claimed" as const, agent: "sub2", files: ["a.ts"], at: 1000 }
-    const before = { t: "tree" as const, phase: "before" as const, agent: "sub1", toolUseId: "s1", state: tree("b") }
-    const inFlight = foldWork([claimed, before])
-    const since = referenceSeq(inFlight, "sub1", "s1")
-    expect(claimedByOther(inFlight, "sub1", "a.ts", since, 1500)).toBe(true)
-    expect(claimedByOther(inFlight, "sub1", "a.ts", since, 1000 + CLAIM_TTL_MS)).toBe(false)
-    // Ended without a write: any other event of the claiming agent's, or the guard refusing it.
-    const endings = [
-      { t: "accessed" as const, agent: "sub2", file: "b.ts" },
-      { t: "claimed" as const, agent: "sub2", files: ["b.ts"], at: 1200 },
-      { t: "released" as const, agent: "sub2" },
-      { t: "tree" as const, phase: "before" as const, agent: "sub2", toolUseId: "s2", state: tree("c") },
-      { t: "edited" as const, file: "b.ts", agent: "sub2" },
-      { t: "edited" as const, file: "a.ts", agent: "sub2", via: "shell" as const },
-    ]
-    for (const ending of endings) {
-      expect(claimedByOther(foldWork([claimed, before, ending]), "sub1", "a.ts", since, 1500)).toBe(false)
-    }
-    // Not ended: another agent's events, or the PostToolUse's access to the file itself.
-    expect(
-      claimedByOther(
-        foldWork([claimed, before, { t: "accessed", agent: "sub2", file: "a.ts" }, { t: "released", agent: "sub3" }]),
-        "sub1",
-        "a.ts",
-        since,
-        1500,
-      ),
-    ).toBe(true)
+      { t: "released", agent: "sub2" },
+      { t: "edited", file: "b.ts", agent: "sub1" },
+    ] as unknown as WorkRecord[]
+    const work = foldWork(records)
+    expect(work.edited).toEqual(["b.ts"])
+    expect(editedBy(work, "sub2")).toEqual([])
   })
 })
 

@@ -21,25 +21,14 @@ import { CorruptStoreError } from "./jsonl"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
+import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import {
-  appendContext,
-  appendWork,
-  commitSession,
-  openSession,
-  readWork,
-  type SessionView,
-  sessionDir,
-} from "./session/session"
-import {
-  claimedByOther,
   dirtyAtStart,
   editedBy,
   emptyContext,
   emptyWork,
   hasOwnTree,
   MAIN_AGENT,
-  pendingByOther,
-  referenceSeq,
   referenceState,
   sweptFor,
   type WorkRecord,
@@ -225,11 +214,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   /**
    * What changed since the agent's latest recorded state that no tool call explains: not a file any
-   * agent edited, and for a subagent, not one another agent's edit tool may be writing. The main
-   * agent sweeps those too: a sibling's write takes its file back from the sweep when it is
-   * recorded, and a claim that never wrote cannot hide a file from the stop that owns integration.
-   * A subagent with no state of its own sweeps nothing — the session's latest may be a sibling's,
-   * taken before that sibling's command wrote — and leaves it to the main agent's stop.
+   * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
+   * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
    */
   function between(work: WorkState, agent: string, now: TreeState): string[] {
     if (!hasOwnTree(work, agent)) return []
@@ -237,12 +223,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const gap = reference === null ? null : treeChanges(reference, now)
     if (gap === null || gap.gitOperation) return []
     const edited = new Set(work.edited)
-    const since = referenceSeq(work, agent)
-    return relevant(
-      gap.files.filter(
-        (file) => !edited.has(file) && (agent === MAIN_AGENT || !claimedByOther(work, agent, file, since)),
-      ),
-    )
+    return relevant(gap.files.filter((file) => !edited.has(file)))
   }
 
   if (event.kind === "shell-before") {
@@ -309,25 +290,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const open = session
     const now = open ? await treeState(root) : null
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
-    // Read after the snapshot: a sibling that claimed and wrote before it must be seen to have.
-    const work = await readingStore(() => readWork(open.dir), emptyWork())
-    if (session === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
-    const reference = referenceState(work, open.agent, event.toolUseId)
+    const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
+    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
     const call = reference === null ? null : treeChanges(reference, now)
-    // A file another agent's edit tool wrote or was writing during the call is that agent's write.
-    // Another agent's shell call running alongside cannot be told apart, and its changes count here too.
-    const since = referenceSeq(work, open.agent, event.toolUseId)
-    const changed = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
-    const theirs = changed.filter((file) => claimedByOther(work, open.agent, file, since))
-    // A write still in flight is swept meanwhile: its PostToolUse takes the file back, and if it
-    // never comes, the file is still reported at a stop rather than lost.
-    const inFlight = theirs.filter((file) => pendingByOther(work, open.agent, file))
-    await appendWork(open.dir, [
-      ...inFlight.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
-      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
-    ])
-    const files = changed.filter((file) => !theirs.includes(file))
+    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
@@ -338,12 +305,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
     // that reads it later would not have the value this branch checked.
     const open = session
-    // Before the guard decides anything, and whether or not a rule refuses writes: a shell call
-    // running alongside must not take this write for its own.
-    const claimed = relevant(event.files)
-    if (open && claimed.length > 0) {
-      await appendWork(open.dir, [{ t: "claimed", agent: open.agent, files: claimed, at: Date.now() }])
-    }
     const delivery = await guardWrite({
       detection,
       config,
@@ -357,10 +318,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
       recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
     })
-    // A refused write never happens: what it claimed is free again.
-    if (open && claimed.length > 0 && delivery.findings.length > 0) {
-      await appendWork(open.dir, [{ t: "released", agent: open.agent }])
-    }
     return { delivery, failed, deadlineMissed }
   }
 
@@ -583,10 +540,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
    */
   async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
     const now = await treeState(root)
-    // Read after the snapshot, as at a shell call's after hook.
-    const work = now === null ? view.work : await readingStore(() => readWork(open.dir), view.work)
+    const work = view.work
     let found: string[] = []
-    if (now !== null && session !== null && hasOwnTree(work, open.agent)) {
+    if (now !== null && hasOwnTree(work, open.agent)) {
       found = between(work, open.agent, now)
       await appendWork(open.dir, [
         ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),

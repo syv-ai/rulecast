@@ -246,10 +246,9 @@ only shows when two subagents' changes meet is caught there. A file two subagent
 block either of them. A change no agent's tool call made, such as your own edit, is reported at the
 main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
 
-Agents running in parallel in one working tree can't be told apart when both change files through
-the shell: each is held to what the other wrote during its command. A file one of them writes with
-its Edit or Write tool stays that agent's. For parallel agents that use the shell, give each its
-own worktree (in Claude Code, a subagent with `isolation: worktree`).
+When agents run in parallel in one working tree and one of them changes files with the shell, it
+can be blamed for what the others wrote while its command ran, with any tool. For parallel agents,
+give each its own worktree (in Claude Code, a subagent with `isolation: worktree`).
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 

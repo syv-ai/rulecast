@@ -2,12 +2,9 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { openSession, sessionDir } from "../../src/core/session/session"
-import { claimedByOther } from "../../src/core/session/state"
-import { type Event, emptyDelivery, type WriteIntent } from "../../src/core/types"
+import type { Event, WriteIntent } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
-import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
 
 const SERVICE = "app/services/users.py"
@@ -171,29 +168,5 @@ describe("pipeline: what a refusal delivered", () => {
     expect(edit.references.map((reference) => [reference.ref, reference.state])).toEqual([
       ["conventions/backend.md#errors", "pointer"],
     ])
-  })
-})
-
-/** #28: a shell call running alongside must not take this write for its own. */
-describe("pipeline: a guarded write is claimed", () => {
-  test("for a file a rule matches, with no rule that refuses writes, and nothing printed", async () => {
-    const quiet = RULES.map(({ refuse_write: _, ...rule }) => rule)
-    const root = await createRepo({ ...files, ".rulecast-config.yaml": localConfig(quiet) })
-    const write = { content: "def get(x):\n    raise HTTPException(404)\n" }
-    const delivery = await run(root, { ...guard(root, SERVICE, write), session: { id: "s1", agentId: "sub2" } })
-    expect(delivery).toEqual(emptyDelivery())
-    await run(root, guard(root, "README.md", write))
-    const work = (await openSession(sessionDir(stateDirFor(root), "s1"), "main")).work
-    expect([...work.claims.keys()]).toEqual([SERVICE])
-    expect(claimedByOther(work, "sub1", SERVICE, null)).toBe(true)
-  })
-
-  test("a refused write is released: it will never happen", async () => {
-    const root = await createRepo(files)
-    const write = { content: "def get(x):\n    raise HTTPException(404)\n" }
-    const delivery = await run(root, { ...guard(root, SERVICE, write), session: { id: "s1", agentId: "sub2" } })
-    expect(delivery.findings).not.toEqual([])
-    const work = (await openSession(sessionDir(stateDirFor(root), "s1"), "main")).work
-    expect(claimedByOther(work, "sub1", SERVICE, null)).toBe(false)
   })
 })
