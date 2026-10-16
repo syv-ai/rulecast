@@ -7,6 +7,7 @@ import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
+import { testEnv } from "../helpers/home"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -304,6 +305,18 @@ describe("rulecast run: turning findings and rules off", () => {
       "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception x\n",
     )
     expect((await run(root)).code).toBe(1)
+  })
+
+  test("an ignore added in a staged change silences its finding in unattended mode too: run always runs attended", async () => {
+    const root = await createFixture()
+    await writeFile(
+      path.join(root, USERS),
+      "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception x\n",
+    )
+    await git(root, "add", USERS)
+    const result = await runCli(root, ["run"], "", { ...testEnv, RULECAST_MODE: "unattended" })
+    expect(result.code).toBe(0)
+    expect(result.stdout).not.toContain(`${USERS}:3`)
   })
 
   test("enabled: false switches a rule off without deleting it", async () => {

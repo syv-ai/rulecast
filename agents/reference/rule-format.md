@@ -198,6 +198,9 @@ In unattended mode:
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
+- **A `rulecast-ignore` added during the session silences nothing.** Its finding blocks and is
+  reported like any other, and the developer is still told about the comment. Ignores that were
+  already in the code keep working.
 - **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, as does
   `escalate: true` on the rule itself, and `refuse_write: unattended` rules refuse writes.
 
