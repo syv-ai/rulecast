@@ -301,6 +301,25 @@ describe("rulecast test --against", () => {
       )
     })
 
+    test("--format json reports the fix per bad example, and a failed one as a failure", async () => {
+      const root = await project([
+        logger([
+          { path: "a.py", code: 'print("hi")\n', expect: { lines: [1] }, fixed: 'logger.info("hi")\n' },
+          { path: "b.py", code: "print(1)\n" },
+        ]),
+      ])
+      const result = await runTest(root, "--format", "json")
+      expect(result.code).toBe(1)
+      const [, differs, fixed] = json(result.stdout).rules[0].examples.outcomes
+      expect(differs).toMatchObject({
+        passed: false,
+        failures: ["the fixed code differs from fixed:"],
+        fix: { passed: false, reason: "differs" },
+      })
+      expect(differs.fix.diff).toContain('-logger.info("hi")\n+log.info("hi")')
+      expect(fixed).toMatchObject({ passed: true, failures: [], fix: { passed: true } })
+    })
+
     test("a rule without fix has no fix score", async () => {
       const root = await project([httpException()])
       expect((await runTest(root)).stdout).not.toContain("fix ")
