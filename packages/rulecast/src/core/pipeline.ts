@@ -293,6 +293,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -453,8 +454,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       ...removed.findings.map((finding) => ({ ...finding, status: "new" as const })),
     ]
     const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
-    // Unattended, an ignore on a line changed this session silences nothing: nobody is there to
-    // agree to it, so its finding takes the unattended path and is reported if it keeps blocking.
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
     const unsilenced =
       project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
     for (const { rule, match, status } of unsilenced) findings.push({ rule, match, status })
