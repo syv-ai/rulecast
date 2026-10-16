@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/classify"
+import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -45,6 +46,12 @@ export interface PipelineOptions {
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /**
+   * `.rulecast/baseline.json`, for a verify with no baseline of its own (no session, no base
+   * commit): a match whose id it lists is pre-existing. Any other baseline wins, so it is ignored
+   * there. Hooks never pass it.
+   */
+  committedBaseline?: CommittedBaseline
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
   /** Debug log sink. */
@@ -452,12 +459,21 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
     const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
-    findings = output.findings.map(({ rule, match }, index) => ({
-      id: ids[index]!,
-      rule,
-      match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, containers),
-    }))
+    // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
+    const committed =
+      event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
+        ? options.committedBaseline
+        : undefined
+    findings = output.findings.map(({ rule, match }, index) => {
+      const id = ids[index]!
+      const status: ClassifiedFinding["status"] =
+        committed === undefined
+          ? classify(match, rule.scope, rule.id, baselineChanges, containers)
+          : baselineHas(committed, rule.id, match.file, id)
+            ? "preexisting"
+            : "new"
+      return { id, rule, match, status }
+    })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)

@@ -24,6 +24,19 @@ export interface FormatOptions {
   complete?: boolean
   /** SARIF's `tool.driver.rules`, for the rules with findings. Absent: ids only. */
   rules?: RuleMetadata[]
+  /** The committed baseline this run classified against; absent or null when it used none. */
+  baseline?: BaselineUse | null
+}
+
+/** What a run made of `.rulecast/baseline.json`: json's `baseline` key, and the stale line. */
+export interface BaselineUse {
+  file: string
+  /** Ids in the file. */
+  entries: number
+  /** Of those, found again by this run. */
+  matched: number
+  /** No longer found where the run looked: fixed, or the text changed. Never changes the exit code. */
+  stale: number
 }
 
 /** What SARIF says about a rule: built by `run` from the compiled rules and their cited sections. */
@@ -41,6 +54,13 @@ export interface RuleMetadata {
 /** The ignores are part of the stock a team owes, so the backlog says how many there are. */
 function ignoredLine(ignored: readonly unknown[]): string {
   return `ignored: ${plural(ignored.length, "finding")} by rulecast-ignore comments (rulecast run --format json lists them)`
+}
+
+/** Fixed legacy violations are worth seeing, and the file only shrinks when someone prunes it. */
+function staleLine(baseline: FormatOptions["baseline"]): string[] {
+  if (baseline === undefined || baseline === null || baseline.stale === 0) return []
+  const entries = baseline.stale === 1 ? "1 entry" : `${baseline.stale} entries`
+  return [`baseline: ${entries} no longer found (fixed or changed); rulecast baseline --prune drops them`]
 }
 
 /** Names what a staged run left out and the flag that puts it back. */
@@ -91,6 +111,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
     if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
     // What was left out and what was looked at are as true of a summary as of the full list.
     const tail = [
+      ...staleLine(options.baseline),
       ...((options.skipped ?? []).length > 0 ? [skippedLine(options.skipped!)] : []),
       ...(options.checked !== undefined ? [checkedLine(options.checked)] : []),
     ]
@@ -134,6 +155,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   out.push(...problemsBlock(delivery.warnings))
 
   for (const notice of delivery.notices ?? []) out.push(notice, "")
+  out.push(...staleLine(options.baseline))
   if ((options.skipped ?? []).length > 0) out.push(skippedLine(options.skipped!))
   if (options.checked !== undefined) out.push(checkedLine(options.checked))
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
@@ -180,6 +202,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       ignored: options.ignored ?? [],
       notices: delivery.notices ?? [],
       stop: delivery.stop,
+      baseline: options.baseline ?? null,
     },
     null,
     2,

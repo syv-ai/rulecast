@@ -9,6 +9,12 @@
 
 export { EXIT, EXIT_CODES, SCHEMA_VERSION } from "./adapters/cli/contract"
 export {
+  BASELINE_FILE,
+  type CommittedBaseline,
+  readCommittedBaseline,
+  serialiseBaseline,
+} from "./core/baseline/committed"
+export {
   type CompiledProject,
   type CompileOptions,
   compile,
