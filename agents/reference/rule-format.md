@@ -255,15 +255,21 @@ back, so under a hook a fixable finding is delivered like any other.
   finding of a fixable rule in those files, pre-existing ones too, and then checks them as
   `rulecast run` would; `--dry-run` prints the diff and writes nothing. A fix after which the rule
   still matches the text it wrote is undone and reported as unresolved, so a second run changes
-  nothing. Findings with a `rulecast-ignore` are left alone, even when another fix moves the comment
-  away from them. Fixes stay within one match in one file: no fix spans files, and `llm` and tool
-  rules have none.
-- **What it will not write:** a symlink (it is reported, not followed), a file whose real path is
-  outside the project, a file that is not UTF-8, and a file that changed after it was read. A file
-  whose fixes have not settled after 10 passes (two rules undoing each other) is left as it was, and
-  its findings are reported as unresolved. A file that cannot be written is reported, and the others
-  are still written. `--dry-run` leaves out the same files. A file is replaced through a rename, so
-  its mode is kept, but another hard link to it keeps the old content.
+  nothing. The exception is a file still changing after 10 passes, such as `aa` → `a` on a long run
+  of `a`s: what the passes did is written, a warning says it is not finished, and the next run goes
+  on from there. Findings with a `rulecast-ignore` are left alone. An ignored match over several
+  lines protects every line of it, so a finding of the same rule nested inside it is not fixed
+  either. Fixes stay within one match in one file: no fix spans files, and `llm` and tool rules have
+  none.
+- **What it will not write:** a symlink (it is reported, not followed), a file with a symlinked
+  directory in its path, a file whose real path is outside the project, a file that is not UTF-8, and
+  a file that changed after it was read, checked again just before it is replaced. A file whose text
+  comes back to an earlier one while fixes are still pending after 10 passes (two rules undoing each
+  other) is left as it was, and so is a file where a fix would move a `rulecast-ignore` comment away
+  from the finding it is for; their findings are reported as unresolved. A file that cannot be
+  written is reported, and the others are still written. `--dry-run` leaves out the same files. A
+  file is replaced through a rename, so its mode is kept, but another hard link to it keeps the old
+  content.
 
 ### Messages
 
