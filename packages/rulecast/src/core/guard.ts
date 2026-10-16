@@ -80,7 +80,11 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   })
 
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
-  const ids = findingIds(output.findings, (kind) => input.detection.registry.get(kind)?.volatileCaptures ?? [])
+  // Over ignored matches too, as the pipeline numbers them, so a match has one id at guard and verify.
+  const ids = findingIds(
+    [...output.findings, ...output.ignored],
+    (kind) => input.detection.registry.get(kind)?.volatileCaptures ?? [],
+  )
   const evidence = output.findings
     .map((finding, index) => ({ ...finding, id: ids[index]! }))
     .filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
