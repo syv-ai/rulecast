@@ -32,7 +32,7 @@ Flagged: an edited line that sets `fail_under`, `--cov-fail-under`, `--fail-unde
 
 A threshold is the bar the project agreed on. Lowering it to make a run pass moves the bar instead of clearing it.
 
-The rule cannot tell raising from lowering: it sees the file as it is now, not what the line said before. So raising a threshold is flagged too. That change is fine. Leave it, and say in your report that you raised the threshold and to what.
+The rule cannot tell raising from lowering: it sees the file as it is now, not what the line said before. So raising a threshold is flagged too, and so is a change the task asked for. Those changes are fine: keep them, and say in your report what the threshold was and what it is now. Do not undo a correct change to make the finding go away. In unattended mode the finding still holds the stop, at most twice, and is then reported instead. That is the cost of catching every lowering.
 
 ## Loop configuration
 
@@ -58,7 +58,7 @@ In an unattended run there is nobody to ask. Write the report in the run's decis
 
 These rules are about who makes the change, not about the change itself. A developer who means to skip a test, add a suppression, change a threshold or edit CI does it in an attended session, where the rules are warnings, or by hand.
 
-- For one line, add `# rulecast-ignore: loop-safety/<rule> <reason>` (or `//` in JavaScript and TypeScript). Every new ignore is reported to the developer at the end of the session.
+- For one line, add `# rulecast-ignore: loop-safety/<rule> <reason>` (or `//` in JavaScript and TypeScript). Every new ignore is reported to the developer at the end of the session. In unattended mode an ignore added during the run silences nothing, so this is for a developer, in an attended session or by hand.
 - For a whole rule, set `enabled: false` on its entry in `.rulecast-config.yaml`.
 - To keep a rule a warning in unattended mode, set `escalate: false` on its entry.
 - To fail CI or a git hook on these, set `severity: error` on the entry. `rulecast run` always runs rules as written, so they are warnings there by default.
