@@ -9,7 +9,7 @@ Load these when you need them. Relative links resolve against this file's own UR
 
 Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
 
-The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them. The gates in steps 5 and 6 do not change that. They make a rule safe to propose, not to adopt: a loop that runs without the developer only ever proposes rules, and never adopts one. The developer decides.
+The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them. The gates in steps 5 and 6 do not change that. Passing them makes a rule ready to show the developer, not to adopt. The developer decides.
 
 ## 1. Read
 
