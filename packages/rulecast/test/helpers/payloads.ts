@@ -11,11 +11,12 @@ export interface Payload {
 
 /**
  * A payload recorded in test/payloads/claude-code, optionally pointed at a test project:
- * `root` replaces cwd, `file` (repo-relative) replaces tool_input.file_path, `sessionId` replaces session_id.
+ * `root` replaces cwd, `file` (repo-relative) replaces tool_input.file_path, `sessionId` replaces session_id,
+ * `agentId` replaces a subagent payload's agent_id.
  */
 export function claudeCodePayload(
   name: string,
-  overrides: { root?: string; file?: string; sessionId?: string } = {},
+  overrides: { root?: string; file?: string; sessionId?: string; agentId?: string } = {},
 ): Payload {
   const payload: Payload = JSON.parse(
     readFileSync(new URL(`../payloads/claude-code/${name}.json`, import.meta.url), "utf8"),
@@ -23,5 +24,6 @@ export function claudeCodePayload(
   if (overrides.root) payload.cwd = overrides.root
   if (overrides.file && payload.tool_input) payload.tool_input.file_path = path.join(payload.cwd, overrides.file)
   if (overrides.sessionId) payload.session_id = overrides.sessionId
+  if (overrides.agentId && payload.agent_id) payload.agent_id = overrides.agentId
   return payload
 }

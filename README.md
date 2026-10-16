@@ -240,6 +240,16 @@ prompt to paste.
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
+With subagents, each one's stop checks only the files it edited, so it is never asked to fix
+another agent's code. The main agent's stop checks everything the session changed: a problem that
+only shows when two subagents' changes meet is caught there. A file two subagents both edit can
+block either of them.
+
+Agents running in parallel in one working tree can't be told apart when both change files through
+the shell: each is held to what the other wrote during its command. A file one of them writes with
+its Edit or Write tool stays that agent's. For parallel agents that use the shell, give each its
+own worktree (in Claude Code, a subagent with `isolation: worktree`).
+
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 
 ## Install
