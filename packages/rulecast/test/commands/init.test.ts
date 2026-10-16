@@ -94,6 +94,20 @@ describe("rulecast init --yes", () => {
     expect(ids(await read(root, CONFIG_FILE))).toEqual(PYTHON)
     expect(result.stdout).toContain("For agents that run with nobody watching")
     expect(result.stdout).toContain("Add it with: rulecast init --rules loop-safety")
+    // /goal and claude -p are not unattended by themselves: the note names the switch.
+    expect(result.stdout).toContain("RULECAST_MODE=unattended")
+    expect(result.stdout).not.toMatch(/watching: \/goal, claude -p/)
+  })
+
+  test("with part of the pack installed, the note says how many rules are missing", async () => {
+    const root = await createRepo({ ...PROJECT, "tests/test_users.py": "def test_get():\n    assert get() is None\n" })
+    await runCli(root, ["init", "--rules", "loop-safety/no-new-suppressions", "--yes"], "", env)
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      "5 of 6 loop-safety rules not installed. Add them with: rulecast init --rules loop-safety",
+    )
+    expect(result.stdout).not.toContain("Not installed.")
   })
 
   test("--rules loop-safety installs the whole pack, and it validates", async () => {
