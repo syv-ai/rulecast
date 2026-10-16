@@ -592,8 +592,9 @@ export function findingKey({ rule, match }: ClassifiedFinding): string {
  * refused one, a protected file changed with the shell, which blocks until it is reverted.
  *
  * Unattended, a stop with nothing to block while configured rules did not run (`incomplete`) holds
- * the main agent once per prompt, so its report says those checks never happened (#29). Never a
- * subagent: its report goes to its parent, whose own stop is held for the same reason.
+ * the main agent once per prompt, so its report says those checks never happened (#29). A block or
+ * report earlier in the prompt already said so and counts as that hold; a capped stop is never
+ * held. Never a subagent: its report goes to its parent, whose own stop is held for the same reason.
  */
 export function gate(
   fresh: readonly ClassifiedFinding[],
@@ -607,10 +608,14 @@ export function gate(
   incomplete = false,
 ): { stop: Exclude<Delivery["stop"], null>; work: WorkRecord[] } {
   const passed = gateFindings(fresh, work, agent, maxBlocks, swept, mode)
-  if (passed.stop !== "allow" && passed.stop !== "capReached") return passed
-  if (mode === "unattended" && incomplete && agent === MAIN_AGENT && !work.incompleteReports.has(agent)) {
-    return { stop: "incomplete", work: [{ t: "incompleteReport", agent }] }
+  const holds = mode === "unattended" && incomplete && agent === MAIN_AGENT && !work.incompleteReports.has(agent)
+  if (!holds) return passed
+  // A block or report carries the list of what did not run (adapters say it beside the findings),
+  // so it is this prompt's hold. A capped stop is past every hold: it says what it says, not this.
+  if (passed.stop === "block" || passed.stop === "report") {
+    return { stop: passed.stop, work: [...passed.work, { t: "incompleteReport", agent }] }
   }
+  if (passed.stop === "allow") return { stop: "incomplete", work: [{ t: "incompleteReport", agent }] }
   return passed
 }
 

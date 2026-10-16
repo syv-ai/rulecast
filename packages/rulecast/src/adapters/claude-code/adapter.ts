@@ -2,7 +2,7 @@ import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
 import { parseClaudeCode } from "./parse"
-import { mergeHooks, removeHooks } from "./settings"
+import { mergeHooks, removeHooks, runsProjectRulecast } from "./settings"
 
 /** Claude Code replaces longer additionalContext with a pointer to a file (test/payloads/claude-code/README.md). */
 export const CONTEXT_LIMIT = 10_000
@@ -87,6 +87,25 @@ export const LOCAL_COMMAND =
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
   `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`
 
+/**
+ * Findings in files changed outside the agent's tool calls never block, and a Stop hook reaches the
+ * agent only by blocking: the user is the one left to tell. Only those findings: the agent's own
+ * warnings were told at its edits and are not news here. Null when no file was swept.
+ */
+function sweptMessage(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): string | null {
+  if ((delivery.swept ?? []).length === 0) return null
+  const swept = new Set(delivery.swept)
+  const onlySwept: Delivery = {
+    ...emptyDelivery(),
+    findings: delivery.findings.filter((finding) => swept.has(finding.file)),
+    templates: delivery.templates,
+    omitted: { ...delivery.omitted, findings: delivery.omitted.findings.filter((cut) => cut.swept === true) },
+    swept: delivery.swept,
+  }
+  const sweptText = renderAgentText(onlySwept, { ...options, notices: false, warnings: false })
+  return withinLimit(`${SWEPT_PREAMBLE}\n\n${sweptText}`, delivery, event)
+}
+
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
   if (delivery.overflowPath !== null) {
@@ -134,7 +153,9 @@ export const claudeCodeAdapter: Adapter = {
     const notices = [...(delivery.notices ?? []), ...problems, ...notRun].join("\n")
     if (event.kind === "verify" && delivery.stop === "incomplete") {
       const reason = `${INCOMPLETE_PREAMBLE}\n\n${disabled.map((d) => `- ${d}`).join("\n")}`
-      return json({ decision: "block", reason, systemMessage: notices })
+      const outside = sweptMessage(delivery, event, options)
+      const message = [notices, outside].filter((part) => part !== null && part !== "").join("\n\n")
+      return json({ decision: "block", reason, systemMessage: message })
     }
     const userOnly = event.kind === "guard" ? NONE : json({ systemMessage: notices })
     if (text === "") return notices === "" ? NONE : userOnly
@@ -172,7 +193,7 @@ export const claudeCodeAdapter: Adapter = {
             },
           }),
         )
-      case "verify":
+      case "verify": {
         // A Stop hook reaches the agent only by blocking: Claude Code takes no additionalContext from
         // Stop, and a stop that is let through ends a headless run. So the unattended report is a block.
         if (delivery.stop === "block" || delivery.stop === "report") {
@@ -196,23 +217,10 @@ export const claudeCodeAdapter: Adapter = {
           const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
           return json({ systemMessage: notices === "" ? cap : `${notices}\n\n${cap}` })
         }
-        // Findings in files changed outside the agent's tool calls never block, and a Stop hook
-        // reaches the agent only by blocking: the user is the one left to tell.
-        // Only those findings: the agent's own warnings were told at its edits and are not news here.
-        if ((delivery.swept ?? []).length > 0) {
-          const swept = new Set(delivery.swept)
-          const onlySwept: Delivery = {
-            ...emptyDelivery(),
-            findings: delivery.findings.filter((finding) => swept.has(finding.file)),
-            templates: delivery.templates,
-            omitted: { ...delivery.omitted, findings: delivery.omitted.findings.filter((cut) => cut.swept === true) },
-            swept: delivery.swept,
-          }
-          const sweptText = renderAgentText(onlySwept, { ...options, notices: false, warnings: false })
-          const outside = withinLimit(`${SWEPT_PREAMBLE}\n\n${sweptText}`, delivery, event)
-          return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
-        }
+        const outside = sweptMessage(delivery, event, options)
+        if (outside !== null) return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
         return notices === "" ? NONE : json({ systemMessage: notices })
+      }
       // Nothing to say before a prompt, a session or a command: these events only record state.
       case "prompt":
       case "start":
@@ -232,5 +240,6 @@ export const claudeCodeAdapter: Adapter = {
     // committed command for one that exits 127 on every hook.
     merge: (settings, command, verifyMs) => mergeHooks(settings, command, verifyMs, LOCAL_COMMAND),
     remove: removeHooks,
+    local: runsProjectRulecast,
   },
 }

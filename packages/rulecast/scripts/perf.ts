@@ -68,7 +68,7 @@ function worktreeReport(result: WorktreeMeasurement, warm: Measurement): string 
     row("new session", result.newSession),
     row("warm edit", warm),
     "",
-    `  ${dim("cold: a cache home nothing has used, as on a new machine")}`,
+    `  ${dim("cold: an empty per-project detector cache (the fixture pins no rule repos)")}`,
     `  ${dim("new session: the same first edit in the warm checkout itself")}`,
     `  ${dim(`without node_modules: ${result.depsMissing}`)}`,
     "",

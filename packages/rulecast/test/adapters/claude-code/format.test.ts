@@ -113,6 +113,21 @@ describe("Claude Code adapter: format", () => {
       expect(output.systemMessage).toContain(LINE)
     })
 
+    test("an incomplete stop keeps telling the user about findings in swept files", () => {
+      const value = delivery({
+        findings: [finding()],
+        swept: [finding().file],
+        stop: "incomplete",
+        unattended: true,
+        disabled,
+      })
+      const output = JSON.parse(format(value, "verify").stdout)
+      expect(output.decision).toBe("block")
+      expect(output.systemMessage).toContain(LINE)
+      expect(output.systemMessage).toContain("changed outside the agent's tool calls")
+      expect(output.systemMessage).toContain(finding().message)
+    })
+
     test("a block names what was not checked, ahead of the findings", () => {
       const value = delivery({ findings: [finding()], stop: "block", unattended: true, disabled })
       const output = JSON.parse(format(value, "verify").stdout)

@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { ADAPTERS } from "../adapters"
@@ -125,10 +127,11 @@ export async function doctorCommand(
   const stateDir = ensureProjectState(home, root)
   io.stdout(`project    ${root}\n`)
 
-  // Before the compile below, which fetches whatever is missing: what the hooks would find now.
-  const uncached = ci ? await uncachedRepos(root, registry, home, io) : []
   // With doctor's own environment: the mode a hook would run in when started from this shell.
-  const project = await compile({ root, registry, repos: fetchingRepos(home), env: io.env })
+  // Under --ci with the cache only, as the hooks will find it: fetching here would make the next
+  // run pass without `rulecast install` ever being run in the job.
+  const project = await compile({ root, registry, repos: ci ? cachedRepos(home) : fetchingRepos(home), env: io.env })
+  const uncached = ci ? uncachedRepos(project) : []
   const configErrors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error").length
   const configWarnings = project.diagnostics.length - configErrors
   io.stdout(
@@ -183,14 +186,14 @@ export async function doctorCommand(
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0
     const missing = state?.missing ?? []
+    // The committed guard runs node_modules/.bin/rulecast or nothing: one on the PATH (npx, a
+    // global install) does not make it run.
+    const guarded = state?.local === true
+    const runs = guarded ? existsSync(path.join(root, "node_modules", ".bin", "rulecast")) : resolves
     // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
     // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
     const level: Level =
-      file !== null && !resolves && ci
-        ? "error"
-        : file === null || !resolves || stale || missing.length > 0
-          ? "warning"
-          : "ok"
+      file !== null && !runs && ci ? "error" : file === null || !runs || stale || missing.length > 0 ? "warning" : "ok"
     count(level)
     const detail =
       file === null
@@ -199,9 +202,11 @@ export async function doctorCommand(
           ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
           : stale
             ? `${file} — but the hooks use an old command; run rulecast install`
-            : resolves
+            : runs
               ? file
-              : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
+              : guarded
+                ? `${file} — but the hooks run node_modules/.bin/rulecast, which is not installed, so they do nothing. Run npm ci (or pnpm install).`
+                : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
     io.stdout(line(level, adapter.label, detail))
   }
 
@@ -285,23 +290,17 @@ interface CheckLine {
   detail: string
 }
 
-/** The pinned repos missing from the cache, compiled as a hook would, with the rules each keeps from running. */
-async function uncachedRepos(
-  root: string,
-  registry: DetectorRegistry,
-  home: string,
-  io: CliIo,
-): Promise<{ source: string; rules: number }[]> {
-  const asHooks = await compile({ root, registry, repos: cachedRepos(home), env: io.env })
-  return asHooks.diagnostics
+/** The pinned repos missing from the cache, with the rules each keeps from running. */
+function uncachedRepos(project: CompiledProject): { source: string; rules: number }[] {
+  return project.diagnostics
     .filter((diagnostic) => diagnostic.hint === "rulecast install")
     .map((diagnostic) => ({ source: diagnostic.source, rules: diagnostic.rules?.length ?? 0 }))
 }
 
 /**
  * What a fresh environment gets wrong (#29). Each is checked as the thing that will meet it: the
- * repos as the hooks see them — doctor's own compile fetches any that are missing, so its passing
- * proves nothing about them — and the history as `rulecast run --from-ref` will need it.
+ * repos as the hooks see them — compiled from the cache only, since hooks never fetch — and the
+ * history as `rulecast run --from-ref` will need it.
  */
 async function ciChecks(
   project: CompiledProject,

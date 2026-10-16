@@ -118,14 +118,25 @@ describe("gate, unattended, when configured rules did not run", () => {
     expect(incomplete([finding("a/rule", "bad")], []).stop).toBe("block")
   })
 
-  test("a capped stop that has had its report is held for what did not run", () => {
-    const work: WorkRecord[] = [{ t: "stopReport", agent: "main" }]
+  test("a block or report that carried the list is the hold: a capped stop after it is not held again", () => {
+    const records: WorkRecord[] = []
+    const same = [finding("a/rule", "same")]
+    const sequence = [same, same, same, same, []].map((fresh) => {
+      const result = incomplete(fresh, records)
+      records.push(...result.work)
+      return result.stop
+    })
+    expect(sequence).toEqual(["block", "block", "report", "capReached", "allow"])
+  })
+
+  test("a capped stop is never turned into a hold", () => {
     const same = finding("a/rule", "same")
-    const blocked: WorkRecord[] = [
+    const work: WorkRecord[] = [
       { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
       { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+      { t: "stopReport", agent: "main" },
     ]
-    expect(incomplete([same], [...blocked, ...work]).stop).toBe("incomplete")
+    expect(incomplete([same], work).stop).toBe("capReached")
   })
 
   test("never a subagent, and never attended", () => {

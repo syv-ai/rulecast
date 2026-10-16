@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -225,7 +225,7 @@ export interface WorktreeMeasurement {
   newSession: Measurement
   /** SessionStart in that worktree: the work done before the first edit. */
   sessionStart: Measurement
-  /** The same first edit with a cache home nothing has used: a new machine or container. */
+  /** The same first edit with a cache home nothing has used: its per-project detector cache only, as no rule repos are pinned. */
   coldHome: Measurement
   /** The first edit with the worktree's node_modules missing: how many rules it said did not run. */
   depsMissing: string
@@ -247,9 +247,12 @@ export async function measureNewWorktree(): Promise<WorktreeMeasurement> {
   for (let i = 0; i < 3; i++) runHook(main, warm("post-tool-use.edit"))
 
   const parent = mkdtempSync(path.join(tmpdir(), "rulecast-perf-wt-"))
+  const created: string[] = []
+  const homes: string[] = []
   const worktree = async (name: string, deps: boolean): Promise<string> => {
     const root = path.join(parent, name)
     execFileSync("git", ["-C", main, "worktree", "add", "-q", "--detach", root], { stdio: "ignore" })
+    created.push(root)
     // Neither is in the commit: the mode was set after it, and node_modules is never committed.
     await chmod(path.join(root, "perf-check.sh"), 0o755)
     if (deps) await linkTool(root, "oxlint")
@@ -269,32 +272,43 @@ export async function measureNewWorktree(): Promise<WorktreeMeasurement> {
   const starts: number[] = []
   const cold: number[] = []
   const sessions: number[] = []
-  for (let i = 0; i < WORKTREES; i++) {
-    sessions.push(firstEdit(main, `perf-main-${i}`, HOME).edit.ms)
-    const shared = firstEdit(await worktree(`wt-${i}`, true), `perf-wt-${i}`, HOME)
-    edits.push(shared.edit.ms)
-    starts.push(shared.start)
-    const home = mkdtempSync(path.join(tmpdir(), "rulecast-perf-home-"))
-    cold.push(firstEdit(await worktree(`cold-${i}`, true), `perf-cold-${i}`, home).edit.ms)
-  }
+  // Each new session edits the file as it was committed, not the last session's edit plus one more.
+  const original = readFileSync(path.join(main, FILE), "utf8")
+  try {
+    for (let i = 0; i < WORKTREES; i++) {
+      sessions.push(firstEdit(main, `perf-main-${i}`, HOME).edit.ms)
+      writeFileSync(path.join(main, FILE), original)
+      const shared = firstEdit(await worktree(`wt-${i}`, true), `perf-wt-${i}`, HOME)
+      edits.push(shared.edit.ms)
+      starts.push(shared.start)
+      const home = mkdtempSync(path.join(tmpdir(), "rulecast-perf-home-"))
+      homes.push(home)
+      cold.push(firstEdit(await worktree(`cold-${i}`, true), `perf-cold-${i}`, home).edit.ms)
+    }
 
-  const bare = await worktree("no-deps", false)
-  const payload = (name: string) => claudeCodePayload(name, { root: bare, file: FILE, sessionId: "perf-no-deps" })
-  runHook(bare, payload("session-start.startup"))
-  appendFileSync(path.join(bare, FILE), "export const first = forbidden0(42)\n")
-  // pnpm puts the workspace's node_modules/.bin on the PATH, where the linter would be found.
-  const PATH = (process.env.PATH ?? "").split(path.delimiter).filter((dir) => !dir.includes("node_modules"))
-  const noDeps = { ...process.env, PATH: PATH.join(path.delimiter) }
-  const edited = runHook(bare, payload("post-tool-use.edit"), HOME, noDeps).stdout
-  const said = JSON.parse(edited || "{}") as { systemMessage?: string }
-  const depsMissing = (said.systemMessage ?? "").split("\n").find((text) => text.includes("oxlint")) ?? "nothing said"
+    const bare = await worktree("no-deps", false)
+    const payload = (name: string) => claudeCodePayload(name, { root: bare, file: FILE, sessionId: "perf-no-deps" })
+    runHook(bare, payload("session-start.startup"))
+    appendFileSync(path.join(bare, FILE), "export const first = forbidden0(42)\n")
+    // pnpm puts the workspace's node_modules/.bin on the PATH, where the linter would be found.
+    const PATH = (process.env.PATH ?? "").split(path.delimiter).filter((dir) => !dir.includes("node_modules"))
+    const noDeps = { ...process.env, PATH: PATH.join(path.delimiter) }
+    const edited = runHook(bare, payload("post-tool-use.edit"), HOME, noDeps).stdout
+    const said = JSON.parse(edited || "{}") as { systemMessage?: string }
+    const depsMissing = (said.systemMessage ?? "").split("\n").find((text) => text.includes("oxlint")) ?? "nothing said"
 
-  return {
-    firstEdit: percentiles(edits),
-    newSession: percentiles(sessions),
-    sessionStart: percentiles(starts),
-    coldHome: percentiles(cold),
-    depsMissing: depsMissing.trim(),
-    worktrees: WORKTREES,
+    return {
+      firstEdit: percentiles(edits),
+      newSession: percentiles(sessions),
+      sessionStart: percentiles(starts),
+      coldHome: percentiles(cold),
+      depsMissing: depsMissing.trim(),
+      worktrees: WORKTREES,
+    }
+  } finally {
+    for (const root of created) {
+      execFileSync("git", ["-C", main, "worktree", "remove", "--force", root], { stdio: "ignore" })
+    }
+    for (const dir of [parent, ...homes]) rmSync(dir, { recursive: true, force: true })
   }
 }

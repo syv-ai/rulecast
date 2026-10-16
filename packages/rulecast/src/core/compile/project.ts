@@ -23,8 +23,9 @@ export interface Diagnostic {
   /** What a hook tells the developer to run; default "rulecast validate". Missing repos: "rulecast install". */
   hint?: string
   /**
-   * The config file itself did not load, so no rule was compiled. A hook still warns; `rulecast run`
-   * exits 2 instead of reporting a run that checked nothing (adapters/cli/contract.ts).
+   * The config file itself did not load, so no rule was compiled: nothing else is said beside it. A
+   * hook still warns; `rulecast run` exits 2 instead of reporting a run that checked nothing
+   * (adapters/cli/contract.ts).
    */
   fatal?: true
   /**

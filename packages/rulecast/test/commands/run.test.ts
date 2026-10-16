@@ -326,7 +326,8 @@ describe("rulecast run: the output contract", () => {
     const parsed = json(result.stdout)
     expect(parsed.complete).toBe(false)
     expect(parsed.findings.map((finding: { rule: string }) => finding.rule)).toEqual([regexRule.id])
-    expect(parsed.warnings.join("\n")).toContain("scripts/broken")
+    // Named once, under `disabled` (#29), not again among the warnings.
+    expect(parsed.disabled.flatMap((group: { rules: string[] }) => group.rules)).toEqual(["scripts/broken"])
   })
 
   test("a verify timeout is exit 3", async () => {
@@ -355,7 +356,9 @@ describe("rulecast run: the output contract", () => {
     const result = await run(root, "--all-files")
     expect(result.code).toBe(3)
     expect(result.stdout).toContain(`${USERS}:2:5  error    ${regexRule.id}`)
-    expect(result.stdout).toContain("backend/bad")
+    expect(result.stdout).toContain("did not run:\n  - 1 rule disabled: .rulecast-config.yaml: ")
+    const parsed = json((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(parsed.disabled.flatMap((group: { rules: string[] }) => group.rules)).toEqual(["backend/bad"])
   })
 
   test.each([
@@ -557,7 +560,9 @@ describe("rulecast run: rules that did not run", () => {
     const terminal = await run(root, "--all-files")
     expect(terminal.code).toBe(3)
     expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
-    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)")
+    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)\n")
+    // Said once, under "did not run", not again among rulecast's problems.
+    expect(terminal.stdout).not.toContain("rulecast problems:")
     const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
     expect(json.disabled).toEqual([{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }])
   })
