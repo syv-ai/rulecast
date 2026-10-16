@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
+import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { removedFindings } from "./baseline/removed"
@@ -421,7 +422,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
-  /** Unattended: ignores the agent wrote, which silenced nothing. The findings log keeps the attempt. */
+  /**
+   * Unattended: ignores the agent added or changed, on findings they did not silence (D49). The
+   * findings log keeps them as the agent's attempts; an unchanged comment over changed code is none.
+   */
   let tried: IgnoredFinding[] = []
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
@@ -632,7 +636,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     const kept = new Set(unsilenced.map(({ match }) => match))
-    tried = unsilenced.map(({ status: _, ...item }) => item)
+    // An attempt only when the comment's own line changed this session: the agent wrote or edited
+    // the ignore. Over code the agent changed under a comment it left alone, the finding is not
+    // silenced, but no ignore was tried.
+    const commentChanged = ({ match, ignoreLine }: IgnoredFinding) =>
+      isNew({ ...match, line: ignoreLine, endLine: ignoreLine }, changes)
+    tried = unsilenced.filter(commentChanged).map(({ status: _, ...item }) => item)
     ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),

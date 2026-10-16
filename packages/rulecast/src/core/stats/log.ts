@@ -65,7 +65,7 @@ export interface FindingsRecord {
   /** Matches a `rulecast-ignore` dropped this event. */
   ign: LoggedMatch[]
   /**
-   * Unattended: matches whose `rulecast-ignore` the agent wrote this session, which silenced
+   * Unattended: matches under ignores the agent added or changed this session, which silenced
    * nothing (they are in `found` as well). Absent when there are none.
    */
   tried?: LoggedMatch[]

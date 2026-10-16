@@ -193,6 +193,32 @@ describe("the findings log", () => {
     expect(document.rules[0]).toMatchObject({ fired: 1, suppressed: 0, suppressAttempted: 1 })
   })
 
+  test("unattended: code edited under an ignore already in the code is not silenced, and is no attempt", async () => {
+    // D49: the developer agreed to the comment for the code it covered, so the finding is the
+    // agent's. But the agent wrote no ignore, so stats must not count one against it.
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const root = await createRepo({ ...fixtureFiles, [USERS]: `def get():\n${above}    raise HTTPException(500)\n` })
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    await session.write(USERS, `def get():\n${above}    raise HTTPException(501)\n`)
+    expect((await session.send({ kind: "edit", files: [USERS] })).findings).toHaveLength(1)
+    const [record] = await session.log()
+    expect(record!.found).toEqual([expect.objectContaining({ r: "backend/no-httpexception", f: USERS, l: 3 })])
+    expect(record!.tried).toBeUndefined()
+
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.rules[0]).toMatchObject({ fired: 1, suppressed: 0, suppressAttempted: 0 })
+  })
+
+  test("unattended: an ignore the agent wrote on the line above code it changed is an attempt", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const root = await createRepo({ ...fixtureFiles, [USERS]: "def get():\n    raise HTTPException(500)\n" })
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    await session.write(USERS, `def get():\n${above}    raise HTTPException(501)\n`)
+    expect((await session.send({ kind: "edit", files: [USERS] })).findings).toHaveLength(1)
+    const [record] = await session.log()
+    expect(record!.tried).toEqual([expect.objectContaining({ r: "backend/no-httpexception", f: USERS, l: 3 })])
+  })
+
   test("an edit no rule checks, and a CLI run, write nothing", async () => {
     const root = await createFixture()
     const session = sessionAt(root)
