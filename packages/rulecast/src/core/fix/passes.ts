@@ -33,10 +33,13 @@ export interface FixResult {
   /** The files whose text changed, sorted. */
   changed: string[]
   fixed: FixSite[]
-  /** Findings whose fix left them in place, or made the same violation again: reverted, never retried. */
+  /**
+   * Findings whose fix left them in place, or made the same violation again: reverted, never retried.
+   * And every finding of a file in `unsettled`, as the file was given.
+   */
   unresolved: FixSite[]
-  /** Fixes were still pending after MAX_PASSES. */
-  exhausted: boolean
+  /** Files with fixes still pending after MAX_PASSES: given back as they came, none of their fixes kept. */
+  unsettled: string[]
   /** A detector failed or timed out: the pass it happened in was not applied. */
   errors: string[]
 }
@@ -71,6 +74,33 @@ function nonOverlapping(edits: Fixable[]): Fixable[] {
   return kept
 }
 
+/** A rule's span of text, as offsets: [start, end). */
+type Region = { rule: string; start: number; end: number }
+
+/**
+ * Where offset `at` of the text before `edits` lies in the text after them; `spans` is where each
+ * edit's new text lies (applyEdits). An offset inside an edit goes to the start or the end of what
+ * replaced it, so a region an edit cut into grows to cover the edit.
+ */
+function mapOffset(at: number, edits: readonly Fixable[], spans: readonly [number, number][], side: 0 | 1): number {
+  let mapped = at
+  for (const [index, { fix }] of edits.entries()) {
+    if (fix.end <= at) mapped = at + spans[index]![1] - fix.end
+    else if (fix.start < at) return spans[index]![side]
+    else break
+  }
+  return mapped
+}
+
+/** The lines `match` spans in `text`, as offsets: an ignore covers whole lines. */
+function linesOf(text: string, match: Match): [number, number] {
+  const starts = [0]
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1)
+  const start = starts[match.line - 1] ?? text.length
+  const end = (starts[match.endLine] ?? text.length + 1) - 1
+  return [start, Math.max(start, end)]
+}
+
 /** `text` with `edits` applied, which must not overlap; also where each edit's new text now lies. */
 function applyEdits(text: string, edits: readonly Fixable[]): { text: string; spans: [number, number][] } {
   let out = ""
@@ -86,15 +116,16 @@ function applyEdits(text: string, edits: readonly Fixable[]): { text: string; sp
 }
 
 /**
- * Whether a finding of the same rule lies on the text an edit wrote: the fix did not remove its
- * finding, or wrote the violation back. A deletion leaves an empty span, which only a match
- * straddling the point it left can be on.
+ * Whether a finding of the same rule lies wholly on the text an edit wrote: the fix did not remove
+ * its finding, or wrote the violation back. One that only overlaps it, taking in text around it, is
+ * new work for the next pass: adjacent fixes can join into a match that fixing again resolves
+ * (`aa` → `a` on `aaaa`). A pair that never settles runs into MAX_PASSES, and its file is given back.
  */
 function refires(span: [number, number], after: readonly { fix?: TextEdit }[]): boolean {
   const [start, end] = span
   return after.some(({ fix }) => {
     if (fix === undefined) return false
-    return start === end ? fix.start < start && fix.end > start : fix.start < end && fix.end > start
+    return fix.start >= start && fix.end <= end && (fix.start < end || start === end)
   })
 }
 
@@ -108,11 +139,16 @@ function refires(span: [number, number], after: readonly { fix?: TextEdit }[]): 
  * second `rulecast fix` a no-op. An edit that changes nothing is unresolved without being applied.
  *
  * Ignored findings (`rulecast-ignore`) are dropped by `runDetection` before they get here, so they
- * are never fixed.
+ * are never fixed. Nor are they in a later pass, after another fix moved the ignore away from them:
+ * the lines each one was on at the start are followed through every edit, and a finding of its rule
+ * on them is left alone.
+ *
+ * A file with fixes still pending after MAX_PASSES never settled, and fixing it again would change
+ * it again: it is given back as it came, and its findings are reported unresolved.
  */
 export async function fixPasses(input: FixInput): Promise<FixResult> {
   const contents = new Map(input.contents)
-  const result: FixResult = { contents, changed: [], fixed: [], unresolved: [], exhausted: false, errors: [] }
+  const result: FixResult = { contents, changed: [], fixed: [], unresolved: [], unsettled: [], errors: [] }
   const original = new Map(input.contents)
   const given = new Set(contents.keys())
   const selections = input.selections
@@ -121,7 +157,8 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
   if (selections.length === 0) return result
 
   const volatile = (kind: string) => input.detection.registry.get(kind)?.volatileCaptures ?? []
-  const detect = async (texts: ReadonlyMap<string, string>): Promise<Fixable[] | null> => {
+  const ignored = new Map<string, Region[]>()
+  const detect = async (texts: ReadonlyMap<string, string>, first = false): Promise<Fixable[] | null> => {
     const output: DetectionOutput = await runDetection({
       detection: input.detection,
       event: "verify",
@@ -136,6 +173,12 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
       for (const late of output.timedOut) result.errors.push(`${late.rules.join(", ")}: timed out`)
       return null
     }
+    if (first) {
+      for (const { rule, match } of output.ignored) {
+        const [start, end] = linesOf(texts.get(match.file)!, match)
+        ignored.set(match.file, [...(ignored.get(match.file) ?? []), { rule: rule.id, start, end }])
+      }
+    }
     // Over ignored matches too, as the pipeline numbers them, so an id here is the id `run` reports.
     const ids = findingIds([...output.findings, ...output.ignored], volatile)
     // An edit outside the text it was computed from is a detector bug; applying it would corrupt the file.
@@ -146,10 +189,19 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
     )
   }
 
+  /** Whether a finding lies on lines that were ignored for its rule: inclusive, to err towards leaving it. */
+  const wasIgnored = ({ rule, match, fix }: Fixable) =>
+    (ignored.get(match.file) ?? []).some(
+      (region) => region.rule === rule.id && fix.start <= region.end && fix.end >= region.start,
+    )
   const givenUp = new Set<string>()
-  let found = await detect(contents)
+  const pendingIn = (findings: Fixable[]) =>
+    findings.filter((finding) => !givenUp.has(contentKey(finding)) && !wasIgnored(finding))
+  const initial = await detect(contents, true)
+  let found = initial
+  let exhausted = false
   for (let pass = 0; found !== null && pass < MAX_PASSES; pass++) {
-    const pending = found.filter((finding) => !givenUp.has(contentKey(finding)))
+    const pending = pendingIn(found)
     const noop = new Set(
       pending.filter(({ match, fix }) => contents.get(match.file)!.slice(fix.start, fix.end) === fix.text),
     )
@@ -166,16 +218,23 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
     const apply = (keep: (edit: Fixable) => boolean) => {
       const next = new Map(contents)
       const spans = new Map<Fixable, [number, number]>()
+      const regions = new Map<string, Region[]>()
       for (const [file, list] of planned) {
         const kept = list.filter(keep)
         const applied = applyEdits(contents.get(file)!, kept)
         next.set(file, applied.text)
         for (const [index, edit] of kept.entries()) spans.set(edit, applied.spans[index]!)
+        const moved = (ignored.get(file) ?? []).map((region) => ({
+          rule: region.rule,
+          start: mapOffset(region.start, kept, applied.spans, 0),
+          end: mapOffset(region.end, kept, applied.spans, 1),
+        }))
+        if (moved.length > 0) regions.set(file, moved)
       }
-      return { next, spans }
+      return { next, spans, regions }
     }
 
-    let { next, spans } = apply(() => true)
+    let { next, spans, regions } = apply(() => true)
     let after = await detect(next)
     if (after === null) break
     const failed = new Set<Fixable>()
@@ -188,16 +247,26 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
         givenUp.add(contentKey(edit))
         result.unresolved.push(site(edit))
       }
-      ;({ next, spans } = apply((edit) => !failed.has(edit)))
+      ;({ next, spans, regions } = apply((edit) => !failed.has(edit)))
       after = await detect(next)
       if (after === null) break
     }
     for (const edit of spans.keys()) result.fixed.push(site(edit))
     for (const [file, text] of next) contents.set(file, text)
+    for (const [file, moved] of regions) ignored.set(file, moved)
     found = after
-    if (pass === MAX_PASSES - 1) {
-      result.exhausted = after.some((finding) => !givenUp.has(contentKey(finding)))
-    }
+    if (pass === MAX_PASSES - 1) exhausted = true
+  }
+
+  if (exhausted && found !== null) {
+    const unsettled = new Set(pendingIn(found).map((finding) => finding.match.file))
+    for (const file of unsettled) contents.set(file, original.get(file)!)
+    result.fixed = result.fixed.filter((fixed) => !unsettled.has(fixed.file))
+    result.unresolved = [
+      ...result.unresolved.filter((fixed) => !unsettled.has(fixed.file)),
+      ...initial!.filter((finding) => unsettled.has(finding.match.file)).map(site),
+    ]
+    result.unsettled = [...unsettled].sort()
   }
 
   result.changed = [...contents].filter(([file, text]) => original.get(file) !== text).map(([file]) => file)

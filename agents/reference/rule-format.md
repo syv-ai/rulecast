@@ -255,8 +255,15 @@ back, so under a hook a fixable finding is delivered like any other.
   finding of a fixable rule in those files, pre-existing ones too, and then checks them as
   `rulecast run` would; `--dry-run` prints the diff and writes nothing. A fix after which the rule
   still matches the text it wrote is undone and reported as unresolved, so a second run changes
-  nothing. Findings with a `rulecast-ignore` are left alone. Fixes stay within one match in one
-  file: no fix spans files, and `llm` and tool rules have none.
+  nothing. Findings with a `rulecast-ignore` are left alone, even when another fix moves the comment
+  away from them. Fixes stay within one match in one file: no fix spans files, and `llm` and tool
+  rules have none.
+- **What it will not write:** a symlink (it is reported, not followed), a file whose real path is
+  outside the project, a file that is not UTF-8, and a file that changed after it was read. A file
+  whose fixes have not settled after 10 passes (two rules undoing each other) is left as it was, and
+  its findings are reported as unresolved. A file that cannot be written is reported, and the others
+  are still written. `--dry-run` leaves out the same files. A file is replaced through a rename, so
+  its mode is kept, but another hard link to it keeps the old content.
 
 ### Messages
 
