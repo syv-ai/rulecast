@@ -1,6 +1,7 @@
 import type { DetectorRule } from "../compile/rule"
 import type { DetectionOutput } from "../detection/run"
 import type { Selection } from "../detection/select"
+import { REMOVED_VARIABLES } from "../template"
 import type { Match } from "../types"
 import type { BaselineChanges } from "./baseline"
 import type { ContainerRanges } from "./classify"
@@ -24,7 +25,11 @@ export interface Removed {
  * did at the baseline.
  *
  * The finding sits on the first changed line, or the file's last line when that is a deletion at
- * its end (line 1 when nothing changed, which a count drop without a changed line cannot be). Its `text` says how many went: `2 of 5 removed`.
+ * its end (line 1 when nothing changed, which a count drop without a changed line cannot be).
+ *
+ * Its `text` is always `removed`, and the counts are captures (`{{removed}} of {{baseline}}`) marked
+ * volatile: deleting one more assertion is the same finding getting worse, not a new one, so the
+ * unattended stop gate's repeat limit applies to it and its identity does not churn.
  */
 export async function removedFindings(
   selections: readonly Selection[],
@@ -67,10 +72,16 @@ export async function removedFindings(
           line,
           endLine: line,
           column: 1,
-          text: `${before - after} of ${before} removed`,
-          // About the file's count, not the changed line it is shown on: its id hashes the text.
+          text: "removed",
+          // About the file's count, not the changed line it is shown on: its id hashes the text and
+          // the captures, less the counts, which change with every further deletion.
           wholeFile: true,
-          captures: Object.fromEntries(rule.detector.captures.map((name) => [name, ""])),
+          captures: {
+            ...Object.fromEntries(rule.detector.captures.map((name) => [name, ""])),
+            removed: String(before - after),
+            baseline: String(before),
+          },
+          volatileCaptures: REMOVED_VARIABLES,
         },
       })
     }

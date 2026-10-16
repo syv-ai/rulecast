@@ -6,7 +6,7 @@ import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
 import { parseReference, type ReferenceRoot, type ReferenceSpec, ReferenceSyntaxError } from "../references"
-import { CORE_VARIABLES, templateVariables } from "../template"
+import { CORE_VARIABLES, REMOVED_VARIABLES, templateVariables } from "../template"
 import type { Severity } from "../types"
 import { isOlder, VERSION } from "../version"
 
@@ -177,7 +177,11 @@ export async function compileRule(
         return "refuse_write cannot be combined with scope: removed: its matches are what the rule keeps"
       }
     }
-    const known = new Set<string>([...CORE_VARIABLES, ...detector.captures])
+    const known = new Set<string>([
+      ...CORE_VARIABLES,
+      ...detector.captures,
+      ...(data.scope === "removed" ? REMOVED_VARIABLES : []),
+    ])
     const unknown = templateVariables(data.message).find((name) => !known.has(name))
     if (unknown) return `unknown template variable "${unknown}"`
   } else {

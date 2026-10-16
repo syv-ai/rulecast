@@ -20,7 +20,7 @@ const keepAssertions = (scope: "removed" | "instance" = "removed") => ({
   severity: "warning",
   scope,
   detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
-  message: "{{file}}:{{line}} removes assertions ({{text}}).",
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed).",
 })
 
 const BEFORE = [

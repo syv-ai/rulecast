@@ -348,7 +348,9 @@ async function runOne(input: ExamplesInput, scratch: string, example: RuleExampl
   const output = await detect(input, relative, new Map())
   const failure = failureOf(output)
   if (failure !== undefined) return { findings: [], error: failure }
-  return { findings: output.findings.map(({ match }) => findingOf(input, example.path, match)) }
+  return {
+    findings: output.findings.map(({ match }) => findingOf(input, example.path, match, countsOf(input, output))),
+  }
 }
 
 /**
@@ -388,13 +390,22 @@ async function runBaselineOne(
   if (failure !== undefined) return { findings: [], error: failure }
   return {
     findings: output.findings.map(({ match }) => ({
-      ...findingOf(input, example.path, match),
+      ...findingOf(input, example.path, match, countsOf(input, output)),
       status: classify(match, rule.scope, rule.id, changes, containers),
     })),
   }
 }
 
-function findingOf(input: ExamplesInput, file: string, match: Match): ExampleFinding {
+/**
+ * A removed rule's matches are what a file keeps: its message is rendered as deleting all of them
+ * would report it.
+ */
+function countsOf(input: ExamplesInput, output: DetectionOutput): Record<string, string> {
+  const total = String(output.findings.length)
+  return input.rule.scope === "removed" ? { removed: total, baseline: total } : {}
+}
+
+function findingOf(input: ExamplesInput, file: string, match: Match, counts: Record<string, string>): ExampleFinding {
   return {
     line: match.line,
     endLine: match.endLine,
@@ -402,6 +413,7 @@ function findingOf(input: ExamplesInput, file: string, match: Match): ExampleFin
     text: match.text,
     message: renderTemplate(input.rule.message, {
       ...match.captures,
+      ...counts,
       file,
       line: String(match.line),
       column: String(match.column),

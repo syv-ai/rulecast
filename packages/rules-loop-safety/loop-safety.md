@@ -22,7 +22,7 @@ Flagged: a test file (the same files as for skipped tests) with fewer assertions
 - Python: `assert` statements, method calls named `assert`, `assert_*` or `assert` and a capital letter (unittest's `self.assertEqual()`, mock's `assert_called_once_with()`, but not `assertions()`), and `pytest.raises`, `pytest.warns`, `pytest.deprecated_call` and `pytest.fail`.
 - JavaScript and TypeScript: `expect()` (also with a type argument, `expect<T>()`, and `expect.soft()` and `expect.poll()`), `assert()` and `assert.*()`.
 
-The finding is one per file, on the first line the change touched, and says how many assertions went: `1 of 3 removed`. A commented-out assertion counts as removed. Adding, moving or rewriting assertions is not flagged as long as the count does not drop. The count is compared when the agent stops, not after each edit, so an assertion cut in one edit and pasted in the next is not flagged.
+The finding is one per file, on the first line the change touched, and says how many assertions went: `1 of 3 removed`. Deleting one more is the same finding, not a new one, so an unattended run is not blocked afresh for each assertion it deletes. A commented-out assertion counts as removed. Adding, moving or rewriting assertions is not flagged as long as the count does not drop. The count is compared when the agent stops, not after each edit, so an assertion cut in one edit and pasted in the next is not flagged.
 
 Combining assertions lowers the count too: three asserts folded into one parametrized test, or several `expect`s into one `toEqual`, are flagged. If that is what you meant to do, keep it and say so in your report.
 
