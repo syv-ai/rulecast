@@ -227,6 +227,7 @@ export async function checkRun(
     maxContextChars: null,
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
+    reportDisabled: true,
     // The machine formats report pre-existing findings by id; the others summarise them.
     listPreexisting: run.format === "json" || run.format === "sarif",
   })

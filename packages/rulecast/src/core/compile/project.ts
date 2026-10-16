@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { CONFIG_FILE, MANIFEST_FILE, parseConfig, readConfigData, readManifest } from "../config/load"
-import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../config/schema"
+import { type Config, defaultConfig, overrideSchema, type RepoEntry, ruleSchema } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError, isNotFound } from "../errors"
 import { compileFilter } from "../files"
@@ -24,6 +24,12 @@ export interface Diagnostic {
    * exits 2 instead of reporting a run that checked nothing (adapters/cli/contract.ts).
    */
   fatal?: true
+  /**
+   * A diagnostic about a whole `repos` entry (a repo that could not be fetched, a missing rev): the
+   * rules that entry configures, by id or alias. `rulecast run RULE_ID` counts it only when it
+   * names that rule. Absent on a diagnostic with no rule: it could affect any rule.
+   */
+  affects?: string[]
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -121,6 +127,20 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   const project: ReferenceRoot = { dir: root, label: null }
   const error = (source: string, rule: string | null, message: string, hint?: string) =>
     diagnostics.push({ source, rule, message, level: "error", ...(hint === undefined ? {} : { hint }) })
+  /** An error about a whole entry: none of the rules it configures compiled. */
+  const entryError = (entry: RepoEntry, source: string, message: string, hint?: string) =>
+    diagnostics.push({
+      source,
+      rule: null,
+      message,
+      level: "error",
+      ...(hint === undefined ? {} : { hint }),
+      affects: entry.rules.flatMap((raw) => {
+        const alias = (raw as { alias?: unknown } | null)?.alias
+        const id = typeof alias === "string" ? alias : idOf(raw)
+        return id === null ? [] : [id]
+      }),
+    })
   const add = async (input: RuleInput, source: string) => {
     const result = await compileRule(input, context)
     if (typeof result === "string") {
@@ -134,7 +154,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   for (const [index, entry] of config.repos.entries()) {
     if (entry.repo === "local") {
       if (entry.rev !== undefined) {
-        error(CONFIG_FILE, null, `repos[${index}]: local repos take no rev`)
+        entryError(entry, CONFIG_FILE, `repos[${index}]: local repos take no rev`)
         continue
       }
       for (const raw of entry.rules) {
@@ -146,7 +166,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
 
     if (entry.rev === undefined) {
-      error(CONFIG_FILE, null, `repos[${index}] ${entry.repo}: rev is required`)
+      entryError(entry, CONFIG_FILE, `repos[${index}] ${entry.repo}: rev is required`)
       continue
     }
     const source = `${entry.repo}@${entry.rev}`
@@ -160,12 +180,12 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
     const checkout = await options.repos.checkout(entry.repo, entry.rev)
     if (!checkout.ok) {
-      error(source, null, checkout.message, checkout.missing ? "rulecast install" : undefined)
+      entryError(entry, source, checkout.message, checkout.missing ? "rulecast install" : undefined)
       continue
     }
     const manifest = await readManifest(checkout.dir)
     if (!manifest.ok) {
-      error(source, null, manifest.message)
+      entryError(entry, source, manifest.message)
       continue
     }
     const byId = new Map<string, unknown[]>()

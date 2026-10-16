@@ -1,6 +1,6 @@
 import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
-import { type IgnoredFinding, suppress } from "../suppress"
+import { type IgnoredFinding, type SourceLines, sourceLines, suppress } from "../suppress"
 import type { ChangeSet, DetectorEvent, DetectorResult, Match, TextEdit } from "../types"
 import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
@@ -13,6 +13,11 @@ export interface DetectionInput {
   changes: ReadonlyMap<string, ChangeSet>
   /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
   read(file: string): Promise<string | null>
+  /**
+   * `read` as lines, memoised (core/suppress.ts). Pass one in to build finding ids from the lines
+   * suppression already read; absent, the run makes its own.
+   */
+  lines?: SourceLines
   /** False when `read` is not the working tree; handed to detectors as `DetectorRun.fromDisk`. */
   fromDisk?: boolean
   /** Per run, not per project: the edit deadline on edit, verify_ms on verify (§13). */
@@ -145,6 +150,6 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     }
   }
   // Last, so every caller — pipeline, guard, examples, doctor, test --against — honours ignores.
-  const suppressed = await suppress(output.findings, input.read)
+  const suppressed = await suppress(output.findings, input.lines ?? sourceLines(input.read))
   return { ...output, ...suppressed }
 }

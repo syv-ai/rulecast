@@ -16,9 +16,13 @@ rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 | `0` | Every rule ran, and no new finding has severity `error`. Warnings and pre-existing findings are allowed. | the report |
 | `1` | Every rule ran, and at least one new finding has severity `error`. | the report |
 | `2` | rulecast could not run: a usage error, a config file that does not load (YAML, schema, `minimum_rulecast_version`), git, or an internal error. | empty; the message is on stderr |
-| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. The findings of the rules that did run are still reported. | the report, with `complete: false` |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. With `--session`, also a rule whose detector failed earlier in that session, which disabled it. The findings of the rules that did run are still reported. | the report, with `complete: false` |
 
 `3` wins over `1`: a `1` promises that every rule ran. A loop can stop on `0`, fix and retry on `1`, and needs a person on `2` or `3`.
+
+`rulecast run RULE_ID` is incomplete only over that rule: its own compile error, or a rule repo that failed and configures it. Another repo that could not be fetched is still a warning, but not a `3`.
+
+`try-repo` fetches the repo it tries before anything runs, so a repo that cannot be fetched, or has no manifest, exits `2`.
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
@@ -130,18 +134,24 @@ A loop needs to tell "the same finding as last run" from a new one, across runs,
 
 - the rule id (the alias, when one is set),
 - the file path,
-- the matched text, with runs of whitespace collapsed to one space and the ends trimmed,
+- the source line or lines the match spans, with runs of whitespace collapsed to one space and the ends trimmed, and with a trailing `rulecast-ignore` comment left out, together with the punctuation that opens it in whatever syntax (`#`, `//`, `/*`, `/**`, `{/*`, `<!--`, `--`, `;`),
 - the detector's captures, sorted by name (a tool rule's `ruleId` and `message`, a regex's named groups), except captures whose value changes from run to run: an `llm` rule's `reason`,
-- the match's position among identical matches in the file (0 for the first, 1 for the second, …).
+- the finding's position among findings of the same rule in the file whose lines and captures are identical (0 for the first, 1 for the second, …).
 
-The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, and re-indenting the line or checking it out with CRLF line endings does not change it either. These do change it:
+The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, including another violation of the same rule. Re-indenting the line, checking it out with CRLF line endings or adding a `rulecast-ignore` comment to it does not change it either. An id changes when the finding's line changes, which is also when rulecast counts the finding as new:
 
-- Editing the offending text. That is a different violation.
-- Adding an identical violation above it in the same file: the occurrence numbers of the ones below shift.
+- Editing the line, even away from the matched text. The line is different, so it is a different finding.
+- Adding a line identical to it above it in the same file: the occurrence numbers of the ones below shift.
 - Renaming the rule's alias, or moving the file.
 - A tool message that contains a number that moves, such as a line count. The message is part of what the tool reports.
 
+Only an ignore that comment punctuation introduces is left out. One inside a string literal (`"rulecast-ignore: …"`) is part of the line, unless the string itself starts with comment punctuation (`"# rulecast-ignore: …"`). The punctuation run is taken whole, so write a space before the comment: in `f();// rulecast-ignore: …` the `);` goes with the `//`, and adding that comment changes the id.
+
+A finding about a whole file hashes its text and captures instead of the file's lines, so an edit to the file keeps its id: a `path` rule's finding (its text is the path), and a hook's finding that covers the whole file (it would reformat the file, or failed without a location). Such a finding says it is about the whole file; one that merely spans every line of its file still hashes its lines. A secret a tool reports (gitleaks) hashes its redacted text and captures, never its line, so no part of the secret goes into the id; two secrets of one rule in one file are told apart by their order. If the file cannot be read, the matched text is hashed in place of its lines.
+
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
+
+A merged finding (`count` above 1) carries its earliest match's id, so fixing that one match gives the merged finding a new id while the rest are still there. A loop that compares merged findings should compare `rule` and `file` as well as `id`.
 
 The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v1`. If what the id hashes ever changes, that key changes with it, and `schemaVersion` is bumped.
 

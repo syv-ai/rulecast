@@ -449,7 +449,14 @@ describe("compile: rule repos", () => {
     )
     expect(project.rules.map((rule) => rule.id)).toEqual(["mine"])
     expect(project.diagnostics).toEqual([
-      { source: `${url}@v1.0.0`, rule: null, message: "not in the cache", level: "error", hint: "rulecast install" },
+      {
+        source: `${url}@v1.0.0`,
+        rule: null,
+        message: "not in the cache",
+        level: "error",
+        hint: "rulecast install",
+        affects: ["python/no-print"],
+      },
     ])
   })
 
