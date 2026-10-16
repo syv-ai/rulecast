@@ -76,6 +76,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
   "checked": { "files": 1, "selection": "range" },
   "ignored": [],
   "notices": [],
+  "disabled": [],
   "stop": null,
   "baseline": null
 }
@@ -92,6 +93,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `references` | The doc sections the new findings' rules cite, with their text when it was read. |
 | `warnings` | rulecast's own problems: a broken rule, a detector that failed, a timeout, an ignore without a reason. Not findings. |
 | `skipped` | `llm` rules a staged run or `--no-llm` left out, when they matched a checked file. |
+| `disabled` | Rules that did not run, grouped by why: `[{ "reason": "…: not in the cache (run rulecast install)", "rules": ["python/no-bare-except"] }]`. A rule repo that could not be fetched, a detector whose tool is missing, a rule that failed to compile. Empty when every rule ran. When it is not empty, `complete` is `false` and the exit code is 3. |
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |

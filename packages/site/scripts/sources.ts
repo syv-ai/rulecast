@@ -113,6 +113,13 @@ export const PAGES: Page[] = [
     source: { readme: ["Git hooks and CI"] },
   },
   {
+    route: "guides/agent-loops",
+    title: "Agent loops",
+    description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
+    group: "Guides",
+    source: { file: "agents/reference/loops.md" },
+  },
+  {
     route: "guides/agents",
     title: "Agents",
     description: "Let your agent set rulecast up and draft rules from your docs.",
