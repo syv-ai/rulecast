@@ -531,12 +531,24 @@ export function trim(
  */
 export const REPEAT_LIMIT = 2
 
+/** Match texts that say nothing about the finding: gitleaks' redaction, a hook's whole-file finding. */
+const OPAQUE_TEXTS = new Set(["", "[redacted]"])
+
 /**
  * What makes two stops' findings the same finding: rule, file and the matched text. Not the line,
  * which any edit above it moves; not the message, which usually carries the line.
+ *
+ * Unless the text is one that every finding of the tool shares: then two secrets in one file would
+ * be one finding, and the second would never block. There the tool's own rule id and message, and
+ * the line, tell them apart, at the cost of a moved finding counting as a new one.
  */
 export function findingKey({ rule, match }: ClassifiedFinding): string {
-  return createHash("sha256").update(`${rule.id}\n${match.file}\n${match.text.trim()}`).digest("hex").slice(0, 16)
+  const text = match.text.trim()
+  const parts = [rule.id, match.file, text]
+  if (OPAQUE_TEXTS.has(text)) {
+    parts.push(match.captures.ruleId ?? "", match.captures.message ?? "", String(match.line))
+  }
+  return createHash("sha256").update(parts.join("\n")).digest("hex").slice(0, 16)
 }
 
 /**
@@ -550,7 +562,8 @@ export function findingKey({ rule, match }: ClassifiedFinding): string {
  * Attended, a capped stop is let through and the user is told. Unattended there is no user, and a
  * stop the gate lets through ends the run, so what is left is said to the agent instead, by one more
  * block (`report`) asking it to record the findings as unresolved and finish. A finding that has
- * blocked REPEAT_LIMIT stops no longer counts towards blocking, only towards that report.
+ * blocked REPEAT_LIMIT stops no longer counts towards blocking, only towards that report — except a
+ * refused one, a protected file changed with the shell, which blocks until it is reverted.
  *
  * Unattended, a stop with nothing to block while configured rules did not run (`incomplete`) holds
  * the main agent once per prompt, so its report says those checks never happened (#29). A block or
@@ -601,7 +614,9 @@ function gateFindings(
   }
   const keys = [...new Set(failing.map(findingKey))]
   const unrepeated = keys.filter((key) => (work.blockedFindings.get(blockedKey(agent, key)) ?? 0) < REPEAT_LIMIT)
-  if (unrepeated.length > 0 && blocks < maxBlocks) {
+  // A refused write is not a judgement the agent may dispute by repetition: it blocks until it is
+  // reverted, bounded only by the budget and the report.
+  if ((unrepeated.length > 0 || failing.some(refused)) && blocks < maxBlocks) {
     return { stop: "block", work: [{ t: "stopBlock", agent, findings: keys }] }
   }
   if (!work.stopReports.has(agent)) return { stop: "report", work: [{ t: "stopReport", agent }] }

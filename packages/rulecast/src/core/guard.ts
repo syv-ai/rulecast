@@ -1,5 +1,7 @@
+import { diffLines } from "./baseline/changes"
+import { hashLines } from "./baseline/hash"
 import type { CompiledRule } from "./compile/rule"
-import type { Config } from "./config/schema"
+import type { Config, Mode } from "./config/schema"
 import type { ReferenceResolver } from "./delivery/resolve"
 import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
@@ -17,6 +19,8 @@ export interface GuardInput {
   event: Event
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
+  /** Unattended, an ignore does not silence a finding on a line the write changes, as in the pipeline. */
+  mode: Mode
   work: WorkState
   /**
    * Not reachable through `detection`, which exposes only `contextFor`: the delivery decision
@@ -46,7 +50,8 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const rules = input.rules.filter((rule) => rule.refuseWrite && !input.disabled.has(rule.id) && rule.matches(file))
   if (rules.length === 0) return emptyDelivery()
 
-  const proposal = propose(await readSourceFile(input.detection.root, file), intent)
+  const current = await readSourceFile(input.detection.root, file)
+  const proposal = propose(current, intent)
   if (proposal === null) {
     input.log(`guard: ${file} could not be reconstructed from the tool call; allowing the write`)
     return emptyDelivery()
@@ -78,10 +83,19 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
-  const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
-  const evidence = output.findings.filter(({ rule, match }) =>
-    isInserted(proposal, match, wholeFile(rule.detector.kind)),
+  // Unattended, an ignore does not silence a finding on a line this write changes, whoever wrote the
+  // comment: nobody agreed to it for this code. Changed is measured against the file as it is, so a
+  // Write restating a line, or an Edit's context, changes nothing.
+  const judged = input.mode === "unattended" ? output.ignored : []
+  const changed =
+    judged.length === 0 || current === null ? null : diffLines(hashLines(current), hashLines(proposal.content)).changed
+  const unsilenced = judged.filter(
+    ({ match }) => changed === null || changed.some(([start, end]) => match.line <= end && match.endLine >= start),
   )
+  const findings = [...output.findings, ...unsilenced.map(({ rule, match }) => ({ rule, match }))]
+
+  const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
+  const evidence = findings.filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
   if (evidence.length === 0) return emptyDelivery()
 
   // The refuse gate, like the stop gate: a rule that has had its say about a file lets the next

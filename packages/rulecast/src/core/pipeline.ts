@@ -26,7 +26,7 @@ import { appendContext, appendWork, commitSession, openSession, type SessionView
 import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -301,6 +301,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -444,11 +445,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
-    findings = output.findings.map(({ rule, match }) => ({
-      rule,
-      match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
-    }))
+    const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
+      classify(match, rule.scope, rule.id, baselineChanges, fingerprints)
+    findings = output.findings.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
+    const unsilenced =
+      project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
+    for (const { rule, match, status } of unsilenced) findings.push({ rule, match, status })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
@@ -456,7 +462,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    ignored = output.ignored
+    const kept = new Set(unsilenced.map(({ match }) => match))
+    ignored = output.ignored.filter(({ match }) => !kept.has(match))
     // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
     // what to undo, because nothing could refuse the write before it happened.
     const shellEdited = (file: string) =>
@@ -474,12 +481,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
         currentConfigHash: atStop ? await configHash(root) : null,
         ignored: atStop
-          ? ignored.map(({ rule, match, reason }) => ({
-              rule: rule.id,
-              match,
-              reason,
-              status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
-            }))
+          ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
           : [],
         told: view.work.noticed,
         refused,

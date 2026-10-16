@@ -16,10 +16,11 @@ export interface ActiveMode {
 /** `interactive` is accepted for `attended`: it is the word people reach for. */
 const ENV_VALUES: Record<string, Mode> = { attended: "attended", interactive: "attended", unattended: "unattended" }
 
-/** CI systems set these to "true"; "false" and "0" are someone switching it off. */
+/** CI systems set these to "true"; "false" (in any case) and "0" are someone switching it off. */
 const CI_VARIABLES = ["CI", "GITHUB_ACTIONS"] as const
 
-const isSet = (value: string | undefined) => value !== undefined && value !== "" && value !== "false" && value !== "0"
+const isSet = (value: string | undefined) =>
+  value !== undefined && value !== "" && value.toLowerCase() !== "false" && value !== "0"
 
 /** The CI variable that is set, if any: what `doctor` reads to check as a CI job would (#29). */
 export function ciVariable(env: Env): (typeof CI_VARIABLES)[number] | undefined {
