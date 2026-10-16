@@ -42,30 +42,34 @@ describe("decide: findings", () => {
     const { delivery } = await decide(
       input({
         findings: [
-          { rule: warningRule, match: at("b.ts", 9), status: "new" },
-          { rule: errorRule, match: at("a.ts", 3, { NAMES: "Docs" }), status: "new" },
-          { rule: errorRule, match: at("a.ts", 3, { NAMES: "Docs" }), status: "new" },
+          { rule: warningRule, match: at("b.ts", 9), id: "w1", status: "new" },
+          { rule: errorRule, match: at("a.ts", 3, { NAMES: "Docs" }), id: "e1", status: "new" },
+          { rule: errorRule, match: at("a.ts", 3, { NAMES: "Docs" }), id: "e2", status: "new" },
         ],
       }),
     )
     expect(delivery.findings).toEqual([
       {
+        id: "e1",
         rule: "api/no-client",
         severity: "error",
         status: "new",
         file: "a.ts",
         line: 3,
+        endLine: 3,
         column: 3,
         message: "a.ts:3 imports Docs",
         count: 2,
         captures: { NAMES: "Docs" },
       },
       {
+        id: "w1",
         rule: "style/warn",
         severity: "warning",
         status: "new",
         file: "b.ts",
         line: 9,
+        endLine: 9,
         column: 3,
         message: "consider style/warn",
         count: 1,
@@ -75,11 +79,40 @@ describe("decide: findings", () => {
     ])
   })
 
+  test("a merged finding shows its earliest match, and carries that match's id, whatever the emit order", async () => {
+    const merged = rule({ id: "api/no-client", message: "{{file}} imports a client" })
+    const { delivery } = await decide(
+      input({
+        findings: [
+          { rule: merged, match: at("a.ts", 8), id: "late", status: "new" },
+          { rule: merged, match: at("a.ts", 2), id: "early", status: "new" },
+        ],
+      }),
+    )
+    expect(delivery.findings).toMatchObject([{ id: "early", line: 2, count: 2 }])
+  })
+
+  test("listPreexisting renders pre-existing findings in full, and leaves new ones as they were", async () => {
+    const findings = [
+      { rule: errorRule, match: at("a.ts", 1, { NAMES: "A" }), id: "p1", status: "preexisting" as const },
+      { rule: errorRule, match: at("a.ts", 7, { NAMES: "B" }), id: "n1", status: "new" as const },
+    ]
+    const context = emptyContext()
+    context.preexisting.add(preexistingKey("api/no-client", "a.ts"))
+    const { delivery } = await decide(input({ findings, context, listPreexisting: true }))
+    expect(delivery.findings.map((finding) => finding.id)).toEqual(["n1"])
+    // The announced backlog is the agent's filter; a report lists everything.
+    expect(delivery.preexisting).toMatchObject([
+      { id: "p1", status: "preexisting", line: 1, message: "a.ts:1 imports A" },
+    ])
+    expect((await decide(input({ findings }))).delivery.preexisting).toBeUndefined()
+  })
+
   test("pre-existing findings become one summary per rule and file, once per context", async () => {
     const findings = [
-      { rule: errorRule, match: at("a.ts", 1, { NAMES: "A" }), status: "preexisting" as const },
-      { rule: errorRule, match: at("a.ts", 7, { NAMES: "B" }), status: "preexisting" as const },
-      { rule: errorRule, match: at("b.ts", 2, { NAMES: "C" }), status: "preexisting" as const },
+      { rule: errorRule, match: at("a.ts", 1, { NAMES: "A" }), id: "id", status: "preexisting" as const },
+      { rule: errorRule, match: at("a.ts", 7, { NAMES: "B" }), id: "id", status: "preexisting" as const },
+      { rule: errorRule, match: at("b.ts", 2, { NAMES: "C" }), id: "id", status: "preexisting" as const },
     ]
     const first = await decide(input({ findings }))
     expect(first.delivery.findings).toEqual([])
@@ -116,8 +149,8 @@ describe("decide: findings", () => {
 })
 
 describe("decide: stop gate", () => {
-  const newError = { rule: errorRule, match: at("a.ts", 3, { NAMES: "X" }), status: "new" as const }
-  const newWarning = { rule: warningRule, match: at("a.ts", 4), status: "new" as const }
+  const newError = { rule: errorRule, match: at("a.ts", 3, { NAMES: "X" }), id: "id", status: "new" as const }
+  const newWarning = { rule: warningRule, match: at("a.ts", 4), id: "id", status: "new" as const }
 
   test("null when not a stop", async () => {
     expect((await decide(input({ findings: [newError] }))).delivery.stop).toBeNull()
@@ -163,7 +196,7 @@ describe("decide: stop gate", () => {
   // became an error the gate could not see — and the agent was allowed to stop with it unresolved.
   test("a budget that drops the rule whole still blocks", async () => {
     const long = rule({ id: "api/long", message: `{{file}} ${"explanation. ".repeat(60)}` })
-    const findings = [{ rule: long, match: at("a.ts", 1), status: "new" as const }]
+    const findings = [{ rule: long, match: at("a.ts", 1), id: "id", status: "new" as const }]
 
     const unbudgeted = await decide(input({ stopGate: true, findings }))
     const budgeted = await decide(input({ stopGate: true, findings, maxContextChars: 200 }))
@@ -200,7 +233,7 @@ describe("decide: stop gate", () => {
       input({
         stopGate: true,
         work,
-        findings: [{ rule: long, match: at("a.ts", 1), status: "new" }],
+        findings: [{ rule: long, match: at("a.ts", 1), id: "id", status: "new" }],
         maxContextChars: 200,
       }),
     )

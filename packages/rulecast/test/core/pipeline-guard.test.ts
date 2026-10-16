@@ -170,3 +170,25 @@ describe("pipeline: what a refusal delivered", () => {
     ])
   })
 })
+
+/** Review of PR #37: the guard numbers occurrences as the pipeline does, ignored matches included. */
+describe("pipeline: a refusal's finding id", () => {
+  test("is the id verify gives the same match, with an ignored duplicate above it", async () => {
+    const root = await createRepo({
+      ...files,
+      [SERVICE]:
+        "def get(x):\n    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception legacy\n    y = 1\n    return x\n",
+    })
+    const refused = await run(
+      root,
+      guard(root, SERVICE, { edit: { find: "return x", replace: "raise HTTPException(404)", all: false } }),
+    )
+    expect(refused.findings).toHaveLength(1)
+    await writeFile(
+      path.join(root, SERVICE),
+      "def get(x):\n    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception legacy\n    y = 1\n    raise HTTPException(404)\n",
+    )
+    const verified = await run(root, { kind: "verify", files: [SERVICE], cwd: root })
+    expect(verified.findings.map((finding) => finding.id)).toEqual([refused.findings[0]!.id])
+  })
+})

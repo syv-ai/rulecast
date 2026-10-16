@@ -38,6 +38,7 @@ function input(count: number, overrides: Partial<DecideInput> = {}): DecideInput
     findings: Array.from({ length: count }, (_, index) => ({
       rule: rule({ id: "scale/compute", message: "{{file}}:{{line}} calls compute({{n}})" }),
       match: at(index + 1),
+      id: "id",
       status: "new" as const,
     })),
     touches: [],
@@ -79,6 +80,7 @@ describe("decide: one rule with very many matches", () => {
     const preexisting = Array.from({ length: 20_000 }, (_, index) => ({
       rule: rule({ id: "scale/legacy", message: "{{file}} is old" }),
       match: { ...at(1), file: `src/old/file-${index}.ts` },
+      id: "id",
       status: "preexisting" as const,
     }))
     const started = performance.now()
@@ -95,9 +97,11 @@ describe("decide: one rule with very many matches", () => {
     const findings = Array.from({ length: 60_000 }, (_, index) => ({
       rule: "scale/compute",
       severity: "error" as const,
+      id: "id",
       status: "new" as const,
       file: "src/generated.ts",
       line: index + 1,
+      endLine: index + 1,
       column: 1,
       message: `src/generated.ts:${index + 1} calls compute(${index + 1})`,
       count: 1,

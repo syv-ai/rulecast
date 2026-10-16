@@ -6,9 +6,11 @@ import { type Delivery, emptyDelivery, type Finding } from "../../../src/core/ty
 const finding = (rule: string, file: string, count = 1, line = 1): Finding => ({
   rule,
   severity: "error",
+  id: "id",
   status: "new",
   file,
   line,
+  endLine: line,
   column: 1,
   message: `${file}:${line}`,
   count,

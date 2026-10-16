@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import type { BaselineChanges } from "../../../src/core/baseline/baseline"
 import { diffLines, identityMap } from "../../../src/core/baseline/changes"
-import { classify, type Fingerprints, mapRange } from "../../../src/core/baseline/fingerprint"
+import { type ContainerRanges, classify, mapRange } from "../../../src/core/baseline/classify"
 import { hashLines } from "../../../src/core/baseline/hash"
 import type { Match } from "../../../src/core/types"
 
@@ -36,12 +36,13 @@ function untouched(lines: number): BaselineChanges {
   }
 }
 
-const recorded = (...ranges: [number, number][]): Fingerprints => new Map([[FILE, new Map([["slim-routes", ranges]])]])
+const recorded = (...ranges: [number, number][]): ContainerRanges =>
+  new Map([[FILE, new Map([["slim-routes", ranges]])]])
 
-const none: Fingerprints = new Map()
+const none: ContainerRanges = new Map()
 
-const container = (match: Match, changes: BaselineChanges, fingerprints: Fingerprints) =>
-  classify(match, "container", "slim-routes", changes, fingerprints)
+const container = (match: Match, changes: BaselineChanges, containers: ContainerRanges) =>
+  classify(match, "container", "slim-routes", changes, containers)
 
 const body = (n: number) => Array.from({ length: n }, (_, index) => `    step_${index}()`)
 
@@ -74,7 +75,7 @@ describe("classify: instance scope is unchanged", () => {
     expect(classify(at(3), "instance", "slim-routes", changes, none)).toBe("preexisting")
   })
 
-  test("fingerprints are ignored entirely", () => {
+  test("containers are ignored entirely", () => {
     expect(classify(at(2), "instance", "slim-routes", changes, recorded([1, 3]))).toBe("new")
   })
 })

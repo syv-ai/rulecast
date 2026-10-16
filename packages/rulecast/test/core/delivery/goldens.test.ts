@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { computeChanges } from "../../../src/core/baseline/baseline"
-import { classify } from "../../../src/core/baseline/fingerprint"
+import { classify } from "../../../src/core/baseline/classify"
 import { snapshotOf } from "../../../src/core/baseline/hash"
 import type { RuleScope } from "../../../src/core/config/schema"
 import { renderAgentText } from "../../../src/core/delivery/render-agent"
@@ -51,7 +51,7 @@ interface ClassificationCase {
   current: string
   scope: RuleScope
   /** The container rule's recorded baseline ranges; null when no record was ever written. */
-  fingerprints: [number, number][] | null
+  containerRanges: [number, number][] | null
   match: [line: number, endLine: number]
   expected: "new" | "preexisting"
 }
@@ -72,11 +72,11 @@ describe("classification goldens", () => {
     // A snapshot, not a commit, so the corpus needs no git.
     const snapshots = golden.baseline === null ? new Map() : new Map([[FILE, snapshotOf(golden.baseline)]])
     const changes = await computeChanges(root, [FILE], { snapshots, fallbackCommit: null })
-    const fingerprints =
-      golden.fingerprints === null ? new Map() : new Map([[FILE, new Map([[RULE, golden.fingerprints]])]])
+    const containers =
+      golden.containerRanges === null ? new Map() : new Map([[FILE, new Map([[RULE, golden.containerRanges]])]])
 
     const [line, endLine] = golden.match
     const match: Match = { file: FILE, line, endLine, column: 1, text: "", captures: {} }
-    expect(classify(match, golden.scope, RULE, changes, fingerprints), golden.about).toBe(golden.expected)
+    expect(classify(match, golden.scope, RULE, changes, containers), golden.about).toBe(golden.expected)
   })
 })

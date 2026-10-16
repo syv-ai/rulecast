@@ -97,8 +97,11 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast init` | Set rulecast up: config, catalog rules, your existing git hooks as rules, agent hooks |
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
+| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
+| `rulecast fix` | Apply regex and ast-grep rules' fixes; `--dry-run` prints the diff |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
+| `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
@@ -109,13 +112,27 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 
 `rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.
 
+### Exit codes
+
+`rulecast run`, `rulecast try-repo` and `rulecast fix` (after its fixes) exit with:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed) |
+| `1` | Every rule ran; at least one new error-severity finding |
+| `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
+
+On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](agents/reference/output.md).
+
 ## Git hooks and CI
 
 The same rule reports the same line the same way in an agent hook, a git hook and CI. What counts as new is a match on a line you changed; a violation that was already there is backlog, shown and never failing.
 
 - **Pre-commit:** `rulecast run` with no file flags checks the staged files, reads their content from the index (what is being committed, not the working tree), and judges it against `HEAD`. `llm` rules are skipped unless you pass `--llm`, and one line says so: a commit should not cost money.
 - **Pre-push and CI:** `rulecast run --from-ref A --to-ref B` checks the files changed between the merge base with `A` and `B`, reading them at `B`. Without `--to-ref` it reads the working tree.
-- `rulecast run --files F...` judges files whole, with no baseline. Use the hook below rather than `--files` from a hook manager.
+- `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
+- **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse.
 
 rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks need it there anyway), and wire it into the one you use.
 
@@ -164,7 +181,7 @@ jobs:
       - run: npm ci
       - run: npx rulecast run --from-ref origin/${{ github.base_ref }} --format sarif > rulecast.sarif
       - uses: github/codeql-action/upload-sarif@v3
-        if: always() # rulecast exits 1 on findings, which is when the upload matters
+        if: always() # rulecast exits 1 on findings and 3 when a rule could not run, which is when the upload matters
         with:
           sarif_file: rulecast.sarif
 ```
@@ -230,6 +247,27 @@ edits to files that already followed the rule broke it 2% of the time, against 3
 mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not
 proven.)
 
+When the fix is mechanical, give the rule a [`fix`](agents/reference/rule-format.md#fixes) and burn the stock down in one go: `rulecast fix <rule> --all-files --dry-run` shows the diff, and without `--dry-run` it writes it. Hooks never apply a fix; only that command does.
+
+### A committed baseline
+
+`--from-ref` needs a ref. A scheduled full-repository run, such as a nightly convention sweep or an agent loop told to keep `main` clean, has none, so every legacy violation is new and the run always fails. For those, record what is there today:
+
+```sh
+rulecast baseline            # writes .rulecast/baseline.json
+git add .rulecast/baseline.json && git commit -m "rulecast baseline"
+rulecast run --all-files     # exits 0 unless something got worse
+```
+
+- `run --all-files` and `run --files` treat the findings listed in the file as pre-existing, and fail only on new ones. Sessions, `--from-ref` and staged commits keep their own baseline, and hooks never read the file.
+- The file lists finding ids ([what an id is](agents/reference/output.md#finding-ids)), so editing a baselined line's offending text, or moving its file, makes the finding new.
+- When a run no longer finds an entry it says so: `baseline: 3 entries no longer found (fixed or changed); rulecast baseline --prune drops them`. Run `--prune` in the same pull request that fixes them. It only ever removes entries, never adds one, and keeps the entries of rules that did not run.
+- Recording new findings means rewriting the file with `rulecast baseline --force`. That is an amnesty, and it shows in review as one.
+- `rulecast doctor` reports its size, when it was added and when it last changed.
+- `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
+
+Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
+
 If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
 
 ## Agents
@@ -265,6 +303,7 @@ can be blamed for what the others wrote while its command ran, with any tool. ru
 once when its shell call overlapped another agent's and files changed while it ran. For parallel agents, give each its own worktree
 (in Claude Code, a subagent with `isolation: worktree`).
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md).
+As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 

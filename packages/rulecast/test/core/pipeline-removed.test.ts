@@ -197,11 +197,11 @@ describe("pipeline: removed scope", () => {
       readFile(path.join(sessionDir(stateDirFor(root), "s1"), "baseline.jsonl"), "utf8")
     const counted = await scenario()
     await counted.send({ kind: "touch", files: [TEST], completeRead: true })
-    expect(await store(counted.root)).toContain("fingerprint")
+    expect(await store(counted.root)).toContain(`"t":"container"`)
 
     const plain = await scenario(BEFORE, [keepAssertions("instance")])
     await plain.send({ kind: "touch", files: [TEST], completeRead: true })
-    expect(await store(plain.root)).not.toContain("fingerprint")
+    expect(await store(plain.root)).not.toContain(`"t":"container"`)
   })
 
   const IGNORE = "  # rulecast-ignore: tests/keep-assertions the value is checked elsewhere"

@@ -20,6 +20,11 @@ export interface DetectorFixture {
    * leaves the others alone. Omit it and that case is skipped.
    */
   failing?: { config: unknown; matching?: string[] }
+  /**
+   * For a detector that declares `fixable`: a config with a fix that matches at least once in
+   * `matching`, and whose fix removes every match. Omit it and the fix cases are skipped.
+   */
+  fix?: { config: unknown }
 }
 
 const EVENTS: DetectorEvent[] = ["edit", "verify"]
@@ -30,13 +35,20 @@ async function configOf(detector: AnyDetector, value: unknown, where: string): P
   return parsed.data
 }
 
-function run(detector: AnyDetector, rules: unknown[], cwd: string, signal: AbortSignal): Promise<DetectorResult> {
+function run(
+  detector: AnyDetector,
+  rules: unknown[],
+  cwd: string,
+  signal: AbortSignal,
+  options: { fixes?: boolean; read?: (file: string) => Promise<string | null> } = {},
+): Promise<DetectorResult> {
   return detector.run({
     event: "edit",
     // biome-ignore lint/suspicious/noExplicitAny: the registry erases each detector's config type.
     rules: rules as any,
     changes: new Map(),
-    read: (file) => readSourceFile(cwd, file),
+    read: options.read ?? ((file) => readSourceFile(cwd, file)),
+    ...(options.fixes === true ? { fixes: true } : {}),
     cache: memoryCache(),
     settings: defaultDetectorSettings(),
     cwd,
@@ -171,6 +183,69 @@ export function detectorContract(detector: AnyDetector, fixture: DetectorFixture
         )
       },
     })
+  }
+
+  if (fixture.fix) {
+    const fix = fixture.fix
+    const fixedRule = async () => rule("a", await configOf(detector, fix.config, "the fixture's fix"), fixture.matching)
+    cases.push(
+      {
+        name: "declares the fix config fixable",
+        async run() {
+          assert.ok(detector.fixable !== undefined, "a fixture with a fix needs a detector that declares fixable")
+          const config = await configOf(detector, fix.config, "the fixture's fix")
+          assert.equal(detector.fixable(config), true, "fixable(config) must be true for the fixture's fix config")
+          const plain = await configOf(detector, fixture.config, "the fixture's")
+          assert.equal(detector.fixable(plain), false, "fixable(config) must be false for a config without a fix")
+        },
+      },
+      {
+        name: "findings carry no fix unless the run asks for fixes",
+        async run() {
+          const result = await run(detector, [await fixedRule()], await project(), open())
+          assert.ok(result.findings.length > 0, "the fixture's fix config must produce at least one finding")
+          for (const finding of result.findings) assert.equal(finding.fix, undefined, "a fix was attached unasked")
+        },
+      },
+      {
+        name: "a fix is an edit inside the text the detector read",
+        async run() {
+          const root = await project()
+          const result = await run(detector, [await fixedRule()], root, open(), { fixes: true })
+          assert.ok(result.findings.length > 0, "the fixture's fix config must produce at least one finding")
+          for (const { match, fix: edit } of result.findings) {
+            assert.ok(edit !== undefined, "with fixes, every finding of a rule with a fix carries one")
+            const text = (await readSourceFile(root, match.file)) ?? ""
+            assert.ok(Number.isInteger(edit.start) && Number.isInteger(edit.end), "edit offsets must be integers")
+            assert.ok(
+              0 <= edit.start && edit.start <= edit.end && edit.end <= text.length,
+              "edit must lie inside the text",
+            )
+            assert.equal(typeof edit.text, "string", "edit.text must be a string")
+          }
+        },
+      },
+      {
+        name: "applying the fixes removes the rule's matches",
+        async run() {
+          const root = await project()
+          const fixed = await fixedRule()
+          const result = await run(detector, [fixed], root, open(), { fixes: true })
+          const texts = new Map<string, string>()
+          for (const file of fixture.matching) {
+            let text = (await readSourceFile(root, file)) ?? ""
+            const edits = result.findings
+              .filter((finding) => finding.match.file === file && finding.fix !== undefined)
+              .map((finding) => finding.fix!)
+              .sort((a, b) => b.start - a.start)
+            for (const edit of edits) text = text.slice(0, edit.start) + edit.text + text.slice(edit.end)
+            texts.set(file, text)
+          }
+          const again = await run(detector, [fixed], root, open(), { read: async (file) => texts.get(file) ?? null })
+          assert.deepEqual(again.findings, [], "the fixed text must not match the rule again")
+        },
+      },
+    )
   }
 
   return cases

@@ -157,6 +157,7 @@ describe("runDetectionFrom", () => {
       { kind: "index" },
     )
     expect(output.warnings).toEqual([])
+    expect(output.skipped).toEqual([])
     expect(runs).toHaveLength(1)
     expect(runs[0]!.cwd).toBe(root)
     expect(runs[0]!.rules[0]!.files).toEqual(["app/a.py"])
@@ -172,6 +173,7 @@ describe("runDetectionFrom", () => {
     )
     expect(runs).toEqual([])
     expect(output.warnings).toEqual(["r/project skipped: unstaged changes in app/a.py"])
+    expect(output.skipped).toEqual(["r/project"])
     expect(output.errors).toEqual([])
     expect(await git(root, "stash", "list")).toBe("")
     expect(await readFile(path.join(root, "app/a.py"), "utf8")).toBe("worktree\n")

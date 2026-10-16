@@ -62,6 +62,7 @@ function scenario(seed: number) {
   const findings: ClassifiedFinding[] = Array.from({ length: Math.floor(random() * 80) }, () => {
     const line = 1 + Math.floor(random() * 400)
     return {
+      id: "id",
       rule: pick(rules),
       match: {
         file: pick(["app/routes/users.py", "app/routes/orders_and_more.py", "app/services/a.py"]),

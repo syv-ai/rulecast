@@ -3,7 +3,7 @@
   "baseline": "a\nb\nc\nd\n",
   "current": "a\nb\nC\nd\n",
   "scope": "instance",
-  "fingerprints": null,
+  "containerRanges": null,
   "match": [1, 4],
   "expected": "new"
 }

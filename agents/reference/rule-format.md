@@ -76,6 +76,7 @@ repos:
 | `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
+| `fix` | no; inside `detect.regex` or `detect.ast-grep` | The replacement `rulecast fix` writes over each match (below). No other detector takes one |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures; a removed rule also has `{{removed}}` and `{{baseline}}` (below) |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
@@ -298,10 +299,14 @@ unattended:
 
 ### Examples
 
-`examples` holds `good` code the rule must leave alone and `bad` code it must flag. `rulecast test`
-runs them; `rulecast test <id> --against <paths>` fires the rule over real files and says how many
-violations it would produce and in how many of the files it matches. Without an id,
-`rulecast test --against <paths>` prints that count for every rule, one line each.
+`examples` holds `good` code the rule must leave alone, `bad` code it must flag, and `baseline`
+edits whose findings it must sort into new and pre-existing. `rulecast test` runs them;
+`rulecast test <id> --against <paths>` fires the rule over real files and says how many violations
+it would produce and in how many of the files it matches. Without an id,
+`rulecast test --against <paths>` prints that count for every rule, one line each. Add
+`--max-rate 0.5` to exit 1 when a rule flags more than that share of the files it matches; under 25
+matching files it is not applied, because a share of a handful of files says nothing. `--format json`
+prints the results as a document ([output.md](output.md#rulecast-test)).
 
 ```yaml
 examples:
@@ -312,19 +317,134 @@ examples:
   bad:
     - path: backend/app/services/users.py
       code: |
+        user = create(name)
         print("created user", user.id)
+      expect: { lines: [2] }
+      fixed: |                     # optional, for a rule with fix (below)
+        user = create(name)
+        log.info("created user", user.id)
+  baseline:
+    - path: backend/app/services/users.py
+      before: |
+        def create_user(name):
+            user = create(name)
+            print("created user", user.id)
+            return user
+      after: |
+        def create_user(name):
+            user = create(name)
+            user.save()
+            print("created user", user.id)
+            print("saved")
+            return user
+      expect: { new: [5], preexisting: [4] }
 ```
 
 - **`path` is required** and must match the rule's own `files`, `exclude` and type keys — those, and
   `ast-grep`'s choice of parser, are all decided by the path, so an example without the right one
   tests a different rule. A path the rule would never be given is a `rulecast validate` error.
-- **A `bad` example passes on at least one finding**, not an exact count.
+- **A `bad` example passes on at least one finding**, unless its `expect` says more:
+  - `count`: exactly this many matches.
+  - `lines`: the line each match starts on (line 1 for a finding about the whole file, such as a
+    `path` rule's). Compared as a set: every listed line has a match starting on it, and no match
+    starts on a line not listed. Two matches on one line need the line once.
+
+  Pin `lines` when it matters that the rule fires on the right line, not merely somewhere: an
+  over-broad pattern passes a bare `bad` example by matching the wrong line. A line past the end of
+  `code` (empty `code` counts as one line), or a `count` below the number of `lines`, is a
+  `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
+- **A `baseline` example is an edit.** `before` is the file when the agent first opens it, `after`
+  the file once it has edited it. `rulecast test` sorts the rule's findings in `after` into new and
+  pre-existing the way a session would, by the rule's own [`scope`](#instance-and-container-rules),
+  and the example passes when the start lines of its new findings are exactly `expect.new` and
+  those of its pre-existing ones exactly `expect.preexisting`, as sets. A status left out must have
+  no findings, so `expect: {}` means "no finding at all". It catches a rule that reports code the
+  edit did not touch as new: a regex that spans lines, an `ast-grep` rule that matches a whole
+  function, a `container` rule. To catch a match that is too wide, put the edit's unrelated line
+  inside the block that holds the old violation, next to it but not on it, as above.
+- **Some rules have no baseline example to give.** A `path` rule's file is the break or it is not.
+  An `llm` rule only reports lines the edit changed, so an untouched old violation is never
+  reported, as in a session; its baseline is never measured either, so an `llm` `container` rule
+  classifies as `instance`. A `hook` rule's finding about the whole file (line 1) is new after any
+  edit to the file.
+  Baseline examples count towards neither precision nor recall.
 - A `path` rule has no `good` example to give: every file it matches is a violation by definition.
 - An `llm` rule's examples are only run when you name the rule — `rulecast test` on its own skips
   them, because running one costs a model call.
 
 Write the examples from real code in the repository rather than inventing them, and treat a failing
 example as a wrong rule before a wrong example.
+
+### Fixes
+
+A `regex` or `ast-grep` rule can carry a `fix`: the text that replaces each match. Only
+`rulecast fix` applies it. Agent hooks never do: rulecast never rewrites an agent's file behind its
+back, so under a hook a fixable finding is delivered like any other.
+
+```yaml
+- id: python/logger-not-print
+  files: '\.py$'
+  detect:
+    regex:
+      pattern: 'print\((?<args>[^)]*)\)'
+      fix: "log.info({{args}})"
+  message: "{{file}}:{{line}} uses print. Use the logger."
+  examples:
+    bad:
+      - path: app/x.py
+        code: |
+          print("hi")
+        fixed: |
+          log.info("hi")
+
+- id: frontend/logger-not-console
+  files: '\.tsx?$'
+  detect:
+    ast-grep:
+      language: tsx
+      rule: { pattern: "console.log($$$ARGS)" }
+      fix: "logger.debug($$$ARGS)"
+  message: "{{file}}:{{line}} uses console.log. Use the logger."
+  examples:
+    bad:
+      - path: src/x.ts
+        code: "console.log(a, b)\n"
+```
+
+- **`regex`:** a template in the message's `{{name}}` syntax, with the pattern's named groups and
+  `{{text}}` (the whole match). Values go in exactly as matched, line breaks included. `{{file}}`,
+  `{{line}}`, `{{column}}` and `{{rule}}` are refused: they would be written into the code. A
+  literal `{{x}}` in the replacement (Vue, Jinja) is read as a variable; an unknown one is a
+  `rulecast validate` error.
+- **`ast-grep`:** ast-grep's own syntax. `$NAME` is the text its node matched; `$$$NAMES` is the
+  source from the first matched node to the last, so separators and comments between them are kept.
+  A fix over several lines has lines 2 and on indented like the line the match starts on. A fix may
+  only name metavariables the rule captures. ast-grep's `FixConfig` object (`expandStart`,
+  `expandEnd`), `transform` and `rewriters` are not supported.
+- **A fix needs a `bad` example.** A rule with `fix` and no `bad` example keeps running, but its fix
+  is dropped and `rulecast validate` warns. `rulecast test` applies the fix to every `bad` example:
+  the rule must not fire on the result, and when the example gives `fixed`, the result must equal it
+  exactly (a failure prints the diff). `rulecast fix` runs these checks again before it applies a
+  fix, and skips a rule that fails them.
+- **What it does:** `rulecast fix [RULE_ID] (--files F... | --all-files | --from-ref A)` fixes every
+  finding of a fixable rule in those files, pre-existing ones too, and then checks them as
+  `rulecast run` would; `--dry-run` prints the diff and writes nothing. A fix after which the rule
+  still matches the text it wrote is undone and reported as unresolved, so a second run changes
+  nothing. The exception is a file still changing after 10 passes, such as `aa` → `a` on a long run
+  of `a`s: what the passes did is written, a warning says it is not finished, and the next run goes
+  on from there. Findings with a `rulecast-ignore` are left alone. An ignored match over several
+  lines protects every line of it, so a finding of the same rule nested inside it is not fixed
+  either. Fixes stay within one match in one file: no fix spans files, and `llm` and tool rules have
+  none.
+- **What it will not write:** a symlink (it is reported, not followed), a file with a symlinked
+  directory in its path, a file whose real path is outside the project, a file that is not UTF-8, and
+  a file that changed after it was read, checked again just before it is replaced. A file whose text
+  comes back to an earlier one while fixes are still pending after 10 passes (two rules undoing each
+  other) is left as it was, and so is a file where a fix would move a `rulecast-ignore` comment away
+  from the finding it is for; their findings are reported as unresolved. A file that cannot be
+  written is reported, and the others are still written. `--dry-run` leaves out the same files. A
+  file is replaced through a rename, so its mode is kept, but another hard link to it keeps the old
+  content.
 
 ### Messages
 

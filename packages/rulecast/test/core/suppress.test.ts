@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest"
 
-import { parseIgnore, suppress } from "../../src/core/suppress"
+import { parseIgnore, sourceLines, suppress } from "../../src/core/suppress"
 import type { Match } from "../../src/core/types"
 import { rule } from "../helpers/rules"
 
 const at = (file: string, line: number): Match => ({ file, line, endLine: line, column: 1, text: "", captures: {} })
 const finding = (id: string, file: string, line: number) => ({ rule: rule({ id }), match: at(file, line) })
-const reader = (files: Record<string, string>) => async (file: string) => files[file] ?? null
+const reader = (files: Record<string, string>) => sourceLines(async (file) => files[file] ?? null)
 
 describe("parseIgnore", () => {
   test.each([

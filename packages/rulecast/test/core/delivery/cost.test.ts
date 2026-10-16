@@ -16,9 +16,11 @@ const render = (delivery: Delivery) => renderAgentText(delivery, { maxMatchesPer
 const finding = (rule: string, file: string, line: number): Finding => ({
   rule,
   severity: "error",
+  id: "id",
   status: "new",
   file,
   line,
+  endLine: line,
   column: 1,
   message: `${file}:${line} broke ${rule}`,
   count: 1,

@@ -1,3 +1,4 @@
+import { EXIT } from "../adapters/cli/contract"
 import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
@@ -5,8 +6,10 @@ import { VERSION } from "../core/version"
 import { builtinDetectors } from "../detectors"
 import type { Prompter } from "../init/prompts"
 import { autoupdateCommand } from "./autoupdate"
+import { baselineCommand } from "./baseline"
 import { cleanCommand } from "./clean"
 import { doctorCommand } from "./doctor"
+import { fixCommand } from "./fix"
 import { commandHelp, usage } from "./help"
 import { hookCommand } from "./hook"
 import { initCommand } from "./init"
@@ -14,6 +17,7 @@ import { installCommand, uninstallCommand } from "./install"
 import { listCommand } from "./list"
 import { findRoot } from "./project"
 import { runCommand } from "./run"
+import { statsCommand } from "./stats"
 import { testCommand } from "./test"
 import { tryRepoCommand } from "./try-repo"
 import { UsageError } from "./usage"
@@ -70,6 +74,10 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await uninstallCommand(root, args, io)
       case "run":
         return await runCommand(root, args, registry, io)
+      case "baseline":
+        return await baselineCommand(root, args, registry, io)
+      case "fix":
+        return await fixCommand(root, args, registry, io)
       case "list":
         return await listCommand(root, args, registry, io)
       case "autoupdate":
@@ -78,6 +86,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await tryRepoCommand(root, args, registry, io)
       case "test":
         return await testCommand(root, args, registry, io)
+      case "stats":
+        return await statsCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
       case "clean":
@@ -93,7 +103,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "--help":
       case "-h":
         io.stdout(usage())
-        return command === undefined ? 2 : 0
+        return command === undefined ? EXIT.failed : 0
       default:
         throw new UsageError(`unknown command "${command}"`)
     }
@@ -103,6 +113,6 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       // The one command's flags, not every command's: that is the help being asked for.
       io.stderr(`\n${(command !== undefined && commandHelp(command)) || usage()}`)
     }
-    return 2
+    return EXIT.failed
   }
 }

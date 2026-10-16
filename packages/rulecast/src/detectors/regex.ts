@@ -3,7 +3,11 @@ import { z } from "zod"
 
 import { lineStarts, positionAt } from "../core/detection/positions"
 import { DeadlineError, errorMessage } from "../core/errors"
+import { renderTemplate, templateVariables } from "../core/template"
 import type { Detector, DetectorResult } from "../core/types"
+
+/** Where a match is, not what it is: a fix that named one would write a position into the code. */
+const LOCATION_VARIABLES = new Set(["file", "line", "column", "rule"])
 
 const schema = z
   .object({
@@ -12,6 +16,8 @@ const schema = z
       .string()
       .regex(/^[dimsuvy]*$/, "allowed flags: d i m s u v y")
       .default(""),
+    /** The match's replacement, in the message's `{{name}}` syntax: the named groups and `text`. */
+    fix: z.string().optional(),
   })
   .strict()
   .superRefine((config, ctx) => {
@@ -19,6 +25,16 @@ const schema = z
       new RegExp(config.pattern, config.flags)
     } catch (error) {
       ctx.addIssue({ code: "custom", path: ["pattern"], message: errorMessage(error) })
+      return
+    }
+    if (config.fix === undefined) return
+    const known = new Set(["text", ...groupNames(config.pattern)])
+    for (const name of templateVariables(config.fix)) {
+      if (known.has(name)) continue
+      const message = LOCATION_VARIABLES.has(name)
+        ? `fix cannot use {{${name}}}: it would be written into the code`
+        : `unknown template variable "${name}" in fix (use the pattern's named groups or text)`
+      ctx.addIssue({ code: "custom", path: ["fix"], message })
     }
   })
 
@@ -91,6 +107,7 @@ export const regexDetector: Detector<RegexConfig> = {
   captures: (config) => groupNames(config.pattern),
   events: () => ["edit", "verify"],
   guards: true,
+  fixable: (config) => config.fix !== undefined,
   /**
    * Driven by file rather than by rule, so one file is read once and scanned once however many
    * rules select it. `perRule` would read and match it once per rule — 100,000 reads for 500 rules
@@ -120,21 +137,19 @@ export const regexDetector: Detector<RegexConfig> = {
 
       for (const [index, rule] of rules.entries()) {
         const captured = names.get(rule.id) ?? []
+        const fix = input.fixes === true ? rule.config.fix : undefined
         for (const found of perPattern[index] ?? []) {
           const start = found.index
           const end = start + found[0].length
           const from = positionAt(starts, start)
           const to = positionAt(starts, Math.max(start, end - 1))
+          const captures = Object.fromEntries(captured.map((name) => [name, found.groups?.[name] ?? ""]))
           result.findings.push({
             rule: rule.id,
-            match: {
-              file,
-              line: from.line,
-              endLine: to.line,
-              column: from.column,
-              text: found[0],
-              captures: Object.fromEntries(captured.map((name) => [name, found.groups?.[name] ?? ""])),
-            },
+            match: { file, line: from.line, endLine: to.line, column: from.column, text: found[0], captures },
+            ...(fix === undefined
+              ? {}
+              : { fix: { start, end, text: renderTemplate(fix, { ...captures, text: found[0] }, { raw: true }) } }),
           })
         }
       }

@@ -2,20 +2,20 @@ import type { CompiledRule } from "../compile/rule"
 import type { DetectionContext } from "../detection/context"
 import { fileBytes, readSourceFile } from "../detection/per-rule"
 import { type BaselineChanges, computeChanges } from "./baseline"
-import type { Fingerprints } from "./fingerprint"
+import type { ContainerRanges } from "./classify"
 import { type Snapshot, snapshotOf } from "./hash"
-import { recordFingerprints } from "./record"
-import { type BaselineRecord, type BaselineState, mergeFingerprints, snapshotRecord } from "./store"
+import { recordContainers } from "./record"
+import { type BaselineRecord, type BaselineState, mergeContainers, snapshotRecord } from "./store"
 
 /**
  * What a finding is new against (spec §8), owned in one place.
  *
- * The pipeline used to assemble this from three blocks, six mutable locals and a fingerprint merge
+ * The pipeline used to assemble this from three blocks, six mutable locals and a container merge
  * of its own. These functions **return records and never append them**: every baseline append is
  * lock-free (`withLock` guards only the session commit), so safety rests on each event's records
- * landing in one `O_APPEND` write, snapshots before the fingerprints measured from them. Two appends
- * would let a reader see a fingerprint whose snapshot had not landed — measured against a baseline
- * it cannot see, which is worse than no fingerprint at all. The caller appends once.
+ * landing in one `O_APPEND` write, snapshots before the container ranges measured from them. Two appends
+ * would let a reader see a container record whose snapshot had not landed — measured against a baseline
+ * it cannot see, which is worse than no record at all. The caller appends once.
  */
 
 export interface BaselineInput {
@@ -35,7 +35,7 @@ export interface BaselineInput {
  * it would make the change the baseline: a verify would drop the file as unchanged, and a removed
  * rule would count from after the deletion. Its baseline stays the start snapshot or the commit.
  *
- * Records are in append order: each snapshot before the fingerprints taken from it. Only
+ * Records are in append order: each snapshot before the container ranges taken from it. Only
  * `edit`-stage rules are measured: those are the cheap in-process ones by construction (§13, slow
  * tools default to verify), and a verify fills in the rest itself.
  */
@@ -95,11 +95,11 @@ async function snapshotRecords(
     snapshotted.push(file)
   }
   const skipped = pending.length - taken
-  // Fingerprints are an optimisation a verify fills in itself, so a start out of time skips them.
+  // Container ranges are an optimisation a verify fills in itself, so a start out of time skips them.
   const timeoutMs = bounds === null ? input.limits.editDeadlineMs : bounds.deadlineAt - Date.now()
   if (snapshotted.length === 0 || timeoutMs <= 0) return { records, skipped }
   records.push(
-    ...(await recordFingerprints({
+    ...(await recordContainers({
       detection: input.detection,
       files: snapshotted,
       rules: input.rules,
@@ -118,15 +118,15 @@ export interface ChangesResult {
   /** The files worth running detectors on: a session verify drops files back at their snapshot. */
   files: string[]
   changes: BaselineChanges
-  /** The session's fingerprints with anything this verify measured merged in. */
-  fingerprints: Fingerprints
+  /** The session's container ranges with anything this verify measured merged in. */
+  containers: ContainerRanges
   /** To append in one call, when there is a session; empty on an edit. */
   records: BaselineRecord[]
 }
 
 /**
  * On `edit` and `verify`: what changed against the baseline, and — on a verify — the container
- * fingerprints a commit baseline was missing.
+ * ranges a commit baseline was missing.
  *
  * The baseline is the session's snapshots, falling back to its start commit; `baseCommit`
  * (`run --from-ref`) replaces both. A verify has seconds where an edit has 350 ms, so it measures a
@@ -157,18 +157,18 @@ export async function changesFor(
       : [...files]
 
   // Copied, so a caller's state is never changed underneath it.
-  const fingerprints: BaselineState["fingerprints"] = new Map(
-    [...(state?.fingerprints ?? [])].map(([file, byRule]) => [file, new Map(byRule)]),
+  const containers: BaselineState["containers"] = new Map(
+    [...(state?.containers ?? [])].map(([file, byRule]) => [file, new Map(byRule)]),
   )
   if (event.kind !== "verify" || changes.fromCommit.size === 0) {
-    return { files: kept, changes, fingerprints, records: [] }
+    return { files: kept, changes, containers, records: [] }
   }
   const texts = changes.fromCommit
-  const missing = [...texts.keys()].filter((file) => !fingerprints.has(file))
+  const missing = [...texts.keys()].filter((file) => !containers.has(file))
   const records =
     missing.length === 0
       ? []
-      : await recordFingerprints({
+      : await recordContainers({
           detection: input.detection,
           files: missing,
           rules: input.rules,
@@ -178,5 +178,5 @@ export async function changesFor(
           source: "memory",
           timeoutMs: input.limits.verifyMs,
         })
-  return { files: kept, changes, fingerprints: mergeFingerprints(fingerprints, records), records }
+  return { files: kept, changes, containers: mergeContainers(containers, records), records }
 }

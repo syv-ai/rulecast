@@ -3,7 +3,7 @@
   "baseline": "x\ny\ndef route():\n    a()\n    b()\n    c()\n    return x\n",
   "current": "new1\nnew2\nx\ny\ndef route():\n    a()\n    b()\n    c()\n    return x\n",
   "scope": "container",
-  "fingerprints": [[3, 7]],
+  "containerRanges": [[3, 7]],
   "match": [5, 9],
   "expected": "preexisting"
 }

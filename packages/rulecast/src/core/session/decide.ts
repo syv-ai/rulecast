@@ -21,6 +21,8 @@ import {
 } from "./state"
 
 export interface ClassifiedFinding {
+  /** The finding's stable id (core/finding-id.ts). */
+  id: string
   rule: CompiledRule
   match: Match
   status: "new" | "preexisting"
@@ -52,6 +54,8 @@ export interface DecideInput {
   swept?: readonly string[]
   /** Protected files the agent changed with its shell (Delivery.refused). */
   refused?: Delivery["refused"]
+  /** Fill `Delivery.preexisting` (AssembleInput.listPreexisting). */
+  listPreexisting?: boolean
   /** Configured rules that did not run (Delivery.disabled): attached whole, after the budget. */
   disabled?: DisabledGroup[]
 }
@@ -97,9 +101,9 @@ function capturesFor(rule: CompiledRule, match: Match): Record<string, string> |
   return values
 }
 
-function renderFindings(findings: ClassifiedFinding[]): Finding[] {
+function renderFindings(findings: ClassifiedFinding[], status: Finding["status"]): Finding[] {
   const merged = new Map<string, Finding>()
-  for (const { rule, match } of findings) {
+  for (const { id, rule, match } of findings) {
     const message = renderTemplate(rule.message ?? "", {
       ...match.captures,
       file: match.file,
@@ -110,19 +114,29 @@ function renderFindings(findings: ClassifiedFinding[]): Finding[] {
     })
     const key = `${rule.id} ${match.file} ${message}`
     const existing = merged.get(key)
-    if (existing) existing.count++
-    else
+    const site = { line: match.line, endLine: match.endLine, column: match.column }
+    if (existing === undefined) {
       merged.set(key, {
+        id,
         rule: rule.id,
         severity: rule.severity,
-        status: "new",
+        status,
         file: match.file,
-        line: match.line,
-        column: match.column,
+        ...site,
         message,
         count: 1,
         captures: capturesFor(rule, match),
+        // Only when true, so a document from a project with no fixes is unchanged (output.md).
+        ...(rule.fixable ? { fixable: true as const } : {}),
       })
+      continue
+    }
+    existing.count++
+    // The earliest match is the one shown, and its id the merged finding's: a tool's emit order
+    // must not decide either.
+    if (match.line < existing.line || (match.line === existing.line && match.column < existing.column)) {
+      Object.assign(existing, { id, ...site, captures: capturesFor(rule, match) })
+    }
   }
   return [...merged.values()].sort(
     (a, b) =>
@@ -178,6 +192,12 @@ export interface AssembleInput {
   swept?: readonly string[]
   /** Default: none. */
   refused?: Delivery["refused"]
+  /**
+   * Also render the pre-existing findings in full, into `Delivery.preexisting`: `rulecast run`'s
+   * JSON and SARIF report them by id. Not filtered by what the context was already told, and never
+   * set on the hook path, where the summary is what an agent is given. Default: false.
+   */
+  listPreexisting?: boolean
 }
 
 /**
@@ -210,7 +230,13 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
 
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
-  delivery.findings = renderFindings(fresh)
+  delivery.findings = renderFindings(fresh, "new")
+  if (input.listPreexisting === true) {
+    delivery.preexisting = renderFindings(
+      input.findings.filter((finding) => finding.status === "preexisting"),
+      "preexisting",
+    )
+  }
   const swept = new Set(input.swept ?? [])
   const sweptWithFindings = [...new Set(fresh.map(({ match }) => match.file))].filter((file) => swept.has(file))
   if (sweptWithFindings.length > 0) delivery.swept = sweptWithFindings.sort()

@@ -3,7 +3,7 @@
  * comes first so `$$$ARGS` is never read as the `$ARGS` inside it. Names starting with `_` are
  * ast-grep's non-capturing form.
  */
-const METAVARIABLE = /\$\$\$([A-Z_][A-Z0-9_]*)|\$([A-Z_][A-Z0-9_]*)/g
+export const METAVARIABLE = /\$\$\$([A-Z_][A-Z0-9_]*)|\$([A-Z_][A-Z0-9_]*)/g
 
 export interface Metavariable {
   name: string

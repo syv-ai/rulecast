@@ -8,9 +8,11 @@ import { readSourceFile } from "./detection/per-rule"
 import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
+import { findingIds } from "./finding-id"
 import { assemble, trim } from "./session/decide"
 import { type ContextRecord, refusalKey, type WorkRecord, type WorkState } from "./session/state"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { sourceLines } from "./suppress"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface GuardInput {
   /** The project's detection context (detection/context.ts). */
@@ -32,6 +34,8 @@ export interface GuardInput {
   record: (records: WorkRecord[]) => Promise<void>
   /** Appends to the agent's context memory: the sections a refusal delivered. */
   recordContext: (records: ContextRecord[]) => Promise<void>
+  /** The findings a refusal rests on, for the findings log (core/stats/log.ts); absent without a session. */
+  recordFindings?: (refusing: { id: string; rule: CompiledRule; match: Match }[]) => Promise<void>
 }
 
 /**
@@ -73,13 +77,16 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const selections = selectDetectorRules(rules, "edit", [file], input.disabled)
   if (selections.length === 0) return emptyDelivery()
 
+  // The proposed file for the one being written; anything else a detector reaches for is real.
+  const read = async (name: string) => (name === file ? proposal.content : readSourceFile(input.detection.root, name))
+  const lines = sourceLines(read)
   const output = await runDetection({
     detection: input.detection,
     event: "edit",
     selections,
     changes: new Map(),
-    // The proposed file for the one being written; anything else a detector reaches for is real.
-    read: async (name) => (name === file ? proposal.content : readSourceFile(input.detection.root, name)),
+    read,
+    lines,
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
@@ -89,12 +96,24 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const judged = input.mode === "unattended" ? output.ignored : []
   const changed =
     judged.length === 0 || current === null ? null : diffLines(hashLines(current), hashLines(proposal.content)).changed
-  const unsilenced = judged.filter(
-    ({ match }) => changed === null || changed.some(([start, end]) => match.line <= end && match.endLine >= start),
-  )
-  const findings = [...output.findings, ...unsilenced.map(({ rule, match }) => ({ rule, match }))]
+  const unsilenced = (match: Match) =>
+    input.mode === "unattended" &&
+    (changed === null || changed.some(([start, end]) => match.line <= end && match.endLine >= start))
 
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
+  // Over ignored matches too, as the pipeline numbers them, so a match has one id at guard and verify.
+  // Over the proposal, the lines the guard judged: the ones verify reads once the write is made.
+  const ids = await findingIds(
+    [...output.findings, ...output.ignored],
+    (kind) => input.detection.registry.get(kind),
+    lines,
+  )
+  const findings = [
+    ...output.findings.map((finding, index) => ({ ...finding, id: ids[index]! })),
+    ...output.ignored
+      .map(({ rule, match }, index) => ({ rule, match, id: ids[output.findings.length + index]! }))
+      .filter(({ match }) => unsilenced(match)),
+  ]
   const evidence = findings.filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
   if (evidence.length === 0) return emptyDelivery()
 
@@ -115,7 +134,7 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   // result — so the sections it carried are recorded as delivered, and the next delivery points
   // back to them instead of sending them again.
   const assembled = await assemble({
-    findings: refusing.map(({ rule, match }) => ({ rule, match, status: "new" as const })),
+    findings: refusing.map(({ id, rule, match }) => ({ id, rule, match, status: "new" as const })),
     resolver: input.resolver,
     maxBytes: input.config.context.maxBytes,
   })
@@ -127,5 +146,6 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   await input.record(
     [...new Set(refusing.map(({ rule }) => rule.id))].map((rule) => ({ t: "refused" as const, rule, file })),
   )
+  await input.recordFindings?.(refusing)
   return delivery
 }

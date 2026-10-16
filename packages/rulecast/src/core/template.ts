@@ -29,11 +29,19 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
 
-export function renderTemplate(template: string, values: Record<string, string>): string {
+/**
+ * `raw`: every value exactly as given, line breaks and all. For a `fix`, whose result is code
+ * written into the file rather than a message, where collapsing a value would change the code.
+ */
+export function renderTemplate(
+  template: string,
+  values: Record<string, string>,
+  options: { raw?: boolean } = {},
+): string {
   return template.replace(VARIABLE, (_, name: string) => {
     const value = values[name]
     if (value === undefined) throw new UnknownTemplateVariable(name)
-    return oneLine(value)
+    return options.raw === true ? value : oneLine(value)
   })
 }
 

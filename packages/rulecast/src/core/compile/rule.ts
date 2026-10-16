@@ -48,6 +48,11 @@ export interface CompiledRule {
   message: string | null
   context: ReferenceSpec[]
   /**
+   * `rulecast fix` may apply this rule's fix: its detector says the config carries one, and the rule
+   * has a `bad` example to prove it on. Hooks never apply one, whatever this says.
+   */
+  fixable: boolean
+  /**
    * Inline good/bad examples, run by `rulecast test`. `null` when the rule declared none, which
    * `validate` and `test` report differently from a rule that declared an empty set.
    */
@@ -103,18 +108,37 @@ export function requiresNewer(raw: unknown): string | null {
   return `requires rulecast ${minimum} or newer (running ${VERSION})`
 }
 
-/** A ready rule, or the diagnostic message that disables it. */
-export async function compileRule(input: RuleInput, context: RuleContext): Promise<CompiledRule | string> {
+/** What `fix` on a rule with no `bad` example becomes: the fix is dropped, the rule still runs. */
+export const FIX_WITHOUT_EXAMPLE =
+  "fix ignored: a rule with fix needs at least one bad example for rulecast test to apply it to"
+
+/** A ready rule with what `validate` should warn about it, or the diagnostic message that disables it. */
+export async function compileRule(
+  input: RuleInput,
+  context: RuleContext,
+): Promise<{ rule: CompiledRule; warnings: string[] } | string> {
   const { data } = input
   const tooNew = requiresNewer(data)
   if (tooNew !== null) return tooNew
 
+  const warnings: string[] = []
   let detector: CompiledDetector | null = null
+  let hasFix = false
   let defaultStages: Stage[] = ["touch"]
   if (data.detect) {
     const [kind, rawConfig] = Object.entries(data.detect)[0]!
     const implementation = context.registry.get(kind)
     if (!implementation) return `unknown detector "${kind}"`
+    // Asked of the detector, not of its kind name: a plugin that can fix needs no edit here.
+    if (
+      implementation.fixable === undefined &&
+      typeof rawConfig === "object" &&
+      rawConfig !== null &&
+      "fix" in rawConfig
+    ) {
+      const kinds = context.registry.kinds().filter((name) => context.registry.get(name)?.fixable !== undefined)
+      return `fix is supported by ${kinds.join(" and ")} rules only; ${kind} cannot apply one`
+    }
     // Detector schemas may refine asynchronously: ast-grep compiles the rule object against the
     // real parser, which it loads on demand (plan 5a). A synchronous schema is unaffected.
     const parsed = await implementation.schema.safeParseAsync(rawConfig ?? {})
@@ -122,6 +146,7 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
       return formatZodError(parsed.error, { prefix: `detect.${kind}`, schema: implementation.schema })
     detector = { kind, config: parsed.data, captures: implementation.captures(parsed.data) }
     defaultStages = implementation.events(parsed.data)
+    hasFix = implementation.fixable?.(parsed.data) === true
   }
   const stages: Stage[] = data.stages ?? context.config.defaultStages ?? defaultStages
 
@@ -179,8 +204,28 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
 
   // An example the rule would never be given is an example that passes for the wrong reason. This
   // checks the rule's own filter, not the project's global one: the example documents the rule.
-  for (const example of [...(data.examples?.good ?? []), ...(data.examples?.bad ?? [])]) {
+  const examples = data.examples
+  for (const example of [...(examples?.good ?? []), ...(examples?.bad ?? []), ...(examples?.baseline ?? [])]) {
     if (!filter(example.path)) return `example path "${example.path}" does not match this rule's files`
+  }
+  // A line past the end can never be found, so the example could only ever fail — and the author
+  // would read the failure as the rule's.
+  for (const [index, example] of (examples?.bad ?? []).entries()) {
+    const pinned = example.expect?.lines ?? []
+    const past = beyondEnd(pinned, example.code)
+    if (past !== null) return `example bad[${index}] expects line ${past}; its code has ${lines(example.code)}`
+    // Each finding starts on one line, so fewer findings than distinct lines can never pass.
+    const distinct = new Set(pinned).size
+    const count = example.expect?.count
+    if (count !== undefined && count < distinct) {
+      return `example bad[${index}] expects ${plural(count, "finding")} on ${plural(distinct, "line")}; a finding starts on one line`
+    }
+  }
+  for (const [index, example] of (examples?.baseline ?? []).entries()) {
+    const past = beyondEnd([...example.expect.new, ...example.expect.preexisting], example.after)
+    if (past !== null) {
+      return `example baseline[${index}] expects line ${past}; its after has ${lines(example.after)}`
+    }
   }
 
   const references: ReferenceSpec[] = []
@@ -200,11 +245,20 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     references.push(spec)
   }
 
+  // A fix is applied without anyone reading it first, so it has to have been seen to work: a rule
+  // with no bad example keeps running, but `rulecast fix` leaves its findings alone. An error would
+  // switch the rule off in every hook over a check only `rulecast fix` needs.
+  const bad = data.examples?.bad ?? []
+  if (hasFix && bad.length === 0) warnings.push(FIX_WITHOUT_EXAMPLE)
+  if (!hasFix && bad.some((example) => example.fixed !== undefined)) {
+    warnings.push("fixed is only checked for rules with fix")
+  }
+
   const { global } = context
   const id = data.alias ?? data.id
   const unattended = context.mode === "unattended"
   const escalated = data.escalate === true || context.config.unattended.escalate.includes(id)
-  return {
+  const rule: CompiledRule = {
     id,
     name: data.name,
     description: data.description ?? null,
@@ -219,6 +273,26 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     detector,
     message: data.message ?? null,
     context: references,
+    fixable: hasFix && bad.length > 0,
     examples: data.examples ?? null,
   }
+  return { rule, warnings }
+}
+
+/**
+ * Lines in an example's code, not counting the empty one after a final newline. Empty code is one
+ * line: a finding about the file itself, a `path` rule's, is on line 1 of an empty file.
+ */
+function lineCount(code: string): number {
+  const lines = code.split(/\r?\n/)
+  return Math.max(1, lines.at(-1) === "" ? lines.length - 1 : lines.length)
+}
+
+const plural = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
+
+const lines = (code: string) => plural(lineCount(code), "line")
+
+function beyondEnd(lines: readonly number[], code: string): number | null {
+  const count = lineCount(code)
+  return lines.find((line) => line > count) ?? null
 }

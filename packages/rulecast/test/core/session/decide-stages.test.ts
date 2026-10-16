@@ -31,6 +31,7 @@ const at = (line: number): Match => ({
 const finding = (id: string, line: number, severity: "error" | "warning" = "error") => ({
   rule: rule({ id, message: MESSAGE, severity, context: [errors] }),
   match: at(line),
+  id: "id",
   status: "new" as const,
 })
 

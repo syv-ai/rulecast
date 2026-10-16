@@ -1,17 +1,35 @@
 import { parseArgs } from "node:util"
 
-import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
-import { type CompiledProject, type CompileOptions, compile } from "../core/compile/project"
+import {
+  type BaselineUse,
+  CLI_FORMATS,
+  type CliFormat,
+  exitCodeFor,
+  formatDelivery,
+  type RuleMetadata,
+} from "../adapters/cli/format"
+import {
+  BASELINE_FILE,
+  baselineSize,
+  type CommittedBaseline,
+  entryVerdict,
+  fileExists,
+  pruneBaseline,
+  readCommittedBaseline,
+} from "../core/baseline/committed"
+import { type CompiledProject, type CompileOptions, compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { WORKTREE } from "../core/content"
+import { createReferenceResolver, resolveRuleContext } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
+import { FINDING_ID_VERSION } from "../core/finding-id"
 import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { CorruptStoreError } from "../core/jsonl"
-import { runPipeline } from "../core/pipeline"
+import { type PipelineResult, runPipeline } from "../core/pipeline"
 import { fetchingRepos } from "../core/repos/provider"
 import { recordedMode, sessionDir } from "../core/session/session"
-import type { ContentSource } from "../core/types"
+import type { ContentSource, Delivery } from "../core/types"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
 import { UsageError } from "./usage"
@@ -101,7 +119,7 @@ export function parseRunArgs(args: string[]): RunArgs {
 /** Which way the files were chosen: what the terminal output says it checked. */
 export type Selection = "files" | "range" | "all" | "session" | "staged"
 
-interface SelectedFiles {
+export interface SelectedFiles {
   selection: Selection
   files: string[]
   /** Where the baseline is read from; null: no baseline (or the session's). */
@@ -111,7 +129,7 @@ interface SelectedFiles {
 }
 
 /** Spec §12, `run` file selection. */
-async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<SelectedFiles> {
+export async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<SelectedFiles> {
   if (run.files !== null) {
     const files = run.files
       .map((file) => toProjectPath(root, cwd, file))
@@ -153,25 +171,103 @@ export interface RunInput {
   run: RunArgs
   registry: DetectorRegistry
   io: CliIo
+  /** Read `.rulecast/baseline.json` when the run has no other baseline. False for try-repo: foreign rules, foreign ids. */
+  committedBaseline: boolean
 }
 
-/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
-export async function executeRun({ project, ruleId, run, registry, io }: RunInput): Promise<number> {
+/** SARIF's rule metadata for the rules that have findings, with the text of the sections they cite. */
+async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>): Promise<RuleMetadata[]> {
+  const resolver = createReferenceResolver(project.root)
+  const rules = project.rules.filter((rule) => ids.has(rule.id))
+  return Promise.all(
+    rules.map(async (rule) => {
+      const resolved = new Map((await resolveRuleContext(resolver, rule.context)).map((entry) => [entry.ref, entry]))
+      return {
+        id: rule.id,
+        name: rule.name,
+        description: rule.description,
+        severity: rule.severity,
+        source: rule.source,
+        context: rule.context.map((spec) => ({ ref: spec.ref, content: resolved.get(spec.ref)?.content ?? null })),
+      }
+    }),
+  )
+}
+
+/**
+ * The committed baseline, when this run has no other: no base commit (so not `--from-ref`, and not
+ * a staged run once there is a HEAD) and no session. Null when there is none, or its ids are from
+ * another scheme and so can match nothing, which is said in `warnings`.
+ */
+async function committedFor(root: string, selected: SelectedFiles, run: RunArgs, warnings: string[]) {
+  if (selected.baseCommit !== null || run.session !== null) return null
+  const baseline = await readCommittedBaseline(root)
+  if (baseline === null || baseline.findingIdVersion === FINDING_ID_VERSION) return baseline
+  warnings.push(
+    `${BASELINE_FILE} holds ids of scheme v${baseline.findingIdVersion} and this rulecast computes v${FINDING_ID_VERSION}, so nothing was matched against it; run rulecast baseline --force`,
+  )
+  return null
+}
+
+/** The `baseline` key: how much of the file this run found again, and how much it showed is gone. */
+function baselineUse(project: CompiledProject, baseline: CommittedBaseline, result: PipelineResult): BaselineUse {
+  const findings = result.findings ?? []
+  const found = new Set([...findings, ...(result.ignored ?? [])].flatMap(({ id }) => (id === undefined ? [] : [id])))
+  const verdict = entryVerdict({
+    rules: project.rules,
+    compiledCleanly: !project.diagnostics.some((diagnostic) => diagnostic.level === "error"),
+    ran: result.ran ?? new Map(),
+    exists: fileExists(project.root),
+  })
+  return {
+    file: BASELINE_FILE,
+    entries: baselineSize(baseline).entries,
+    matched: findings.filter((finding) => finding.status === "preexisting").length,
+    stale: pruneBaseline(baseline, found, verdict).removed.length,
+  }
+}
+
+/** What a verify over the selected files found, before it is printed. */
+export interface RunCheck {
+  result: PipelineResult
+  selected: SelectedFiles
+  /** Metered rules left out of this run (a staged run, --no-llm) that matched a checked file. */
+  skipped: string[]
+  complete: boolean
+  /** The committed baseline the run classified against; null when it used none. */
+  committed: CommittedBaseline | null
+}
+
+/**
+ * The verify event `run` prints, without printing it: `fix` runs it after writing, for its exit
+ * code. `selected`: files already chosen, so a check after a fix judges the files the fix looked at.
+ */
+export async function checkRun(
+  { project, ruleId, run, registry, io, committedBaseline }: RunInput,
+  selected?: SelectedFiles,
+): Promise<RunCheck> {
   const root = project.root
+  // A config file that does not load compiled no rule at all: a report would say "no findings" of
+  // a run that checked nothing. Checked before the rule id, which no rule could match.
+  const fatal = project.diagnostics.find((diagnostic) => diagnostic.fatal === true)
+  if (fatal !== undefined) throw new Error(`${diagnosticText(fatal)} (run ${fatal.hint ?? "rulecast validate"})`)
   if (ruleId !== null && !project.rules.some((rule) => rule.id === ruleId)) {
     throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
   }
-  const selected = await selectFiles(root, io.cwd, run)
+  selected ??= await selectFiles(root, io.cwd, run)
+  const baselineWarnings: string[] = []
+  const committed = committedBaseline ? await committedFor(root, selected, run, baselineWarnings) : null
   // Spec §6, Consent, applied to a commit: a staged run is a pre-commit hook, which fires on every
   // commit of every teammate, so a detector that costs money per file is left out unless asked for.
   // --no-llm leaves it out everywhere. The registry says which kinds are metered; the core names none.
   const skipMetered = run.noLlm || (selected.selection === "staged" && !run.llm)
   const meteredKinds = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
+  const files = selected.files
   const skipped = skipMetered
     ? project.rules
         .filter((rule) => rule.enabled && rule.detector !== null && meteredKinds.has(rule.detector.kind))
         .filter((rule) => ruleId === null || rule.id === ruleId)
-        .filter((rule) => rule.stages.includes("verify") && selected.files.some((file) => rule.matches(file)))
+        .filter((rule) => rule.stages.includes("verify") && files.some((file) => rule.matches(file)))
         .map((rule) => rule.id)
     : []
   const result = await runPipeline({
@@ -189,23 +285,52 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     maxContextChars: null,
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
+    ...(committed === null ? {} : { committedBaseline: committed }),
+    // The machine formats report pre-existing findings by id; the others summarise them.
+    listPreexisting: run.format === "json" || run.format === "sarif",
     reportDisabled: true,
   })
-  const text = formatDelivery(result.delivery, run.format, {
+  // A warning, not a failure: every rule ran, and the findings are right for a run with no baseline.
+  result.delivery.warnings.push(...baselineWarnings)
+  return { result, selected, skipped, complete: !result.failed, committed }
+}
+
+/** A check as `run` prints it. `extra`: keys another command adds to the JSON document. */
+export async function formatRun(
+  project: CompiledProject,
+  run: RunArgs,
+  check: RunCheck,
+  delivery: Delivery = check.result.delivery,
+  extra?: Record<string, unknown>,
+): Promise<string> {
+  const { result, selected, skipped, complete, committed } = check
+  const withFindings = new Set([...delivery.findings, ...(delivery.preexisting ?? [])].map((finding) => finding.rule))
+  return formatDelivery(delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
     skipped,
     checked: { files: selected.files.length, selection: selected.selection },
-    ignored: (result.ignored ?? []).map(({ rule, match, reason }) => ({
+    ignored: (result.ignored ?? []).map(({ id, rule, match, reason }) => ({
+      ...(id === undefined ? {} : { id }),
       rule: rule.id,
       file: match.file,
       line: match.line,
       reason,
     })),
+    complete,
+    baseline: committed === null ? null : baselineUse(project, committed, result),
+    ...(run.format === "sarif" ? { rules: await ruleMetadata(project, withFindings) } : {}),
+    ...(extra === undefined ? {} : { extra }),
   })
-  if (text) io.stdout(`${text}\n`)
-  return exitCodeFor(result.delivery, result.failed)
+}
+
+/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
+export async function executeRun(input: RunInput): Promise<number> {
+  const check = await checkRun(input)
+  const text = await formatRun(input.project, input.run, check)
+  if (text) input.io.stdout(`${text}\n`)
+  return exitCodeFor(check.result.delivery, check.complete)
 }
 
 /**
@@ -236,5 +361,5 @@ export async function runCommand(root: string, args: string[], registry: Detecto
     repos: fetchingRepos(cacheHome(io.env)),
     ...(await modeFor(root, run, io)),
   })
-  return executeRun({ project, ruleId: run.leading[0] ?? null, run, registry, io })
+  return executeRun({ project, ruleId: run.leading[0] ?? null, run, registry, io, committedBaseline: true })
 }

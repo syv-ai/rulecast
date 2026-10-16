@@ -72,6 +72,17 @@ export interface Match {
    */
   captures: Record<string, string>
   /**
+   * The match is about the file as a whole (a hook would reformat it), not the lines it spans, so
+   * its id (core/finding-id.ts) hashes its text and captures. A kind whose every match is the
+   * whole file says so once, with `Detector.wholeFile`.
+   */
+  wholeFile?: true
+  /**
+   * The source at the match is itself sensitive (a secret) and `text` was redacted: its id hashes
+   * the text and captures, never the source line.
+   */
+  redacted?: true
+  /**
    * Captures that are not part of what the finding *is*, only of what its message says: a removed
    * finding's counts, which change with every further deletion while the finding stays the same.
    * Whatever identifies a finding across runs (the stop gate's `findingKey`, a finding id) leaves
@@ -152,10 +163,27 @@ export interface DetectorRun<Config> {
    * fires it only runs when the event loop is free, and synchronous work is what keeps it busy.
    */
   deadlineAt: number
+  /**
+   * Attach each finding's `fix`, for a rule whose config carries one. Set only by `rulecast fix`
+   * and `rulecast test`, never on a hook's path: rulecast never rewrites an agent's file behind its
+   * back (detectors/hook/modified.ts). Absent: false, and a detector computes no edit.
+   */
+  fixes?: boolean
+}
+
+/**
+ * One replacement in a file: the text `read` returned, from `start` to `end` (UTF-16 code units,
+ * the indexes a JavaScript string uses; end exclusive), becomes `text`.
+ */
+export interface TextEdit {
+  start: number
+  end: number
+  text: string
 }
 
 export interface DetectorResult {
-  findings: { rule: string; match: Match }[]
+  /** `fix`: only when the run asked for `fixes` and the rule's config has one. */
+  findings: { rule: string; match: Match; fix?: TextEdit }[]
   /** rule null = the whole run failed. */
   errors: { rule: string | null; message: string }[]
 }
@@ -204,7 +232,7 @@ export interface Detector<Config> {
   guards?: boolean
   /**
    * Each file costs money or a third party sees it (§6, Consent). The core never preselects such a
-   * rule in `init`, never runs it as a side effect — no fingerprint run on `touch`, no `doctor` dry
+   * rule in `init`, never runs it as a side effect — no container measurement on `touch`, no `doctor` dry
    * run, no `rulecast test` without a rule id — and budgets the files it is given per event.
    *
    * The core asks this rather than a kind name, the way it asks `guards`, so a second metered
@@ -245,6 +273,18 @@ export interface Detector<Config> {
    * The core runs such a kind after every other kind, alone, so nothing reads a file mid-change.
    */
   changesFiles?: boolean
+  /**
+   * Captures whose value differs between two runs over the same content (a model's `reason`). A
+   * finding's id (core/finding-id.ts) leaves them out, so it stays the same from run to run.
+   */
+  volatileCaptures?: readonly string[]
+  /**
+   * This rule's config carries a fix that `rulecast fix` may apply: with `DetectorRun.fixes`, its
+   * findings come with a `fix`. A detector that declares it must read only through `read`, because
+   * fixes are applied over several passes in memory before anything is written. The core asks this
+   * rather than a kind name, so `fix` on any other detector is refused with no edit to the core.
+   */
+  fixable?(config: Config): boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>
@@ -262,16 +302,24 @@ export interface Detector<Config> {
 }
 
 export interface Finding {
+  /**
+   * Stable across runs (core/finding-id.ts): the same violation keeps it when lines above it move.
+   * A merged finding (`count` > 1) carries the id of the match it shows, the earliest in the file.
+   */
+  id: string
   rule: string
   severity: Severity
   status: "new" | "preexisting"
   file: string
   line: number
+  endLine: number
   column: number
   message: string
   count: number
   /** The detector's captures and the matched text, for a grouped rendering's per-site line. */
   captures?: Record<string, string>
+  /** `rulecast fix` can apply this rule's fix. Present only when true. */
+  fixable?: true
 }
 
 export interface DeliveredReference {
@@ -294,6 +342,11 @@ export interface Omitted {
 
 export interface Delivery {
   findings: Finding[]
+  /**
+   * Pre-existing findings in full, for `rulecast run`'s JSON and SARIF (PipelineOptions.listPreexisting).
+   * Absent under a hook: an agent is given `preexistingSummary` instead.
+   */
+  preexisting?: Finding[]
   preexistingSummary: { rule: string; file: string; count: number }[]
   references: DeliveredReference[]
   touches: string[]

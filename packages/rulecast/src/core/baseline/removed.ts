@@ -4,7 +4,7 @@ import type { Selection } from "../detection/select"
 import { REMOVED_VARIABLES } from "../template"
 import type { Match } from "../types"
 import type { BaselineChanges } from "./baseline"
-import type { Fingerprints } from "./fingerprint"
+import type { ContainerRanges } from "./classify"
 
 export interface Removed {
   /** One per file whose count dropped, always new: the drop is the change's by construction. */
@@ -17,7 +17,7 @@ export interface Removed {
  * `scope: removed` (spec §8): a match is something the rule keeps — an assertion — and the finding
  * is a file with fewer of them than at its baseline.
  *
- * The baseline count is the fingerprint record's length (baseline/record.ts), taken when the
+ * The baseline count is the container record's length (baseline/record.ts), taken when the
  * container rules' ranges are. No record — no baseline, a rule that was not measured, a file over
  * the size ceiling — is no finding: there is nothing to compare with, and guessing would report
  * every file. Nor is a file that is gone. A rule that failed or timed out now is skipped the same
@@ -35,7 +35,7 @@ export async function removedFindings(
   selections: readonly Selection[],
   output: DetectionOutput,
   changes: BaselineChanges,
-  fingerprints: Fingerprints,
+  containers: ContainerRanges,
   /** The file's content now, as the detectors read it: only to clamp the finding's line. */
   read: (file: string) => Promise<string | null>,
 ): Promise<Removed> {
@@ -59,7 +59,7 @@ export async function removedFindings(
       // and the shell and `run --from-ref` paths never hand one over, so it is not reported here
       // either: the rule says what it covers the same way on every path.
       const change = changes.sets.get(file)
-      const before = fingerprints.get(file)?.get(rule.id)?.length
+      const before = containers.get(file)?.get(rule.id)?.length
       if (change === undefined || before === undefined) continue
       const after = now.get(key(file, rule.id)) ?? 0
       if (after >= before) continue
@@ -73,6 +73,9 @@ export async function removedFindings(
           endLine: line,
           column: 1,
           text: "removed",
+          // About the file's count, not the changed line it is shown on: its id hashes the text and
+          // the captures, less the counts, which change with every further deletion.
+          wholeFile: true,
           captures: {
             ...Object.fromEntries(rule.detector.captures.map((name) => [name, ""])),
             removed: String(before - after),

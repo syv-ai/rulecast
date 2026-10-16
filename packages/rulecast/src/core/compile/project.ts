@@ -4,6 +4,7 @@ import path from "node:path"
 import { CONFIG_FILE, MANIFEST_FILE, parseConfig, readConfigData, readManifest } from "../config/load"
 import { type ActiveMode, ATTENDED, resolveMode } from "../config/mode"
 import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../config/schema"
+import { AGENT_DIR } from "../delivery/persist"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError, isNotFound } from "../errors"
 import { compileFilter } from "../files"
@@ -22,12 +23,17 @@ export interface Diagnostic {
   /** What a hook tells the developer to run; default "rulecast validate". Missing repos: "rulecast install". */
   hint?: string
   /**
+   * The config file itself did not load, so no rule was compiled: nothing else is said beside it. A
+   * hook still warns; `rulecast run` exits 2 instead of reporting a run that checked nothing
+   * (adapters/cli/contract.ts).
+   */
+  fatal?: true
+  /**
    * The rules this error keeps from running when it is not one rule's own: a `repos` entry that
    * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
+   * `rulecast run RULE_ID` counts such an entry only when it names that rule.
    */
   rules?: string[]
-  /** The config itself did not load, so no rule compiled: nothing else is said beside it. */
-  fatal?: true
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -132,14 +138,17 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   if (config.minimumRulecastVersion !== null && isOlder(VERSION, config.minimumRulecastVersion)) {
     return configFailure(`requires rulecast ${config.minimumRulecastVersion} or newer (running ${VERSION})`, config)
   }
-  const global = compileFilter({
+  const filter = compileFilter({
     files: config.files,
     exclude: config.exclude,
     types: [],
     typesOr: [],
     excludeTypes: [],
   })
-  if (typeof global === "string") return configFailure(global, config)
+  if (typeof filter === "string") return configFailure(filter, config)
+  // rulecast's own directory is never checked: a committed baseline is a JSON file of hex ids, which
+  // a secrets scanner or a `\.json$` rule would otherwise read, and the rest is rulecast's output.
+  const global = (file: string) => !file.startsWith(`${AGENT_DIR}/`) && filter(file)
 
   const mode = modeOf(config, options)
   const diagnostics: Diagnostic[] = []
@@ -157,8 +166,12 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     })
   const add = async (input: RuleInput, source: string) => {
     const result = await compileRule(input, context)
-    if (typeof result === "string") error(source, input.data.alias ?? input.data.id, result)
-    else compiled.push({ rule: result, source })
+    if (typeof result === "string") {
+      error(source, input.data.alias ?? input.data.id, result)
+      return
+    }
+    compiled.push({ rule: result.rule, source })
+    for (const message of result.warnings) diagnostics.push({ source, rule: result.rule.id, message, level: "warning" })
   }
 
   for (const [index, entry] of config.repos.entries()) {
@@ -302,7 +315,10 @@ export async function compileManifest(
         message: result,
         level: "error",
       })
-    } else compiled.push({ rule: result, source })
+      continue
+    }
+    compiled.push({ rule: result.rule, source })
+    for (const message of result.warnings) diagnostics.push({ source, rule: result.rule.id, message, level: "warning" })
   }
   const rules = uniqueRules(compiled, diagnostics, (id) => `rule "${id}" is defined more than once`)
   return { rules, diagnostics }

@@ -1,7 +1,7 @@
 import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
-import { type IgnoredFinding, suppress } from "../suppress"
-import type { ChangeSet, DetectorEvent, DetectorResult, Match } from "../types"
+import { type IgnoredFinding, type SourceLines, sourceLines, suppress } from "../suppress"
+import type { ChangeSet, DetectorEvent, DetectorResult, Match, TextEdit } from "../types"
 import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
 
@@ -13,26 +13,39 @@ export interface DetectionInput {
   changes: ReadonlyMap<string, ChangeSet>
   /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
   read(file: string): Promise<string | null>
+  /**
+   * `read` as lines, memoised (core/suppress.ts). Pass one in to build finding ids from the lines
+   * suppression already read; absent, the run makes its own.
+   */
+  lines?: SourceLines
   /** False when `read` is not the working tree; handed to detectors as `DetectorRun.fromDisk`. */
   fromDisk?: boolean
   /** Per run, not per project: the edit deadline on edit, verify_ms on verify (§13). */
   timeoutMs: number
+  /**
+   * Ask detectors for each finding's `fix` (`DetectorRun.fixes`). Only `rulecast fix` and
+   * `rulecast test` set it (core/fix/); no `PipelineOptions` key reaches it, so a hook never does.
+   */
+  fixes?: boolean
 }
 
 export interface DetectionOutput {
-  findings: { rule: DetectorRule; match: Match }[]
+  /** `fix`: only when the input asked for `fixes`. */
+  findings: { rule: DetectorRule; match: Match; fix?: TextEdit }[]
   errors: { kind: string; rules: string[]; message: string }[]
   timedOut: { kind: string; rules: string[] }[]
   /** Findings dropped by a `rulecast-ignore` comment (core/suppress.ts). */
   ignored: IgnoredFinding[]
   /** Ignores written without a reason, which suppressed nothing, and rules a staged run skipped. */
   warnings: string[]
+  /** Rules a staged run did not run at all (materialise.ts); each also has a warning. */
+  skipped: string[]
 }
 
 const TIMED_OUT = Symbol("timed out")
 
 export async function runDetection(input: DetectionInput): Promise<DetectionOutput> {
-  const output: DetectionOutput = { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
+  const output: DetectionOutput = { findings: [], errors: [], timedOut: [], ignored: [], warnings: [], skipped: [] }
   const byKind = new Map<string, Selection[]>()
   for (const selection of input.selections) {
     const kind = selection.rule.detector.kind
@@ -81,6 +94,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
           cwd: input.detection.root,
           signal: controller.signal,
           deadlineAt,
+          ...(input.fixes === true ? { fixes: true } : {}),
         }),
         deadline,
       ])
@@ -128,10 +142,14 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     }
     for (const [rule, message] of failed) output.errors.push({ kind: outcome.kind, rules: [rule], message })
     for (const finding of result.findings) {
-      if (!failed.has(finding.rule)) output.findings.push({ rule: rulesById.get(finding.rule)!, match: finding.match })
+      if (failed.has(finding.rule)) continue
+      const rule = rulesById.get(finding.rule)!
+      // A fix is handed on only when it was asked for, so nothing past here can apply one by accident.
+      const fix = input.fixes === true ? finding.fix : undefined
+      output.findings.push({ rule, match: finding.match, ...(fix === undefined ? {} : { fix }) })
     }
   }
   // Last, so every caller — pipeline, guard, examples, doctor, test --against — honours ignores.
-  const suppressed = await suppress(output.findings, input.read)
+  const suppressed = await suppress(output.findings, input.lines ?? sourceLines(input.read))
   return { ...output, ...suppressed }
 }
