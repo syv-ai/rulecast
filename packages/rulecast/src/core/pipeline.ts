@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
-import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/fingerprint"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
@@ -439,21 +438,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
       classify(match, rule.scope, rule.id, baselineChanges, fingerprints)
     findings = output.findings.map((finding) => ({ ...finding, status: statusOf(finding) }))
-    // An ignore is judged by its comment's own line, not its finding's: a comment that was already
-    // there was agreed to, and stays so when the agent edits the code under it; one the agent wrote
-    // or changed this session is the agent's.
-    const classifiedIgnores = output.ignored.map((finding) => ({
-      ...finding,
-      status: isNew({ ...finding.match, line: finding.commentLine, endLine: finding.commentLine }, changes)
-        ? ("new" as const)
-        : ("preexisting" as const),
-    }))
-    // Unattended, an ignore the agent added or changed silences nothing: nobody is there to agree to
-    // it, so its finding is classified as any other, and is reported if it keeps blocking.
+    const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
     const unsilenced =
       project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
-    for (const finding of unsilenced)
-      findings.push({ rule: finding.rule, match: finding.match, status: statusOf(finding) })
+    for (const { rule, match, status } of unsilenced) findings.push({ rule, match, status })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)

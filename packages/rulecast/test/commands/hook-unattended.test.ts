@@ -192,6 +192,21 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
   const IGNORED = "    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception the caller expects it\n"
   const ADDED_NOTICE = "the agent added a rulecast-ignore comment this session"
 
+  /** A repo whose no-httpexception rule refuses writes unattended, and a pre-tool-use call against it. */
+  const guarded = async (files: Record<string, string>) => {
+    const rules = fixtureRules.map((rule) =>
+      rule.id === "backend/no-httpexception" ? { ...rule, refuse_write: "unattended" } : rule,
+    )
+    const root = await createRepo({ ...fixtureFiles, ...files, ".rulecast-config.yaml": localConfig(rules) })
+    const pre = async (input: Record<string, string>, name = "pre-tool-use.edit") => {
+      const payload = claudeCodePayload(name, { root, file: USERS, sessionId: "s1" })
+      payload.tool_input = { ...payload.tool_input, ...input } as Payload["tool_input"]
+      const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), UNATTENDED_ENV)
+      return stdout === "" ? null : (JSON.parse(stdout).hookSpecificOutput?.permissionDecision ?? null)
+    }
+    return { root, pre }
+  }
+
   test("an ignore added this session does not silence its finding: delivered, blocked twice, then reported", async () => {
     const { edit, stop } = await session({}, UNATTENDED_ENV)
     expect(await edit(USERS, `def get():\n    raise HTTPException(404)\n${IGNORED}`)).toContain(
@@ -214,23 +229,46 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     expect(await stop()).toBeNull()
   })
 
-  test("an ignore already in the code keeps working when the agent edits the line it covers", async () => {
+  test("an agent edit to the code under an ignore already in the code is reported: the ignore does not cover it", async () => {
+    // Intended (D49): the comment was agreed to for the code it covered then, not for what the agent
+    // writes under it. The finding blocks up to the repeat limit, then goes into the report.
     const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
     const committed = `def get():\n${above}    raise HTTPException(500)\n`
     const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
-    expect(await edit(USERS, `def get():\n${above}    raise HTTPException(501)\n`)).not.toContain("HTTPException(501)")
-    expect(await stop()).toBeNull()
+    expect(await edit(USERS, `def get():\n${above}    raise HTTPException(501)\n`)).toContain("HTTPException(501)")
+    const outputs = []
+    for (let n = 0; n < 4; n++) outputs.push(await stop())
+    expect(outputs.map(kindOf)).toEqual(["block", "block", "report", "systemMessage"])
   })
 
-  test("an ignore added above code that was already there does not silence it, and the user is told", async () => {
+  test("new code inserted under an ignore already in the code is not silenced unattended", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const committed = `def get():\n${above}    return None\n`
+    const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
+    expect(await edit(USERS, `def get():\n${above}    raise HTTPException(500)\n    return None\n`)).toContain(
+      "raises HTTPException(500)",
+    )
+    expect(kindOf(await stop())).toBe("block")
+  })
+
+  test("attended, new code inserted under an ignore already in the code is silenced, and the user is told", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const committed = `def get():\n${above}    return None\n`
+    const { edit, stop } = await session({}, testEnv, { [USERS]: committed })
+    expect(await edit(USERS, `def get():\n${above}    raise HTTPException(500)\n    return None\n`)).not.toContain(
+      "raises HTTPException(500)",
+    )
+    expect(await stop()).toEqual({ systemMessage: expect.stringContaining(ADDED_NOTICE) })
+  })
+
+  test("an ignore added above code the run did not touch is judged by that code: it holds, as attended", async () => {
+    // D49 judges by the finding's line. The code was there before the run and is unchanged, so the
+    // finding was the backlog's, never blocking; the ignore silences it as it would on main.
     const committed = "def get():\n    raise HTTPException(500)\n"
     const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
     const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
     await edit(USERS, `def get():\n${above}    raise HTTPException(500)\n`)
-    // The finding is the backlog's again, not silenced: summarised, never blocking.
-    const output = await stop()
-    expect(output?.decision).toBeUndefined()
-    expect(output?.systemMessage).toContain(ADDED_NOTICE)
+    expect(await stop()).toBeNull()
   })
 
   test("the guard does not honour an ignore the proposed write adds", async () => {
@@ -247,24 +285,36 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     expect(await write(`def get():\n${IGNORED}`)).toBe("deny")
   })
 
-  test("the guard honours an ignore that was already in the file", async () => {
-    const rules = fixtureRules.map((rule) =>
-      rule.id === "backend/no-httpexception" ? { ...rule, refuse_write: "unattended" } : rule,
-    )
+  test("the guard refuses an edit to the code under an ignore already in the file", async () => {
     const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
-    const root = await createRepo({
-      ...fixtureFiles,
-      [USERS]: `def get():\n${above}    raise HTTPException(500)\n`,
-      ".rulecast-config.yaml": localConfig(rules),
-    })
-    const payload = claudeCodePayload("pre-tool-use.edit", { root, file: USERS, sessionId: "s1" })
-    payload.tool_input = {
-      ...payload.tool_input,
-      old_string: "raise HTTPException(500)",
-      new_string: "raise HTTPException(501)",
-    } as Payload["tool_input"]
-    const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), UNATTENDED_ENV)
-    expect(stdout).toBe("")
+    const { pre } = await guarded({ [USERS]: `def get():\n${above}    raise HTTPException(500)\n` })
+    expect(await pre({ old_string: "raise HTTPException(500)", new_string: "raise HTTPException(501)" })).toBe("deny")
+  })
+
+  test("the guard refuses a violation written under an ignore an earlier edit added", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const { root, pre } = await guarded({ [USERS]: "def get():\n    return None\n" })
+    // Edit 1 adds only the comment: nothing to refuse.
+    const first = { old_string: "def get():\n", new_string: `def get():\n${above}` }
+    expect(await pre(first)).toBeNull()
+    await writeFile(path.join(root, USERS), `def get():\n${above}    return None\n`)
+    // Edit 2 writes the violation under it.
+    const second = { old_string: "    return None\n", new_string: "    raise HTTPException(500)\n    return None\n" }
+    expect(await pre(second)).toBe("deny")
+  })
+
+  test("the guard allows a Write that restates a file whose agreed ignore covers untouched code", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const committed = `def get():\n${above}    raise HTTPException(500)\n`
+    const { pre } = await guarded({ [USERS]: committed })
+    expect(await pre({ content: `${committed}\n\ndef put():\n    return None\n` }, "pre-tool-use.write")).toBeNull()
+  })
+
+  test("the guard allows an Edit that carries an agreed ignore and its code as context", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const { pre } = await guarded({ [USERS]: `def get():\n${above}    raise HTTPException(500)\n` })
+    const context = `${above}    raise HTTPException(500)\n`
+    expect(await pre({ old_string: context, new_string: `${context}    return None\n` })).toBeNull()
   })
 
   test("attended, an added ignore silences its finding as before, and the user is told", async () => {

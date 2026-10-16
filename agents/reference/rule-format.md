@@ -200,11 +200,13 @@ In unattended mode:
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
-- **A `rulecast-ignore` comment the agent adds or changes during the run silences nothing.** Its
-  finding is judged like any other, blocking and reported if it is new, and the developer is still
-  told about the comment. Comments already in the code keep working, even when the agent edits the
-  code they cover. A comment on a line the agent changed counts as changed. The same holds for a
-  `refuse_write` rule: an ignore in the write itself does not stop the refusal.
+- **A `rulecast-ignore` does not silence a finding on a line the agent changed during the run,
+  whoever wrote the comment.** Ignores on code the run did not touch keep working. The finding is
+  judged like any other: it blocks, and is reported if it keeps blocking. That includes an edit to
+  code under a comment that was already there: the comment was agreed to for the code as it was.
+  The developer is still told about an ignore on changed code. A `refuse_write` rule works the same
+  way: an ignore does not stop the refusal of a line the write changes, while a write that only
+  restates a line, or an edit that carries it as context, does not change it.
 - **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, and
   `refuse_write: unattended` rules refuse writes.
 
