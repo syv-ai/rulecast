@@ -23,15 +23,20 @@ const violation = (status: number) => `def get():\n    raise HTTPException(404)\
 const UNATTENDED = "Nobody is watching this run to ask"
 const REPORT = "Record each one as unresolved in your final report"
 
-async function session(settings: Record<string, unknown> = {}, env: Env = testEnv) {
-  const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(fixtureRules, settings) })
+async function session(settings: Record<string, unknown> = {}, env: Env = testEnv, files: Record<string, string> = {}) {
+  const root = await createRepo({
+    ...fixtureFiles,
+    ...files,
+    ".rulecast-config.yaml": localConfig(fixtureRules, settings),
+  })
   const hook = (name: string, file?: string) =>
     runCli(root, ["hook", "claude-code"], JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" })), env)
   let stops = 0
-  /** The agent edits `file` to `content`; the edit hook sees it. */
-  const edit = async (file: string, content: string) => {
+  /** The agent edits `file` to `content`; the edit hook sees it. What the agent was told, or "". */
+  const edit = async (file: string, content: string): Promise<string> => {
     await writeFile(path.join(root, file), content)
-    await hook("post-tool-use.edit", file)
+    const { stdout } = await hook("post-tool-use.edit", file)
+    return stdout === "" ? "" : (JSON.parse(stdout).hookSpecificOutput?.additionalContext ?? "")
   }
   /** The agent stops: the parsed hook output, or null when it printed nothing. */
   const stop = async () => {
@@ -149,5 +154,41 @@ describe("hook claude-code: unattended stops", () => {
     }
     expect(await write(testEnv)).toBeNull()
     expect(await write({ ...testEnv, RULECAST_MODE: "unattended" })).toBe("deny")
+  })
+})
+
+describe("hook claude-code: rulecast-ignore in unattended mode", () => {
+  const UNATTENDED_ENV = { ...testEnv, RULECAST_MODE: "unattended" }
+  const IGNORED = "    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+  const ADDED_NOTICE = "the agent added a rulecast-ignore comment this session"
+
+  test("an ignore added this session does not silence its finding: delivered, blocked twice, then reported", async () => {
+    const { edit, stop } = await session({}, UNATTENDED_ENV)
+    expect(await edit(USERS, `def get():\n    raise HTTPException(404)\n${IGNORED}`)).toContain(
+      "raises HTTPException(500)",
+    )
+    const outputs = []
+    for (let n = 0; n < 4; n++) outputs.push(await stop())
+    expect(outputs.map(kindOf)).toEqual(["block", "block", "report", "systemMessage"])
+    expect(outputs[0].reason).toContain("raises HTTPException(500)")
+    expect(outputs[0].reason).toContain("does not silence a finding")
+    // The developer reading the run's log still learns the agent tried.
+    expect(outputs[0].systemMessage).toContain(ADDED_NOTICE)
+  })
+
+  test("an ignore that was already in the code still silences its finding", async () => {
+    const committed = `def get():\n${IGNORED}`
+    const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
+    // Not even counted among the file's pre-existing findings.
+    expect(await edit(USERS, `${committed}    return None\n`)).not.toMatch(/HTTPException|no-httpexception/)
+    expect(await stop()).toBeNull()
+  })
+
+  test("attended, an added ignore silences its finding as before, and the user is told", async () => {
+    const { edit, stop } = await session()
+    expect(await edit(USERS, `def get():\n    raise HTTPException(404)\n${IGNORED}`)).not.toContain(
+      "raises HTTPException(500)",
+    )
+    expect(await stop()).toEqual({ systemMessage: expect.stringContaining(ADDED_NOTICE) })
   })
 })
