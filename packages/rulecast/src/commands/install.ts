@@ -76,27 +76,32 @@ export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: n
   return (await hookState(root, adapter, verifyMs))?.file ?? null
 }
 
+/** `local`: the hooks run only the project's own rulecast, so one on the PATH does not make them run. */
+export interface HookState {
+  file: string
+  stale: string[]
+  missing: string[]
+  local: boolean
+}
+
 /**
  * Where the adapter's hooks are and whether they are current. `stale`: installed by an older
  * rulecast with another command; `missing`: installed before rulecast needed every hook it needs
  * now (plan 11's Bash hooks). Either way `install` upgrades that file in place and `doctor` says so.
  * A file with every hook wins over one with only some.
  */
-export async function hookState(
-  root: string,
-  adapter: Adapter,
-  verifyMs: number,
-): Promise<{ file: string; stale: string[]; missing: string[] } | null> {
+export async function hookState(root: string, adapter: Adapter, verifyMs: number): Promise<HookState | null> {
   const install = installOf(adapter)
   const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
-  let partial: { file: string; stale: string[]; missing: string[] } | null = null
+  let partial: HookState | null = null
   for (const { file } of install.scopes) {
     const current = await readSettings(root, file)
     if (current === null) continue
     const merged = inFile(file, () => install.merge(current.value, command, verifyMs))
-    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [] }
+    const local = inFile(file, () => install.local?.(current.value) ?? false)
+    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [], local }
     const ours = inFile(file, () => install.remove(current.value)).removed.length > 0
-    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added }
+    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added, local }
   }
   return partial
 }

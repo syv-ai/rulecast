@@ -130,3 +130,45 @@ describe("gate, unattended", () => {
     expect(gate(fresh, after, "main", 1).stop).toBe("capReached")
   })
 })
+
+describe("gate, unattended, when configured rules did not run", () => {
+  const incomplete = (fresh: ReturnType<typeof finding>[], work: WorkRecord[], agent = "main", mode = "unattended") =>
+    gate(fresh, foldWork(work), agent, 10, new Set(), mode as "attended" | "unattended", true)
+
+  test("the main agent is held once per prompt to say so, then let through", () => {
+    const first = incomplete([], [])
+    expect(first).toEqual({ stop: "incomplete", work: [{ t: "incompleteReport", agent: "main" }] })
+    expect(incomplete([], first.work).stop).toBe("allow")
+    expect(incomplete([], [...first.work, { t: "prompt", agent: "main" }]).stop).toBe("incomplete")
+  })
+
+  test("a block comes first: the findings are what the agent can act on", () => {
+    expect(incomplete([finding("a/rule", "bad")], []).stop).toBe("block")
+  })
+
+  test("a block or report that carried the list is the hold: a capped stop after it is not held again", () => {
+    const records: WorkRecord[] = []
+    const same = [finding("a/rule", "same")]
+    const sequence = [same, same, same, same, []].map((fresh) => {
+      const result = incomplete(fresh, records)
+      records.push(...result.work)
+      return result.stop
+    })
+    expect(sequence).toEqual(["block", "block", "report", "capReached", "allow"])
+  })
+
+  test("a capped stop is never turned into a hold", () => {
+    const same = finding("a/rule", "same")
+    const work: WorkRecord[] = [
+      { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+      { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+      { t: "stopReport", agent: "main" },
+    ]
+    expect(incomplete([same], work).stop).toBe("capReached")
+  })
+
+  test("never a subagent, and never attended", () => {
+    expect(incomplete([], [], "agent-1").stop).toBe("allow")
+    expect(incomplete([], [], "main", "attended").stop).toBe("allow")
+  })
+})

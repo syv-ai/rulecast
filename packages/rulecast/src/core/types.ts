@@ -1,5 +1,7 @@
 import type { ZodType, ZodTypeDef } from "zod"
 
+import type { DisabledGroup } from "./disabled"
+
 /**
  * `start`: the session began or resumed. `shell-before` / `shell-after`: around one call of the
  * agent's shell tool, whose writes rulecast finds by comparing the working tree (session/tree.ts).
@@ -298,8 +300,10 @@ export interface Delivery {
   /**
    * At an agent's stop. `report`: unattended only — the gate will not block for these findings
    * again, so the agent is held once more to record them as unresolved (session/decide.ts `gate`).
+   * `incomplete`: unattended only — nothing blocks, but configured rules did not run, so the main
+   * agent is held once per prompt to say in its report that those checks did not happen.
    */
-  stop: "block" | "allow" | "capReached" | "report" | null
+  stop: "block" | "allow" | "capReached" | "report" | "incomplete" | null
   /** Decided in unattended mode: nobody answers the agent, so the adapter words its stop for that. */
   unattended?: true
   warnings: string[]
@@ -326,6 +330,11 @@ export interface Delivery {
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.
    */
   notices?: string[]
+  /**
+   * Configured rules that did not run (#29), grouped by why. Set at every stop in unattended mode —
+   * not once per context, as warnings are — and on every `rulecast run`. Never priced into the budget.
+   */
+  disabled?: DisabledGroup[]
 }
 
 export interface AdapterInput {
@@ -356,6 +365,11 @@ export interface AdapterInstall {
     verifyMs: number,
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
+  /**
+   * Whether the installed hooks run only the project's own rulecast (node_modules/.bin), so one on
+   * the PATH does not count (`doctor`). Absent: the adapter cannot tell.
+   */
+  local?(settings: unknown): boolean
 }
 
 export interface Adapter {

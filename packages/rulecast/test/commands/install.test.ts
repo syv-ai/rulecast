@@ -130,6 +130,29 @@ describe("rulecast install", () => {
     expect((await settingsOf(clone)).hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
   })
 
+  test("a clone without node_modules upgrades a released guard to the current guard, not the bare command", async () => {
+    const released =
+      'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+      `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
+    const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
+    await runCli(local, ["install"])
+    const committed = JSON.parse(
+      (await read(local, SHARED)).replaceAll(JSON.stringify(LOCAL_COMMAND), JSON.stringify(released)),
+    )
+    const clone = await createProject({
+      ".rulecast-config.yaml": "repos: []\n",
+      ".claude/settings.json": JSON.stringify(committed),
+    })
+    expect((await runCli(clone, ["doctor"])).stdout).toContain("the hooks use an old command; run rulecast install")
+    expect((await runCli(clone, ["install"])).code).toBe(0)
+    const commands = Object.values(
+      (await settingsOf(clone)).hooks as Record<string, { hooks: { command: string }[] }[]>,
+    )
+      .flat()
+      .flatMap((group) => group.hooks.map((hook) => hook.command))
+    expect(new Set(commands)).toEqual(new Set([LOCAL_COMMAND]))
+  })
+
   test("fetches rule repos missing from the cache", async () => {
     const url = await createRuleRepo([{ tag: "v1.0.0", files: { ".rulecast-rules.yaml": "[]\n" } }])
     const root = await createProject({ ".rulecast-config.yaml": repoConfig(url) })

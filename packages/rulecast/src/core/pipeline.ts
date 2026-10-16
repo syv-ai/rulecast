@@ -16,6 +16,7 @@ import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
+import { type DisabledGroup, disabledRules } from "./disabled"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
@@ -45,6 +46,11 @@ export interface PipelineOptions {
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /**
+   * Say which configured rules did not run (Delivery.disabled), whatever the mode: `rulecast run`.
+   * An agent's stop says it only in unattended mode, where nobody reads the warning given once (#29).
+   */
+  reportDisabled?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
   /**
@@ -80,6 +86,9 @@ const TREE_UNAVAILABLE =
 const SUMMARY_THRESHOLD = 3
 
 const DEFAULT_HINT = "rulecast validate"
+
+/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
+const DISABLED_WARNING = /^(diagnostics?|detector):/
 
 /**
  * The key a summary is delivered under.
@@ -321,6 +330,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let ignored: IgnoredFinding[] = []
   let told: Notice[] = []
   let agentRead: string | null = null
+  let disabledGroups: DisabledGroup[] = []
 
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
@@ -506,6 +516,26 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
     }
+    // Every time, not once per context: a loop nobody watches must not read "no findings" as
+    // "checked". The session's earlier disables are named too, since they are skipped above unsaid.
+    if (
+      event.kind === "verify" &&
+      (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
+    ) {
+      const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
+      const earlier = [...view.work.disabled].map(([rule, message]) => ({
+        kind: kinds.get(rule) ?? "detector",
+        rules: [rule],
+        message,
+      }))
+      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
+      // there the warning is the once-per-context word to the user, the list the agent's every stop.
+      if (options.reportDisabled === true) {
+        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
+        warnings.splice(0, warnings.length, ...kept)
+      }
+    }
     // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
     // skipped in a staged run says which files kept it from running (detection/materialise.ts).
     for (const text of output.warnings) warnings.push({ key: `detection:${text}`, text })
@@ -579,6 +609,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
     ...(refused.length === 0 ? {} : { refused }),
+    ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.

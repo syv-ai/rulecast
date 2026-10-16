@@ -27,6 +27,22 @@ const delivery: Delivery = {
 }
 
 describe("formatDelivery", () => {
+  test("terminal: rules that did not run make it incomplete, never clean (#29)", () => {
+    const value: Delivery = {
+      ...emptyDelivery(),
+      warnings: ["llm rules checked 5 files; 2 were not checked"],
+      disabled: [{ reason: "x.git@v1: not in the cache", hint: "rulecast install", rules: ["a", "b"] }],
+    }
+    const text = formatDelivery(value, "terminal", { maxMatchesPerRule: 10 })
+    expect(text).toContain("did not run:\n  - 2 rules disabled: x.git@v1: not in the cache (run rulecast install)")
+    // The other problems keep their count beside it.
+    expect(text).toContain(
+      "no findings · incomplete: 2 rules did not run (see above) · rulecast: 1 problem (see above)",
+    )
+    const config = { ...value, disabled: [{ reason: "the config did not load: bad", rules: [] }] }
+    expect(formatDelivery(config, "terminal", { maxMatchesPerRule: 10 })).toContain("incomplete: no rules ran")
+  })
+
   test("terminal", () => {
     expect(formatDelivery(delivery, "terminal", { maxMatchesPerRule: 10 })).toBe(
       [
@@ -78,6 +94,7 @@ describe("formatDelivery", () => {
     expect(Object.keys(parsed).sort()).toEqual([
       "backlog",
       "checked",
+      "disabled",
       "findings",
       "ignored",
       "notices",

@@ -330,7 +330,13 @@ describe("compile: the config", () => {
   test("a missing, unparseable or invalid config disables every rule", async () => {
     const missing = await compile({ root: await createProject({}), registry, repos: cachedRepos(TEST_HOME) })
     expect(missing.diagnostics).toEqual([
-      { source: ".rulecast-config.yaml", rule: null, message: ".rulecast-config.yaml not found", level: "error" },
+      {
+        source: ".rulecast-config.yaml",
+        rule: null,
+        message: ".rulecast-config.yaml not found",
+        level: "error",
+        fatal: true,
+      },
     ])
     const broken = await compile({
       root: await createProject({ ".rulecast-config.yaml": "repos: [" }),
@@ -464,8 +470,25 @@ describe("compile: rule repos", () => {
     )
     expect(project.rules.map((rule) => rule.id)).toEqual(["mine"])
     expect(project.diagnostics).toEqual([
-      { source: `${url}@v1.0.0`, rule: null, message: "not in the cache", level: "error", hint: "rulecast install" },
+      {
+        source: `${url}@v1.0.0`,
+        rule: null,
+        message: "not in the cache",
+        level: "error",
+        hint: "rulecast install",
+        rules: ["python/no-print"],
+      },
     ])
+  })
+
+  test("a repo entry that cannot be read names the rules it keeps from running, by alias when set", async () => {
+    const url = await packageRepo()
+    const project = await compileConfig(
+      { repos: [{ repo: url, rev: "v1.0.0", rules: [{ id: "python/no-print" }, { id: "a", alias: "b" }] }] },
+      {},
+      false,
+    )
+    expect(project.diagnostics[0]?.rules).toEqual(["python/no-print", "b"])
   })
 
   test("repo entry problems are diagnostics naming the repo and rev", async () => {

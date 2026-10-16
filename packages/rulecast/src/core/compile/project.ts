@@ -21,6 +21,13 @@ export interface Diagnostic {
   level: "error" | "warning"
   /** What a hook tells the developer to run; default "rulecast validate". Missing repos: "rulecast install". */
   hint?: string
+  /**
+   * The rules this error keeps from running when it is not one rule's own: a `repos` entry that
+   * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
+   */
+  rules?: string[]
+  /** The config itself did not load, so no rule compiled: nothing else is said beside it. */
+  fatal?: true
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -80,6 +87,12 @@ function idOf(raw: unknown): string | null {
   return typeof id === "string" ? id : null
 }
 
+/** What a configured rule is called once compiled: its alias when it has one. */
+function nameOf(raw: unknown): string | null {
+  const alias = (raw as { alias?: unknown } | null)?.alias
+  return typeof alias === "string" ? alias : idOf(raw)
+}
+
 /** pre-commit's heuristic: a rev with no "." that is not hex is probably a branch. */
 function isBranchLike(rev: string): boolean {
   return !rev.includes(".") && !/^[0-9a-f]+$/i.test(rev)
@@ -106,7 +119,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     root,
     config,
     rules: [],
-    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
+    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error", fatal: true }],
     mode: modeOf(config, options),
   })
 
@@ -133,8 +146,15 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   const compiled: Compiled[] = []
   const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }
   const project: ReferenceRoot = { dir: root, label: null }
-  const error = (source: string, rule: string | null, message: string, hint?: string) =>
-    diagnostics.push({ source, rule, message, level: "error", ...(hint === undefined ? {} : { hint }) })
+  const error = (source: string, rule: string | null, message: string, hint?: string, rules?: string[]) =>
+    diagnostics.push({
+      source,
+      rule,
+      message,
+      level: "error",
+      ...(hint === undefined ? {} : { hint }),
+      ...(rules === undefined ? {} : { rules }),
+    })
   const add = async (input: RuleInput, source: string) => {
     const result = await compileRule(input, context)
     if (typeof result === "string") error(source, input.data.alias ?? input.data.id, result)
@@ -142,9 +162,11 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   }
 
   for (const [index, entry] of config.repos.entries()) {
+    // A whole entry that cannot be read disables every rule in it, and says how many (core/disabled.ts).
+    const entryRules = entry.rules.map(nameOf).filter((name): name is string => name !== null)
     if (entry.repo === "local") {
       if (entry.rev !== undefined) {
-        error(CONFIG_FILE, null, `repos[${index}]: local repos take no rev`)
+        error(CONFIG_FILE, null, `repos[${index}]: local repos take no rev`, undefined, entryRules)
         continue
       }
       for (const raw of entry.rules) {
@@ -161,7 +183,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
 
     if (entry.rev === undefined) {
-      error(CONFIG_FILE, null, `repos[${index}] ${entry.repo}: rev is required`)
+      error(CONFIG_FILE, null, `repos[${index}] ${entry.repo}: rev is required`, undefined, entryRules)
       continue
     }
     const source = `${entry.repo}@${entry.rev}`
@@ -175,12 +197,12 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
     const checkout = await options.repos.checkout(entry.repo, entry.rev)
     if (!checkout.ok) {
-      error(source, null, checkout.message, checkout.missing ? "rulecast install" : undefined)
+      error(source, null, checkout.message, checkout.missing ? "rulecast install" : undefined, entryRules)
       continue
     }
     const manifest = await readManifest(checkout.dir)
     if (!manifest.ok) {
-      error(source, null, manifest.message)
+      error(source, null, manifest.message, undefined, entryRules)
       continue
     }
     const byId = new Map<string, unknown[]>()
