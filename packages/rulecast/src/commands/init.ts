@@ -161,6 +161,22 @@ const idOf = (entry: unknown): string | null => {
 
 const groupOf = (id: string) => (id.includes("/") ? id.slice(0, id.indexOf("/")) : "general")
 
+/**
+ * Packs that are offered but not ticked for someone, with the note that says who they are for.
+ * loop-safety matches the test files of almost every project, and it is for people who run agents
+ * with nobody watching; a config that already says `mode: unattended` is that reader.
+ */
+const OPT_IN_PACKS: Record<string, { title: string; note: string }> = {
+  "loop-safety": {
+    title: "Loop safety",
+    note:
+      "For agents that run with nobody watching: /goal, claude -p, scheduled tasks, CI. It catches the " +
+      "shortcuts a loop takes to make tests pass: skipped or focused tests, new lint, type and coverage " +
+      "suppressions, changed coverage thresholds, and edits to CI, git hooks or rulecast's own config. " +
+      "Warnings while you watch; errors, and refused edits to that config, in unattended mode.",
+  },
+}
+
 async function chooseRules(
   catalog: Catalog,
   installed: ReadonlySet<string>,
@@ -168,30 +184,42 @@ async function chooseRules(
   flags: Flags,
   ui: Ui,
   registry: DetectorRegistry,
+  unattended: boolean,
 ): Promise<CompiledRule[]> {
   const metered = (rule: CompiledRule) => rule.detector !== null && registry.get(rule.detector.kind)?.metered === true
+  const optIn = (rule: CompiledRule) => !unattended && groupOf(rule.id) in OPT_IN_PACKS
   const available = catalog.rules.filter((rule) => !installed.has(rule.id))
   if (flags.noRules) return []
   if (flags.rules !== null) {
-    const known = new Set(catalog.rules.map((rule) => rule.id))
+    // A group name selects the group: `--rules loop-safety` is the pack.
+    const known = new Set(
+      catalog.rules.flatMap((rule) => (rule.id.includes("/") ? [rule.id, groupOf(rule.id)] : [rule.id])),
+    )
     const unknown = flags.rules.find((id) => !known.has(id))
     if (unknown !== undefined) throw new UsageError(`"${unknown}" is not a rule in ${catalog.label}`)
-    return available.filter((rule) => flags.rules!.includes(rule.id))
+    return available.filter((rule) => flags.rules!.includes(rule.id) || flags.rules!.includes(groupOf(rule.id)))
   }
-  // Preselected: rules that apply to at least one project file — except metered ones. Spec §6,
-  // Consent: an llm rule sends file contents to a third party and costs money per file, so it is
-  // never ticked on someone's behalf. It is still offered, and --rules still installs it. This
-  // also covers --yes and the no-TTY path, which take `preselected` directly below.
+  // Preselected: rules that apply to at least one project file — except metered ones and opt-in
+  // packs. Spec §6, Consent: an llm rule sends file contents to a third party and costs money per
+  // file, so it is never ticked on someone's behalf. Both are still offered, and --rules still
+  // installs them. This also covers --yes and the no-TTY path, which take `preselected` directly below.
   const preselected = available
-    .filter((rule) => !metered(rule) && files.some((file) => rule.matches(file)))
+    .filter((rule) => !metered(rule) && !optIn(rule) && files.some((file) => rule.matches(file)))
     .map((rule) => rule.id)
+  const packs = Object.entries(OPT_IN_PACKS).filter(([group]) => available.some((rule) => groupOf(rule.id) === group))
   if (ui.prompter === null) {
     // An empty config otherwise reads as a dead one: say the catalog was consulted and why it gave nothing.
     if (available.length > 0 && preselected.length === 0) {
       ui.say(`Nothing in ${catalog.label} applies to this project's files. Draft rules from your own docs.`, "Rules")
     }
+    for (const [group, pack] of packs) {
+      if (preselected.some((id) => groupOf(id) === group)) continue
+      ui.say(`${pack.note}\nNot installed. Add it with: rulecast init --rules ${group}`, pack.title)
+    }
     return available.filter((rule) => preselected.includes(rule.id))
   }
+  // A group header cannot carry a hint, so the note goes just before the prompt.
+  for (const [, pack] of packs) ui.say(pack.note, pack.title)
   if (available.length === 0) {
     ui.say(`Every rule from ${catalog.label} is already configured.`, "Rules")
     return []
@@ -382,7 +410,10 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   const catalog = typeof loaded === "string" ? null : loaded
   if (typeof loaded === "string") ui.say(`${loaded}. Continuing without catalog rules.`, "Catalog unavailable")
   const installed = new Set((configured?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
-  const rules = catalog === null ? [] : await chooseRules(catalog, installed, files, flags, ui, registry)
+  const rules =
+    catalog === null
+      ? []
+      : await chooseRules(catalog, installed, files, flags, ui, registry, config?.mode === "unattended")
   const selections = await chooseConventions(rules, detection, ui)
   const hooks = await chooseHooks(root, config, flags, ui)
   const agents = await chooseAgents(detection, flags, ui)

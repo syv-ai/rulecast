@@ -44,6 +44,8 @@ const ruleKeys = {
   stages: stagesSchema.optional(),
   minimum_rulecast_version: versionSchema.optional(),
   severity: z.enum(["error", "warning"]).optional(),
+  /** true: `error` in unattended mode, as if `unattended.escalate` named the rule. A catalog default an override can turn off. */
+  escalate: z.boolean().optional(),
   /**
    * What the convention belongs to (§8). `instance`: the token the detector matched, classified by
    * whether the agent's edit touched it. `container`: the node the match spans, classified by

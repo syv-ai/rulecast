@@ -227,6 +227,7 @@ describe("compile: local rules", () => {
         touchRule("bad-syntax", { context: ["docs/api.md"] }),
         touchRule("escapes", { context: ["@../secrets.md"] }),
         detectRule("too-new", { minimum_rulecast_version: "99.0.0" }),
+        detectRule("too-new-key", { minimum_rulecast_version: "99.0.0", added_later: true }),
         { id: "no-name", stages: ["touch"], context: ["@docs/api.md"] },
         { id: "Bad Id", name: "x" },
         "not a rule",
@@ -254,6 +255,7 @@ describe("compile: local rules", () => {
       ["bad-syntax", 'reference "docs/api.md" must start with "@"'],
       ["escapes", 'reference "@../secrets.md" leaves its root'],
       ["too-new", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
+      ["too-new-key", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
       ["no-name", "name: required"],
       ["Bad Id", "id: must be lowercase segments separated by /"],
       [null, "Expected object, received string"],
@@ -475,6 +477,31 @@ describe("compile: rule repos", () => {
     expect(project.diagnostics.every((d) => d.hint === undefined)).toBe(true)
   })
 
+  test("a manifest rule that needs a newer rulecast says so, whatever keys it uses", async () => {
+    const url = await createRuleRepo([
+      {
+        tag: "v1.0.0",
+        files: {
+          ".rulecast-rules.yaml": stringify([
+            detectRule("later", { minimum_rulecast_version: "99.0.0", added_later: true }),
+          ]),
+        },
+      },
+    ])
+    const project = await compileConfig({ repos: [{ repo: url, rev: "v1.0.0", rules: [{ id: "later" }] }] })
+    expect(project.diagnostics.map((d) => [d.source, d.rule, d.message])).toEqual([
+      [`${url}@v1.0.0`, "later", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
+    ])
+    const dir = await createProject({
+      ".rulecast-rules.yaml": stringify([
+        detectRule("later", { minimum_rulecast_version: "99.0.0", added_later: true }),
+      ]),
+    })
+    expect((await compileManifest(dir, registry)).diagnostics.map((d) => d.message)).toEqual([
+      `requires rulecast 99.0.0 or newer (running ${VERSION})`,
+    ])
+  })
+
   test("a branch-like rev is a warning, not an error", async () => {
     const url = await packageRepo()
     const project = await compileConfig({ repos: [{ repo: url, rev: "main", rules: [{ id: "generated-code" }] }] })
@@ -571,6 +598,36 @@ describe("compile: unattended mode", () => {
     expect(shape(await compiled({}))).toEqual(attended)
     expect(shape(await compiled())).toEqual(attended)
     expect((await compiled()).mode.source).toBe("default")
+  })
+
+  test("a rule's own escalate: true is the same as being named; an override's escalate: false turns it off", async () => {
+    const url = await createRuleRepo([
+      {
+        tag: "v1.0.0",
+        files: {
+          ".rulecast-rules.yaml": stringify([
+            detectRule("pack/a", { severity: "warning", escalate: true }),
+            detectRule("pack/b", { severity: "warning", escalate: true }),
+          ]),
+        },
+      },
+    ])
+    const root = await createProject({
+      ".rulecast-config.yaml": stringify({
+        repos: [{ repo: url, rev: "v1.0.0", rules: [{ id: "pack/a" }, { id: "pack/b", escalate: false }] }],
+      }),
+    })
+    const project = (env: Record<string, string>) => compile({ root, registry, repos: fetchingRepos(TEST_HOME), env })
+    const unattended = await project({ RULECAST_MODE: "unattended" })
+    expect(unattended.diagnostics).toEqual([])
+    expect(shape(unattended)).toEqual([
+      ["pack/a", "error", false],
+      ["pack/b", "warning", false],
+    ])
+    expect(shape(await project({}))).toEqual([
+      ["pack/a", "warning", false],
+      ["pack/b", "warning", false],
+    ])
   })
 
   test("an escalation naming no rule is a warning in every mode", async () => {

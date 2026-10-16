@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
@@ -13,6 +13,7 @@ import { runExamples } from "../src/core/examples"
 import { runPipeline } from "../src/core/pipeline"
 import { defaultDetectorSettings } from "../src/core/types"
 import { registry } from "./helpers/fixture"
+import { createRepo, git } from "./helpers/git"
 import { stateDirFor } from "./helpers/home"
 import { stubAgentCli } from "./helpers/llm"
 import { createProject } from "./helpers/project"
@@ -21,6 +22,12 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url))
 
 const CATALOG = [
   "generated-code",
+  "loop-safety/no-skipped-tests-python",
+  "loop-safety/no-skipped-tests-ts",
+  "loop-safety/no-skipped-tests-js",
+  "loop-safety/no-new-suppressions",
+  "loop-safety/no-lowered-thresholds",
+  "loop-safety/protected-loop-config",
   "python/no-httpexception-in-services",
   "python/no-queries-in-services",
   "python/layering",
@@ -153,6 +160,113 @@ const cases: Case[] = [
     content: 'export const Card = () => <div className="p-2">x</div>\n',
     fires: false,
   },
+  {
+    rule: "loop-safety/no-skipped-tests-python",
+    kind: "verify",
+    file: "tests/test_rates.py",
+    content:
+      "import unittest\n\nclass Rates(unittest.TestCase):\n    def test_fresh(self):\n        self.skipTest('no service')\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-skipped-tests-python",
+    kind: "verify",
+    file: "tests/test_rates.py",
+    content: "pytestmark = pytest.mark.slow\nyaml = pytest.importorskip('yaml')\n",
+    fires: false,
+  },
+  // A skip outside a test file is not this rule's business: app code may have a `skip` of its own.
+  {
+    rule: "loop-safety/no-skipped-tests-python",
+    kind: "verify",
+    file: "app/pagination.py",
+    content: "def page(items, mark):\n    return mark.skip(items)\n",
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-skipped-tests-ts",
+    kind: "verify",
+    file: "src/cart.spec.ts",
+    content: "test.describe.skip('cart', () => {})\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-skipped-tests-ts",
+    kind: "verify",
+    file: "src/cart.ts",
+    content: "export const page = (items: number[]) => items.slice(1)\nit.only = 1\n",
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-skipped-tests-js",
+    kind: "verify",
+    file: "src/Cart.test.tsx",
+    content: "it.concurrent.only('totals', () => expect(<Cart />).toBeTruthy())\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-skipped-tests-js",
+    kind: "verify",
+    file: "src/Cart.test.tsx",
+    content: "describe.each([1, 2])('cart %i', (n) => it('totals', () => expect(n).toBe(n)))\n",
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-new-suppressions",
+    kind: "verify",
+    file: "app/report.py",
+    content: "def total(lines):  # pragma: no cover\n    return sum(lines)\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-new-suppressions",
+    kind: "verify",
+    file: "src/cart.ts",
+    content: "// @ts-expect-error the old client has no types\nimport legacy from 'legacy'\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-new-suppressions",
+    kind: "verify",
+    file: "app/report.py",
+    content: "# Coverage is checked in CI.\ndef total(lines):\n    return sum(lines)\n",
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-lowered-thresholds",
+    kind: "verify",
+    file: "tox.ini",
+    content: "[testenv]\ncommands = pytest --cov=app --cov-fail-under=60\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-lowered-thresholds",
+    kind: "verify",
+    file: "package.json",
+    content: '{ "scripts": { "lint": "eslint . --max-warnings 50" } }\n',
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-lowered-thresholds",
+    kind: "verify",
+    file: "package.json",
+    content: '{ "scripts": { "test": "vitest run --coverage" } }\n',
+    fires: false,
+  },
+  {
+    rule: "loop-safety/protected-loop-config",
+    kind: "verify",
+    file: ".pre-commit-config.yaml",
+    content: "repos: []\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/protected-loop-config",
+    kind: "verify",
+    file: "docs/ci.md",
+    content: "# CI\n",
+    fires: false,
+  },
   // An llm rule's judgement belongs to the model, so what the catalog can check is that it is
   // wired up: the right files reach it, and a finding renders through {{reason}}. The stub answers
   // for whatever rule the prompt names, so the quiet case is a file the rule does not select.
@@ -268,5 +382,55 @@ describe("catalog rules", () => {
     const fired =
       kind === "touch" ? delivery.touches.includes(rule) : delivery.findings.some((finding) => finding.rule === rule)
     expect(fired).toBe(fires)
+  })
+})
+
+describe("loop-safety flags only what the change adds", () => {
+  // Spec §8: an instance rule's finding is new when the change touched its line, and a path rule's
+  // when the file changed. A loop that inherits a skip or a workflow is not blamed for it.
+  const TEST = "tests/test_pricing.py"
+  const WORKFLOW = ".github/workflows/test.yml"
+  const SKIPPED = '@pytest.mark.skip(reason="needs the rates service")\ndef test_rates():\n    assert rates.fresh()\n'
+  let rules: CompiledRule[] = []
+  beforeAll(async () => {
+    rules = (await compileManifest(repoRoot, registry)).rules.filter((rule) => rule.id.startsWith("loop-safety/"))
+  })
+
+  async function verifyAfter(edits: Record<string, string>) {
+    const root = await createRepo({ [TEST]: SKIPPED, [WORKFLOW]: "jobs: {}\n" })
+    const baseCommit = await git(root, "rev-parse", "HEAD")
+    for (const [file, content] of Object.entries(edits)) await writeFile(path.join(root, file), content)
+    const { delivery } = await runPipeline({
+      project: { root, config: defaultConfig(), rules, diagnostics: [], mode: ATTENDED },
+      stateDir: stateDirFor(root),
+      event: { kind: "verify", files: [TEST, WORKFLOW], baseCommit, cwd: root },
+      registry,
+      maxContextChars: null,
+    })
+    return delivery
+  }
+
+  test("an unrelated test next to an existing skip is no finding; the skip and the workflow are pre-existing", async () => {
+    const delivery = await verifyAfter({ [TEST]: `${SKIPPED}\ndef test_total():\n    assert total([1, 2]) == 3\n` })
+    expect(delivery.findings).toEqual([])
+    expect(delivery.preexistingSummary).toEqual([
+      { rule: "loop-safety/no-skipped-tests-python", file: TEST, count: 1 },
+      { rule: "loop-safety/protected-loop-config", file: WORKFLOW, count: 1 },
+    ])
+  })
+
+  test("a second skip is one new finding, on the line the change added", async () => {
+    const delivery = await verifyAfter({
+      [TEST]: `${SKIPPED}\n@pytest.mark.xfail\ndef test_total():\n    assert total([1, 2]) == 3\n`,
+    })
+    expect(delivery.findings.map((finding) => [finding.rule, finding.line])).toEqual([
+      ["loop-safety/no-skipped-tests-python", 5],
+    ])
+  })
+
+  test("an unchanged workflow is nothing; an edited one is new", async () => {
+    expect((await verifyAfter({})).findings).toEqual([])
+    const edited = await verifyAfter({ [WORKFLOW]: "jobs: { test: {} }\n" })
+    expect(edited.findings.map((finding) => finding.rule)).toEqual(["loop-safety/protected-loop-config"])
   })
 })
