@@ -1,28 +1,12 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test } from "vitest"
 
 import { openSession, sessionDir } from "../../src/core/session/session"
-import type * as Tree from "../../src/core/session/tree"
 import type { Event } from "../../src/core/types"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
 import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
-
-/** Run once, inside the next tree snapshot the pipeline takes: another agent acting at that moment. */
-const race = vi.hoisted(() => ({ before: null as null | (() => Promise<unknown>) }))
-vi.mock("../../src/core/session/tree", async (importOriginal) => {
-  const actual = await importOriginal<typeof Tree>()
-  return {
-    ...actual,
-    treeState: async (root: string) => {
-      const act = race.before
-      race.before = null
-      if (act !== null) await act()
-      return actual.treeState(root)
-    },
-  }
-})
 
 const USERS = "app/services/users.py"
 // Not in the fixture's commit: a file the subagent creates.
@@ -49,12 +33,7 @@ async function scenario() {
     await act()
     return send({ kind: "shell-after", files: [], toolUseId, agentId })
   }
-  /** Another agent's Edit tool, PreToolUse and the write; its PostToolUse is left to the test. */
-  const claimAndWrite = async (file: string, content: string, agentId: string) => {
-    await send({ kind: "guard", files: [file], intent: { content }, agentId })
-    await writeFile(path.join(root, file), content)
-  }
-  return { send, edit, stop, work, shell, claimAndWrite, root }
+  return { send, edit, stop, work, shell, root }
 }
 
 const violation = (file: string) => `${fixtureFiles[file] ?? "def get():\n"}    raise HTTPException(500)\n`
@@ -120,25 +99,6 @@ describe("a subagent's stop verifies its own edits", () => {
 })
 
 describe("agents acting at the same moment", () => {
-  test("a sibling's claim and write while the after hook reads the store are the sibling's", async () => {
-    const { send, shell, claimAndWrite } = await scenario()
-    await send({ kind: "start", files: [] })
-    const call = await shell(async () => {
-      race.before = () => claimAndWrite(USERS, violation(USERS), "sub2")
-    }, "sub1")
-    expect(call.findings).toEqual([])
-  })
-
-  test("a sibling's claim and write while the stop reads the store are not swept", async () => {
-    const { send, shell, stop, claimAndWrite } = await scenario()
-    await send({ kind: "start", files: [] })
-    await shell(async () => {}, "sub1")
-    race.before = () => claimAndWrite(USERS, violation(USERS), "sub2")
-    const first = await stop("sub1")
-    expect(first.swept).toBeUndefined()
-    expect(first.findings).toEqual([])
-  })
-
   test("a subagent that never used the shell sweeps nothing: a sibling's command may still be writing", async () => {
     const { send, stop, root } = await scenario()
     await send({ kind: "start", files: [] })
@@ -147,6 +107,15 @@ describe("agents acting at the same moment", () => {
     const other = await stop("sub2")
     expect(other.swept).toBeUndefined()
     expect(other.findings).toEqual([])
+  })
+
+  test("a subagent's first shell call sweeps nothing: the session's latest state may be a sibling's", async () => {
+    const { send, shell, work, root } = await scenario()
+    await send({ kind: "start", files: [] })
+    await send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
+    await writeFile(path.join(root, USERS), violation(USERS))
+    await shell(async () => {}, "sub2")
+    expect((await work()).swept).toEqual([])
   })
 
   test("a subagent's stop shows what it swept, not what another agent swept; the main stop shows both", async () => {

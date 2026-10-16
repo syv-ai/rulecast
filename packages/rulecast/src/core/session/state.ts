@@ -6,36 +6,12 @@ export const MAIN_AGENT = "main"
 /** The editor of an `edited` record written before records named their agent: it counts as every agent. */
 export const ANY_AGENT = "*"
 
-/**
- * How long a claim with no write recorded after it is taken to be in flight. The tool writes as soon
- * as the guard returns, and the guard's hook times out after 5 s; a claim older than this that its
- * PostToolUse never ended was a write that never happened (an Edit whose old_string was not found).
- */
-export const CLAIM_TTL_MS = 30_000
-
-/**
- * One agent's edit tool and one file: the store position of its latest recorded write (its
- * PostToolUse), and when a write it claimed in PreToolUse is still in flight, the time of that claim.
- */
-export interface Claim {
-  wrote: number | null
-  pendingSince: number | null
-}
-
 export type WorkRecord =
   /**
    * `via: "shell"`: changed during the agent's shell call, not by an edit tool. `agent`: who edited;
    * absent in stores written before it was recorded.
    */
   | { t: "edited"; file: string; via?: "shell"; agent?: string }
-  /**
-   * An agent's edit tool is about to write `files` (PreToolUse), at `at` (ms since the epoch): a
-   * shell call running alongside did not write them. The claim lasts until the agent's PostToolUse
-   * records the write; any other event of the agent's ends it with no write.
-   */
-  | { t: "claimed"; agent: string; files: string[]; at: number }
-  /** The guard refused the agent's write: what it claimed will not be written. */
-  | { t: "released"; agent: string }
   | { t: "accessed"; agent: string; file: string }
   /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
   | { t: "stopBlock"; agent: string; findings?: string[] }
@@ -67,8 +43,6 @@ export interface WorkState {
   edited: string[]
   /** Who edited each file. */
   editors: Map<string, Set<string>>
-  /** Each file's writes by agents' edit tools, by agent: recorded, and claimed and still in flight. */
-  claims: Map<string, Map<string, Claim>>
   stopBlocks: Map<string, number>
   /** How many stops each finding has blocked, by `blockedKey(agent, finding)`. Never reset: a prompt does not make a false positive true. */
   blockedFindings: Map<string, number>
@@ -95,10 +69,6 @@ export interface WorkState {
   sessionLatestTree: TreeState | null
   /** The state recorded before each shell call, by its tool use id. */
   beforeTrees: Map<string, TreeState>
-  /** The store positions of latestTree, sessionLatestTree and beforeTrees, in the same keys. */
-  latestTreeSeq: Map<string, number>
-  sessionLatestTreeSeq: number | null
-  beforeTreeSeq: Map<string, number>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
 }
@@ -126,7 +96,6 @@ export function emptyWork(): WorkState {
   return {
     edited: [],
     editors: new Map(),
-    claims: new Map(),
     stopBlocks: new Map(),
     blockedFindings: new Map(),
     stopReports: new Set(),
@@ -141,9 +110,6 @@ export function emptyWork(): WorkState {
     latestTree: new Map(),
     sessionLatestTree: null,
     beforeTrees: new Map(),
-    latestTreeSeq: new Map(),
-    sessionLatestTreeSeq: null,
-    beforeTreeSeq: new Map(),
     startTree: null,
   }
 }
@@ -154,24 +120,7 @@ export function emptyContext(): ContextState {
 
 export function foldWork(records: readonly WorkRecord[]): WorkState {
   const state = emptyWork()
-  /** The files each agent's edit tool has claimed and not yet written. */
-  const pending = new Map<string, Set<string>>()
-  const claimOf = (file: string, agent: string): Claim => {
-    const byAgent = state.claims.get(file) ?? new Map<string, Claim>()
-    state.claims.set(file, byAgent)
-    const claim = byAgent.get(agent) ?? { wrote: null, pendingSince: null }
-    byAgent.set(agent, claim)
-    return claim
-  }
-  // An agent's tools that write run one at a time: any other event of the agent's means the tool
-  // that claimed has finished, and had it written, its PostToolUse would have said so first.
-  const endClaims = (agent: string | undefined, except?: string) => {
-    if (agent === undefined || pending.get(agent)?.has(except ?? "") === true) return
-    for (const file of pending.get(agent) ?? []) claimOf(file, agent).pendingSince = null
-    pending.delete(agent)
-  }
-  // The store is append-only, so a record's position is its place in time.
-  for (const [seq, record] of records.entries()) {
+  for (const record of records) {
     switch (record.t) {
       case "edited": {
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
@@ -180,51 +129,27 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         state.sweptBy.delete(record.file)
         const agent = record.agent ?? ANY_AGENT
         state.editors.set(record.file, new Set([...(state.editors.get(record.file) ?? []), agent]))
-        if (record.agent === undefined) break
-        // A shell call's changes are not a write by an edit tool: they are what one is compared against.
-        endClaims(record.agent, record.via === undefined ? record.file : undefined)
-        if (record.via === undefined) {
-          const claim = claimOf(record.file, record.agent)
-          claim.wrote = seq
-          claim.pendingSince = null
-          pending.get(record.agent)?.delete(record.file)
-        }
         break
       }
-      case "claimed":
-        endClaims(record.agent)
-        for (const file of record.files) claimOf(file, record.agent).pendingSince = record.at
-        pending.set(record.agent, new Set(record.files))
-        break
-      case "released":
-        endClaims(record.agent)
-        break
       case "swept":
         state.swept = [...state.swept.filter((file) => file !== record.file), record.file]
         state.sweptBy.set(record.file, new Set([...(state.sweptBy.get(record.file) ?? []), record.agent ?? ANY_AGENT]))
         break
       case "tree":
-        endClaims(record.agent)
         state.latestTree.set(record.agent, record.state)
-        state.latestTreeSeq.set(record.agent, seq)
         state.sessionLatestTree = record.state
-        state.sessionLatestTreeSeq = seq
         if (record.phase === "before" && record.toolUseId !== undefined) {
           state.beforeTrees.set(record.toolUseId, record.state)
-          state.beforeTreeSeq.set(record.toolUseId, seq)
         }
         // A resumed session records another start; what was dirty is what was dirty at the first.
         if (record.phase === "start" && state.startTree === null) state.startTree = record.state
         break
       case "accessed": {
-        // The PostToolUse of a claimed write records the access before the write.
-        endClaims(record.agent, record.file)
         const files = state.accessed.get(record.agent) ?? []
         state.accessed.set(record.agent, [...files.filter((file) => file !== record.file), record.file])
         break
       }
       case "stopBlock":
-        endClaims(record.agent)
         state.stopBlocks.set(record.agent, (state.stopBlocks.get(record.agent) ?? 0) + 1)
         for (const finding of record.findings ?? []) {
           const key = blockedKey(record.agent, finding)
@@ -243,7 +168,6 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       }
       case "prompt":
-        endClaims(record.agent)
         state.stopBlocks.delete(record.agent)
         state.stopReports.delete(record.agent)
         state.incompleteReports.delete(record.agent)
@@ -267,41 +191,6 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
 export function referenceState(work: WorkState, agent: string, toolUseId?: string): TreeState | null {
   const before = toolUseId === undefined ? undefined : work.beforeTrees.get(toolUseId)
   return before ?? work.latestTree.get(agent) ?? work.sessionLatestTree
-}
-
-/** The store position of the state referenceState returns, by the same fallbacks; null when there is none. */
-export function referenceSeq(work: WorkState, agent: string, toolUseId?: string): number | null {
-  const before = toolUseId === undefined ? undefined : work.beforeTreeSeq.get(toolUseId)
-  return before ?? work.latestTreeSeq.get(agent) ?? work.sessionLatestTreeSeq
-}
-
-/**
- * Whether a change to `file` measured from the state at store position `since` may be another
- * agent's edit tool's write: that agent recorded a write to it after that state, or has one in
- * flight — claimed (PreToolUse), not yet recorded, and not given up. A claim made before `since`
- * counts too: the guard claims, judges, and only then does the tool write.
- */
-export function claimedByOther(
-  work: WorkState,
-  agent: string,
-  file: string,
-  since: number | null,
-  now = Date.now(),
-): boolean {
-  for (const [other, claim] of work.claims.get(file) ?? []) {
-    if (other === agent) continue
-    if (claim.wrote !== null && claim.wrote > (since ?? -1)) return true
-    if (claim.pendingSince !== null && now - claim.pendingSince < CLAIM_TTL_MS) return true
-  }
-  return false
-}
-
-/** Whether another agent's edit tool claimed `file` and has not recorded writing it yet. */
-export function pendingByOther(work: WorkState, agent: string, file: string, now = Date.now()): boolean {
-  for (const [other, claim] of work.claims.get(file) ?? []) {
-    if (other !== agent && claim.pendingSince !== null && now - claim.pendingSince < CLAIM_TTL_MS) return true
-  }
-  return false
 }
 
 /** The swept files an agent's stop reports: those its own comparisons found, and every one for the main agent. */
