@@ -88,13 +88,14 @@ export const COMMANDS: CommandHelp[] = [
     flags: [
       ["--prune", "Drop the entries that are no longer found; never adds one"],
       ["--force", "Rewrite the file: every current finding becomes pre-existing"],
-      ["--no-llm", "Skip metered (llm) rules; with --prune their entries are kept"],
+      ["--no-llm", "Skip metered (llm) rules: named as left out; --force and --prune keep their entries"],
     ],
     notes: [
       "Writes .rulecast/baseline.json. Commit it. run --all-files and run --files then treat the",
       "findings it lists as pre-existing. Sessions and --from-ref keep their own baseline, and",
       "wherever a ref exists --from-ref is the better one: it never needs maintaining.",
-      "Exits 3 and writes nothing when a rule could not run.",
+      "Without --prune, exits 3 and writes nothing when a rule could not run; --prune drops only",
+      "what it could check and exits 3. --force keeps the old entries of rules that did not run.",
     ],
   },
   {

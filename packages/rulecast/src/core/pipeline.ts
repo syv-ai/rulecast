@@ -67,6 +67,8 @@ export interface PipelineOptions {
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
   skipDetectorKinds?: ReadonlySet<string>
+  /** Give every detector every file, past the file budget it declares: `rulecast baseline`, which asked for all of them. */
+  ignoreFileBudgets?: boolean
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
@@ -533,7 +535,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
-    if (event.kind === "verify") {
+    if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
       const recent = [...editedBy(view.work, session?.agent ?? MAIN_AGENT)].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)

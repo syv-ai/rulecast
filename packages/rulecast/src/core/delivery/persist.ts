@@ -15,25 +15,26 @@ import { renderAgentText } from "./render-agent"
  */
 export const AGENT_DIR = ".rulecast"
 
-/** How a `.gitignore` rulecast wrote begins: one that does not is the project's, and left alone. */
+/** How a `.gitignore` rulecast wrote begins. */
 const IGNORE_HEADER = "# Written by rulecast"
+
+/** What rulecast wrote before the committed baseline: the one text it migrates, so an edited copy is left alone. */
+const OLD_AGENT_DIR_IGNORE = `${IGNORE_HEADER}: files its hooks point an agent at.\n*\n`
 
 /** Ignores everything but the committed baseline. */
 export const AGENT_DIR_IGNORE = `${IGNORE_HEADER}: files its hooks point an agent at, and the committed baseline.\n*\n!baseline.json\n`
 
 /**
  * `<root>/.rulecast`, created with its self-ignoring `.gitignore` on first use. One rulecast wrote
- * before the committed baseline existed ignores it too, and is brought up to date.
+ * before the committed baseline existed ignores it too, and is brought up to date when it is exactly
+ * what rulecast wrote; one the project edited is left alone.
  */
 export function agentDir(root: string): string {
   const dir = path.join(root, AGENT_DIR)
   mkdirSync(dir, { recursive: true })
   const ignore = path.join(dir, ".gitignore")
   if (!existsSync(ignore)) writeFileSync(ignore, AGENT_DIR_IGNORE)
-  else {
-    const text = readFileSync(ignore, "utf8")
-    if (text.startsWith(IGNORE_HEADER) && !text.includes("!baseline.json")) writeFileSync(ignore, AGENT_DIR_IGNORE)
-  }
+  else if (readFileSync(ignore, "utf8") === OLD_AGENT_DIR_IGNORE) writeFileSync(ignore, AGENT_DIR_IGNORE)
   return dir
 }
 

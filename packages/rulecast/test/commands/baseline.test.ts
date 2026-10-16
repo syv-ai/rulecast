@@ -3,8 +3,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { stringify } from "yaml"
+import { z } from "zod"
 
-import { runCli } from "../helpers/cli"
+import { baselineCommand } from "../../src/commands/baseline"
+import { createRegistry } from "../../src/core/detection/registry"
+import type { Detector } from "../../src/core/types"
+import { builtinDetectors } from "../../src/detectors"
+import { captureIo, runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
@@ -203,6 +208,26 @@ describe("rulecast baseline", () => {
     expect(await git(root, "status", "--porcelain")).toContain(`A  ${FILE}`)
   })
 
+  test("an old rulecast .gitignore the project edited is left alone", async () => {
+    const root = await legacyRepo()
+    await mkdir(path.join(root, ".rulecast"), { recursive: true })
+    const edited = "# Written by rulecast: files its hooks point an agent at.\n*\n!notes.md\n"
+    await writeFile(path.join(root, ".rulecast/.gitignore"), edited)
+    const result = await baseline(root)
+    expect(await readFile(path.join(root, ".rulecast/.gitignore"), "utf8")).toBe(edited)
+    expect(result.stdout).toContain(`git ignores ${FILE} (.rulecast/.gitignore:2:*): add !baseline.json`)
+  })
+
+  test("a directory pattern elsewhere is named, with a hint that can work", async () => {
+    const root = await createRepo({ ...fixtureFiles, [USERS]: LEGACY, ".gitignore": ".rulecast/\n" })
+    const result = await baseline(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      `git ignores ${FILE} (.gitignore:1:.rulecast/): narrow or remove that pattern, or commit it with git add -f ${FILE}`,
+    )
+    expect(result.stdout).not.toContain("add !baseline.json")
+  })
+
   test("a .gitignore the project wrote is left alone, with a hint", async () => {
     const root = await legacyRepo()
     await mkdir(path.join(root, ".rulecast"), { recursive: true })
@@ -272,6 +297,23 @@ describe("which runs use the committed baseline", () => {
     expect(result.baseline).toBeNull()
   })
 
+  test("a staged run before the first commit uses it", async () => {
+    const root = await createProject({ ...fixtureFiles, [USERS]: LEGACY })
+    await git(root, "init", "-q", "-b", "main")
+    expect((await baseline(root)).code).toBe(0)
+    await git(root, "add", "-A")
+    const clean = await report(root)
+    expect(clean.code).toBe(0)
+    expect(clean.findings).toEqual([])
+    expect(clean.baseline).toMatchObject({ entries: 3, matched: 3 })
+
+    await writeFile(path.join(root, USERS), `${LEGACY}    raise HTTPException(418)\n`)
+    await git(root, "add", USERS)
+    const worse = await report(root)
+    expect(worse.code).toBe(1)
+    expect(worse.findings.map((finding) => finding.line)).toEqual([4])
+  })
+
   test("try-repo does not read it", async () => {
     const root = await legacyRepo()
     await baseline(root)
@@ -337,5 +379,78 @@ describe("rulecast doctor and the baseline", () => {
     await writeFile(path.join(root, FILE), "nope")
     const stdout = (await runCli(root, ["doctor"])).stdout
     expect(stdout).toContain(`baseline   ${FILE} — cannot be used\n  warning  ${FILE}: not JSON`)
+  })
+})
+
+const paidSchema = z.object({}).strict()
+
+/** A metered detector with a budget of one file, firing once on every file it is given. */
+const paidDetector: Detector<z.infer<typeof paidSchema>> = {
+  kind: "paid",
+  schema: paidSchema,
+  captures: () => [],
+  events: () => ["verify"],
+  metered: true,
+  cost: () => "paid · bills per file",
+  fileBudget: () => ({ max: 1, setting: "paid.max_files" }),
+  async run(input) {
+    return {
+      findings: input.rules.flatMap((one) =>
+        one.files.map((file) => ({
+          rule: one.id,
+          match: { file, line: 1, endLine: 1, column: 1, text: "", captures: {} },
+        })),
+      ),
+      errors: [],
+    }
+  },
+}
+
+describe("rulecast baseline and metered rules", () => {
+  const PAID = "paid/rule"
+  const paidRepo = () =>
+    createRepo({
+      ...fixtureFiles,
+      [USERS]: LEGACY,
+      "app/a.py": "x = 1\n",
+      "app/b.py": "y = 2\n",
+      ".rulecast-config.yaml": localConfig([
+        ...fixtureRules,
+        { id: PAID, name: "Paid", files: "^app/[ab]\\.py$", stages: ["verify"], detect: { paid: {} }, message: "m" },
+      ]),
+    })
+  const paidBaseline = async (root: string, ...flags: string[]) => {
+    const { io, output } = captureIo(root)
+    const code = await baselineCommand(root, flags, createRegistry([...builtinDetectors, paidDetector]), io)
+    return { code, ...output }
+  }
+
+  test("the file budget does not apply: every file a metered rule matches is in the baseline", async () => {
+    const root = await paidRepo()
+    const result = await paidBaseline(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).not.toContain("were not checked")
+    expect(Object.keys((await stored(root)).rules[PAID].files)).toEqual(["app/a.py", "app/b.py"])
+  })
+
+  test("--no-llm writes the rest and names the rules left out", async () => {
+    const root = await paidRepo()
+    const result = await paidBaseline(root, "--no-llm")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`not in the baseline (--no-llm): ${PAID}`)
+    expect(Object.keys((await stored(root)).rules)).not.toContain(PAID)
+  })
+
+  test("--force --no-llm keeps the entries of the rules it skipped", async () => {
+    const root = await paidRepo()
+    await paidBaseline(root)
+    const before = (await stored(root)).rules[PAID]
+    await writeFile(path.join(root, USERS), `${LEGACY}    raise HTTPException(418)\n`)
+    const result = await paidBaseline(root, "--force", "--no-llm")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`kept from the old baseline, for rules that did not run: ${PAID}`)
+    const after = await stored(root)
+    expect(after.rules[PAID]).toEqual(before)
+    expect(after.rules["backend/no-httpexception"].count).toBe(3)
   })
 })

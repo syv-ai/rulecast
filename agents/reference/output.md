@@ -157,7 +157,14 @@ The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v
 
 `rulecast baseline` writes `.rulecast/baseline.json`, the ids of every finding there is today, to be committed. A run that has no baseline of its own (`--all-files`, `--files`, or a staged run before the first commit) treats a finding whose id is listed as pre-existing, and only the rest can fail it. A session, `--from-ref` or a staged run's `HEAD` always wins over the file, and agent hooks never read it.
 
-Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry the run no longer finds, in a file a rule that ran on it checked, is stale; `rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run is neither matched nor stale. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
+Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry is stale when:
+
+- the run no longer finds it, in a file the rule ran on and checked;
+- its file was deleted;
+- its rule is gone from a config that compiled without errors (a rule missing because its repo could not be fetched or it failed to compile is not gone);
+- its rule no longer matches the file, or no longer has the `verify` stage.
+
+`rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run (disabled, failed, or left out by `--no-llm`) is neither matched nor stale. `rulecast baseline` and `--force` give metered rules every file, past `llm.max_files_per_verify`; with `--no-llm` they name the rules left out, and `--force` keeps the old file's entries of every rule that did not run. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
 
 ### Version policy
 
