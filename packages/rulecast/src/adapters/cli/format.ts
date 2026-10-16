@@ -24,6 +24,8 @@ export interface FormatOptions {
   complete?: boolean
   /** SARIF's `tool.driver.rules`, for the rules with findings. Absent: ids only. */
   rules?: RuleMetadata[]
+  /** Keys a command adds after json's own (`rulecast fix`'s `fixed`, `changedFiles`). Additive only. */
+  extra?: Record<string, unknown>
 }
 
 /** What SARIF says about a rule: built by `run` from the compiled rules and their cited sections. */
@@ -180,6 +182,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       ignored: options.ignored ?? [],
       notices: delivery.notices ?? [],
       stop: delivery.stop,
+      ...options.extra,
     },
     null,
     2,

@@ -93,8 +93,16 @@ function summaryLine(rule: DetectorRule, result: ExampleResult): string {
   if (result.missing || result.empty) return `  ${id}no examples`
   const passed = result.outcomes.filter((outcome) => outcome.passed).length
   const score = `${passed}/${result.outcomes.length}`.padEnd(7)
-  return `  ${id}${score} P ${ratio(result.precision.correct, result.precision.total)}  R ${ratio(result.recall.matched, result.recall.total)}`
+  const fixes = result.fixes.total === 0 ? "" : `  fix ${result.fixes.passed}/${result.fixes.total}`
+  return `  ${id}${score} P ${ratio(result.precision.correct, result.precision.total)}  R ${ratio(result.recall.matched, result.recall.total)}${fixes}`
 }
+
+/** Why a fix failed its example, as the line under the example's name. */
+const FIX_FAILURES = {
+  stillFires: "the rule still fires after its fix",
+  unresolved: "a fix did not remove its own finding and was reverted",
+  differs: "the fixed code differs from fixed:",
+} as const
 
 /** Characters of matched text shown; enough to see where a pattern went wrong. */
 const MATCH_PREVIEW = 60
@@ -117,6 +125,18 @@ function failureLines(rule: DetectorRule, result: ExampleResult): string[] {
     const name = `${outcome.kind}[${outcome.index}] ${outcome.path}`
     if (outcome.error !== undefined) {
       out.push(`      ${name} — ${rule.detector.kind} failed: ${outcome.error}`)
+      continue
+    }
+    if (outcome.kind === "bad" && outcome.fix !== undefined) {
+      out.push(`      ${name} — ${FIX_FAILURES[outcome.fix.reason ?? "stillFires"]}`)
+      if (outcome.fix.diff !== undefined) {
+        out.push(
+          ...outcome.fix.diff
+            .trimEnd()
+            .split("\n")
+            .map((line) => `        ${line}`),
+        )
+      }
       continue
     }
     if (outcome.kind === "bad") {

@@ -24,6 +24,9 @@ const stagesSchema = z.array(z.enum(STAGES)).nonempty()
  */
 const exampleSchema = z.object({ path: z.string().min(1), code: z.string() }).strict()
 
+/** A `bad` example may also say what the rule's `fix` must turn it into, exactly. */
+const badExampleSchema = exampleSchema.extend({ fixed: z.string().optional() }).strict()
+
 /** Every rule key except id. No defaults: compileRule applies them after overrides are merged. */
 const ruleKeys = {
   alias: idSchema.optional(),
@@ -54,13 +57,14 @@ const ruleKeys = {
   context: z.array(referenceInputSchema).optional(),
   /** Code the rule must flag (`bad`) and must not (`good`), run by `rulecast test`. */
   examples: z
-    .object({ good: z.array(exampleSchema).default([]), bad: z.array(exampleSchema).default([]) })
+    .object({ good: z.array(exampleSchema).default([]), bad: z.array(badExampleSchema).default([]) })
     .strict()
     .optional(),
 }
 
-export type RuleExample = z.infer<typeof exampleSchema>
-export type RuleExamples = { good: RuleExample[]; bad: RuleExample[] }
+/** One example. `fixed` is only ever set on a `bad` one. */
+export type RuleExample = z.infer<typeof badExampleSchema>
+export type RuleExamples = { good: z.infer<typeof exampleSchema>[]; bad: RuleExample[] }
 
 /** A config entry selecting a rule from a rule repo; every key but id overrides the manifest rule's. */
 export const overrideSchema = z.object({ id: idSchema, ...ruleKeys }).strict()

@@ -8,9 +8,9 @@ import { createReferenceResolver, resolveRuleContext } from "../core/delivery/re
 import type { DetectorRegistry } from "../core/detection/registry"
 import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
-import { runPipeline } from "../core/pipeline"
+import { type PipelineResult, runPipeline } from "../core/pipeline"
 import { fetchingRepos } from "../core/repos/provider"
-import type { ContentSource } from "../core/types"
+import type { ContentSource, Delivery } from "../core/types"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
 import { UsageError } from "./usage"
@@ -100,7 +100,7 @@ export function parseRunArgs(args: string[]): RunArgs {
 /** Which way the files were chosen: what the terminal output says it checked. */
 export type Selection = "files" | "range" | "all" | "session" | "staged"
 
-interface SelectedFiles {
+export interface SelectedFiles {
   selection: Selection
   files: string[]
   /** Where the baseline is read from; null: no baseline (or the session's). */
@@ -110,7 +110,7 @@ interface SelectedFiles {
 }
 
 /** Spec §12, `run` file selection. */
-async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<SelectedFiles> {
+export async function selectFiles(root: string, cwd: string, run: RunArgs): Promise<SelectedFiles> {
   if (run.files !== null) {
     const files = run.files
       .map((file) => toProjectPath(root, cwd, file))
@@ -154,7 +154,6 @@ export interface RunInput {
   io: CliIo
 }
 
-/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
 /** SARIF's rule metadata for the rules that have findings, with the text of the sections they cite. */
 async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>): Promise<RuleMetadata[]> {
   const resolver = createReferenceResolver(project.root)
@@ -174,7 +173,23 @@ async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>):
   )
 }
 
-export async function executeRun({ project, ruleId, run, registry, io }: RunInput): Promise<number> {
+/** What a verify over the selected files found, before it is printed. */
+export interface RunCheck {
+  result: PipelineResult
+  selected: SelectedFiles
+  /** Metered rules left out of this run (a staged run, --no-llm) that matched a checked file. */
+  skipped: string[]
+  complete: boolean
+}
+
+/**
+ * The verify event `run` prints, without printing it: `fix` runs it after writing, for its exit
+ * code. `selected`: files already chosen, so a check after a fix judges the files the fix looked at.
+ */
+export async function checkRun(
+  { project, ruleId, run, registry, io }: RunInput,
+  selected?: SelectedFiles,
+): Promise<RunCheck> {
   const root = project.root
   // A config file that does not load compiled no rule at all: a report would say "no findings" of
   // a run that checked nothing. Checked before the rule id, which no rule could match.
@@ -183,17 +198,18 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
   if (ruleId !== null && !project.rules.some((rule) => rule.id === ruleId)) {
     throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
   }
-  const selected = await selectFiles(root, io.cwd, run)
+  selected ??= await selectFiles(root, io.cwd, run)
   // Spec §6, Consent, applied to a commit: a staged run is a pre-commit hook, which fires on every
   // commit of every teammate, so a detector that costs money per file is left out unless asked for.
   // --no-llm leaves it out everywhere. The registry says which kinds are metered; the core names none.
   const skipMetered = run.noLlm || (selected.selection === "staged" && !run.llm)
   const meteredKinds = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
+  const files = selected.files
   const skipped = skipMetered
     ? project.rules
         .filter((rule) => rule.enabled && rule.detector !== null && meteredKinds.has(rule.detector.kind))
         .filter((rule) => ruleId === null || rule.id === ruleId)
-        .filter((rule) => rule.stages.includes("verify") && selected.files.some((file) => rule.matches(file)))
+        .filter((rule) => rule.stages.includes("verify") && files.some((file) => rule.matches(file)))
         .map((rule) => rule.id)
     : []
   const result = await runPipeline({
@@ -214,11 +230,20 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     // The machine formats report pre-existing findings by id; the others summarise them.
     listPreexisting: run.format === "json" || run.format === "sarif",
   })
-  const complete = !result.failed
-  const withFindings = new Set(
-    [...result.delivery.findings, ...(result.delivery.preexisting ?? [])].map((finding) => finding.rule),
-  )
-  const text = formatDelivery(result.delivery, run.format, {
+  return { result, selected, skipped, complete: !result.failed }
+}
+
+/** A check as `run` prints it. `extra`: keys another command adds to the JSON document. */
+export async function formatRun(
+  project: CompiledProject,
+  run: RunArgs,
+  check: RunCheck,
+  delivery: Delivery = check.result.delivery,
+  extra?: Record<string, unknown>,
+): Promise<string> {
+  const { result, selected, skipped, complete } = check
+  const withFindings = new Set([...delivery.findings, ...(delivery.preexisting ?? [])].map((finding) => finding.rule))
+  return formatDelivery(delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
@@ -233,9 +258,16 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     })),
     complete,
     ...(run.format === "sarif" ? { rules: await ruleMetadata(project, withFindings) } : {}),
+    ...(extra === undefined ? {} : { extra }),
   })
-  if (text) io.stdout(`${text}\n`)
-  return exitCodeFor(result.delivery, complete)
+}
+
+/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
+export async function executeRun(input: RunInput): Promise<number> {
+  const check = await checkRun(input)
+  const text = await formatRun(input.project, input.run, check)
+  if (text) input.io.stdout(`${text}\n`)
+  return exitCodeFor(check.result.delivery, check.complete)
 }
 
 export async function runCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {

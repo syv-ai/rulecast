@@ -1,6 +1,7 @@
 import { pastDeadline } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
+import { fixEdit } from "./fix"
 import type { Language } from "./languages"
 import { parserFor } from "./load"
 import { type Metavariable, metavariables } from "./metavars"
@@ -11,7 +12,10 @@ import { type AstGrepConfig, astGrepSchema, captureNames, matcher } from "./sche
 interface Node {
   text(): string
   isNamed(): boolean
-  range(): { start: { line: number; column: number }; end: { line: number; column: number } }
+  range(): {
+    start: { line: number; column: number; index: number }
+    end: { line: number; column: number; index: number }
+  }
   getMatch(name: string): Node | null
   getMultipleMatches(name: string): Node[]
   findAll(matcher: unknown): Node[]
@@ -50,6 +54,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
   captures: captureNames,
   events: () => ["edit", "verify"],
   guards: true,
+  fixable: (config) => config.fix !== undefined,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     const byLanguage = new Map<Language, DetectorRuleInput<AstGrepConfig>[]>()
@@ -76,8 +81,9 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
         for (const file of files) {
           input.signal.throwIfAborted()
           let root: Node
+          let source: string | null
           try {
-            const source = await input.read(file)
+            source = await input.read(file)
             if (source === null) continue
             root = parser.parse(source).root() as unknown as Node
           } catch (error) {
@@ -94,9 +100,15 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
           }
           for (const rule of rules) {
             if (!rule.files.includes(file)) continue
+            const fix = input.fixes === true ? rule.config.fix : undefined
             try {
               for (const node of root.findAll(matcher(rule.config))) {
-                result.findings.push({ rule: rule.id, match: matchOf(file, node, variables.get(rule.id)!) })
+                const ruleVariables = variables.get(rule.id)!
+                result.findings.push({
+                  rule: rule.id,
+                  match: matchOf(file, node, ruleVariables),
+                  ...(fix === undefined ? {} : { fix: fixEdit(node, fix, ruleVariables, source) }),
+                })
               }
             } catch (error) {
               if (pastDeadline(error, input)) throw error

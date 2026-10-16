@@ -255,4 +255,52 @@ describe("rulecast test --against", () => {
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("no files under app/other match backend/no-httpexception")
   })
+  describe("fixes", () => {
+    const logger = (bad: Record<string, unknown>[], fix = "log.info({{args}})") => ({
+      id: "py/logger",
+      name: "Logger",
+      files: "\\.py$",
+      detect: { regex: { pattern: "print\\((?<args>[^)]*)\\)", fix } },
+      message: "{{file}}:{{line}} uses print",
+      examples: { good: [{ path: "a.py", code: "log.info(1)\n" }], bad },
+    })
+
+    test("a fix that removes the finding, and gives fixed exactly, passes and is scored", async () => {
+      const root = await project([
+        logger([
+          { path: "a.py", code: 'print("hi")\n', fixed: 'log.info("hi")\n' },
+          { path: "b.py", code: "print(1)\nprint(2)\n" },
+        ]),
+      ])
+      const result = await runTest(root)
+      expect(result.code).toBe(0)
+      expect(result.stdout).toContain("3/3     P 1.00  R 1.00  fix 2/2")
+    })
+
+    test("a bad example that still fires after its fix fails the rule", async () => {
+      // The fix rewrites the call and leaves a second one inside the arguments.
+      const root = await project([logger([{ path: "a.py", code: "print(1)\n" }], "print({{args}}) or print(0)")])
+      const result = await runTest(root)
+      expect(result.code).toBe(1)
+      expect(result.stdout).toContain("fix 0/1")
+      expect(result.stdout).toMatch(
+        /bad\[0\] a\.py — (the rule still fires after its fix|a fix did not remove its own finding)/,
+      )
+    })
+
+    test("fixed that differs from what the fix produced fails, with the diff", async () => {
+      const root = await project([logger([{ path: "a.py", code: 'print("hi")\n', fixed: 'logger.info("hi")\n' }])])
+      const result = await runTest(root)
+      expect(result.code).toBe(1)
+      expect(result.stdout).toContain("bad[0] a.py — the fixed code differs from fixed:")
+      expect(result.stdout).toContain(
+        '--- expected\n        +++ got\n        @@ -1,1 +1,1 @@\n        -logger.info("hi")\n        +log.info("hi")',
+      )
+    })
+
+    test("a rule without fix has no fix score", async () => {
+      const root = await project([httpException()])
+      expect((await runTest(root)).stdout).not.toContain("fix ")
+    })
+  })
 })
