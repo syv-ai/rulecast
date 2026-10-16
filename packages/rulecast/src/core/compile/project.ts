@@ -26,6 +26,8 @@ export interface Diagnostic {
    * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
    */
   rules?: string[]
+  /** The config itself did not load, so no rule compiled: nothing else is said beside it. */
+  fatal?: true
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -110,7 +112,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     root,
     config,
     rules: [],
-    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
+    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error", fatal: true }],
     mode: options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env),
   })
 

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { chmod, readdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -257,21 +257,24 @@ describe("rulecast doctor", () => {
     const ci = (cwd: string, ...args: string[]) => runCli(cwd, ["doctor", "--ci", ...args])
     const ciLines = (stdout: string) => stdout.slice(stdout.indexOf("\nci\n"), stdout.indexOf("\ndry run\n"))
 
-    test("a pinned repo the hooks would not find fails, though doctor's own compile fetched it", async () => {
+    test("a pinned repo the hooks would not find fails, and doctor does not fetch it, so a retry fails too", async () => {
       const repo = await createRuleRepo([{ tag: "v1.0.0", files: { ".rulecast-rules.yaml": MANIFEST } }])
       const root = await createRepo({
         ".rulecast-config.yaml": stringify({ repos: [{ repo, rev: "v1.0.0", rules: [{ id: "demo/no-print" }] }] }),
         "a.py": "x = 1\n",
       })
-      const result = await ci(root)
-      expect(result.stdout).toContain(".rulecast-config.yaml — 1 rule, 0 errors")
-      expect(ciLines(result.stdout)).toContain(
-        `error    ${repo}@v1.0.0 not in the cache — hooks never fetch, so 1 rule would not run; run rulecast install before the agent starts`,
-      )
-      expect(result.code).toBe(2)
-      // Without --ci the same project is fine: the compile fetched it, and at a desk that is enough.
+      const missing = `error    ${repo}@v1.0.0 not in the cache — hooks never fetch, so 1 rule would not run; run rulecast install before the agent starts`
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await ci(root)
+        expect(ciLines(result.stdout)).toContain(missing)
+        expect(result.code).toBe(2)
+      }
+      expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+      const installed = await ci(root)
+      expect(installed.stdout).toContain(".rulecast-config.yaml — 1 rule, 0 errors")
+      expect(ciLines(installed.stdout)).toContain("ok       rule repos cached")
+      // Without --ci doctor fetches what is missing: at a desk that is enough.
       expect((await doctor(root)).stdout).not.toContain("\nci\n")
-      expect(ciLines((await ci(root)).stdout)).toContain("ok       rule repos cached")
     })
 
     test("hooks installed but unrunnable are an error, a warning without --ci", async () => {
@@ -281,6 +284,24 @@ describe("rulecast doctor", () => {
       expect(result.stdout).toContain("error    Claude Code — .claude/settings.json")
       expect(result.code).toBe(2)
       expect((await doctor(root)).stdout).toContain("warning  Claude Code — .claude/settings.json")
+    })
+
+    test("a committed guard without node_modules fails although rulecast is on the PATH: the guard never runs that one", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([RULE("a")]),
+        "src/x.ts": "const x = 1\n",
+        "node_modules/.bin/rulecast": "",
+      })
+      expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+      await rm(path.join(root, "node_modules"), { recursive: true })
+      const bin = await createProject({ rulecast: "#!/bin/sh\n" })
+      await chmod(path.join(bin, "rulecast"), 0o755)
+      vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`)
+      const result = await ci(root)
+      expect(result.stdout).toMatch(
+        /error {4}Claude Code — \.claude\/settings\.json — but the hooks run node_modules\/\.bin\/rulecast/,
+      )
+      expect(result.code).toBe(2)
     })
 
     test("hooks not installed at all stay a warning: a CI job may only run rulecast run", async () => {

@@ -403,7 +403,9 @@ describe("rulecast run: rules that did not run", () => {
     const terminal = await run(root, "--all-files")
     expect(terminal.code).toBe(2)
     expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
-    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)")
+    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)\n")
+    // Said once, under "did not run", not again among rulecast's problems.
+    expect(terminal.stdout).not.toContain("rulecast problems:")
     const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
     expect(json.disabled).toEqual([{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }])
   })

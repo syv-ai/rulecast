@@ -39,14 +39,19 @@ export function disabledRules(input: DisabledInput): DisabledGroup[] {
       group.rules.push(rule)
     }
   }
+  let unnamed = 0
   for (const diagnostic of input.diagnostics) {
     if (diagnostic.level !== "error") continue
-    const rules = diagnostic.rule !== null ? [diagnostic.rule] : (diagnostic.rules ?? [])
-    if (diagnostic.rule === null && diagnostic.rules === undefined) {
+    if (diagnostic.fatal === true) {
       const reason = `the config did not load: ${diagnosticText(diagnostic)}`
       whole.add(reason)
       add(reason, [], diagnostic.hint)
-    } else add(diagnosticText({ ...diagnostic, rule: null }), rules, diagnostic.hint)
+      continue
+    }
+    // Naming no rule and holding none: a configured rule without an id, one rule that did not run.
+    const rules =
+      diagnostic.rule !== null ? [diagnostic.rule] : (diagnostic.rules ?? [`(rule without an id ${++unnamed})`])
+    add(diagnosticText({ ...diagnostic, rule: null }), rules, diagnostic.hint)
   }
   for (const error of input.detectorErrors) add(`${error.kind} detector: ${error.message}`, error.rules)
   return [...groups.values()]

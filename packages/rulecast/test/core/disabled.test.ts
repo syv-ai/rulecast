@@ -50,9 +50,20 @@ describe("disabledRules", () => {
     expect(disabledCount(groups)).toBe(3)
   })
 
+  test("a rule without an id is one unnamed rule that did not run, not a config that did not load", () => {
+    const groups = disabledRules({
+      diagnostics: [{ source: ".rulecast-config.yaml", rule: null, message: "id: Required", level: "error" }],
+      detectorErrors: [],
+    })
+    expect(groups.map(disabledText)).toEqual(["1 rule disabled: .rulecast-config.yaml: id: Required"])
+    expect(disabledCount(groups)).toBe(1)
+  })
+
   test("a config that did not load names no rules but is still said", () => {
     const groups = disabledRules({
-      diagnostics: [{ source: ".rulecast-config.yaml", rule: null, message: "not valid YAML", level: "error" }],
+      diagnostics: [
+        { source: ".rulecast-config.yaml", rule: null, message: "not valid YAML", level: "error", fatal: true },
+      ],
       detectorErrors: [],
     })
     expect(groups.map(disabledText)).toEqual([

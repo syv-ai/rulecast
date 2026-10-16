@@ -81,6 +81,9 @@ const SUMMARY_THRESHOLD = 3
 
 const DEFAULT_HINT = "rulecast validate"
 
+/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
+const DISABLED_WARNING = /^(diagnostics?|detector):/
+
 /**
  * The key a summary is delivered under.
  *
@@ -497,6 +500,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         message,
       }))
       disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
+      // there the warning is the once-per-context word to the user, the list the agent's every stop.
+      if (options.reportDisabled === true) {
+        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
+        warnings.splice(0, warnings.length, ...kept)
+      }
     }
     // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
     // skipped in a staged run says which files kept it from running (detection/materialise.ts).
