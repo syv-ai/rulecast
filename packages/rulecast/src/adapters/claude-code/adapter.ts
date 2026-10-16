@@ -18,7 +18,7 @@ const BLOCK_PREAMBLE =
 const UNATTENDED_BLOCK_PREAMBLE =
   "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
   "Nobody is watching this run to ask. If you believe a finding is wrong, leave that code as it is, record the finding and your reason in this run's decisions file or final report, and carry on with the rest. " +
-  'Do not change .rulecast-config.yaml or add "rulecast-ignore" comments.'
+  'Do not change .rulecast-config.yaml. A "rulecast-ignore" comment added in this run does not silence a finding.'
 
 /** Unattended, once per prompt: the last block, which turns what is left into the run's report. */
 const REPORT_PREAMBLE =

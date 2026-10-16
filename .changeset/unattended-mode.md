@@ -10,6 +10,7 @@ Set `RULECAST_MODE=unattended`, or `mode: unattended` in `.rulecast-config.yaml`
 - A finding that has blocked two stops is reported instead of blocked again, so a false positive cannot loop.
 - When the budget is spent, or only repeated findings are left, the agent is held once more and told to record the findings as unresolved in its final report. Before, they went only to a message for the user.
 - The block message tells the agent that nobody is there to ask. If it disputes a finding, it records the finding in the run's decisions file or final report instead of asking the user.
+- A `rulecast-ignore` comment the agent adds during the run does not silence its finding. Nobody is there to agree to it, so the finding blocks and is reported like any other. Ignores already in the code keep working.
 - `unattended.escalate: [rule-id, ...]` makes chosen warning rules errors, and `refuse_write: unattended` makes a rule refuse writes only in this mode.
 
 The mode applies to agent hooks only. `rulecast run`, in a git hook or a CI job, always runs the rules as written, so a CI job's exit code does not change. `rulecast doctor` shows the active mode and where it came from. Attended behaviour is unchanged.

@@ -195,7 +195,7 @@
   detect:
     regex:
       pattern: \bfail_under\s*=\s*\d+(\.\d+)?|--cov-fail-under[= ]+\d+|--fail-under[= ]+\d+|\bcoverageThreshold\b|\bthresholds\s*:|"?\b(branches|functions|lines|statements)"?\s*:\s*\d+(\.\d+)?|--max-warnings[= ]+\d+
-  message: "{{file}}:{{line}} changes a quality threshold ({{text}}). Never lower one to make a run pass: fix the code, or report that the threshold cannot be met."
+  message: "{{file}}:{{line}} changes a quality threshold ({{text}}). Never lower one to make a run pass: fix the code, or report that the threshold cannot be met. If you raised it, or the task asked for this change, keep it and say in your report what it was and what it is now."
   context:
     - "@packages/rules-loop-safety/loop-safety.md#quality-thresholds"
     - "@packages/rules-loop-safety/loop-safety.md#when-a-test-is-wrong"
