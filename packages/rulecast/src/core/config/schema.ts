@@ -15,7 +15,7 @@ export const RULE_ID = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/
 export const MODES = ["attended", "unattended"] as const
 export type Mode = (typeof MODES)[number]
 
-export const RULE_SCOPES = ["instance", "container"] as const
+export const RULE_SCOPES = ["instance", "container", "removed"] as const
 export type RuleScope = (typeof RULE_SCOPES)[number]
 
 const idSchema = z.string().regex(RULE_ID, "must be lowercase segments separated by /")
@@ -44,10 +44,13 @@ const ruleKeys = {
   stages: stagesSchema.optional(),
   minimum_rulecast_version: versionSchema.optional(),
   severity: z.enum(["error", "warning"]).optional(),
+  /** true: `error` in unattended mode, as if `unattended.escalate` named the rule. A catalog default an override can turn off. */
+  escalate: z.boolean().optional(),
   /**
    * What the convention belongs to (§8). `instance`: the token the detector matched, classified by
    * whether the agent's edit touched it. `container`: the node the match spans, classified by
-   * whether that node already violated the rule at the baseline.
+   * whether that node already violated the rule at the baseline. `removed`: a match is something
+   * the rule keeps, and the finding is a file with fewer matches than at its baseline.
    */
   scope: z.enum(RULE_SCOPES).optional(),
   /** `unattended`: refuse only when no one is in the loop (core/config/mode.ts); `true`: always. */

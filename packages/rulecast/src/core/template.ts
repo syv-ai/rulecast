@@ -2,6 +2,13 @@ const VARIABLE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
 
 export const CORE_VARIABLES = ["file", "line", "column", "text", "rule"] as const
 
+/**
+ * What a `scope: removed` rule's message may say besides: how many matches went, and how many the
+ * file had at its baseline. Its `text` is always `removed`, so the finding stays one finding while
+ * the counts change (baseline/removed.ts).
+ */
+export const REMOVED_VARIABLES = ["removed", "baseline"] as const
+
 export class UnknownTemplateVariable extends Error {
   constructor(readonly variable: string) {
     super(`template variable "${variable}" has no value`)

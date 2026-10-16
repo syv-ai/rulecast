@@ -369,3 +369,79 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     })
   })
 })
+
+describe("hook claude-code: a removed assertion in unattended mode", () => {
+  const TEST = "tests/test_pricing.py"
+  const rule = {
+    id: "tests/keep-assertions",
+    name: "Assertions are not removed",
+    files: "^tests/",
+    severity: "warning",
+    escalate: true,
+    scope: "removed",
+    detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
+    message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Make the test pass instead.",
+  }
+
+  test("a deleted assert blocks the stop, escalated to an error; attended it is a warning that lets the stop through", async () => {
+    const files = { [TEST]: "def test_total():\n    assert total([1, 2]) == 3\n    assert total([]) == 0\n" }
+    const weakened = "def test_total():\n    assert total([1, 2]) == 3\n"
+    const run = async (env: Env) => {
+      const root = await createRepo({ ...files, ".rulecast-config.yaml": localConfig([rule]) })
+      const hook = (name: string, file?: string) =>
+        runCli(
+          root,
+          ["hook", "claude-code"],
+          JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" })),
+          env,
+        )
+      await writeFile(path.join(root, TEST), weakened)
+      await hook("post-tool-use.edit", TEST)
+      const { stdout } = await hook("stop")
+      return stdout === "" ? null : JSON.parse(stdout)
+    }
+
+    const unattended = await run({ ...testEnv, RULECAST_MODE: "unattended" })
+    expect(kindOf(unattended)).toBe("block")
+    expect(unattended.reason).toContain("error tests/keep-assertions")
+    expect(unattended.reason).toContain("removes assertions (1 of 2 removed)")
+
+    expect(kindOf(await run(testEnv))).not.toBe("block")
+  })
+
+  test("one more assert deleted at each stop is the same finding: block, block, then report; the message counts", async () => {
+    const asserts = ["total([1, 2]) == 3", "total([]) == 0", "total([5]) == 5", "total([1]) == 1"]
+    const content = (kept: number) =>
+      `def test_total():\n${asserts
+        .slice(0, kept)
+        .map((a) => `    assert ${a}\n`)
+        .join("")}`
+    const error = {
+      ...rule,
+      severity: "error",
+      message:
+        "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Make the test pass instead.",
+    }
+    const root = await createRepo({ [TEST]: content(4), ".rulecast-config.yaml": localConfig([error]) })
+    const env = { ...testEnv, RULECAST_MODE: "unattended" }
+    const hook = (name: string, file?: string) =>
+      runCli(
+        root,
+        ["hook", "claude-code"],
+        JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" })),
+        env,
+      )
+    const seen: { kind: string; reason: string }[] = []
+    for (const [index, kept] of [3, 2, 1].entries()) {
+      await writeFile(path.join(root, TEST), content(kept))
+      await hook("post-tool-use.edit", TEST)
+      const { stdout } = await hook(index === 0 ? "stop" : "stop.after-block")
+      const output = stdout === "" ? null : JSON.parse(stdout)
+      seen.push({ kind: kindOf(output), reason: output?.reason ?? "" })
+    }
+    expect(seen.map(({ kind }) => kind)).toEqual(["block", "block", "report"])
+    expect(seen[0]!.reason).toContain("removes assertions (1 of 4 removed)")
+    expect(seen[1]!.reason).toContain("removes assertions (2 of 4 removed)")
+    expect(seen[2]!.reason).toContain("removes assertions (3 of 4 removed)")
+  })
+})

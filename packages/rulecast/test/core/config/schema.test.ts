@@ -144,6 +144,12 @@ describe("rule schemas", () => {
     expect(ruleSchema.safeParse({ ...complete, refuse_write: "always" }).success).toBe(false)
   })
 
+  test("escalate is a boolean, and an override may set it", () => {
+    expect(ruleSchema.safeParse({ ...complete, escalate: true }).success).toBe(true)
+    expect(overrideSchema.safeParse({ id: "a", escalate: false }).success).toBe(true)
+    expect(ruleSchema.safeParse({ ...complete, escalate: "unattended" }).success).toBe(false)
+  })
+
   test("applies no defaults, so overrides can merge over manifest rules", () => {
     expect(ruleSchema.parse({ id: "a", name: "A" })).toEqual({ id: "a", name: "A" })
   })

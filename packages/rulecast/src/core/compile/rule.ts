@@ -6,7 +6,7 @@ import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
 import { parseReference, type ReferenceRoot, type ReferenceSpec, ReferenceSyntaxError } from "../references"
-import { CORE_VARIABLES, templateVariables } from "../template"
+import { CORE_VARIABLES, REMOVED_VARIABLES, templateVariables } from "../template"
 import type { Severity } from "../types"
 import { isOlder, VERSION } from "../version"
 
@@ -23,12 +23,14 @@ export interface CompiledRule {
   description: string | null
   /** "local", or the rule repo label ("syv-ai/rulecast@v0.2.0"). */
   source: string
-  /** In unattended mode, `error` for a warning rule the config's `unattended.escalate` names. */
+  /** In unattended mode, `error` for a rule with `escalate: true` or one the config's `unattended.escalate` names. */
   severity: Severity
   /**
    * How a finding of this rule is classified against the baseline (spec §8). `instance` — the
    * default, and every rule before 0.2 — is new when the match touches a changed line. `container`
    * is new when the node the match spans was not already violating the rule at the baseline.
+   * `removed` inverts the question: a match is what the rule keeps, and a file with fewer matches
+   * than at its baseline is one finding (baseline/removed.ts).
    */
   scope: RuleScope
   /**
@@ -91,13 +93,21 @@ function fileOf(spec: ReferenceSpec): string {
   return spec.anchor === null ? spec.ref : spec.ref.slice(0, spec.ref.length - spec.anchor.length - 1)
 }
 
+/**
+ * The diagnostic for a rule that needs a newer rulecast, read from the raw rule before the strict
+ * parse: a rule using a key added after this version must say "upgrade", not "unrecognized key".
+ */
+export function requiresNewer(raw: unknown): string | null {
+  const minimum = (raw as { minimum_rulecast_version?: unknown } | null)?.minimum_rulecast_version
+  if (typeof minimum !== "string" || !isOlder(VERSION, minimum)) return null
+  return `requires rulecast ${minimum} or newer (running ${VERSION})`
+}
+
 /** A ready rule, or the diagnostic message that disables it. */
 export async function compileRule(input: RuleInput, context: RuleContext): Promise<CompiledRule | string> {
   const { data } = input
-  const minimum = data.minimum_rulecast_version
-  if (minimum !== undefined && isOlder(VERSION, minimum)) {
-    return `requires rulecast ${minimum} or newer (running ${VERSION})`
-  }
+  const tooNew = requiresNewer(data)
+  if (tooNew !== null) return tooNew
 
   let detector: CompiledDetector | null = null
   let defaultStages: Stage[] = ["touch"]
@@ -128,7 +138,25 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
       }
       if (!stages.includes("edit")) return "refuse_write needs edit among the rule's stages"
     }
-    const known = new Set<string>([...CORE_VARIABLES, ...detector.captures])
+    if (data.scope === "removed") {
+      // Counting at the baseline means measuring content that is no longer on disk (a commit's) or
+      // soon will not be (a snapshot's), through `read`; a whole-file match has nothing to count.
+      const implementation = context.registry.get(detector.kind)
+      if (implementation?.guards !== true || implementation.wholeFile === true || implementation.metered === true) {
+        return `scope: removed needs a detector that reads the file's content and reports each match in it; ${detector.kind} cannot`
+      }
+      // A session's baseline is a snapshot: line hashes, with the content gone. Its count is taken
+      // on touch, by the edit-stage rules only (baseline/stage.ts).
+      if (!stages.includes("edit")) return "scope: removed needs edit among the rule's stages"
+      if (data.refuse_write) {
+        return "refuse_write cannot be combined with scope: removed: its matches are what the rule keeps"
+      }
+    }
+    const known = new Set<string>([
+      ...CORE_VARIABLES,
+      ...detector.captures,
+      ...(data.scope === "removed" ? REMOVED_VARIABLES : []),
+    ])
     const unknown = templateVariables(data.message).find((name) => !known.has(name))
     if (unknown) return `unknown template variable "${unknown}"`
   } else {
@@ -175,12 +203,13 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
   const { global } = context
   const id = data.alias ?? data.id
   const unattended = context.mode === "unattended"
+  const escalated = data.escalate === true || context.config.unattended.escalate.includes(id)
   return {
     id,
     name: data.name,
     description: data.description ?? null,
     source: input.source,
-    severity: unattended && context.config.unattended.escalate.includes(id) ? "error" : (data.severity ?? "error"),
+    severity: unattended && escalated ? "error" : (data.severity ?? "error"),
     scope: data.scope ?? "instance",
     refuseWrite: data.refuse_write === true || (unattended && data.refuse_write === "unattended"),
     enabled: data.enabled !== false,
