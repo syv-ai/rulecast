@@ -131,8 +131,9 @@ function renderFindings(findings: ClassifiedFinding[], status: Finding["status"]
         message,
         count: 1,
         captures: capturesFor(rule, match),
-        // Only when true, so a document from a project with no fixes is unchanged (output.md).
-        ...(rule.fixable ? { fixable: true as const } : {}),
+        // Only when true, so a document from a project with no fixes is unchanged (output.md). Never
+        // a removed finding: what is gone has nothing to rewrite.
+        ...(rule.fixable && rule.scope !== "removed" ? { fixable: true as const } : {}),
       })
       continue
     }

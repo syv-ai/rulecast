@@ -161,7 +161,8 @@ What it needs:
 - **A detector that reads the content it is handed and reports each match in it:** `regex` or
   `ast-grep`. Not `path`, whose match is the whole file, and not a linter, command or `llm`.
 - **`edit` among its stages,** which is the default for both. A session's baseline is taken when the
-  agent opens a file, by the edit-stage rules. It cannot be combined with `refuse_write`.
+  agent opens a file, by the edit-stage rules. It cannot be combined with `refuse_write` or `fix`:
+  the matches are what the rule keeps.
 - **A file that still exists.** A deleted file has nothing to count and is not reported. Nor is a
   renamed one (`git mv`): it is a deleted file and a new one, and the new path has no baseline.
 
