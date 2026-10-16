@@ -170,10 +170,11 @@ const OPT_IN_PACKS: Record<string, { title: string; note: string }> = {
   "loop-safety": {
     title: "Loop safety",
     note:
-      "For agents that run with nobody watching: /goal, claude -p, scheduled tasks, CI. It catches the " +
-      "shortcuts a loop takes to make tests pass: skipped or focused tests, new lint, type and coverage " +
-      "suppressions, changed coverage thresholds, and edits to CI, git hooks or rulecast's own config. " +
-      "Warnings while you watch; errors, and refused edits to that config, in unattended mode.",
+      "For agents that run with nobody watching. It catches the shortcuts a loop takes to make tests " +
+      "pass: skipped or focused tests, new lint, type and coverage suppressions, changed coverage " +
+      "thresholds, and edits to CI, git hooks or rulecast's own config. Warnings while you watch; errors, " +
+      "and refused edits to that config, in unattended mode (set RULECAST_MODE=unattended or " +
+      "`mode: unattended` for /goal, claude -p and scheduled runs; on by itself in CI).",
   },
 }
 
@@ -214,7 +215,13 @@ async function chooseRules(
     }
     for (const [group, pack] of packs) {
       if (preselected.some((id) => groupOf(id) === group)) continue
-      ui.say(`${pack.note}\nNot installed. Add it with: rulecast init --rules ${group}`, pack.title)
+      const total = catalog.rules.filter((rule) => groupOf(rule.id) === group).length
+      const missing = available.filter((rule) => groupOf(rule.id) === group).length
+      const status =
+        missing === total
+          ? `Not installed. Add it with: rulecast init --rules ${group}`
+          : `${missing} of ${total} ${group} rules not installed. Add them with: rulecast init --rules ${group}`
+      ui.say(`${pack.note}\n${status}`, pack.title)
     }
     return available.filter((rule) => preselected.includes(rule.id))
   }
