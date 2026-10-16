@@ -1,9 +1,18 @@
 import type { ActiveMode } from "../config/mode"
 import type { TreeState } from "./tree"
 
+/** The agent of a session event without a subagent id: the one that owns integration. */
+export const MAIN_AGENT = "main"
+
+/** The editor of an `edited` record written before records named their agent: it counts as every agent. */
+export const ANY_AGENT = "*"
+
 export type WorkRecord =
-  /** `via: "shell"`: changed during the agent's shell call, not by an edit tool. */
-  | { t: "edited"; file: string; via?: "shell" }
+  /**
+   * `via: "shell"`: changed during the agent's shell call, not by an edit tool. `agent`: who edited;
+   * absent in stores written before it was recorded.
+   */
+  | { t: "edited"; file: string; via?: "shell"; agent?: string }
   | { t: "accessed"; agent: string; file: string }
   /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
   | { t: "stopBlock"; agent: string; findings?: string[] }
@@ -17,8 +26,11 @@ export type WorkRecord =
   | { t: "noticed"; key: string }
   /** The working tree at session start, before and after a shell call, and at a stop (session/tree.ts). */
   | { t: "tree"; phase: "start" | "before" | "after" | "stop"; agent: string; toolUseId?: string; state: TreeState }
-  /** Changed outside any of the agent's tool calls, found by comparing tree states: reported, never blocking. */
-  | { t: "swept"; file: string }
+  /**
+   * Changed outside any of the agent's tool calls, found by comparing tree states: reported, never
+   * blocking. `agent`: whose comparison found it; absent in stores written before it was recorded.
+   */
+  | { t: "swept"; file: string; agent?: string }
   /** The mode the hooks ran this session in, so `rulecast run --session` judges as they did. */
   | { t: "mode"; mode: ActiveMode["mode"]; source: ActiveMode["source"]; detail: string }
 
@@ -32,6 +44,8 @@ export type ContextRecord =
 export interface WorkState {
   /** Unique, least recently edited first. */
   edited: string[]
+  /** Who edited each file. */
+  editors: Map<string, Set<string>>
   stopBlocks: Map<string, number>
   /** How many stops each finding has blocked, by `blockedKey(agent, finding)`. Never reset: a prompt does not make a false positive true. */
   blockedFindings: Map<string, number>
@@ -50,6 +64,8 @@ export interface WorkState {
   editedVia: Map<string, "tool" | "shell">
   /** Unique, least recently swept first; a file the agent edits leaves it. */
   swept: string[]
+  /** The agents whose comparisons swept each file in `swept`. */
+  sweptBy: Map<string, Set<string>>
   /** Each agent's last recorded tree state, of any phase. The store is append-only, so record order is time order. */
   latestTree: Map<string, TreeState>
   /** The last tree state any agent recorded. */
@@ -58,6 +74,12 @@ export interface WorkState {
   beforeTrees: Map<string, TreeState>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
+  /**
+   * Shell calls whose after has not been recorded, by tool use id (or record position without one).
+   * `shared`: another agent's shell call ran during it. An agent's prompt or stop closes its calls:
+   * an interrupted command never records its after.
+   */
+  openShells: Map<string, { agent: string; shared: boolean }>
   /** The mode last recorded; null in a session recorded before modes were. */
   mode: ActiveMode | null
 }
@@ -68,9 +90,6 @@ export interface ContextState {
   preexisting: Set<string>
   warned: Set<string>
 }
-
-/** The agent a session's events belong to when the payload names no subagent. */
-export const MAIN_AGENT = "main"
 
 export function preexistingKey(rule: string, file: string): string {
   return `${rule} ${file}`
@@ -87,6 +106,7 @@ export const refusalKey = preexistingKey
 export function emptyWork(): WorkState {
   return {
     edited: [],
+    editors: new Map(),
     stopBlocks: new Map(),
     blockedFindings: new Map(),
     stopReports: new Set(),
@@ -97,10 +117,12 @@ export function emptyWork(): WorkState {
     noticed: new Set(),
     editedVia: new Map(),
     swept: [],
+    sweptBy: new Map(),
     latestTree: new Map(),
     sessionLatestTree: null,
     beforeTrees: new Map(),
     startTree: null,
+    openShells: new Map(),
     mode: null,
   }
 }
@@ -111,15 +133,20 @@ export function emptyContext(): ContextState {
 
 export function foldWork(records: readonly WorkRecord[]): WorkState {
   const state = emptyWork()
-  for (const record of records) {
+  for (const [index, record] of records.entries()) {
     switch (record.t) {
-      case "edited":
+      case "edited": {
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
         state.editedVia.set(record.file, record.via ?? "tool")
         state.swept = state.swept.filter((file) => file !== record.file)
+        state.sweptBy.delete(record.file)
+        const agent = record.agent ?? ANY_AGENT
+        state.editors.set(record.file, new Set([...(state.editors.get(record.file) ?? []), agent]))
         break
+      }
       case "swept":
         state.swept = [...state.swept.filter((file) => file !== record.file), record.file]
+        state.sweptBy.set(record.file, new Set([...(state.sweptBy.get(record.file) ?? []), record.agent ?? ANY_AGENT]))
         break
       case "tree":
         state.latestTree.set(record.agent, record.state)
@@ -129,6 +156,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         }
         // A resumed session records another start; what was dirty is what was dirty at the first.
         if (record.phase === "start" && state.startTree === null) state.startTree = record.state
+        if (record.phase === "before") openShell(state, record.agent, record.toolUseId ?? `#${index}`)
+        else if (record.phase === "after") closeShell(state, shellCallOf(state, record.agent, record.toolUseId))
+        else if (record.phase === "stop") closeShells(state, record.agent)
         break
       case "accessed": {
         const files = state.accessed.get(record.agent) ?? []
@@ -157,6 +187,7 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         state.stopBlocks.delete(record.agent)
         state.stopReports.delete(record.agent)
         state.incompleteReports.delete(record.agent)
+        closeShells(state, record.agent)
         break
       case "disabled":
         if (!state.disabled.has(record.rule)) state.disabled.set(record.rule, record.reason)
@@ -172,6 +203,42 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
   return state
 }
 
+/** A shell call starts: it and every other agent's open call now ran alongside each other. */
+function openShell(state: WorkState, agent: string, id: string): void {
+  let shared = false
+  for (const call of state.openShells.values()) {
+    if (call.agent === agent) continue
+    call.shared = true
+    shared = true
+  }
+  state.openShells.set(id, { agent, shared })
+}
+
+function closeShell(state: WorkState, id: string | undefined): void {
+  if (id !== undefined) state.openShells.delete(id)
+}
+
+function closeShells(state: WorkState, agent: string): void {
+  for (const [id, call] of state.openShells) if (call.agent === agent) state.openShells.delete(id)
+}
+
+/** The open call an after belongs to: by tool use id, else the agent's latest open call. */
+function shellCallOf(state: WorkState, agent: string, toolUseId: string | undefined): string | undefined {
+  if (toolUseId !== undefined) return state.openShells.has(toolUseId) ? toolUseId : undefined
+  let latest: string | undefined
+  for (const [id, call] of state.openShells) if (call.agent === agent) latest = id
+  return latest
+}
+
+/**
+ * Whether another agent's shell call ran during this agent's open one: then both compared the same
+ * working tree across each other's writes, and either may hold the other's changes as its own.
+ */
+export function sharedShell(work: WorkState, agent: string, toolUseId?: string): boolean {
+  const id = shellCallOf(work, agent, toolUseId)
+  return id !== undefined && work.openShells.get(id)?.shared === true
+}
+
 /**
  * The state a new tree state is compared with: the one recorded before this shell call when the
  * call has an id, otherwise this agent's latest, otherwise the session's latest (a subagent's first
@@ -180,6 +247,32 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
 export function referenceState(work: WorkState, agent: string, toolUseId?: string): TreeState | null {
   const before = toolUseId === undefined ? undefined : work.beforeTrees.get(toolUseId)
   return before ?? work.latestTree.get(agent) ?? work.sessionLatestTree
+}
+
+/** The swept files an agent's stop reports: those its own comparisons found, and every one for the main agent. */
+export function sweptFor(work: WorkState, agent: string): string[] {
+  if (agent === MAIN_AGENT) return work.swept
+  return work.swept.filter((file) => {
+    const by = work.sweptBy.get(file)
+    return by?.has(agent) === true || by?.has(ANY_AGENT) === true
+  })
+}
+
+/** Whether `agent` has a tree state of its own to compare with: the main agent always counts as having one. */
+export function hasOwnTree(work: WorkState, agent: string): boolean {
+  return agent === MAIN_AGENT || work.latestTree.has(agent)
+}
+
+/**
+ * The files an agent's stop verifies, least recently edited first: its own edits, and every edit for
+ * the main agent, which owns integration. A file another agent also edited is in both lists.
+ */
+export function editedBy(work: WorkState, agent: string): string[] {
+  if (agent === MAIN_AGENT) return work.edited
+  return work.edited.filter((file) => {
+    const editors = work.editors.get(file)
+    return editors?.has(agent) === true || editors?.has(ANY_AGENT) === true
+  })
 }
 
 /** Whether `file` had uncommitted changes when the session started. */

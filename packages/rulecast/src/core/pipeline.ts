@@ -24,8 +24,20 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
-import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
-import { isGone, treeChanges, treeState } from "./session/tree"
+import {
+  dirtyAtStart,
+  editedBy,
+  emptyContext,
+  emptyWork,
+  hasOwnTree,
+  MAIN_AGENT,
+  referenceState,
+  sharedShell,
+  sweptFor,
+  type WorkRecord,
+  type WorkState,
+} from "./session/state"
+import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
@@ -75,6 +87,13 @@ type Warning = { key: string; text: string }
 /** Said once: without a working tree to compare, shell edits are seen only after the session. */
 const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
+
+/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
+const SHARED_TREE =
+  "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
+  "command to every file that changed while it ran, so findings here and at your stop may be another " +
+  "agent's. Give each agent that runs in parallel its own worktree (in Claude Code, a subagent with " +
+  "`isolation: worktree`)."
 
 /**
  * Above this many warnings of one kind, they collapse into one carrying a count and an example.
@@ -183,7 +202,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let failed = errors.length > 0
   const deadlineMissed: string[] = []
   let session = event.session
-    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
+    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? MAIN_AGENT }
     : null
 
   /**
@@ -216,6 +235,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
+  /**
+   * What changed since the agent's latest recorded state that no tool call explains: not a file any
+   * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
+   * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
+   */
+  function between(work: WorkState, agent: string, now: TreeState): string[] {
+    if (!hasOwnTree(work, agent)) return []
+    const reference = referenceState(work, agent)
+    const gap = reference === null ? null : treeChanges(reference, now)
+    if (gap === null || gap.gitOperation) return []
+    const edited = new Set(work.edited)
+    return relevant(gap.files.filter((file) => !edited.has(file)))
+  }
+
   if (event.kind === "shell-before") {
     // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
     // agent's last recorded state happened between its calls — the user's editor, a formatter, a
@@ -225,17 +258,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const now = open ? await treeState(root) : null
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
-      const reference = referenceState(work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      const edited = new Set(work.edited)
-      const swept =
-        gap === null || gap.gitOperation
-          ? []
-          : relevant(gap.files.filter((file) => !isGone(now, file) && !edited.has(file)))
+      const swept = between(work, open.agent, now).filter((file) => !isGone(now, file))
       const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
       if (session !== null) {
         await appendWork(open.dir, [
-          ...swept.map((file) => ({ t: "swept" as const, file })),
+          ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
       }
@@ -285,6 +312,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
   const refused: NonNullable<Delivery["refused"]> = []
+  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
+  const agentNotices: string[] = []
+  const withAgentNotices = (): Pick<Delivery, "agentNotices"> => (agentNotices.length === 0 ? {} : { agentNotices })
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -295,9 +325,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
     const call = reference === null ? null : treeChanges(reference, now)
     const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    // Another agent's shell call ran during this one, and this one is held to files: those may be the
+    // other's writes (README, Agents). Hooks key on the session's directory, so an overlap alone may be
+    // a command that ran elsewhere; with no files there is nothing to misattribute. Told once per agent.
+    const sharedKey = `shared-tree:${open.agent}`
+    const shared =
+      files.length > 0 && sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    if (shared) agentNotices.push(SHARED_TREE)
+    await appendWork(open.dir, [
+      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+      ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
+    ])
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
@@ -389,15 +429,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "edit" || event.kind === "verify") {
     let requested = relevant(event.files)
     if (event.kind === "edit" && session) {
+      const agent = session.agent
       await appendWork(
         session.dir,
-        requested.map((file) => ({ t: "edited" as const, file, ...(via === undefined ? {} : { via }) })),
+        requested.map((file) => ({ t: "edited" as const, file, agent, ...(via === undefined ? {} : { via }) })),
       )
     }
     if (event.kind === "verify" && event.files.length === 0 && session) {
-      requested = relevant(view.work.edited)
+      // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
+      // edited is never swept: it was changed by a tool call, only not by this agent's.
+      requested = relevant(editedBy(view.work, session.agent))
       if (options.stopGate === true) {
-        swept = await sweep(session, new Set(requested))
+        swept = await sweep(session)
         requested = [...requested, ...swept]
       }
     }
@@ -429,7 +472,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
     if (event.kind === "verify") {
-      const recent = [...view.work.edited].reverse()
+      const recent = [...editedBy(view.work, session?.agent ?? MAIN_AGENT)].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)
         if (budget === undefined) continue
@@ -571,28 +614,28 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   /**
    * At a stop: what changed since the agent's latest recorded state that no call of its explains —
-   * a job it left running, a formatter, the user's own edits — joined with what earlier calls'
-   * before hooks already swept. A git operation in between sweeps nothing. Never the agent's own
-   * edited files, which stay its own.
+   * a job it left running, a formatter, the user's own edits — joined with what earlier comparisons
+   * of this agent's swept (every agent's, at the main agent's stop). A git operation in between
+   * sweeps nothing.
    */
-  async function sweep(open: { dir: string; agent: string }, edited: ReadonlySet<string>): Promise<string[]> {
+  async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
     const now = await treeState(root)
+    const work = view.work
     let found: string[] = []
-    if (now !== null) {
-      const reference = referenceState(view.work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      if (gap !== null && !gap.gitOperation) found = relevant(gap.files.filter((file) => !edited.has(file)))
+    if (now !== null && hasOwnTree(work, open.agent)) {
+      found = between(work, open.agent, now)
       await appendWork(open.dir, [
-        ...found.map((file) => ({ t: "swept" as const, file })),
+        ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
         { t: "tree", phase: "stop", agent: open.agent, state: now },
       ])
     }
-    const all = [...new Set([...relevant(view.work.swept), ...found])].filter((file) => !edited.has(file))
+    const edited = new Set(work.edited)
+    const all = [...new Set([...relevant(sweptFor(work, open.agent)), ...found])].filter((file) => !edited.has(file))
     return now === null ? all : all.filter((file) => !isGone(now, file))
   }
 
   const inputFor = (state: SessionView): DecideInput => ({
-    agent: session?.agent ?? "main",
+    agent: session?.agent ?? MAIN_AGENT,
     findings,
     touches: touches.filter((rule) => !state.context.touched.has(rule.id)),
     agentRead,
@@ -632,6 +675,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
+    Object.assign(decision.delivery, withAgentNotices())
     return decision.delivery
   }
 

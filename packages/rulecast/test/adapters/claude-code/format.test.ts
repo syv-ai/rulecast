@@ -51,6 +51,15 @@ describe("Claude Code adapter: format", () => {
     })
   })
 
+  test("a notice for the agent alone is additional context on a shell call", () => {
+    const value = delivery({ agentNotices: ["rulecast: another agent shares this working tree."] })
+    const output = JSON.parse(format(value, "shell-after").stdout)
+    expect(output).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: renderAgentText(value, options) },
+    })
+    expect(output.hookSpecificOutput.additionalContext).toContain("another agent shares this working tree")
+  })
+
   test("touch and edit deliver agent text as additional context", () => {
     const value = delivery({ findings: [finding()] })
     for (const kind of ["touch", "edit"] as const) {

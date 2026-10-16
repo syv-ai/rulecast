@@ -254,6 +254,16 @@ prompt to paste.
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
+With subagents, each one's stop checks only the files it edited, so it is never asked to fix
+another agent's code. The main agent's stop checks everything the session changed: a problem that
+only shows when two subagents' changes meet is caught there. A file two subagents both edit can
+block either of them. A change no agent's tool call made, such as your own edit, is reported at the
+main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
+
+When agents run in parallel in one working tree and one of them changes files with the shell, it
+can be blamed for what the others wrote while its command ran, with any tool. rulecast tells an agent
+once when its shell call overlapped another agent's and files changed while it ran. For parallel agents, give each its own worktree
+(in Claude Code, a subagent with `isolation: worktree`).
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md).
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.

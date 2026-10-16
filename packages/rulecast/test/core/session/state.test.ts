@@ -1,13 +1,18 @@
 import { describe, expect, test } from "vitest"
 
 import {
+  ANY_AGENT,
   dirtyAtStart,
+  editedBy,
   emptyContext,
   emptyWork,
   foldContext,
   foldWork,
+  MAIN_AGENT,
   preexistingKey,
   referenceState,
+  sweptFor,
+  type WorkRecord,
 } from "../../../src/core/session/state"
 import type { TreeState } from "../../../src/core/session/tree"
 
@@ -30,6 +35,10 @@ describe("foldWork", () => {
       editedVia: new Map([
         ["a.ts", "tool"],
         ["b.ts", "tool"],
+      ]),
+      editors: new Map([
+        ["a.ts", new Set([ANY_AGENT])],
+        ["b.ts", new Set([ANY_AGENT])],
       ]),
       stopBlocks: new Map([
         ["main", 1],
@@ -127,6 +136,52 @@ describe("tree records, shell edits and swept files", () => {
     expect(work.swept).toEqual([])
     expect(work.startTree).toBeNull()
     expect(referenceState(work, "main")).toBeNull()
+    // An edit recorded without its agent is every agent's, so no stop verifies less than before.
+    expect(editedBy(work, "sub1")).toEqual(["a.ts"])
+  })
+})
+
+describe("edits by agent", () => {
+  test("a subagent's files are its own edits, in edit order; the main agent's are everyone's", () => {
+    const work = foldWork([
+      { t: "edited", file: "a.ts", agent: "sub1" },
+      { t: "edited", file: "b.ts", agent: "sub2" },
+      { t: "edited", file: "c.ts", agent: "main" },
+      { t: "edited", file: "d.ts", agent: "sub1", via: "shell" },
+      { t: "edited", file: "a.ts", agent: "sub2" },
+    ])
+    expect(editedBy(work, "sub1")).toEqual(["d.ts", "a.ts"])
+    expect(editedBy(work, "sub2")).toEqual(["b.ts", "a.ts"])
+    expect(editedBy(work, "sub3")).toEqual([])
+    expect(editedBy(work, MAIN_AGENT)).toEqual(["b.ts", "c.ts", "d.ts", "a.ts"])
+  })
+
+  // Written by unreleased builds that claimed files for edit tools (#28), in both of their shapes.
+  test("claim records in an older store are ignored", () => {
+    const records = [
+      { t: "claimed", agent: "sub2", file: "a.ts" },
+      { t: "claimed", agent: "sub2", files: ["a.ts"], at: 0 },
+      { t: "released", agent: "sub2" },
+      { t: "edited", file: "b.ts", agent: "sub1" },
+    ] as unknown as WorkRecord[]
+    const work = foldWork(records)
+    expect(work.edited).toEqual(["b.ts"])
+    expect(editedBy(work, "sub2")).toEqual([])
+  })
+})
+
+describe("swept files by agent", () => {
+  test("a subagent's stop reports what its own comparisons swept; the main agent's, all of them", () => {
+    const work = foldWork([
+      { t: "swept", file: "a.ts", agent: "sub1" },
+      { t: "swept", file: "b.ts", agent: "sub2" },
+      { t: "swept", file: "old.ts" },
+      { t: "swept", file: "c.ts", agent: "sub1" },
+      { t: "edited", file: "c.ts", agent: "sub2" },
+    ])
+    expect(sweptFor(work, "sub1")).toEqual(["a.ts", "old.ts"])
+    expect(sweptFor(work, "sub2")).toEqual(["b.ts", "old.ts"])
+    expect(sweptFor(work, MAIN_AGENT)).toEqual(["a.ts", "b.ts", "old.ts"])
   })
 })
 
