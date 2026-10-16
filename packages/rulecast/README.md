@@ -102,6 +102,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
+| `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
@@ -275,6 +276,8 @@ prompt to paste.
 
 - [`agents/SETUP.md`](https://github.com/syv-ai/rulecast/blob/main/agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
+
+As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 
