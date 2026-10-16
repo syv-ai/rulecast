@@ -101,26 +101,26 @@ describe("pipeline: container scope", () => {
     expect(delivery.preexistingSummary).toEqual([{ rule: "routes/no-crud", file: ROUTES, count: 1 }])
   })
 
-  test("a touch records one fingerprint per container rule, empty when the file is clean", async () => {
+  test("a touch records one container range set per container rule, empty when the file is clean", async () => {
     const { send, baseline } = await scenario(
       [containerRule("container")],
       route("list_users", { crud: false, filler: 2 }),
     )
     await send({ kind: "touch", files: [ROUTES], completeRead: true })
 
-    expect(await baseline().then((state) => state.fingerprints.get(ROUTES))).toEqual(new Map([["routes/no-crud", []]]))
+    expect(await baseline().then((state) => state.containers.get(ROUTES))).toEqual(new Map([["routes/no-crud", []]]))
   })
 
-  test("a project with no container rule takes no fingerprint run", async () => {
+  test("a project with no container rule takes no container measurement", async () => {
     const { root, send, baseline } = await scenario([containerRule()], route("list_users", { crud: true, filler: 2 }))
     await send({ kind: "touch", files: [ROUTES], completeRead: true })
 
-    expect((await baseline()).fingerprints).toEqual(new Map())
+    expect((await baseline()).containers).toEqual(new Map())
     const store = await readFile(path.join(sessionDir(stateDirFor(root), "s1"), "baseline.jsonl"), "utf8")
-    expect(store).not.toContain("fingerprint")
+    expect(store).not.toContain(`"t":"container"`)
   })
 
-  test("a verify against a base commit measures the fingerprints it is missing", async () => {
+  test("a verify against a base commit measures the containers it is missing", async () => {
     const before = route("list_users", { crud: true, filler: 6 })
     const { root, send, write } = await scenario([containerRule("container")], before)
     const base = (await headCommit(root))!
@@ -148,7 +148,7 @@ describe("pipeline: container scope", () => {
     const before = route("list_users", { crud: true, filler: 6 })
     const { send, write } = await scenario([containerRule("container")], before)
 
-    // No touch: the file's baseline is the session-start commit, which leaves no fingerprint.
+    // No touch: the file's baseline is the session-start commit, which leaves no container record.
     await write(`${before}\n    log("one more")`)
     const delivery = await send({ kind: "edit", files: [ROUTES] })
 

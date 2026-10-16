@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { expect, test } from "vitest"
 
+import { EXIT_CODES } from "../../src/adapters/cli/contract"
 import { COMMANDS, commandHelp, usage } from "../../src/commands/help"
 import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
@@ -66,4 +67,27 @@ test("the README's command table lists exactly the commands rulecast has", () =>
     rows.flatMap((row) => [...row.split("|")[1]!.matchAll(/`(?:rulecast )?([a-z-]+)/g)].map((match) => match[1]!)),
   )
   expect([...named].sort()).toEqual(COMMANDS.map((command) => command.name).sort())
+})
+
+test("run --help and try-repo --help print the exit codes", async () => {
+  const cwd = await createProject({})
+  for (const command of ["run", "try-repo"]) {
+    const result = await runCli(cwd, [command, "--help"])
+    for (const [code, meaning] of EXIT_CODES) expect(result.stdout).toContain(`  ${code}  ${meaning}`)
+    expect(result.stdout).toContain("agents/reference/output.md")
+  }
+})
+
+/** The README's exit-code table says exactly what EXIT_CODES says, so the two cannot drift apart. */
+test("the README's exit-code table matches the codes rulecast exits with", () => {
+  const readme = readFileSync(fileURLToPath(new URL("../../../../README.md", import.meta.url)), "utf8")
+  const section = readme.slice(readme.indexOf("### Exit codes"))
+  const rows = section
+    .split("\n")
+    .filter((line) => /^\| `\d+` \|/.test(line))
+    .map((row) => {
+      const [, code, meaning] = row.split("|").map((cell) => cell.trim())
+      return [Number(code!.replaceAll("`", "")), meaning]
+    })
+  expect(rows).toEqual(EXIT_CODES)
 })

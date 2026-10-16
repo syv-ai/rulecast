@@ -29,6 +29,7 @@ const at = (file: string, line: number, status: string): Match => ({
 const violation = (id: string, file: string, line: number, context: ReturnType<typeof ref>[] = []) => ({
   rule: rule({ id, message: MESSAGE, context }),
   match: at(file, line, "404"),
+  id: "id",
   status: "new" as const,
 })
 
@@ -94,6 +95,7 @@ describe("decide: the context budget", () => {
     const preexisting = Array.from({ length: 30 }, (_, index) => ({
       rule: rule({ id: "old/rule", message: MESSAGE }),
       match: at(`old${index}.py`, 1, "404"),
+      id: "id",
       status: "preexisting" as const,
     }))
     const { delivery, context } = await decide(

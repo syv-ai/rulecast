@@ -309,7 +309,13 @@ describe("compile: the config", () => {
   test("a missing, unparseable or invalid config disables every rule", async () => {
     const missing = await compile({ root: await createProject({}), registry, repos: cachedRepos(TEST_HOME) })
     expect(missing.diagnostics).toEqual([
-      { source: ".rulecast-config.yaml", rule: null, message: ".rulecast-config.yaml not found", level: "error" },
+      {
+        source: ".rulecast-config.yaml",
+        rule: null,
+        message: ".rulecast-config.yaml not found",
+        level: "error",
+        fatal: true,
+      },
     ])
     const broken = await compile({
       root: await createProject({ ".rulecast-config.yaml": "repos: [" }),

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
-import { classify } from "./baseline/fingerprint"
+import { classify } from "./baseline/classify"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -15,6 +15,7 @@ import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
+import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
@@ -44,6 +45,8 @@ export interface PipelineOptions {
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
+  listPreexisting?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
 }
@@ -237,7 +240,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     started: false,
     startCommit: null,
     snapshots: new Map(),
-    fingerprints: new Map(),
+    containers: new Map(),
   }
   // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
   // takes snapshots, and neither starts the session.
@@ -256,6 +259,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
+  const volatileCaptures = (kind: string) => registry.get(kind)?.volatileCaptures ?? []
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
@@ -340,7 +344,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
-    // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
+    // One append, snapshots before the container ranges taken from them (baseline/stage.ts).
     if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
   }
 
@@ -384,7 +388,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       requested,
       read,
     )
-    const { files, changes: baselineChanges, fingerprints } = stage
+    const { files, changes: baselineChanges, containers } = stage
     const changes = baselineChanges.sets
     // Persisted so the next event in the session reuses them rather than measuring again.
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
@@ -434,10 +438,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
-    findings = output.findings.map(({ rule, match }) => ({
+    // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
+    const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
+    findings = output.findings.map(({ rule, match }, index) => ({
+      id: ids[index]!,
       rule,
       match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
+      status: classify(match, rule.scope, rule.id, baselineChanges, containers),
     }))
     for (const error of output.errors) {
       failed = true
@@ -446,7 +453,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    ignored = output.ignored
+    ignored = output.ignored.map((item, index) => ({ ...item, id: ids[output.findings.length + index]! }))
     // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
     // what to undo, because nothing could refuse the write before it happened.
     const shellEdited = (file: string) =>
@@ -468,7 +475,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
               rule: rule.id,
               match,
               reason,
-              status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
+              status: classify(match, rule.scope, rule.id, baselineChanges, containers),
             }))
           : [],
         told: view.work.noticed,
@@ -547,6 +554,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxContextChars: options.maxContextChars,
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
+    ...(options.listPreexisting === true ? { listPreexisting: true } : {}),
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
     ...(refused.length === 0 ? {} : { refused }),

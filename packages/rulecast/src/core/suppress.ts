@@ -35,6 +35,8 @@ export interface IgnoredFinding {
   rule: DetectorRule
   match: Match
   reason: string
+  /** The id the finding would have had (core/finding-id.ts); set by the pipeline after detection. */
+  id?: string
 }
 
 export interface Suppressed {

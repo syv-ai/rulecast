@@ -3,7 +3,7 @@
   "baseline": "def route():\n    a()\n    b()\n    c()\n    return x\n",
   "current": "def route():\n    a()\n    b()\n    c()\n    return x\ndef other():\n    pass\n",
   "scope": "container",
-  "fingerprints": [[1, 5]],
+  "containerRanges": [[1, 5]],
   "match": [5, 6],
   "expected": "preexisting"
 }

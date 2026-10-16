@@ -1,3 +1,4 @@
+import { EXIT } from "../adapters/cli/contract"
 import { createRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
@@ -93,7 +94,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "--help":
       case "-h":
         io.stdout(usage())
-        return command === undefined ? 2 : 0
+        return command === undefined ? EXIT.failed : 0
       default:
         throw new UsageError(`unknown command "${command}"`)
     }
@@ -103,6 +104,6 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       // The one command's flags, not every command's: that is the help being asked for.
       io.stderr(`\n${(command !== undefined && commandHelp(command)) || usage()}`)
     }
-    return 2
+    return EXIT.failed
   }
 }

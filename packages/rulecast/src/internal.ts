@@ -7,6 +7,7 @@
  * outside it, can drive a pipeline without reaching into `dist/` by path.
  */
 
+export { EXIT, EXIT_CODES, SCHEMA_VERSION } from "./adapters/cli/contract"
 export {
   type CompiledProject,
   type CompileOptions,
@@ -18,6 +19,7 @@ export { CONFIG_FILE, MANIFEST_FILE } from "./core/config/load"
 export type { Config, RuleEntry, Stage } from "./core/config/schema"
 export { renderAgentText } from "./core/delivery/render-agent"
 export { checkableKinds, checkDetectors, type KindCheckResult } from "./core/detection/check"
+export { FINDING_ID_VERSION, findingIds } from "./core/finding-id"
 export { cacheHome, type Env, projectStateDir } from "./core/home"
 export { type PipelineOptions, type PipelineResult, runPipeline } from "./core/pipeline"
 export { type Checkout, cachedRepos, fetchingRepos, fixedRepo, type RepoProvider } from "./core/repos/provider"

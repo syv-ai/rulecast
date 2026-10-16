@@ -35,9 +35,11 @@ const claudeCode: AdapterFixture = {
           {
             rule: "no-silent-except",
             severity: "error",
+            id: "id",
             status: "new",
             file: "src/math.ts",
             line: 4,
+            endLine: 4,
             column: 5,
             message: "src/math.ts:4 swallows an exception.",
             count: 1,

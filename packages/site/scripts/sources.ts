@@ -149,6 +149,13 @@ export const PAGES: Page[] = [
     source: { file: "agents/reference/tool-recipes.md" },
   },
   {
+    route: "reference/output",
+    title: "Output contract",
+    description: "Exit codes, the JSON and SARIF output, and how finding ids are computed.",
+    group: "Reference",
+    source: { file: "agents/reference/output.md" },
+  },
+  {
     route: "agents/setup",
     title: "SETUP.md",
     description: "The instructions an agent follows to set rulecast up.",

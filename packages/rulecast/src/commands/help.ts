@@ -1,3 +1,4 @@
+import { EXIT_CODES } from "../adapters/cli/contract"
 import { VERSION } from "../core/version"
 
 export interface CommandHelp {
@@ -6,7 +7,16 @@ export interface CommandHelp {
   /** One line, for `rulecast help`. */
   summary: string
   flags: [flag: string, text: string][]
+  /** Printed after the flags: what a script needs to know beyond them. */
+  notes?: string[]
 }
+
+/** `run` and `try-repo` share the contract a loop branches on. */
+const EXIT_NOTES = [
+  "Exit codes:",
+  ...EXIT_CODES.map(([code, meaning]) => `  ${code}  ${meaning}`),
+  "The JSON and SARIF output is documented in agents/reference/output.md.",
+]
 
 /**
  * Every command, once. The usage text, each `<command> --help` and the README's command table are
@@ -62,6 +72,7 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm", "Include metered (llm) rules in a staged run, which skips them by default"],
       ["--no-llm", "Skip metered (llm) rules in any run"],
     ],
+    notes: EXIT_NOTES,
   },
   {
     name: "list",
@@ -110,6 +121,7 @@ export const COMMANDS: CommandHelp[] = [
     synopsis: "rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]",
     summary: "Run a rule repo against your project without configuring it",
     flags: [["--ref REV", "The revision of a URL repo (default HEAD)"]],
+    notes: EXIT_NOTES,
   },
   {
     name: "clean",
@@ -159,6 +171,7 @@ export function commandHelp(name: string): string | null {
     ...(command.flags.length === 0
       ? []
       : ["", ...command.flags.map(([flag, text]) => `  ${flag.padEnd(width)}  ${text}`)]),
+    ...(command.notes === undefined ? [] : ["", ...command.notes]),
     "",
   ].join("\n")
 }

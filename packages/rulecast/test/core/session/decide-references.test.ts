@@ -22,6 +22,7 @@ const ref = (text: string, mode: "inject" | "read" = "inject") =>
 const violated = (id: string, context: ReturnType<typeof ref>[]) => ({
   rule: rule({ id, message: "m", context }),
   match: { file: "a.ts", line: 1, endLine: 1, column: 1, text: "", captures: {} },
+  id: "id",
   status: "new" as const,
 })
 

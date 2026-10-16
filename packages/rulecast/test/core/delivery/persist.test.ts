@@ -12,11 +12,13 @@ function delivery(count: number): Delivery {
   return {
     ...emptyDelivery(),
     findings: Array.from({ length: count }, (_, index) => ({
+      id: `f${index}`,
       rule: "backend/no-httpexception",
       severity: "error" as const,
       status: "new" as const,
       file: `app/services/f${index}.py`,
       line: index + 1,
+      endLine: index + 1,
       column: 1,
       message: `app/services/f${index}.py:${index + 1} returns HTTP 404 straight from the service layer.`,
       count: 1,

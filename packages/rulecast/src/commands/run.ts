@@ -1,9 +1,10 @@
 import { parseArgs } from "node:util"
 
-import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
-import { type CompiledProject, compile } from "../core/compile/project"
+import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery, type RuleMetadata } from "../adapters/cli/format"
+import { type CompiledProject, compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { WORKTREE } from "../core/content"
+import { createReferenceResolver, resolveRuleContext } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
@@ -154,8 +155,31 @@ export interface RunInput {
 }
 
 /** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
+/** SARIF's rule metadata for the rules that have findings, with the text of the sections they cite. */
+async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>): Promise<RuleMetadata[]> {
+  const resolver = createReferenceResolver(project.root)
+  const rules = project.rules.filter((rule) => ids.has(rule.id))
+  return Promise.all(
+    rules.map(async (rule) => {
+      const resolved = new Map((await resolveRuleContext(resolver, rule.context)).map((entry) => [entry.ref, entry]))
+      return {
+        id: rule.id,
+        name: rule.name,
+        description: rule.description,
+        severity: rule.severity,
+        source: rule.source,
+        context: rule.context.map((spec) => ({ ref: spec.ref, content: resolved.get(spec.ref)?.content ?? null })),
+      }
+    }),
+  )
+}
+
 export async function executeRun({ project, ruleId, run, registry, io }: RunInput): Promise<number> {
   const root = project.root
+  // A config file that does not load compiled no rule at all: a report would say "no findings" of
+  // a run that checked nothing. Checked before the rule id, which no rule could match.
+  const fatal = project.diagnostics.find((diagnostic) => diagnostic.fatal === true)
+  if (fatal !== undefined) throw new Error(`${diagnosticText(fatal)} (run ${fatal.hint ?? "rulecast validate"})`)
   if (ruleId !== null && !project.rules.some((rule) => rule.id === ruleId)) {
     throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
   }
@@ -187,22 +211,31 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     maxContextChars: null,
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
+    // The machine formats report pre-existing findings by id; the others summarise them.
+    listPreexisting: run.format === "json" || run.format === "sarif",
   })
+  const complete = !result.failed
+  const withFindings = new Set(
+    [...result.delivery.findings, ...(result.delivery.preexisting ?? [])].map((finding) => finding.rule),
+  )
   const text = formatDelivery(result.delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
     skipped,
     checked: { files: selected.files.length, selection: selected.selection },
-    ignored: (result.ignored ?? []).map(({ rule, match, reason }) => ({
+    ignored: (result.ignored ?? []).map(({ id, rule, match, reason }) => ({
+      ...(id === undefined ? {} : { id }),
       rule: rule.id,
       file: match.file,
       line: match.line,
       reason,
     })),
+    complete,
+    ...(run.format === "sarif" ? { rules: await ruleMetadata(project, withFindings) } : {}),
   })
   if (text) io.stdout(`${text}\n`)
-  return exitCodeFor(result.delivery, result.failed)
+  return exitCodeFor(result.delivery, complete)
 }
 
 export async function runCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {

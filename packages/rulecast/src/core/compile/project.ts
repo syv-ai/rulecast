@@ -21,6 +21,11 @@ export interface Diagnostic {
   level: "error" | "warning"
   /** What a hook tells the developer to run; default "rulecast validate". Missing repos: "rulecast install". */
   hint?: string
+  /**
+   * The config file itself did not load, so no rule was compiled. A hook still warns; `rulecast run`
+   * exits 2 instead of reporting a run that checked nothing (adapters/cli/contract.ts).
+   */
+  fatal?: true
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -101,6 +106,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     rules: [],
     diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
     mode: options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env),
+    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error", fatal: true }],
   })
 
   const data =

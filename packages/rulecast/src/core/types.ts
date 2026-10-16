@@ -192,7 +192,7 @@ export interface Detector<Config> {
   guards?: boolean
   /**
    * Each file costs money or a third party sees it (§6, Consent). The core never preselects such a
-   * rule in `init`, never runs it as a side effect — no fingerprint run on `touch`, no `doctor` dry
+   * rule in `init`, never runs it as a side effect — no container measurement on `touch`, no `doctor` dry
    * run, no `rulecast test` without a rule id — and budgets the files it is given per event.
    *
    * The core asks this rather than a kind name, the way it asks `guards`, so a second metered
@@ -233,6 +233,11 @@ export interface Detector<Config> {
    * The core runs such a kind after every other kind, alone, so nothing reads a file mid-change.
    */
   changesFiles?: boolean
+  /**
+   * Captures whose value differs between two runs over the same content (a model's `reason`). A
+   * finding's id (core/finding-id.ts) leaves them out, so it stays the same from run to run.
+   */
+  volatileCaptures?: readonly string[]
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>
@@ -250,11 +255,17 @@ export interface Detector<Config> {
 }
 
 export interface Finding {
+  /**
+   * Stable across runs (core/finding-id.ts): the same violation keeps it when lines above it move.
+   * A merged finding (`count` > 1) carries the id of the match it shows, the earliest in the file.
+   */
+  id: string
   rule: string
   severity: Severity
   status: "new" | "preexisting"
   file: string
   line: number
+  endLine: number
   column: number
   message: string
   count: number
@@ -282,6 +293,11 @@ export interface Omitted {
 
 export interface Delivery {
   findings: Finding[]
+  /**
+   * Pre-existing findings in full, for `rulecast run`'s JSON and SARIF (PipelineOptions.listPreexisting).
+   * Absent under a hook: an agent is given `preexistingSummary` instead.
+   */
+  preexisting?: Finding[]
   preexistingSummary: { rule: string; file: string; count: number }[]
   references: DeliveredReference[]
   touches: string[]
