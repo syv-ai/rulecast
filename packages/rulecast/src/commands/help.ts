@@ -106,7 +106,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "test",
-    synopsis: "rulecast test [RULE_ID] [--against PATH...]",
+    synopsis: "rulecast test [RULE_ID] [--against PATH... [--max-rate N]] [--format terminal|json]",
     summary: "Run each rule's good/bad examples; --against says how much it would flag",
     flags: [
       ["RULE_ID", "Only this rule. Needed for llm rules, which cost money per example"],
@@ -114,6 +114,11 @@ export const COMMANDS: CommandHelp[] = [
         "--against PATH...",
         "Fire the rule over real files and count what it finds; without RULE_ID, every rule, one line each",
       ],
+      [
+        "--max-rate N",
+        "With --against: exit 1 when a rule flags more than this share (0 to 1) of the files it matches. Not applied under 25 matching files",
+      ],
+      ["--format", "terminal or json"],
     ],
   },
   {

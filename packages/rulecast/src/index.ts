@@ -13,7 +13,14 @@ export type { CompiledDetector, CompiledRule, DetectorRule, TouchRule } from "./
 export { isDetectorRule } from "./core/compile/rule"
 // Every type a field of `CompiledRule` is declared with, so a third-party detector or adapter can
 // name them all. `test/plugin-api.ts` fails typecheck if one of them goes missing again.
-export type { RuleExample, RuleExamples, RuleScope, Stage } from "./core/config/schema"
+export type {
+  BadRuleExample,
+  BaselineRuleExample,
+  RuleExample,
+  RuleExamples,
+  RuleScope,
+  Stage,
+} from "./core/config/schema"
 // An adapter cannot implement `Adapter.format` without the renderer, and the positions helpers are
 // what a detector needs to turn an offset into the line and column a `Match` carries.
 export { type RenderOptions, renderAgentText } from "./core/delivery/render-agent"

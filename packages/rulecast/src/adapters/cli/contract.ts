@@ -1,14 +1,21 @@
 /**
  * What a loop or CI job may rely on from the CLI (agents/reference/output.md): the JSON document's
- * version and the exit codes. Kept apart from the formatters so every command that prints JSON
- * stamps the same version, and the help text and the README are held to the same codes.
+ * versions and the exit codes. Kept apart from the formatters so every command that prints a
+ * document stamps its version from one place, and the help text and the README are held to the
+ * same codes.
  */
 
 /**
- * `schemaVersion` of every JSON document rulecast prints. Adding a field leaves it alone; removing
- * one, renaming one or changing what one means bumps it.
+ * `schemaVersion` of the JSON document `run` and `try-repo` print. Adding a field leaves it alone;
+ * removing one, renaming one or changing what one means bumps it.
  */
 export const SCHEMA_VERSION = 1
+
+/**
+ * `schemaVersion` of `rulecast test --format json`, under the same policy. Its own number: the test
+ * document has nothing in common with the run report, and one changing must not bump the other.
+ */
+export const TEST_SCHEMA_VERSION = 1
 
 /** `rulecast run` and `try-repo`. Other commands use 2 for whatever they found wrong. */
 export const EXIT = {
