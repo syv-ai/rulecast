@@ -59,6 +59,17 @@ export interface PipelineResult {
   deadlineMissed: string[]
   /** Findings a `rulecast-ignore` comment dropped (core/suppress.ts); absent when nothing was detected. */
   ignored?: IgnoredFinding[]
+  /**
+   * Every match this event classified, with its id and status, before merging and the context
+   * budget cut anything; absent when nothing was detected.
+   */
+  findings?: ClassifiedFinding[]
+  /**
+   * Rule id to the files its detector ran on and completed: the selections after skipped kinds and
+   * file budgets, without rules that errored, timed out or a staged run skipped. Absent when no
+   * detector was run. A rule not listed was not checked: its absence from `findings` proves nothing.
+   */
+  ran?: Map<string, string[]>
 }
 
 type Warning = { key: string; text: string }
@@ -309,6 +320,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
 
@@ -454,6 +466,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     ignored = output.ignored.map((item, index) => ({ ...item, id: ids[output.findings.length + index]! }))
+    const incomplete = new Set([
+      ...output.errors.flatMap((error) => error.rules),
+      ...output.timedOut.flatMap((timeout) => timeout.rules),
+      ...output.skipped,
+    ])
+    ran = new Map(
+      selections
+        .filter((selection) => !incomplete.has(selection.rule.id))
+        .map((selection) => [selection.rule.id, selection.files]),
+    )
     // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
     // what to undo, because nothing could refuse the write before it happened.
     const shellEdited = (file: string) =>
@@ -582,12 +604,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     return decision.delivery
   }
 
-  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ignored }
+  const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
+  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
 
   await appendWork(session.dir, workRecords)
   try {
     const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
+    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
   } catch (error) {
     // §14's two "run without session state" rows: a lock nobody released, and a store nobody can
     // read. The commit reads the stores inside the lock, so both surface here as well.
@@ -598,6 +621,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     } else throw error
     const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
-    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
+    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
   }
 }
