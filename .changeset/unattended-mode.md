@@ -12,4 +12,4 @@ Set `RULECAST_MODE=unattended`, or `mode: unattended` in `.rulecast-config.yaml`
 - The block message tells the agent that nobody is there to ask. If it disputes a finding, it records the finding in the run's decisions file or final report instead of asking the user.
 - `unattended.escalate: [rule-id, ...]` makes chosen warning rules errors, and `refuse_write: unattended` makes a rule refuse writes only in this mode.
 
-`rulecast doctor` shows the active mode and where it came from. Attended behaviour is unchanged.
+The mode applies to agent hooks only. `rulecast run`, in a git hook or a CI job, always runs the rules as written, so a CI job's exit code does not change. `rulecast doctor` shows the active mode and where it came from. Attended behaviour is unchanged.
