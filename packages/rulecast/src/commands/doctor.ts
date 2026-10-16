@@ -58,7 +58,9 @@ function modeText(mode: ActiveMode, config: CompiledProject["config"]): string {
         ? `from ${mode.detail} in ${CONFIG_FILE}`
         : mode.source === "ci"
           ? `detected from ${mode.detail}`
-          : "default (no RULECAST_MODE, mode or CI)"
+          : mode.ignored !== undefined
+            ? "default (RULECAST_MODE ignored; no mode or CI)"
+            : "default (no RULECAST_MODE, mode or CI)"
   const blocks = mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks
   return `${mode.mode} — ${source}; up to ${plural(blocks, "blocked stop")} per prompt`
 }

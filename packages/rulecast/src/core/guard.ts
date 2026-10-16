@@ -1,8 +1,9 @@
 import type { CompiledRule } from "./compile/rule"
-import type { Config } from "./config/schema"
+import type { Config, Mode } from "./config/schema"
 import type { ReferenceResolver } from "./delivery/resolve"
 import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
+import { lineStarts } from "./detection/positions"
 import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
@@ -17,6 +18,8 @@ export interface GuardInput {
   event: Event
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
+  /** Unattended, an ignore comment the proposal writes silences nothing, as in the pipeline. */
+  mode: Mode
   work: WorkState
   /**
    * Not reachable through `detection`, which exposes only `contextFor`: the delivery decision
@@ -78,10 +81,21 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
+  // Unattended, nobody agreed to an ignore comment on a line this write adds or changes: the
+  // finding it would silence is judged as if it were not there. A comment already in the file
+  // still counts, even when the write changes the code under it.
+  const starts = lineStarts(proposal.content)
+  const written = (line: number) => {
+    const from = starts[line - 1]
+    if (from === undefined) return false
+    const to = starts[line] ?? proposal.content.length
+    return proposal.inserts.some(([start, end]) => from < end && to > start)
+  }
+  const unsilenced = input.mode === "unattended" ? output.ignored.filter(({ commentLine }) => written(commentLine)) : []
+  const findings = [...output.findings, ...unsilenced.map(({ rule, match }) => ({ rule, match }))]
+
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
-  const evidence = output.findings.filter(({ rule, match }) =>
-    isInserted(proposal, match, wholeFile(rule.detector.kind)),
-  )
+  const evidence = findings.filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
   if (evidence.length === 0) return emptyDelivery()
 
   // The refuse gate, like the stop gate: a rule that has had its say about a file lets the next

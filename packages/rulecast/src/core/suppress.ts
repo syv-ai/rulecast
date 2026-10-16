@@ -35,6 +35,8 @@ export interface IgnoredFinding {
   rule: DetectorRule
   match: Match
   reason: string
+  /** The line the ignore comment is on: the finding's, or the one above it. */
+  commentLine: number
 }
 
 export interface Suppressed {
@@ -88,7 +90,7 @@ export async function suppress(
       result.findings.push(finding)
       continue
     }
-    result.ignored.push({ ...finding, reason: ignore.reason })
+    result.ignored.push({ ...finding, reason: ignore.reason, commentLine: at })
   }
   return result
 }

@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
@@ -7,8 +7,8 @@ import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
-import { testEnv } from "../helpers/home"
-import { claudeCodePayload } from "../helpers/payloads"
+import { stateDirFor, testEnv } from "../helpers/home"
+import { claudeCodePayload, type Payload } from "../helpers/payloads"
 
 /**
  * Unattended mode (#24) through the hook command, with recorded Claude Code payloads: what a goal
@@ -142,6 +142,36 @@ describe("hook claude-code: unattended stops", () => {
     expect(output.reason).toContain("error frontend/no-generated-edits")
   })
 
+  test("a refuse_write finding in a file changed with the shell blocks until reverted, past the repeat limit", async () => {
+    const rules = fixtureRules.map((rule) =>
+      rule.id === "frontend/no-generated-edits" ? { ...rule, refuse_write: true } : rule,
+    )
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(rules) })
+    const hook = (name: string) =>
+      runCli(root, ["hook", "claude-code"], JSON.stringify(claudeCodePayload(name, { root, sessionId: "s1" })), {
+        ...testEnv,
+        RULECAST_MODE: "unattended",
+      })
+    await hook("pre-tool-use.bash")
+    await writeFile(path.join(root, CLIENT), "export const api = 2\n")
+    await hook("post-tool-use.bash")
+    const kinds = []
+    for (let n = 0; n < 4; n++) {
+      const { stdout } = await hook(n === 0 ? "stop" : "stop.after-block")
+      kinds.push(kindOf(stdout === "" ? null : JSON.parse(stdout)))
+    }
+    expect(kinds).toEqual(["block", "block", "block", "block"])
+  })
+
+  test("an unknown RULECAST_MODE is attended, and the debug log says why", async () => {
+    const { root, edit, stop } = await session({}, { ...testEnv, RULECAST_MODE: "headless" })
+    await edit(USERS, violation(500))
+    expect((await stop()).reason).toContain("say so to the user")
+    expect(await readFile(path.join(stateDirFor(root), "debug.log"), "utf8")).toContain(
+      "RULECAST_MODE=headless is ignored",
+    )
+  })
+
   test("refuse_write: unattended refuses only when nobody is in the loop", async () => {
     const rules = fixtureRules.map((rule) =>
       rule.id === "frontend/no-generated-edits" ? { ...rule, refuse_write: "unattended" } : rule,
@@ -182,6 +212,59 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     // Not even counted among the file's pre-existing findings.
     expect(await edit(USERS, `${committed}    return None\n`)).not.toMatch(/HTTPException|no-httpexception/)
     expect(await stop()).toBeNull()
+  })
+
+  test("an ignore already in the code keeps working when the agent edits the line it covers", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const committed = `def get():\n${above}    raise HTTPException(500)\n`
+    const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
+    expect(await edit(USERS, `def get():\n${above}    raise HTTPException(501)\n`)).not.toContain("HTTPException(501)")
+    expect(await stop()).toBeNull()
+  })
+
+  test("an ignore added above code that was already there does not silence it, and the user is told", async () => {
+    const committed = "def get():\n    raise HTTPException(500)\n"
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const { edit, stop } = await session({}, UNATTENDED_ENV, { [USERS]: committed })
+    await edit(USERS, `def get():\n${above}    raise HTTPException(500)\n`)
+    // The finding is the backlog's again, not silenced: summarised, never blocking.
+    const output = await stop()
+    expect(output?.decision).toBeUndefined()
+    expect(output?.systemMessage).toContain(ADDED_NOTICE)
+  })
+
+  test("the guard does not honour an ignore the proposed write adds", async () => {
+    const rules = fixtureRules.map((rule) =>
+      rule.id === "backend/no-httpexception" ? { ...rule, refuse_write: "unattended" } : rule,
+    )
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(rules) })
+    const write = async (content: string) => {
+      const payload = claudeCodePayload("pre-tool-use.write", { root, file: USERS, sessionId: "s1" })
+      ;(payload.tool_input as { content: string }).content = content
+      const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), UNATTENDED_ENV)
+      return stdout === "" ? null : JSON.parse(stdout).hookSpecificOutput?.permissionDecision
+    }
+    expect(await write(`def get():\n${IGNORED}`)).toBe("deny")
+  })
+
+  test("the guard honours an ignore that was already in the file", async () => {
+    const rules = fixtureRules.map((rule) =>
+      rule.id === "backend/no-httpexception" ? { ...rule, refuse_write: "unattended" } : rule,
+    )
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const root = await createRepo({
+      ...fixtureFiles,
+      [USERS]: `def get():\n${above}    raise HTTPException(500)\n`,
+      ".rulecast-config.yaml": localConfig(rules),
+    })
+    const payload = claudeCodePayload("pre-tool-use.edit", { root, file: USERS, sessionId: "s1" })
+    payload.tool_input = {
+      ...payload.tool_input,
+      old_string: "raise HTTPException(500)",
+      new_string: "raise HTTPException(501)",
+    } as Payload["tool_input"]
+    const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), UNATTENDED_ENV)
+    expect(stdout).toBe("")
   })
 
   test("attended, an added ignore silences its finding as before, and the user is told", async () => {

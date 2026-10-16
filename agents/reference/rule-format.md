@@ -188,7 +188,10 @@ In unattended mode:
   per prompt.
 - **A finding that has blocked two stops no longer blocks.** It is reported instead, so a false
   positive, with nobody to overrule it, cannot use up the budget. A finding is the same finding when
-  its rule, its file and the text it matched are the same, wherever the line has moved.
+  its rule, its file and the text it matched are the same, wherever the line has moved. When the
+  text tells nothing apart (a redacted secret, a hook's whole-file finding), the tool's rule id,
+  message and line are compared too. A `refuse_write` finding in a protected file the agent changed
+  with its shell is the exception: it keeps blocking until the change is reverted.
 - **When nothing is left that may block, the agent is held once more, to report.** This happens when
   the budget is spent, or when every remaining finding has blocked twice. The agent is given the
   findings and told to record each one as unresolved in its final report, or in the run's decisions
@@ -197,9 +200,11 @@ In unattended mode:
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
-- **A `rulecast-ignore` added during the session silences nothing.** Its finding blocks and is
-  reported like any other, and the developer is still told about the comment. Ignores that were
-  already in the code keep working.
+- **A `rulecast-ignore` comment the agent adds or changes during the run silences nothing.** Its
+  finding is judged like any other, blocking and reported if it is new, and the developer is still
+  told about the comment. Comments already in the code keep working, even when the agent edits the
+  code they cover. A comment on a line the agent changed counts as changed. The same holds for a
+  `refuse_write` rule: an ignore in the write itself does not stop the refusal.
 - **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, and
   `refuse_write: unattended` rules refuse writes.
 
@@ -208,10 +213,11 @@ The mode is decided in this order:
 1. `RULECAST_MODE`: `unattended`, or `attended` (also `interactive`). It overrides the config, so
    an orchestrator can set it per run.
 2. `mode:` in `.rulecast-config.yaml`.
-3. `CI` or `GITHUB_ACTIONS` set (and not `false` or `0`): unattended.
+3. `CI` or `GITHUB_ACTIONS` set (and not `false`, in any case, or `0`): unattended.
 4. Otherwise attended.
 
-A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
+An unknown `RULECAST_MODE` value is ignored: `rulecast doctor` warns about it, and a hook writes it
+to its debug log. A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
 it would run in from your shell, and where that came from. The mode applies to agent hooks only.
 `rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
 to answer.

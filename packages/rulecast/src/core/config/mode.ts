@@ -16,10 +16,11 @@ export interface ActiveMode {
 /** `interactive` is accepted for `attended`: it is the word people reach for. */
 const ENV_VALUES: Record<string, Mode> = { attended: "attended", interactive: "attended", unattended: "unattended" }
 
-/** CI systems set these to "true"; "false" and "0" are someone switching it off. */
+/** CI systems set these to "true"; "false" (in any case) and "0" are someone switching it off. */
 const CI_VARIABLES = ["CI", "GITHUB_ACTIONS"] as const
 
-const isSet = (value: string | undefined) => value !== undefined && value !== "" && value !== "false" && value !== "0"
+const isSet = (value: string | undefined) =>
+  value !== undefined && value !== "" && value.toLowerCase() !== "false" && value !== "0"
 
 /**
  * RULECAST_MODE, then the config's `mode`, then CI detection, then attended.
