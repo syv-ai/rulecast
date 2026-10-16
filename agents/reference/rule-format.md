@@ -193,12 +193,18 @@ examples:
   baseline:
     - path: backend/app/services/users.py
       before: |
-        print("created user", user.id)
+        def create_user(name):
+            user = create(name)
+            print("created user", user.id)
+            return user
       after: |
-        user = create(name)
-        print("created user", user.id)
-        print("done")
-      expect: { new: [3], preexisting: [2] }
+        def create_user(name):
+            user = create(name)
+            user.save()
+            print("created user", user.id)
+            print("saved")
+            return user
+      expect: { new: [5], preexisting: [4] }
 ```
 
 - **`path` is required** and must match the rule's own `files`, `exclude` and type keys — those, and
@@ -206,20 +212,28 @@ examples:
   tests a different rule. A path the rule would never be given is a `rulecast validate` error.
 - **A `bad` example passes on at least one finding**, unless its `expect` says more:
   - `count`: exactly this many matches.
-  - `lines`: the lines the matches are on. Compared as a set: every listed line has a match, and
-    no match is on a line not listed. Two matches on one line need the line once.
+  - `lines`: the line each match starts on (line 1 for a finding about the whole file, such as a
+    `path` rule's). Compared as a set: every listed line has a match starting on it, and no match
+    starts on a line not listed. Two matches on one line need the line once.
 
   Pin `lines` when it matters that the rule fires on the right line, not merely somewhere: an
   over-broad pattern passes a bare `bad` example by matching the wrong line. A line past the end of
-  `code` is a `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
+  `code` (empty `code` counts as one line), or a `count` below the number of `lines`, is a
+  `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
 - **A `baseline` example is an edit.** `before` is the file when the agent first opens it, `after`
   the file once it has edited it. `rulecast test` sorts the rule's findings in `after` into new and
   pre-existing the way a session would, by the rule's own [`scope`](#instance-and-container-rules),
-  and the example passes when the lines of each match `expect.new` and `expect.preexisting`, as
-  sets. A status left out must have no findings, so `expect: {}` means "no finding at all". It
-  catches a rule that reports code the edit did not touch as new: a regex that spans lines, an
-  `ast-grep` rule that matches a whole function, a `container` rule. An `llm` rule's baseline is
-  never measured, as in a session, so an `llm` `container` rule classifies as `instance` here too.
+  and the example passes when the start lines of its new findings are exactly `expect.new` and
+  those of its pre-existing ones exactly `expect.preexisting`, as sets. A status left out must have
+  no findings, so `expect: {}` means "no finding at all". It catches a rule that reports code the
+  edit did not touch as new: a regex that spans lines, an `ast-grep` rule that matches a whole
+  function, a `container` rule. To catch a match that is too wide, put the edit's unrelated line
+  inside the block that holds the old violation, next to it but not on it, as above.
+- **Some rules have no baseline example to give.** A `path` rule's file is the break or it is not.
+  An `llm` rule only reports lines the edit changed, so an untouched old violation is never
+  reported, as in a session; its baseline is never measured either, so an `llm` `container` rule
+  classifies as `instance`. A `hook` rule's finding about the whole file (line 1) is new after any
+  edit to the file.
   Baseline examples count towards neither precision nor recall.
 - A `path` rule has no `good` example to give: every file it matches is a violation by definition.
 - An `llm` rule's examples are only run when you name the rule — `rulecast test` on its own skips

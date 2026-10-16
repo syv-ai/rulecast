@@ -99,8 +99,9 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
    - Quote real code first. Search the files the rule matches for an actual violation to use as `bad` and compliant code for `good`; a violation the repository already has is the best `bad` example there is.
    - Where it has none, which is usual in a small or clean repository, write your own: the smallest code that shows the break for `bad`, and for `good` a near miss, code that looks like the break and is not. Invented examples are fine. Say which ones are invented in the summary.
    - A `path` rule judges the file name, not its code: give it `bad` examples only, at paths the rule must refuse.
-   - Every `bad` example gets `expect: { lines: [...] }`: the line or lines the violation is on, counted from 1. Without it, a pattern that fires on the wrong line still passes.
-   - The `baseline` example is an edit: `before` already has one violation, and `after` adds unrelated code above it and a second violation. It expects the old violation, on the line it moved to, as `preexisting`, and the added one as `new`. It catches a rule that reports code the edit did not touch as the edit's: a pattern that spans lines, an `ast-grep` match on a whole function, a `scope: container` rule. A `path` rule has none to give: the file is either the break or it is not.
+   - Every `bad` example gets `expect: { lines: [...] }`: the line each match starts on, counted from 1 (line 1 for a finding about the whole file). Without it, a pattern that fires on the wrong line still passes.
+   - The `baseline` example is an edit: `before` has one violation inside a function or other block, and `after` adds an unrelated line in that same block, next to the violation but not on it, and a second violation. It expects the old violation, on the line it moved to, as `preexisting`, and the added one as `new`. It catches a rule that reports code the edit did not touch as the edit's: a pattern that spans lines, an `ast-grep` match on a whole function, a `scope: container` rule. The unrelated line goes inside the block because a match that is too wide covers it there and comes out `new`; above the block it would be missed.
+   - Three kinds of rule have no baseline example to give, so skip it for them. A `path` rule: the file is either the break or it is not. An `llm` rule: it only reports lines the edit changed, so the old violation is never reported at all. A `hook` rule whose findings are about the whole file (line 1, as a formatter's are): any edit to the file makes it new.
 
    ```yaml
    examples:
@@ -117,12 +118,18 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
      baseline:
        - path: backend/app/services/users.py
          before: |
-           print("created user", user.id)
+           def create_user(name):
+               user = create(name)
+               print("created user", user.id)
+               return user
          after: |
-           user = create(name)
-           print("created user", user.id)
-           print("done")
-         expect: { new: [3], preexisting: [2] }
+           def create_user(name):
+               user = create(name)
+               user.save()
+               print("created user", user.id)
+               print("saved")
+               return user
+         expect: { new: [5], preexisting: [4] }
    ```
 
 4. Run `rulecast validate` and fix every diagnostic for your rule. An `expect` line past the end of its example is one of them.

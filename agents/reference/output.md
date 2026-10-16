@@ -162,11 +162,11 @@ rulecast test <rule-id> --against . --max-rate 0.5 --format json
 
 | Code | Meaning | stdout |
 |---|---|---|
-| `0` | Every example that ran passed, and no rule is over `--max-rate`. | the report |
-| `1` | An example failed, or a rule is over `--max-rate`. | the report |
-| `2` | rulecast could not run: a usage error, no config, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
+| `0` | Every rule compiled, every example that ran passed, and no rule is over `--max-rate`. | the report |
+| `1` | An example failed, a rule is over `--max-rate`, or, without a rule id, a rule failed to compile. | the report; each compile diagnostic is on stderr |
+| `2` | rulecast could not run: a usage error, no config or one that does not load, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
 
-A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`.
+A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`. Neither is a rule that failed to compile: it is in no entry of `rules`, since nothing tested it, and `passed` is `false`. `rulecast validate` says why. A named rule is tested alone, so another rule's compile error does not fail it; a named rule that did not compile is an unknown rule id.
 
 `--format json` prints one document:
 

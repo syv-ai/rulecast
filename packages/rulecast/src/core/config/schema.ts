@@ -36,7 +36,7 @@ const badExampleSchema = exampleSchema
       .object({
         /** The exact number of matches. */
         count: z.number().int().positive().optional(),
-        /** The lines the matches are on, as a set: each has one, and no match is on another. */
+        /** The line each match starts on, as a set: each has one, and no match starts on another. */
         lines: linesSchema.nonempty().optional(),
       })
       .strict()

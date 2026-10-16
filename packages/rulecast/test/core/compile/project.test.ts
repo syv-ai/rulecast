@@ -240,6 +240,30 @@ describe("compile: local rules", () => {
     ])
   })
 
+  test("empty code is one line: a path rule's bad example reports line 1", async () => {
+    const project = await compileConfig(
+      local(detectRule("path-like", { examples: { bad: [{ path: "a.ts", code: "", expect: { lines: [1] } }] } })),
+    )
+    expect(project.diagnostics).toEqual([])
+    expect(project.rules.map((rule) => rule.id)).toEqual(["path-like"])
+  })
+
+  test("a count below the number of lines it pins can never pass, and is an error", async () => {
+    const project = await compileConfig(
+      local(
+        detectRule("too-few", {
+          examples: { bad: [{ path: "a.ts", code: "a\nb\n", expect: { count: 1, lines: [1, 2] } }] },
+        }),
+        detectRule("one-line", { examples: { bad: [{ path: "a.ts", code: "a\n", expect: { lines: [2] } }] } }),
+      ),
+    )
+    expect(project.rules).toEqual([])
+    expect(project.diagnostics.map((d) => [d.rule, d.message])).toEqual([
+      ["too-few", "example bad[0] expects 1 finding on 2 lines; a finding starts on one line"],
+      ["one-line", "example bad[0] expects line 2; its code has 1 line"],
+    ])
+  })
+
   test("an unknown scope is a schema error naming the key", async () => {
     const project = await compileConfig(local(detectRule("sideways", { scope: "sideways" })))
     expect(project.rules).toEqual([])
