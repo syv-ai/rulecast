@@ -1,3 +1,4 @@
+import type { ActiveMode } from "../config/mode"
 import type { TreeState } from "./tree"
 
 export type WorkRecord =
@@ -18,6 +19,8 @@ export type WorkRecord =
   | { t: "tree"; phase: "start" | "before" | "after" | "stop"; agent: string; toolUseId?: string; state: TreeState }
   /** Changed outside any of the agent's tool calls, found by comparing tree states: reported, never blocking. */
   | { t: "swept"; file: string }
+  /** The mode the hooks ran this session in, so `rulecast run --session` judges as they did. */
+  | { t: "mode"; mode: ActiveMode["mode"]; source: ActiveMode["source"]; detail: string }
 
 export type ContextRecord =
   | { t: "reset" }
@@ -55,6 +58,8 @@ export interface WorkState {
   beforeTrees: Map<string, TreeState>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
+  /** The mode last recorded; null in a session recorded before modes were. */
+  mode: ActiveMode | null
 }
 
 export interface ContextState {
@@ -96,6 +101,7 @@ export function emptyWork(): WorkState {
     sessionLatestTree: null,
     beforeTrees: new Map(),
     startTree: null,
+    mode: null,
   }
 }
 
@@ -157,6 +163,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       case "noticed":
         state.noticed.add(record.key)
+        break
+      case "mode":
+        state.mode = { mode: record.mode, source: record.source, detail: record.detail }
         break
     }
   }
