@@ -157,8 +157,12 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     })
   const add = async (input: RuleInput, source: string) => {
     const result = await compileRule(input, context)
-    if (typeof result === "string") error(source, input.data.alias ?? input.data.id, result)
-    else compiled.push({ rule: result, source })
+    if (typeof result === "string") {
+      error(source, input.data.alias ?? input.data.id, result)
+      return
+    }
+    compiled.push({ rule: result.rule, source })
+    for (const message of result.warnings) diagnostics.push({ source, rule: result.rule.id, message, level: "warning" })
   }
 
   for (const [index, entry] of config.repos.entries()) {
@@ -302,7 +306,10 @@ export async function compileManifest(
         message: result,
         level: "error",
       })
-    } else compiled.push({ rule: result, source })
+      continue
+    }
+    compiled.push({ rule: result.rule, source })
+    for (const message of result.warnings) diagnostics.push({ source, rule: result.rule.id, message, level: "warning" })
   }
   const rules = uniqueRules(compiled, diagnostics, (id) => `rule "${id}" is defined more than once`)
   return { rules, diagnostics }

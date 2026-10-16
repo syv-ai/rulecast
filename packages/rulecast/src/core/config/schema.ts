@@ -35,7 +35,8 @@ const linesSchema = z.array(z.number().int().positive())
 
 /**
  * A `bad` example, optionally pinning what the rule finds in it. Without `expect` it passes on at
- * least one finding, as it always has.
+ * least one finding, as it always has. It may also say what the rule's `fix` must turn it into,
+ * exactly.
  */
 const badExampleSchema = exampleSchema
   .extend({
@@ -49,6 +50,7 @@ const badExampleSchema = exampleSchema
       .strict()
       .refine((expect) => expect.count !== undefined || expect.lines !== undefined, "expect needs count or lines")
       .optional(),
+    fixed: z.string().optional(),
   })
   .strict()
 

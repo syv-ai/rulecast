@@ -100,6 +100,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
 | `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
+| `rulecast fix` | Apply regex and ast-grep rules' fixes; `--dry-run` prints the diff |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
@@ -115,7 +116,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 
 ### Exit codes
 
-`rulecast run` and `rulecast try-repo` exit with:
+`rulecast run`, `rulecast try-repo` and `rulecast fix` (after its fixes) exit with:
 
 | Code | Meaning |
 |---|---|
@@ -247,6 +248,8 @@ Per-edit enforcement does not touch that stock — it only stops it growing. Fix
 edits to files that already followed the rule broke it 2% of the time, against 37% in files that
 mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not
 proven.)
+
+When the fix is mechanical, give the rule a [`fix`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md#fixes) and burn the stock down in one go: `rulecast fix <rule> --all-files --dry-run` shows the diff, and without `--dry-run` it writes it. Hooks never apply a fix; only that command does.
 
 ### A committed baseline
 

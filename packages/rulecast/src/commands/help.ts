@@ -98,6 +98,27 @@ export const COMMANDS: CommandHelp[] = [
     ],
   },
   {
+    name: "fix",
+    synopsis: "rulecast fix [RULE_ID] (--all-files | --files F... | --from-ref A) [--dry-run] [--format terminal|json]",
+    summary: "Apply regex and ast-grep rules' fixes; --dry-run prints the diff",
+    flags: [
+      ["RULE_ID", "Only this rule's fix"],
+      ["--all-files", "Every file git knows about"],
+      ["--files F...", "These files"],
+      ["--from-ref A", "Files changed since the merge base with A"],
+      ["--dry-run", "Print the diff and write nothing"],
+      ["--format", "terminal or json"],
+      ["--llm | --no-llm", "Passed to the check after the fixes, as for run"],
+    ],
+    notes: [
+      "Pre-existing findings are fixed too. A rule whose fix fails its own examples is skipped.",
+      "After writing, the files are checked as rulecast run checks them, and the exit code is run's.",
+      "With --dry-run nothing is written, so the exit code is an estimate: the findings left after the",
+      "fixes, as far as the rules that fix can tell.",
+      ...EXIT_NOTES,
+    ],
+  },
+  {
     name: "list",
     synopsis: "rulecast list [RULE_ID] [--format terminal|json]",
     summary: "Show every configured rule: where it comes from, what it matches, what it cites",

@@ -126,6 +126,8 @@ function renderFindings(findings: ClassifiedFinding[], status: Finding["status"]
         message,
         count: 1,
         captures: capturesFor(rule, match),
+        // Only when true, so a document from a project with no fixes is unchanged (output.md).
+        ...(rule.fixable ? { fixable: true as const } : {}),
       })
       continue
     }

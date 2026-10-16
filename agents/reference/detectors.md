@@ -17,6 +17,7 @@ detect:
 - `flags`: any of `d`, `i`, `m`, `s`, `u`, `v`, `y`; default none. `g` is always added. Use `m` for `^` and `$` at each line, `s` for `.` across lines.
 - `\s` matches a line break. With `m`, `^\s*print\(` matches from an empty line above the `print(` and reports that empty line. Indentation is `[ \t]*`: `^[ \t]*print\(`. `rulecast test` prints what a failing example matched, line breaks included.
 - Captures: the pattern's named groups. `(?<args>…)` gives `{{args}}`, an empty string when the group did not take part in the match.
+- `fix`: optional, the replacement `rulecast fix` writes over each match, in the `{{name}}` syntax with the named groups and `{{text}}`. See [rule-format.md](rule-format.md#fixes).
 - Position: the line and column where the match starts. A match that spans lines counts as new when any of its lines changed.
 - Default stages: `edit`, `verify`.
 
@@ -45,6 +46,7 @@ detect:
 - `language`: one of `css`, `html`, `javascript`, `python`, `tsx`, `typescript`. Use `tsx` for both `.tsx` and `.jsx`; it also parses plain TypeScript.
 - `rule`: an [ast-grep rule object](https://ast-grep.github.io/reference/rule.html) — `pattern`, `kind`, `regex`, `inside`, `has`, `all`, `any`, `not`, and the rest. It is compiled when you run `rulecast validate`, so a rule ast-grep rejects is caught before any agent sees it.
 - `constraints` and `utils`: optional, exactly as in ast-grep's own YAML.
+- `fix`: optional, the replacement `rulecast fix` writes over each match, in ast-grep's syntax (`$NAME`, `$$$NAMES`). Only the string form: no `FixConfig` object, `transform` or `rewriters`. See [rule-format.md](rule-format.md#fixes).
 - Captures: every metavariable in the config. `$NAME` gives `{{NAME}}` (one node, empty when it did not match); `$$$NAMES` gives `{{NAMES}}` with the matched nodes joined by `, `. A metavariable starting with an underscore (`$_TMP`) matches without capturing.
 - Position and `{{text}}`: the matched node's start, and its source.
 - Default stages: `edit`, `verify`.

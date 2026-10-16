@@ -76,6 +76,7 @@ repos:
 | `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
+| `fix` | no; inside `detect.regex` or `detect.ast-grep` | The replacement `rulecast fix` writes over each match (below). No other detector takes one |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
@@ -252,6 +253,9 @@ examples:
         user = create(name)
         print("created user", user.id)
       expect: { lines: [2] }
+      fixed: |                     # optional, for a rule with fix (below)
+        user = create(name)
+        log.info("created user", user.id)
   baseline:
     - path: backend/app/services/users.py
       before: |
@@ -289,6 +293,64 @@ examples:
 
 Write the examples from real code in the repository rather than inventing them, and treat a failing
 example as a wrong rule before a wrong example.
+
+### Fixes
+
+A `regex` or `ast-grep` rule can carry a `fix`: the text that replaces each match. Only
+`rulecast fix` applies it. Agent hooks never do: rulecast never rewrites an agent's file behind its
+back, so under a hook a fixable finding is delivered like any other.
+
+```yaml
+- id: python/logger-not-print
+  files: '\.py$'
+  detect:
+    regex:
+      pattern: 'print\((?<args>[^)]*)\)'
+      fix: "log.info({{args}})"
+  message: "{{file}}:{{line}} uses print. Use the logger."
+  examples:
+    bad:
+      - path: app/x.py
+        code: |
+          print("hi")
+        fixed: |
+          log.info("hi")
+
+- id: frontend/logger-not-console
+  files: '\.tsx?$'
+  detect:
+    ast-grep:
+      language: tsx
+      rule: { pattern: "console.log($$$ARGS)" }
+      fix: "logger.debug($$$ARGS)"
+  message: "{{file}}:{{line}} uses console.log. Use the logger."
+  examples:
+    bad:
+      - path: src/x.ts
+        code: "console.log(a, b)\n"
+```
+
+- **`regex`:** a template in the message's `{{name}}` syntax, with the pattern's named groups and
+  `{{text}}` (the whole match). Values go in exactly as matched, line breaks included. `{{file}}`,
+  `{{line}}`, `{{column}}` and `{{rule}}` are refused: they would be written into the code. A
+  literal `{{x}}` in the replacement (Vue, Jinja) is read as a variable; an unknown one is a
+  `rulecast validate` error.
+- **`ast-grep`:** ast-grep's own syntax. `$NAME` is the text its node matched; `$$$NAMES` is the
+  source from the first matched node to the last, so separators and comments between them are kept.
+  A fix over several lines has lines 2 and on indented like the line the match starts on. A fix may
+  only name metavariables the rule captures. ast-grep's `FixConfig` object (`expandStart`,
+  `expandEnd`), `transform` and `rewriters` are not supported.
+- **A fix needs a `bad` example.** A rule with `fix` and no `bad` example keeps running, but its fix
+  is dropped and `rulecast validate` warns. `rulecast test` applies the fix to every `bad` example:
+  the rule must not fire on the result, and when the example gives `fixed`, the result must equal it
+  exactly (a failure prints the diff). `rulecast fix` runs these checks again before it applies a
+  fix, and skips a rule that fails them.
+- **What it does:** `rulecast fix [RULE_ID] (--files F... | --all-files | --from-ref A)` fixes every
+  finding of a fixable rule in those files, pre-existing ones too, and then checks them as
+  `rulecast run` would; `--dry-run` prints the diff and writes nothing. A fix after which the rule
+  still matches the text it wrote is undone and reported as unresolved, so a second run changes
+  nothing. Findings with a `rulecast-ignore` are left alone. Fixes stay within one match in one
+  file: no fix spans files, and `llm` and tool rules have none.
 
 ### Messages
 

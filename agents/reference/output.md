@@ -110,6 +110,21 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `message` | The rule's `message` with its template variables filled in. |
 | `count` | How many matches this finding stands for. Findings of one rule in one file with the same rendered message are merged into one; that only happens when the message has no `{{line}}`. A merged finding shows its earliest match, and carries that match's id. |
 | `captures` | The values the message template names, when it names any. |
+| `fixable` | `true` when `rulecast fix` can apply this rule's fix; absent otherwise. Route these to `rulecast fix`, the rest to an agent. |
+
+### `rulecast fix`
+
+`rulecast fix [RULE_ID] (--files F... | --all-files | --from-ref A) [--dry-run] --format json` prints the same document, for a check of the files after the fixes were written, with these keys added:
+
+| Key | Meaning |
+|---|---|
+| `dryRun` | Whether `--dry-run` was given. |
+| `fixed` | `id`, `rule`, `file`, `line` of each finding a fix was applied to. The id and line are the finding's before the fix. |
+| `changedFiles` | The files the fixes changed (or would change). |
+| `unresolved` | Findings whose fix left the rule matching the text it wrote: the fix was undone. Same shape as `fixed`. |
+| `diff` | With `--dry-run` only: a unified diff of every change. |
+
+The exit codes are `run`'s, from that check: `0` when no new error finding is left, `1` when one is (a rule with no fix, an unresolved fix, a rule whose fix failed its own examples), `3` when a rule did not run, `2` when rulecast could not run. Under `--dry-run` nothing is written, so the check reads the files unfixed and leaves out the findings the fixes would remove: the code is an estimate, and a fix that would create or remove another tool's finding is not seen. A rule whose fix fails its examples is named in `warnings`.
 
 ### Finding ids
 
@@ -232,6 +247,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `findings` | What the rule found, passing or not: `line`, `endLine`, `column`, `text` (what the detector matched), `message`. One per match, not merged. A baseline example's findings also have `status`: `new` or `preexisting`. |
 | `failures` | Why the example failed, one sentence each, such as `expected lines [2, 4], found [2]` or `line 3: expected new, was pre-existing`. The wording can change; `passed` cannot. |
 | `error` | Present when the detector failed or timed out on the example. The example fails. |
+| `fix` | Only on a `bad` example of a rule with a [`fix`](rule-format.md#fixes), when the rule caught it as expected and the fix was applied: `{ "passed": true }`, or `{ "passed": false, "reason": ... }` with `reason` `stillFires` (the rule fires on the fixed code), `unresolved` (a fix left its own finding and was undone) or `differs` (the result is not the example's `fixed`; `diff` holds the diff from `fixed` to what the fix produced). A failed fix also adds a sentence to `failures`. Added without a `schemaVersion` bump: it is a new field. |
 
 ### `against`
 

@@ -142,10 +142,27 @@ export interface DetectorRun<Config> {
    * fires it only runs when the event loop is free, and synchronous work is what keeps it busy.
    */
   deadlineAt: number
+  /**
+   * Attach each finding's `fix`, for a rule whose config carries one. Set only by `rulecast fix`
+   * and `rulecast test`, never on a hook's path: rulecast never rewrites an agent's file behind its
+   * back (detectors/hook/modified.ts). Absent: false, and a detector computes no edit.
+   */
+  fixes?: boolean
+}
+
+/**
+ * One replacement in a file: the text `read` returned, from `start` to `end` (UTF-16 code units,
+ * the indexes a JavaScript string uses; end exclusive), becomes `text`.
+ */
+export interface TextEdit {
+  start: number
+  end: number
+  text: string
 }
 
 export interface DetectorResult {
-  findings: { rule: string; match: Match }[]
+  /** `fix`: only when the run asked for `fixes` and the rule's config has one. */
+  findings: { rule: string; match: Match; fix?: TextEdit }[]
   /** rule null = the whole run failed. */
   errors: { rule: string | null; message: string }[]
 }
@@ -240,6 +257,13 @@ export interface Detector<Config> {
    * finding's id (core/finding-id.ts) leaves them out, so it stays the same from run to run.
    */
   volatileCaptures?: readonly string[]
+  /**
+   * This rule's config carries a fix that `rulecast fix` may apply: with `DetectorRun.fixes`, its
+   * findings come with a `fix`. A detector that declares it must read only through `read`, because
+   * fixes are applied over several passes in memory before anything is written. The core asks this
+   * rather than a kind name, so `fix` on any other detector is refused with no edit to the core.
+   */
+  fixable?(config: Config): boolean
   run(input: DetectorRun<Config>): Promise<DetectorResult>
   /** Optional: build expensive caches ahead of events (rulecast warm, §13). */
   warm?(input: DetectorWarm<Config>): Promise<void>
@@ -273,6 +297,8 @@ export interface Finding {
   count: number
   /** The detector's captures and the matched text, for a grouped rendering's per-site line. */
   captures?: Record<string, string>
+  /** `rulecast fix` can apply this rule's fix. Present only when true. */
+  fixable?: true
 }
 
 export interface DeliveredReference {

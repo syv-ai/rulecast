@@ -33,6 +33,7 @@ import type {
   RuleScope,
   Severity,
   Stage,
+  TextEdit,
   ToolResult,
 } from "../src/index"
 import {
@@ -63,6 +64,7 @@ export const matches: (file: string) => boolean = rule.matches
 export const detector: CompiledDetector | null = rule.detector
 export const message: string | null = rule.message
 export const context: ReferenceSpec[] = rule.context
+export const fixable: boolean = rule.fixable
 export const examples: RuleExamples | null = rule.examples
 
 // An adapter has to be implementable from here: it renders a delivery and installs its own hooks.
@@ -78,6 +80,9 @@ export type PublicInstall = AdapterInstall
 declare const run: DetectorRun<{ pattern: string }>
 export const cache: Cache = run.cache
 export const deadlineAt: number = run.deadlineAt
+// A fixable detector attaches an edit to a finding when the run asks for fixes.
+export const fixes: boolean | undefined = run.fixes
+export const edit: TextEdit = { start: 0, end: 1, text: "" }
 export const starts: number[] = lineStarts("a\nb")
 export const at: { line: number; column: number } = positionAt(starts, 2)
 export const offset: number = offsetAt(starts, 1, 1, 3)

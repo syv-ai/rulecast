@@ -10,6 +10,8 @@ import type { DetectionContext } from "./detection/context"
 import { readSourceFile } from "./detection/per-rule"
 import { type DetectionOutput, runDetection } from "./detection/run"
 import { withScratchTree } from "./detection/scratch"
+import { labelledDiff } from "./fix/diff"
+import { fixPasses } from "./fix/passes"
 import { renderTemplate } from "./template"
 import type { ChangeSet, Match } from "./types"
 
@@ -45,6 +47,12 @@ export interface ExampleOutcome {
   failures: string[]
   /** The detector failed on this example. A failure, not a silent pass. */
   error?: string
+  /**
+   * A `bad` example of a rule with a fix that fired: whether the fix removed every finding of the
+   * rule (`stillFires` when not, `unresolved` when a fix had to be reverted) and, when the example
+   * gives `fixed`, produced exactly that (`differs`, with the diff from expected to what it got).
+   */
+  fix?: { passed: boolean; reason?: "stillFires" | "differs" | "unresolved"; diff?: string }
 }
 
 export interface ExampleResult {
@@ -60,6 +68,8 @@ export interface ExampleResult {
   empty: boolean
   /** Not run: a metered rule (llm), and no rule id was named. */
   skipped: boolean
+  /** Of the `bad` examples a fix was applied to, how many it fixed. Zero of zero for a rule with no fix. */
+  fixes: { passed: number; total: number }
 }
 
 export interface ExamplesInput {
@@ -88,6 +98,7 @@ function emptyResult(rule: string): ExampleResult {
     missing: false,
     empty: false,
     skipped: false,
+    fixes: { passed: 0, total: 0 },
   }
 }
 
@@ -118,7 +129,10 @@ export async function runExamples(input: ExamplesInput): Promise<ExampleResult> 
   const result = emptyResult(rule.id)
   if (rule.examples === null) return { ...result, missing: true }
 
-  const cases: { kind: "good" | "bad"; index: number; example: RuleExample | BadRuleExample }[] = [
+  const cases: (
+    | { kind: "good"; index: number; example: RuleExample }
+    | { kind: "bad"; index: number; example: BadRuleExample }
+  )[] = [
     ...rule.examples.good.map((example, index) => ({ kind: "good" as const, index, example })),
     ...rule.examples.bad.map((example, index) => ({ kind: "bad" as const, index, example })),
   ]
@@ -132,7 +146,23 @@ export async function runExamples(input: ExamplesInput): Promise<ExampleResult> 
       new Map([[example.path, example.code]]),
       (scratch) => runOne(input, scratch, example),
     )
-    result.outcomes.push(outcomeOf(kind, index, example.path, expectationOf(kind, example), run))
+    const outcome = outcomeOf(kind, index, example.path, expectationOf(kind, example), run)
+    // A fix is checked on a `bad` example the rule caught as expected: on one it missed there is
+    // nothing to fix, and that failure is already said.
+    if (outcome.passed && kind === "bad" && rule.fixable) {
+      const checked = await checkFix(input, example)
+      if ("error" in checked) {
+        outcome.error = checked.error
+        outcome.failures.push(`the fix check failed: ${checked.error}`)
+      } else {
+        outcome.fix = checked
+        if (!checked.passed) outcome.failures.push(FIX_FAILURES[checked.reason ?? "stillFires"])
+      }
+      outcome.passed = outcome.failures.length === 0
+      result.fixes.total++
+      if (outcome.passed) result.fixes.passed++
+    }
+    result.outcomes.push(outcome)
   }
   for (const [index, example] of baselines.entries()) {
     const run = await withScratchTree(
@@ -172,6 +202,42 @@ function outcomeOf(
     failures,
     ...(run.error === undefined ? {} : { error: run.error }),
   }
+}
+
+/** Why a fix failed its example: the failure sentence, and the line under the example's name. */
+const FIX_FAILURES = {
+  stillFires: "the rule still fires after its fix",
+  unresolved: "a fix did not remove its own finding and was reverted",
+  differs: "the fixed code differs from fixed:",
+} as const
+
+/**
+ * A `bad` example through the rule's fix: the same passes `rulecast fix` runs, in memory, then the
+ * fixed text through the rule again on disk, the way every example is judged. A fix that leaves a
+ * finding of its own rule behind fails, and so does one that does not produce `fixed` exactly.
+ */
+async function checkFix(
+  input: ExamplesInput,
+  example: BadRuleExample,
+): Promise<NonNullable<ExampleOutcome["fix"]> | { error: string }> {
+  const passes = await fixPasses({
+    detection: input.detection,
+    selections: [{ rule: input.rule, files: [example.path] }],
+    contents: new Map([[example.path, example.code]]),
+    timeoutMs: input.timeoutMs,
+  })
+  if (passes.errors.length > 0) return { error: passes.errors[0]! }
+  if (passes.unresolved.length > 0) return { passed: false, reason: "unresolved" }
+  const got = passes.contents.get(example.path)!
+  const again = await withScratchTree(input.detection.root, EXAMPLES_DIR, new Map([[example.path, got]]), (scratch) =>
+    runOne(input, scratch, { ...example, code: got }),
+  )
+  if (again.error !== undefined) return { error: again.error }
+  if (again.findings.length > 0) return { passed: false, reason: "stillFires" }
+  if (example.fixed !== undefined && example.fixed !== got) {
+    return { passed: false, reason: "differs", diff: labelledDiff("expected", "got", example.fixed, got) }
+  }
+  return { passed: true }
 }
 
 function expectationOf(kind: "good" | "bad", example: RuleExample | BadRuleExample): ExampleExpectation {
