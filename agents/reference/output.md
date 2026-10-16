@@ -367,7 +367,7 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
-| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. Changed without a `schemaVersion` bump: `suppressionRate` used to leave `suppressAttempted` out, and now counts it. |
+| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. It counts `suppressAttempted` from the first release; nothing earlier was published, so this is not a change of meaning. |
 | `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, an ignore tried. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
 
 Things to know when reading the counts:
