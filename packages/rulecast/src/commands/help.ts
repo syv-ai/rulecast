@@ -126,9 +126,12 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "doctor",
-    synopsis: "rulecast doctor",
+    synopsis: "rulecast doctor [--ci] [--from-ref REF]",
     summary: "Compile, check the environment and hooks, dry-run every rule",
-    flags: [],
+    flags: [
+      ["--ci", "Check what a CI or headless run needs; exit 2 if rulecast would run degraded. On by itself under CI"],
+      ["--from-ref REF", "Also check that rulecast run --from-ref REF finds a merge base here (implies --ci)"],
+    ],
   },
   {
     name: "autoupdate",

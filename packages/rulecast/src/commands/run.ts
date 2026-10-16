@@ -268,6 +268,7 @@ export async function executeRun({ project, ruleId, run, registry, io, committed
     ...(committed === null ? {} : { committedBaseline: committed }),
     // The machine formats report pre-existing findings by id; the others summarise them.
     listPreexisting: run.format === "json" || run.format === "sarif",
+    reportDisabled: true,
   })
   const complete = !result.failed
   // A warning, not a failure: every rule ran, and the findings are right for a run with no baseline.

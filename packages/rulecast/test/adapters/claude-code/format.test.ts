@@ -100,6 +100,34 @@ describe("Claude Code adapter: format", () => {
     expect(output.systemMessage).toBe(notice)
   })
 
+  describe("rules that did not run, unattended (#29)", () => {
+    const disabled = [{ reason: "x.git@v1: not in the cache", hint: "rulecast install", rules: ["a", "b"] }]
+    const LINE = "2 rules disabled: x.git@v1: not in the cache (run rulecast install)"
+
+    test("an incomplete stop holds the agent to report it, and does not ask it to repair rulecast", () => {
+      const output = JSON.parse(format(delivery({ stop: "incomplete", unattended: true, disabled }), "verify").stdout)
+      expect(output.decision).toBe("block")
+      expect(output.reason).toContain("State in your final report")
+      expect(output.reason).toContain("Do not try to repair rulecast's setup")
+      expect(output.reason).toContain(`- ${LINE}`)
+      expect(output.systemMessage).toContain(LINE)
+    })
+
+    test("a block names what was not checked, ahead of the findings", () => {
+      const value = delivery({ findings: [finding()], stop: "block", unattended: true, disabled })
+      const output = JSON.parse(format(value, "verify").stdout)
+      expect(output.reason).toContain(
+        `Not checked (rulecast could not run these rules; say so in your report):\n- ${LINE}`,
+      )
+      expect(output.reason.indexOf(LINE)).toBeLessThan(output.reason.indexOf("raises HTTPException(500)"))
+    })
+
+    test("an allowed stop says it to the user every time", () => {
+      const output = JSON.parse(format(delivery({ stop: "allow", unattended: true, disabled }), "verify").stdout)
+      expect(output).toEqual({ systemMessage: `rulecast: rules that did not run:\n  - ${LINE}` })
+    })
+  })
+
   test("an allowed stop prints nothing", () => {
     const value = delivery({ findings: [finding({ severity: "warning" })], stop: "allow" })
     expect(format(value, "verify")).toEqual({ stdout: "", exitCode: 0 })

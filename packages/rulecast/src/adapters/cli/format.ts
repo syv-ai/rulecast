@@ -2,6 +2,8 @@ import { renderAgentText } from "../../core/delivery/render-agent"
 import { FINDING_ID_VERSION } from "../../core/finding-id"
 import type { Delivery, Finding, Severity } from "../../core/types"
 import { VERSION } from "../../core/version"
+import { disabledCount, disabledText } from "../../core/disabled"
+import type { Delivery, Finding } from "../../core/types"
 import { renderBacklog, summarise } from "./backlog"
 import { EXIT, SCHEMA_VERSION } from "./contract"
 
@@ -98,15 +100,38 @@ function problemsBlock(warnings: readonly string[]): string[] {
   return warnings.length === 0 ? [] : ["rulecast problems:", ...warnings.map((warning) => `  - ${warning}`), ""]
 }
 
+/** Configured rules that did not run, by why (#29): what makes "no findings" not mean "clean". */
+function disabledBlock(delivery: Delivery): string[] {
+  const groups = delivery.disabled ?? []
+  return groups.length === 0 ? [] : ["did not run:", ...groups.map((group) => `  - ${disabledText(group)}`), ""]
+}
+
+/** The tail's word on rulecast's own state: incomplete when rules did not run, else the problem count. */
+function problemsTail(delivery: Delivery): string {
+  const groups = delivery.disabled ?? []
+  if (groups.length > 0) {
+    const count = disabledCount(groups)
+    return count === 0
+      ? " · incomplete: no rules ran (see above)"
+      : ` · incomplete: ${plural(count, "rule")} did not run (see above)`
+  }
+  return delivery.warnings.length === 0 ? "" : ` · rulecast: ${plural(delivery.warnings.length, "problem")} (see above)`
+}
+
 function terminal(delivery: Delivery, options: FormatOptions): string {
   const out: string[] = []
   // --summary: the warnings still matter — a rule that is broken makes the count below wrong — but
   // the list of sites does not, which is the whole reason for the flag.
-  if (options.checked?.selection === "staged" && options.checked.files === 0 && delivery.warnings.length === 0) {
+  if (
+    options.checked?.selection === "staged" &&
+    options.checked.files === 0 &&
+    delivery.warnings.length === 0 &&
+    delivery.disabled === undefined
+  ) {
     return NOTHING_STAGED
   }
   if (options.findings === false) {
-    out.push(...problemsBlock(delivery.warnings))
+    out.push(...problemsBlock(delivery.warnings), ...disabledBlock(delivery))
     if (options.backlog === true) out.push(renderBacklog(summarise(delivery), { topFiles: TOP_FILES }))
     if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
     // What was left out and what was looked at are as true of a summary as of the full list.
@@ -152,7 +177,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   }
   if (delivery.preexistingSummary.length > 0 || delivery.references.length > 0) out.push("")
 
-  out.push(...problemsBlock(delivery.warnings))
+  out.push(...problemsBlock(delivery.warnings), ...disabledBlock(delivery))
 
   for (const notice of delivery.notices ?? []) out.push(notice, "")
   out.push(...staleLine(options.baseline))
@@ -162,8 +187,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   const warningsCount = delivery.findings.length - errors
   // Findings and rulecast's own problems are counted apart: one word, two meanings, side by side, is
   // how a reader decides the count above it is wrong.
-  const problems =
-    delivery.warnings.length === 0 ? "" : ` · rulecast: ${plural(delivery.warnings.length, "problem")} (see above)`
+  const problems = problemsTail(delivery)
   out.push(
     (delivery.findings.length === 0
       ? "no findings"
@@ -201,6 +225,8 @@ function json(delivery: Delivery, options: FormatOptions): string {
       checked: options.checked ?? null,
       ignored: options.ignored ?? [],
       notices: delivery.notices ?? [],
+      // Additive: what did not run, so a consumer can tell "no findings" from "not checked".
+      disabled: (delivery.disabled ?? []).map(({ reason, rules }) => ({ reason, rules })),
       stop: delivery.stop,
       baseline: options.baseline ?? null,
     },
