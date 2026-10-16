@@ -207,6 +207,7 @@ describe("ruleStats", () => {
     stopsPresent: 0,
     blocks: 0,
     refusals: 0,
+    suppressAttempts: 0,
     turnsToFix: 0,
     ...overrides,
   })

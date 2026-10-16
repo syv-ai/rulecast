@@ -184,7 +184,7 @@ describe("rulecast run RULE_ID: another rule's problem", () => {
       [USERS]: fixtureFiles[USERS]!,
       "conventions/backend.md": backendConventions,
     })
-    const result = await run(root, "--all-files", fixtureRules[0]!.id, "--format", "json")
+    const result = await run(root, "--all-files", "backend/no-httpexception", "--format", "json")
     expect(JSON.parse(result.stdout)).toMatchObject({ complete: true, disabled: [] })
     expect(result.code).toBe(1)
   })
