@@ -35,7 +35,8 @@ describe("resolveMode", () => {
       mode: "unattended",
       detail: "GITHUB_ACTIONS=true",
     })
-    for (const value of ["false", "0", ""]) expect(resolveMode(null, { CI: value }).mode).toBe("attended")
+    for (const value of ["false", "False", "FALSE", "0", ""])
+      expect(resolveMode(null, { CI: value }).mode).toBe("attended")
   })
 
   test("an unknown RULECAST_MODE is ignored and said, and the rest decides", () => {

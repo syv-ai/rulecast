@@ -35,6 +35,8 @@ export interface IgnoredFinding {
   rule: DetectorRule
   match: Match
   reason: string
+  /** The line the ignore comment is on: the finding's, or the one above it. */
+  commentLine: number
   /** The id the finding would have had (core/finding-id.ts); set by the pipeline after detection. */
   id?: string
 }
@@ -91,7 +93,7 @@ export async function suppress<F extends { rule: DetectorRule; match: Match }>(
       result.findings.push(finding)
       continue
     }
-    result.ignored.push({ rule: finding.rule, match: finding.match, reason: ignore.reason })
+    result.ignored.push({ rule: finding.rule, match: finding.match, reason: ignore.reason, commentLine: at })
   }
   return result
 }

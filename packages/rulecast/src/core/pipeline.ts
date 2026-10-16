@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
+import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
@@ -353,6 +354,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -535,15 +537,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       const id = ids[index]!
       return { id, rule, match, status: statusOf(rule, match, id) }
     })
+    // An ignore is judged by its comment's own line, not its finding's: a comment that was already
+    // there was agreed to, and stays so when the agent edits the code under it; one the agent wrote
+    // or changed this session is the agent's. Against a committed baseline, by its entry.
     const classifiedIgnores = output.ignored.map((item, index) => {
       const id = ids[output.findings.length + index]!
-      return { ...item, id, status: statusOf(item.rule, item.match, id) }
+      const status: ClassifiedFinding["status"] =
+        committed !== undefined
+          ? statusOf(item.rule, item.match, id)
+          : isNew({ ...item.match, line: item.commentLine, endLine: item.commentLine }, changes)
+            ? "new"
+            : "preexisting"
+      return { ...item, id, status }
     })
-    // Unattended, an ignore on a line changed this session silences nothing: nobody is there to
-    // agree to it, so its finding takes the unattended path and is reported if it keeps blocking.
+    // Unattended, an ignore the agent added or changed silences nothing: nobody is there to agree to
+    // it, so its finding is classified as any other, and is reported if it keeps blocking.
     const unsilenced =
       project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
-    for (const { id, rule, match, status } of unsilenced) findings.push({ id, rule, match, status })
+    for (const { id, rule, match } of unsilenced) findings.push({ id, rule, match, status: statusOf(rule, match, id) })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)

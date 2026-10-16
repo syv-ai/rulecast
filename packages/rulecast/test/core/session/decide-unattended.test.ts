@@ -59,6 +59,37 @@ describe("gate, unattended", () => {
     expect(stops([same, same, same, same], 10, [[], [], [], prompt])).toEqual(["block", "block", "report", "report"])
   })
 
+  test("findings whose text says nothing about them are told apart by what the tool said, and where", () => {
+    const secret = (line: number, ruleId: string) => ({
+      ...finding("a/secrets", "[redacted]", line),
+      match: { file: "a.py", line, endLine: line, column: 1, text: "[redacted]", captures: { ruleId, message: "m" } },
+    })
+    expect(findingKey(secret(1, "aws"))).not.toBe(findingKey(secret(9, "aws")))
+    expect(findingKey(secret(1, "aws"))).not.toBe(findingKey(secret(1, "github")))
+    const hook = (message: string) => ({
+      ...finding("a/hook", ""),
+      match: { file: "a.py", line: 1, endLine: 3, column: 1, text: "", captures: { ruleId: "fmt", message } },
+    })
+    expect(findingKey(hook("would reformat"))).not.toBe(findingKey(hook("trailing whitespace")))
+    // A second secret in the file still blocks after the first one has used up its repeats.
+    expect(stops([[secret(1, "aws")], [secret(1, "aws")], [secret(1, "aws"), secret(9, "aws")]], 10)).toEqual([
+      "block",
+      "block",
+      "block",
+    ])
+  })
+
+  test("a refuse_write finding in a file the shell changed is never let go by the repeat limit", () => {
+    const refused = { ...finding("a/protected", "x"), rule: rule({ id: "a/protected", refuseWrite: true }) }
+    const shell: WorkRecord[] = [{ t: "edited", file: "a.py", via: "shell" }]
+    expect(stops([[refused], [refused], [refused], [refused]], 10, [shell])).toEqual([
+      "block",
+      "block",
+      "block",
+      "block",
+    ])
+  })
+
   test("warnings never block, and a budget of 0 goes straight to the report", () => {
     expect(stops([[finding("a/rule", "w", 1, "warning")]], 3)).toEqual(["allow"])
     expect(stops([[finding("a/rule", "e")], [finding("a/rule", "e")]], 0)).toEqual(["report", "capReached"])

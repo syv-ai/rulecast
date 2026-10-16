@@ -38,7 +38,16 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     log = debugLogger(stateDir)
     // Hooks never fetch: a pinned repo missing from the cache disables its rules with a warning (spec §4).
     // The hook's environment is the agent's: RULECAST_MODE or CI there picks unattended mode.
-    const compileProject = () => compile({ root, registry, repos: cachedRepos(home), env: io.env })
+    const compileProject = async () => {
+      const project = await compile({ root, registry, repos: cachedRepos(home), env: io.env })
+      // Nobody reads a hook's stderr: a typo here would quietly leave an unattended run attended.
+      if (project.mode.ignored !== undefined) {
+        log?.(
+          `RULECAST_MODE=${project.mode.ignored} is ignored (use attended, interactive or unattended); mode is ${project.mode.mode}`,
+        )
+      }
+      return project
+    }
     if (parsed.warmup) {
       const kinds = warmableKinds(await compileProject(), registry)
       if (kinds.length > 0) io.startWarm(root, kinds)

@@ -65,7 +65,7 @@ describe("rulecast doctor", () => {
   test("an unknown RULECAST_MODE is a warning", async () => {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]) })
     const result = await runCli(root, ["doctor"], "", { ...testEnv, RULECAST_MODE: "headless" })
-    expect(result.stdout).toContain("mode       attended — default")
+    expect(result.stdout).toContain("mode       attended — default (RULECAST_MODE ignored; no mode or CI)")
     expect(result.stdout).toContain(
       "  warning  RULECAST_MODE=headless is ignored — use attended, interactive or unattended",
     )
