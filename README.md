@@ -295,7 +295,8 @@ prompt to paste.
 With subagents, each one's stop checks only the files it edited, so it is never asked to fix
 another agent's code. The main agent's stop checks everything the session changed: a problem that
 only shows when two subagents' changes meet is caught there. A file two subagents both edit can
-block either of them.
+block either of them. A change no agent's tool call made, such as your own edit, is reported at the
+main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
 
 Agents running in parallel in one working tree can't be told apart when both change files through
 the shell: each is held to what the other wrote during its command. A file one of them writes with

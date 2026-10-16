@@ -3,6 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { openSession, sessionDir } from "../../src/core/session/session"
+import { claimedByOther } from "../../src/core/session/state"
 import { type Event, emptyDelivery, type WriteIntent } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
@@ -183,7 +184,17 @@ describe("pipeline: a guarded write is claimed", () => {
     expect(delivery).toEqual(emptyDelivery())
     await run(root, guard(root, "README.md", write))
     const work = (await openSession(sessionDir(stateDirFor(root), "s1"), "main")).work
-    expect(work.lastClaim).toEqual(new Map([[SERVICE, { agent: "sub2", seq: 0 }]]))
+    expect([...work.claims.keys()]).toEqual([SERVICE])
+    expect(claimedByOther(work, "sub1", SERVICE, null)).toBe(true)
+  })
+
+  test("a refused write is released: it will never happen", async () => {
+    const root = await createRepo(files)
+    const write = { content: "def get(x):\n    raise HTTPException(404)\n" }
+    const delivery = await run(root, { ...guard(root, SERVICE, write), session: { id: "s1", agentId: "sub2" } })
+    expect(delivery.findings).not.toEqual([])
+    const work = (await openSession(sessionDir(stateDirFor(root), "s1"), "main")).work
+    expect(claimedByOther(work, "sub1", SERVICE, null)).toBe(false)
   })
 })
 
