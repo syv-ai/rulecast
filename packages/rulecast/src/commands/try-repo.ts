@@ -67,7 +67,7 @@ export async function tryRepoCommand(
       repos: [{ repo, rev, rules: (ruleId === undefined ? ids : [ruleId]).map((id) => ({ id })) }],
     }
     const project = await compile({ root, registry, repos: fixedRepo(dir, label), configData })
-    return await executeRun({ project, ruleId: null, run, registry, io })
+    return await executeRun({ project, ruleId: null, run, registry, io, committedBaseline: false })
   } finally {
     if (temp !== null) await rm(temp, { recursive: true, force: true })
   }

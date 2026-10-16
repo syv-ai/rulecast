@@ -78,6 +78,7 @@ async function onWorkingTree(
   )
   const runnable: Selection[] = []
   const warnings: string[] = []
+  const skipped: string[] = []
   for (const selection of selections) {
     const differs = selection.files.filter((file) => changed.has(file))
     if (differs.length === 0) {
@@ -89,12 +90,13 @@ async function onWorkingTree(
         ? `the working tree differs from ${source.ref} in ${differs.join(", ")}`
         : `unstaged changes in ${differs.join(", ")}`
     warnings.push(`${selection.rule.id} skipped: ${where}`)
+    skipped.push(selection.rule.id)
   }
   const ran =
     runnable.length === 0
-      ? { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
+      ? { findings: [], errors: [], timedOut: [], ignored: [], warnings: [], skipped: [] }
       : await runDetection({ ...input, selections: runnable })
-  return { ...ran, warnings: [...warnings, ...ran.warnings] }
+  return { ...ran, warnings: [...warnings, ...ran.warnings], skipped: [...skipped, ...ran.skipped] }
 }
 
 async function fromScratch(input: DetectionInput, selections: Selection[]): Promise<DetectionOutput> {
@@ -104,7 +106,7 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
     // Absent from the source (deleted in the index): not written, and so not checked.
     if (text !== null) entries.set(file, text)
   }
-  if (entries.size === 0) return { findings: [], errors: [], timedOut: [], ignored: [], warnings: [] }
+  if (entries.size === 0) return { findings: [], errors: [], timedOut: [], ignored: [], warnings: [], skipped: [] }
   return withScratchTree(input.detection.root, STAGED_DIR, entries, async (dir) => {
     const prefix = `${dir}/`
     const strip = (file: string) => (file.startsWith(prefix) ? file.slice(prefix.length) : file)
@@ -131,6 +133,7 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
         match: { ...ignored.match, file: strip(ignored.match.file) },
       })),
       warnings: output.warnings.map((warning) => warning.replaceAll(prefix, "")),
+      skipped: output.skipped,
     }
   })
 }
@@ -142,5 +145,6 @@ function merge(outputs: DetectionOutput[]): DetectionOutput {
     timedOut: outputs.flatMap((output) => output.timedOut),
     ignored: outputs.flatMap((output) => output.ignored),
     warnings: outputs.flatMap((output) => output.warnings),
+    skipped: outputs.flatMap((output) => output.skipped),
   }
 }

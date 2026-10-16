@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/classify"
+import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -41,10 +42,18 @@ export interface PipelineOptions {
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
   skipDetectorKinds?: ReadonlySet<string>
+  /** Give every detector every file, past the file budget it declares: `rulecast baseline`, which asked for all of them. */
+  ignoreFileBudgets?: boolean
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /**
+   * `.rulecast/baseline.json`, for a verify with no baseline of its own (no session, no base
+   * commit): a match whose id it lists is pre-existing. Any other baseline wins, so it is ignored
+   * there. Hooks never pass it.
+   */
+  committedBaseline?: CommittedBaseline
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
   /**
@@ -65,6 +74,17 @@ export interface PipelineResult {
   deadlineMissed: string[]
   /** Findings a `rulecast-ignore` comment dropped (core/suppress.ts); absent when nothing was detected. */
   ignored?: IgnoredFinding[]
+  /**
+   * Every match this event classified, with its id and status, before merging and the context
+   * budget cut anything; absent when nothing was detected.
+   */
+  findings?: ClassifiedFinding[]
+  /**
+   * Rule id to the files its detector ran on and completed: the selections after skipped kinds and
+   * file budgets, without rules that errored, timed out or a staged run skipped. Absent when no
+   * detector was run. A rule not listed was not checked: its absence from `findings` proves nothing.
+   */
+  ran?: Map<string, string[]>
 }
 
 type Warning = { key: string; text: string }
@@ -322,6 +342,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
 
@@ -423,7 +444,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
-    if (event.kind === "verify") {
+    if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
       const recent = [...view.work.edited].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)
@@ -467,12 +488,21 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // From the lines suppression read through `read`, the content detection judged: staged in a
     // staged run, not the working tree. No file is read again.
     const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
-    findings = output.findings.map(({ rule, match }, index) => ({
-      id: ids[index]!,
-      rule,
-      match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, containers),
-    }))
+    // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
+    const committed =
+      event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
+        ? options.committedBaseline
+        : undefined
+    findings = output.findings.map(({ rule, match }, index) => {
+      const id = ids[index]!
+      const status: ClassifiedFinding["status"] =
+        committed === undefined
+          ? classify(match, rule.scope, rule.id, baselineChanges, containers)
+          : baselineHas(committed, rule.id, match.file, id)
+            ? "preexisting"
+            : "new"
+      return { id, rule, match, status }
+    })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
@@ -481,6 +511,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     ignored = output.ignored.map((item, index) => ({ ...item, id: ids[output.findings.length + index]! }))
+    const incomplete = new Set([
+      ...output.errors.flatMap((error) => error.rules),
+      ...output.timedOut.flatMap((timeout) => timeout.rules),
+      ...output.skipped,
+    ])
+    ran = new Map(
+      selections
+        .filter((selection) => !incomplete.has(selection.rule.id))
+        .map((selection) => [selection.rule.id, selection.files]),
+    )
     // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
     // what to undo, because nothing could refuse the write before it happened.
     const shellEdited = (file: string) =>
@@ -609,12 +649,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     return decision.delivery
   }
 
-  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ignored }
+  const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
+  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
 
   await appendWork(session.dir, workRecords)
   try {
     const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
+    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
   } catch (error) {
     // §14's two "run without session state" rows: a lock nobody released, and a store nobody can
     // read. The commit reads the stores inside the lock, so both surface here as well.
@@ -625,6 +666,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     } else throw error
     const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
-    return { delivery: persisted(decision), failed, deadlineMissed, ignored }
+    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
   }
 }

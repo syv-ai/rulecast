@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 import type { Delivery } from "../types"
@@ -10,16 +10,31 @@ import { renderAgentText } from "./render-agent"
  * Measured with Claude Code 2.1.296 (plan 10, Task 11): in default permission mode a Read of
  * anything under `~/.cache/rulecast` is blocked until the user grants it, so a pointer to the cache
  * is a pointer the agent cannot follow. The directory ignores itself — its own `.gitignore` holds
- * `*` — so nothing here is ever committed and no project's ignore file needs editing.
+ * `*` — so no project's ignore file needs editing. The one exception is `baseline.json`, the
+ * committed baseline (core/baseline/committed.ts), which is meant to be committed.
  */
 export const AGENT_DIR = ".rulecast"
 
-/** `<root>/.rulecast`, created with its self-ignoring `.gitignore` on first use. */
+/** How a `.gitignore` rulecast wrote begins. */
+const IGNORE_HEADER = "# Written by rulecast"
+
+/** What rulecast wrote before the committed baseline: the one text it migrates, so an edited copy is left alone. */
+const OLD_AGENT_DIR_IGNORE = `${IGNORE_HEADER}: files its hooks point an agent at.\n*\n`
+
+/** Ignores everything but the committed baseline. */
+export const AGENT_DIR_IGNORE = `${IGNORE_HEADER}: files its hooks point an agent at, and the committed baseline.\n*\n!baseline.json\n`
+
+/**
+ * `<root>/.rulecast`, created with its self-ignoring `.gitignore` on first use. One rulecast wrote
+ * before the committed baseline existed ignores it too, and is brought up to date when it is exactly
+ * what rulecast wrote; one the project edited is left alone.
+ */
 export function agentDir(root: string): string {
   const dir = path.join(root, AGENT_DIR)
   mkdirSync(dir, { recursive: true })
   const ignore = path.join(dir, ".gitignore")
-  if (!existsSync(ignore)) writeFileSync(ignore, "# Written by rulecast: files its hooks point an agent at.\n*\n")
+  if (!existsSync(ignore)) writeFileSync(ignore, AGENT_DIR_IGNORE)
+  else if (readFileSync(ignore, "utf8") === OLD_AGENT_DIR_IGNORE) writeFileSync(ignore, AGENT_DIR_IGNORE)
   return dir
 }
 

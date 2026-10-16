@@ -80,7 +80,8 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
   "checked": { "files": 1, "selection": "range" },
   "ignored": [],
   "notices": [],
-  "stop": null
+  "stop": null,
+  "baseline": null
 }
 ```
 
@@ -89,7 +90,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `schemaVersion` | The version of this shape (below). |
 | `complete` | `false` exactly when the exit code is 3. |
 | `findings` | New findings: on lines the change touched. The exit code is decided by these. |
-| `preexisting` | Findings that were already there before the change, in the same shape with `status: "preexisting"`. With `--all-files` or `--files` there is no baseline, so every finding is new. |
+| `preexisting` | Findings that were already there before the change, in the same shape with `status: "preexisting"`. With `--all-files` or `--files` the baseline is `.rulecast/baseline.json` when it exists (below), else there is none and every finding is new. |
 | `backlog` | Counts per rule and per file, new and pre-existing together. |
 | `preexistingSummary` | Pre-existing findings counted per rule and file. |
 | `references` | The doc sections the new findings' rules cite, with their text when it was read. |
@@ -98,6 +99,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |
+| `baseline` | When the run classified against the committed baseline: `{ "file": ".rulecast/baseline.json", "entries": 412, "matched": 372, "stale": 40 }`. `entries` is how many ids the file lists, `matched` how many of this run's findings it made pre-existing, `stale` how many entries the run showed are gone (fixed, or the text changed). `null` when the run used no committed baseline. Never changes the exit code. |
 
 ### A finding
 
@@ -139,6 +141,19 @@ A `rulecast-ignore` comment does not renumber the other matches: ignored matches
 A merged finding (`count` above 1) carries its earliest match's id, so fixing that one match gives the merged finding a new id while the rest are still there. A loop that compares merged findings should compare `rule` and `file` as well as `id`.
 
 The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v1`. If what the id hashes ever changes, that key changes with it, and `schemaVersion` is bumped.
+
+### Committed baseline
+
+`rulecast baseline` writes `.rulecast/baseline.json`, the ids of every finding there is today, to be committed. A run that has no baseline of its own (`--all-files`, `--files`, or a staged run before the first commit) treats a finding whose id is listed as pre-existing, and only the rest can fail it. A session, `--from-ref` or a staged run's `HEAD` always wins over the file, and agent hooks never read it.
+
+Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry is stale when:
+
+- the run no longer finds it, in a file the rule ran on and checked;
+- its file was deleted;
+- its rule is gone from a config that compiled without errors (a rule missing because its repo could not be fetched or it failed to compile is not gone);
+- its rule no longer matches the file, or no longer has the `verify` stage.
+
+`rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run (disabled, failed, or left out by `--no-llm`) is neither matched nor stale. `rulecast baseline` and `--force` give metered rules every file, past `llm.max_files_per_verify`; with `--no-llm` they name the rules left out, and `--force` keeps the old file's entries of every rule that did not run. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
 
 ### Version policy
 
