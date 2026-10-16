@@ -60,6 +60,12 @@ export interface WorkState {
   beforeTrees: Map<string, TreeState>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
+  /**
+   * Shell calls whose after has not been recorded, by tool use id (or record position without one).
+   * `shared`: another agent's shell call ran during it. An agent's prompt or stop closes its calls:
+   * an interrupted command never records its after.
+   */
+  openShells: Map<string, { agent: string; shared: boolean }>
 }
 
 export interface ContextState {
@@ -92,6 +98,7 @@ export function emptyWork(): WorkState {
     sessionLatestTree: null,
     beforeTrees: new Map(),
     startTree: null,
+    openShells: new Map(),
   }
 }
 
@@ -101,7 +108,7 @@ export function emptyContext(): ContextState {
 
 export function foldWork(records: readonly WorkRecord[]): WorkState {
   const state = emptyWork()
-  for (const record of records) {
+  for (const [index, record] of records.entries()) {
     switch (record.t) {
       case "edited": {
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
@@ -124,6 +131,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         }
         // A resumed session records another start; what was dirty is what was dirty at the first.
         if (record.phase === "start" && state.startTree === null) state.startTree = record.state
+        if (record.phase === "before") openShell(state, record.agent, record.toolUseId ?? `#${index}`)
+        else if (record.phase === "after") closeShell(state, shellCallOf(state, record.agent, record.toolUseId))
+        else if (record.phase === "stop") closeShells(state, record.agent)
         break
       case "accessed": {
         const files = state.accessed.get(record.agent) ?? []
@@ -140,6 +150,7 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       }
       case "prompt":
         state.stopBlocks.delete(record.agent)
+        closeShells(state, record.agent)
         break
       case "disabled":
         if (!state.disabled.has(record.rule)) state.disabled.set(record.rule, record.reason)
@@ -150,6 +161,42 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
     }
   }
   return state
+}
+
+/** A shell call starts: it and every other agent's open call now ran alongside each other. */
+function openShell(state: WorkState, agent: string, id: string): void {
+  let shared = false
+  for (const call of state.openShells.values()) {
+    if (call.agent === agent) continue
+    call.shared = true
+    shared = true
+  }
+  state.openShells.set(id, { agent, shared })
+}
+
+function closeShell(state: WorkState, id: string | undefined): void {
+  if (id !== undefined) state.openShells.delete(id)
+}
+
+function closeShells(state: WorkState, agent: string): void {
+  for (const [id, call] of state.openShells) if (call.agent === agent) state.openShells.delete(id)
+}
+
+/** The open call an after belongs to: by tool use id, else the agent's latest open call. */
+function shellCallOf(state: WorkState, agent: string, toolUseId: string | undefined): string | undefined {
+  if (toolUseId !== undefined) return state.openShells.has(toolUseId) ? toolUseId : undefined
+  let latest: string | undefined
+  for (const [id, call] of state.openShells) if (call.agent === agent) latest = id
+  return latest
+}
+
+/**
+ * Whether another agent's shell call ran during this agent's open one: then both compared the same
+ * working tree across each other's writes, and either may hold the other's changes as its own.
+ */
+export function sharedShell(work: WorkState, agent: string, toolUseId?: string): boolean {
+  const id = shellCallOf(work, agent, toolUseId)
+  return id !== undefined && work.openShells.get(id)?.shared === true
 }
 
 /**

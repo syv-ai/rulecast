@@ -30,6 +30,7 @@ import {
   hasOwnTree,
   MAIN_AGENT,
   referenceState,
+  sharedShell,
   sweptFor,
   type WorkRecord,
   type WorkState,
@@ -74,6 +75,13 @@ type Warning = { key: string; text: string }
 /** Said once: without a working tree to compare, shell edits are seen only after the session. */
 const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
+
+/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
+const SHARED_TREE =
+  "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
+  "command to every file that changed while it ran, so findings here and at your stop may be another " +
+  "agent's. Give each agent that runs in parallel its own worktree (in Claude Code, a subagent with " +
+  "`isolation: worktree`)."
 
 /**
  * Above this many warnings of one kind, they collapse into one carrying a count and an example.
@@ -282,6 +290,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
   const refused: NonNullable<Delivery["refused"]> = []
+  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
+  const agentNotices: string[] = []
+  const withAgentNotices = (): Pick<Delivery, "agentNotices"> => (agentNotices.length === 0 ? {} : { agentNotices })
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -292,10 +303,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
+    // Another agent's shell call ran during this one, in the same tree: each takes the other's
+    // writes for its own (README, Agents). Told once per agent, on the hook that can reach it.
+    const sharedKey = `shared-tree:${open.agent}`
+    const shared = sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    if (shared) agentNotices.push(SHARED_TREE)
+    await appendWork(open.dir, [
+      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+      ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
+    ])
     const call = reference === null ? null : treeChanges(reference, now)
     const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
-    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    if (files.length === 0) return { delivery: { ...emptyDelivery(), ...withAgentNotices() }, failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
     event = { ...event, kind: "edit", files }
@@ -593,6 +612,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
+    Object.assign(decision.delivery, withAgentNotices())
     return decision.delivery
   }
 
