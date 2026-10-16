@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/classify"
+import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -42,10 +43,18 @@ export interface PipelineOptions {
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
   skipDetectorKinds?: ReadonlySet<string>
+  /** Give every detector every file, past the file budget it declares: `rulecast baseline`, which asked for all of them. */
+  ignoreFileBudgets?: boolean
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /**
+   * `.rulecast/baseline.json`, for a verify with no baseline of its own (no session, no base
+   * commit): a match whose id it lists is pre-existing. Any other baseline wins, so it is ignored
+   * there. Hooks never pass it.
+   */
+  committedBaseline?: CommittedBaseline
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
   /**
@@ -454,7 +463,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
-    if (event.kind === "verify") {
+    if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
       const recent = [...view.work.edited].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)
@@ -498,12 +507,21 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // From the lines suppression read through `read`, the content detection judged: staged in a
     // staged run, not the working tree. No file is read again.
     const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
-    findings = output.findings.map(({ rule, match }, index) => ({
-      id: ids[index]!,
-      rule,
-      match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, containers),
-    }))
+    // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
+    const committed =
+      event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
+        ? options.committedBaseline
+        : undefined
+    findings = output.findings.map(({ rule, match }, index) => {
+      const id = ids[index]!
+      const status: ClassifiedFinding["status"] =
+        committed === undefined
+          ? classify(match, rule.scope, rule.id, baselineChanges, containers)
+          : baselineHas(committed, rule.id, match.file, id)
+            ? "preexisting"
+            : "new"
+      return { id, rule, match, status }
+    })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)

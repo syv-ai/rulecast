@@ -105,6 +105,7 @@ describe("formatDelivery", () => {
     const parsed = JSON.parse(formatDelivery(delivery, "json", { maxMatchesPerRule: 10 }))
     expect(Object.keys(parsed).sort()).toEqual([
       "backlog",
+      "baseline",
       "checked",
       "complete",
       "findings",

@@ -94,3 +94,10 @@ test("the README's exit-code table matches the codes rulecast exits with", () =>
     })
   expect(rows).toEqual(EXIT_CODES)
 })
+
+test("baseline --help scopes writing nothing to create and --force: --prune still writes", async () => {
+  const result = await runCli(await createProject({}), ["baseline", "--help"])
+  expect(result.stdout.replace(/\s+/g, " ")).toContain(
+    "Without --prune, exits 3 and writes nothing when a rule could not run; --prune drops only what it could check and exits 3.",
+  )
+})

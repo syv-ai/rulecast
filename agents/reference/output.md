@@ -1,6 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. Also the JSON of [`rulecast stats`](#rulecast-stats). The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) and [`rulecast stats`](#rulecast-stats) have their own documents. The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -26,7 +26,7 @@ rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
-Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example.
+Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example or a rule over `--max-rate` ([below](#rulecast-test)).
 
 ## JSON
 
@@ -80,7 +80,8 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
   "checked": { "files": 1, "selection": "range" },
   "ignored": [],
   "notices": [],
-  "stop": null
+  "stop": null,
+  "baseline": null
 }
 ```
 
@@ -89,7 +90,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `schemaVersion` | The version of this shape (below). |
 | `complete` | `false` exactly when the exit code is 3. |
 | `findings` | New findings: on lines the change touched. The exit code is decided by these. |
-| `preexisting` | Findings that were already there before the change, in the same shape with `status: "preexisting"`. With `--all-files` or `--files` there is no baseline, so every finding is new. |
+| `preexisting` | Findings that were already there before the change, in the same shape with `status: "preexisting"`. With `--all-files` or `--files` the baseline is `.rulecast/baseline.json` when it exists (below), else there is none and every finding is new. |
 | `backlog` | Counts per rule and per file, new and pre-existing together. |
 | `preexistingSummary` | Pre-existing findings counted per rule and file. |
 | `references` | The doc sections the new findings' rules cite, with their text when it was read. |
@@ -98,6 +99,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |
+| `baseline` | When the run classified against the committed baseline: `{ "file": ".rulecast/baseline.json", "entries": 412, "matched": 372, "stale": 40 }`. `entries` is how many ids the file lists, `matched` how many of this run's findings it made pre-existing, `stale` how many entries the run showed are gone (fixed, or the text changed). `null` when the run used no committed baseline. Never changes the exit code. |
 
 ### A finding
 
@@ -140,6 +142,19 @@ A merged finding (`count` above 1) carries its earliest match's id, so fixing th
 
 The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v1`. If what the id hashes ever changes, that key changes with it, and `schemaVersion` is bumped.
 
+### Committed baseline
+
+`rulecast baseline` writes `.rulecast/baseline.json`, the ids of every finding there is today, to be committed. A run that has no baseline of its own (`--all-files`, `--files`, or a staged run before the first commit) treats a finding whose id is listed as pre-existing, and only the rest can fail it. A session, `--from-ref` or a staged run's `HEAD` always wins over the file, and agent hooks never read it.
+
+Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry is stale when:
+
+- the run no longer finds it, in a file the rule ran on and checked;
+- its file was deleted;
+- its rule is gone from a config that compiled without errors (a rule missing because its repo could not be fetched or it failed to compile is not gone);
+- its rule no longer matches the file, or no longer has the `verify` stage.
+
+`rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run (disabled, failed, or left out by `--no-llm`) is neither matched nor stale. `rulecast baseline` and `--force` give metered rules every file, past `llm.max_files_per_verify`; with `--no-llm` they name the rules left out, and `--force` keeps the old file's entries of every rule that did not run. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
+
 ### Version policy
 
 `schemaVersion` is `1`. Adding a field leaves it at `1`, so read the fields you need and ignore the rest. Removing a field, renaming one, or changing what one means bumps it.
@@ -160,6 +175,107 @@ The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v
 | `invocations[0]` | `executionSuccessful` is `complete`; `toolExecutionNotifications` are the `warnings`. |
 
 `artifactLocation.uri` is relative to the project root. For a project below the repository's top, code scanning needs paths relative to the repository; until rulecast writes them, run it from a project at the repository's top.
+
+## rulecast test
+
+`rulecast test` runs each rule's examples ([rule-format.md](rule-format.md#examples)); with `--against` it fires each rule over real files instead. It is the gate for a rule an agent drafted: the examples pass, and the rule does not flag most of the files it matches.
+
+```sh
+rulecast test <rule-id> --format json
+rulecast test <rule-id> --against . --max-rate 0.5 --format json
+```
+
+| Code | Meaning | stdout |
+|---|---|---|
+| `0` | Every rule compiled, every example that ran passed, and no rule is over `--max-rate`. | the report |
+| `1` | An example failed, a rule is over `--max-rate`, or, without a rule id, a rule failed to compile. | the report; each compile diagnostic is on stderr |
+| `2` | rulecast could not run: a usage error, no config or one that does not load, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
+
+A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`. Neither is a rule that failed to compile: it is in no entry of `rules`, since nothing tested it, and `passed` is `false`. `rulecast validate` says why. A named rule is tested alone, so another rule's compile error does not fail it; a named rule that did not compile is an unknown rule id.
+
+`--format json` prints one document:
+
+```json
+{
+  "schemaVersion": 1,
+  "passed": false,
+  "rules": [
+    {
+      "rule": "backend/no-print",
+      "detector": "regex",
+      "scope": "instance",
+      "status": "failed",
+      "examples": {
+        "outcomes": [
+          {
+            "kind": "bad",
+            "index": 0,
+            "path": "backend/app/services/users.py",
+            "passed": false,
+            "expected": { "fires": true, "lines": [2, 4] },
+            "findings": [
+              { "line": 2, "endLine": 2, "column": 1, "text": "print(", "message": "backend/app/services/users.py:2 prints. Use the logger instead." }
+            ],
+            "failures": ["expected lines [2, 4], found [2]"]
+          }
+        ],
+        "precision": { "correct": 1, "total": 1 },
+        "recall": { "matched": 1, "total": 1 }
+      },
+      "against": null
+    }
+  ]
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `schemaVersion` | The version of this document. It is versioned on its own, apart from `run`'s, under the same [policy](#version-policy). |
+| `passed` | `true` exactly when the exit code is 0. |
+| `rules` | One entry per rule tested: every detector rule, or the one named. |
+| `rules[].rule`, `detector`, `scope` | The rule's id, its detector kind (`null` for a touch rule) and its `scope`. |
+| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money); `touch` (a named touch rule: nothing to test). |
+| `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
+| `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
+
+### An outcome
+
+| Field | Meaning |
+|---|---|
+| `kind`, `index` | `good`, `bad` or `baseline`, and the 0-based position in that list: `bad[1]`. |
+| `path` | The example's `path`. |
+| `passed` | `true` exactly when `failures` is empty. |
+| `expected` | `{ "fires": false }` for `good`. `{ "fires": true }` for `bad`, with `count` and `lines` when its `expect` pins them. `{ "new": [...], "preexisting": [...] }` for `baseline`. |
+| `findings` | What the rule found, passing or not: `line`, `endLine`, `column`, `text` (what the detector matched), `message`. One per match, not merged. A baseline example's findings also have `status`: `new` or `preexisting`. |
+| `failures` | Why the example failed, one sentence each, such as `expected lines [2, 4], found [2]` or `line 3: expected new, was pre-existing`. The wording can change; `passed` cannot. |
+| `error` | Present when the detector failed or timed out on the example. The example fails. |
+
+### `against`
+
+```json
+{
+  "paths": ["."],
+  "matchingFiles": 120,
+  "violatingFiles": 70,
+  "violations": 212,
+  "rate": 0.5833333333333334,
+  "maxRate": 0.5,
+  "exceeded": true,
+  "smallSample": false,
+  "files": [{ "file": "backend/app/a.py", "count": 31 }]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `paths` | The `--against` paths, as given. |
+| `matchingFiles` | Files under the paths that the rule's own `files` and `exclude` match: the denominator. |
+| `violatingFiles`, `violations` | Matching files with at least one finding, and the findings in them. |
+| `rate` | `violatingFiles / matchingFiles`; `null` when no file matches. |
+| `maxRate` | The `--max-rate` given, or `null`. |
+| `exceeded` | `rate` is over `maxRate`, and `smallSample` is `false`. This is what fails the rule. |
+| `smallSample` | Under 25 matching files. `--max-rate` is not applied: a share of a handful of files says nothing about the rule. |
+| `files` | Every violating file with its count, worst first. |
 
 ## rulecast stats
 

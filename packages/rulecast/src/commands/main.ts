@@ -6,6 +6,7 @@ import { VERSION } from "../core/version"
 import { builtinDetectors } from "../detectors"
 import type { Prompter } from "../init/prompts"
 import { autoupdateCommand } from "./autoupdate"
+import { baselineCommand } from "./baseline"
 import { cleanCommand } from "./clean"
 import { doctorCommand } from "./doctor"
 import { commandHelp, usage } from "./help"
@@ -72,6 +73,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await uninstallCommand(root, args, io)
       case "run":
         return await runCommand(root, args, registry, io)
+      case "baseline":
+        return await baselineCommand(root, args, registry, io)
       case "list":
         return await listCommand(root, args, registry, io)
       case "autoupdate":

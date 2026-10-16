@@ -72,7 +72,28 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm", "Include metered (llm) rules in a staged run, which skips them by default"],
       ["--no-llm", "Skip metered (llm) rules in any run"],
     ],
-    notes: exitNotes(EXIT_CODES),
+    notes: [
+      "With --all-files or --files, findings listed in a committed .rulecast/baseline.json are",
+      "pre-existing (see rulecast baseline).",
+      ...exitNotes(EXIT_CODES),
+    ],
+  },
+  {
+    name: "baseline",
+    synopsis: "rulecast baseline [--prune | --force] [--no-llm]",
+    summary: "Record today's findings, so full-repo runs fail only on new ones",
+    flags: [
+      ["--prune", "Drop the entries that are no longer found; never adds one"],
+      ["--force", "Rewrite the file: every current finding becomes pre-existing"],
+      ["--no-llm", "Skip metered (llm) rules: named as left out; --force and --prune keep their entries"],
+    ],
+    notes: [
+      "Writes .rulecast/baseline.json. Commit it. run --all-files and run --files then treat the",
+      "findings it lists as pre-existing. Sessions and --from-ref keep their own baseline, and",
+      "wherever a ref exists --from-ref is the better one: it never needs maintaining.",
+      "Without --prune, exits 3 and writes nothing when a rule could not run; --prune drops only",
+      "what it could check and exits 3. --force keeps the old entries of rules that did not run.",
+    ],
   },
   {
     name: "list",
@@ -85,7 +106,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "test",
-    synopsis: "rulecast test [RULE_ID] [--against PATH...]",
+    synopsis: "rulecast test [RULE_ID] [--against PATH... [--max-rate N]] [--format terminal|json]",
     summary: "Run each rule's good/bad examples; --against says how much it would flag",
     flags: [
       ["RULE_ID", "Only this rule. Needed for llm rules, which cost money per example"],
@@ -93,6 +114,11 @@ export const COMMANDS: CommandHelp[] = [
         "--against PATH...",
         "Fire the rule over real files and count what it finds; without RULE_ID, every rule, one line each",
       ],
+      [
+        "--max-rate N",
+        "With --against: exit 1 when a rule flags more than this share (0 to 1) of the files it matches. Not applied under 25 matching files",
+      ],
+      ["--format", "terminal or json"],
     ],
   },
   {

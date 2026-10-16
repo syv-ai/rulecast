@@ -3,9 +3,10 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { z } from "zod"
 
+import { buildBaseline } from "../../src/core/baseline/committed"
 import { createRegistry } from "../../src/core/detection/registry"
 import { mergeBase } from "../../src/core/git"
-import type { Detector } from "../../src/core/types"
+import type { Detector, Event } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureRules } from "../helpers/fixture"
@@ -128,5 +129,27 @@ describe("pipeline findings and ran", () => {
     const result = await pipelineAt(root, { kind: "touch", files: [USERS], cwd: root, session: { id: "s1" } })
     expect(result.ran).toBeUndefined()
     expect(result.findings ?? []).toEqual([])
+  })
+})
+
+describe("the committed baseline only fills in", () => {
+  test("it decides a verify with no other baseline, and nothing with a base commit or a session", async () => {
+    const root = await createFixture()
+    const event: Event = { kind: "verify", files: [USERS], cwd: root }
+    const id = (await pipelineAt(root, event)).findings![0]!.id
+    const listed = buildBaseline([{ id, rule: "backend/no-httpexception", file: USERS }])
+    const empty = buildBaseline([])
+    const status = async (options: Parameters<typeof pipelineAt>[2], extra: Partial<Event> = {}) =>
+      (await pipelineAt(root, { ...event, ...extra }, options)).findings?.map((finding) => finding.status)
+
+    expect(await status({ committedBaseline: listed })).toEqual(["preexisting"])
+    expect(await status({ committedBaseline: empty })).toEqual(["new"])
+    // An unchanged file against its commit, or a session's edit below it: pre-existing by
+    // their own baseline, whatever the committed file says. Hooks always have a session.
+    const base = { baseCommit: await mergeBase(root, "main") }
+    expect(await status({ committedBaseline: empty }, base)).toEqual(["preexisting"])
+    await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(404)\n\nx = 1\n")
+    await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+    expect(await status({ committedBaseline: empty }, { session: { id: "s1" } })).toEqual(["preexisting"])
   })
 })

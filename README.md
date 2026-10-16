@@ -97,6 +97,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast init` | Set rulecast up: config, catalog rules, your existing git hooks as rules, agent hooks |
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
+| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
@@ -129,7 +130,8 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 
 - **Pre-commit:** `rulecast run` with no file flags checks the staged files, reads their content from the index (what is being committed, not the working tree), and judges it against `HEAD`. `llm` rules are skipped unless you pass `--llm`, and one line says so: a commit should not cost money.
 - **Pre-push and CI:** `rulecast run --from-ref A --to-ref B` checks the files changed between the merge base with `A` and `B`, reading them at `B`. Without `--to-ref` it reads the working tree.
-- `rulecast run --files F...` judges files whole, with no baseline. Use the hook below rather than `--files` from a hook manager.
+- `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
+- **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse.
 
 rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks need it there anyway), and wire it into the one you use.
 
@@ -229,6 +231,25 @@ Per-edit enforcement does not touch that stock — it only stops it growing. Fix
 edits to files that already followed the rule broke it 2% of the time, against 37% in files that
 mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not
 proven.)
+
+### A committed baseline
+
+`--from-ref` needs a ref. A scheduled full-repository run, such as a nightly convention sweep or an agent loop told to keep `main` clean, has none, so every legacy violation is new and the run always fails. For those, record what is there today:
+
+```sh
+rulecast baseline            # writes .rulecast/baseline.json
+git add .rulecast/baseline.json && git commit -m "rulecast baseline"
+rulecast run --all-files     # exits 0 unless something got worse
+```
+
+- `run --all-files` and `run --files` treat the findings listed in the file as pre-existing, and fail only on new ones. Sessions, `--from-ref` and staged commits keep their own baseline, and hooks never read the file.
+- The file lists finding ids ([what an id is](agents/reference/output.md#finding-ids)), so editing a baselined line's offending text, or moving its file, makes the finding new.
+- When a run no longer finds an entry it says so: `baseline: 3 entries no longer found (fixed or changed); rulecast baseline --prune drops them`. Run `--prune` in the same pull request that fixes them. It only ever removes entries, never adds one, and keeps the entries of rules that did not run.
+- Recording new findings means rewriting the file with `rulecast baseline --force`. That is an amnesty, and it shows in review as one.
+- `rulecast doctor` reports its size, when it was added and when it last changed.
+- `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
+
+Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
 
 If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
 
