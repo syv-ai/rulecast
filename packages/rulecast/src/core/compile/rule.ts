@@ -170,8 +170,28 @@ export async function compileRule(
 
   // An example the rule would never be given is an example that passes for the wrong reason. This
   // checks the rule's own filter, not the project's global one: the example documents the rule.
-  for (const example of [...(data.examples?.good ?? []), ...(data.examples?.bad ?? [])]) {
+  const examples = data.examples
+  for (const example of [...(examples?.good ?? []), ...(examples?.bad ?? []), ...(examples?.baseline ?? [])]) {
     if (!filter(example.path)) return `example path "${example.path}" does not match this rule's files`
+  }
+  // A line past the end can never be found, so the example could only ever fail — and the author
+  // would read the failure as the rule's.
+  for (const [index, example] of (examples?.bad ?? []).entries()) {
+    const pinned = example.expect?.lines ?? []
+    const past = beyondEnd(pinned, example.code)
+    if (past !== null) return `example bad[${index}] expects line ${past}; its code has ${lines(example.code)}`
+    // Each finding starts on one line, so fewer findings than distinct lines can never pass.
+    const distinct = new Set(pinned).size
+    const count = example.expect?.count
+    if (count !== undefined && count < distinct) {
+      return `example bad[${index}] expects ${plural(count, "finding")} on ${plural(distinct, "line")}; a finding starts on one line`
+    }
+  }
+  for (const [index, example] of (examples?.baseline ?? []).entries()) {
+    const past = beyondEnd([...example.expect.new, ...example.expect.preexisting], example.after)
+    if (past !== null) {
+      return `example baseline[${index}] expects line ${past}; its after has ${lines(example.after)}`
+    }
   }
 
   const references: ReferenceSpec[] = []
@@ -220,4 +240,22 @@ export async function compileRule(
     examples: data.examples ?? null,
   }
   return { rule, warnings }
+}
+
+/**
+ * Lines in an example's code, not counting the empty one after a final newline. Empty code is one
+ * line: a finding about the file itself, a `path` rule's, is on line 1 of an empty file.
+ */
+function lineCount(code: string): number {
+  const lines = code.split(/\r?\n/)
+  return Math.max(1, lines.at(-1) === "" ? lines.length - 1 : lines.length)
+}
+
+const plural = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
+
+const lines = (code: string) => plural(lineCount(code), "line")
+
+function beyondEnd(lines: readonly number[], code: string): number | null {
+  const count = lineCount(code)
+  return lines.find((line) => line > count) ?? null
 }

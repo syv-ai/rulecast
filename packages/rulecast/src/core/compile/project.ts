@@ -3,6 +3,7 @@ import path from "node:path"
 
 import { CONFIG_FILE, MANIFEST_FILE, parseConfig, readConfigData, readManifest } from "../config/load"
 import { type Config, defaultConfig, overrideSchema, type RepoEntry, ruleSchema } from "../config/schema"
+import { AGENT_DIR } from "../delivery/persist"
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError, isNotFound } from "../errors"
 import { compileFilter } from "../files"
@@ -112,14 +113,17 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   if (config.minimumRulecastVersion !== null && isOlder(VERSION, config.minimumRulecastVersion)) {
     return configFailure(`requires rulecast ${config.minimumRulecastVersion} or newer (running ${VERSION})`, config)
   }
-  const global = compileFilter({
+  const filter = compileFilter({
     files: config.files,
     exclude: config.exclude,
     types: [],
     typesOr: [],
     excludeTypes: [],
   })
-  if (typeof global === "string") return configFailure(global, config)
+  if (typeof filter === "string") return configFailure(filter, config)
+  // rulecast's own directory is never checked: a committed baseline is a JSON file of hex ids, which
+  // a secrets scanner or a `\.json$` rule would otherwise read, and the rest is rulecast's output.
+  const global = (file: string) => !file.startsWith(`${AGENT_DIR}/`) && filter(file)
 
   const diagnostics: Diagnostic[] = []
   const compiled: Compiled[] = []

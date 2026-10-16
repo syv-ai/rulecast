@@ -174,7 +174,7 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
     }
   }
 
-  const input = { project, ruleId, run, registry, io }
+  const input = { project, ruleId, run, registry, io, committedBaseline: true }
   const selected = await selectFiles(root, io.cwd, run)
   const stateDir = ensureProjectState(cacheHome(io.env), root)
   const detection = detectionFor(project, registry, stateDir, createReferenceResolver(root))
