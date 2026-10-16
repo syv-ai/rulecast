@@ -150,7 +150,7 @@ export const COMMANDS: CommandHelp[] = [
     synopsis: "rulecast stats [--since 30d] [--format terminal|json]",
     summary: "Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy",
     flags: [
-      ["--since", "Only findings first reported in this window: 30d, 12h or a date"],
+      ["--since", "Only findings first reported in this window: 30d, 12h, or a date (UTC)"],
       ["--format", "terminal or json"],
     ],
     notes: [

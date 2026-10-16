@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { z } from "zod"
 
 import { errorMessage, isNotFound } from "../errors"
 import { appendRecordsCapped } from "../jsonl"
@@ -136,10 +137,26 @@ export async function appendFindingsLog(
   }
 }
 
+const loggedMatchSchema = z.object({ r: z.string(), id: z.string(), f: z.string(), l: z.number() })
+
+/** What the reader accepts: a parseable line of this version can still be cut short or hand-edited. */
+const recordSchema = z.object({
+  v: z.literal(FINDINGS_LOG_VERSION),
+  at: z.string(),
+  s: z.string(),
+  a: z.string(),
+  ev: z.enum(["edit", "stop", "guard"]),
+  via: z.literal("shell").optional(),
+  files: z.array(z.string()),
+  ran: z.record(z.array(z.number().int().nonnegative())),
+  found: z.array(loggedMatchSchema.extend({ o: z.enum(["delivered", "blocked", "refused"]) })),
+  ign: z.array(loggedMatchSchema),
+}) satisfies z.ZodType<FindingsRecord>
+
 export interface FindingsLog {
   /** Oldest first: the rotated file, then the current one. */
   records: FindingsRecord[]
-  /** Lines that were not a record this version understands. */
+  /** Lines that were not a whole record this version understands. */
   skipped: number
   /** The log has been rotated at least once, so its oldest records may be gone. */
   rotated: boolean
@@ -159,13 +176,16 @@ export async function readFindingsLog(stateDir: string): Promise<FindingsLog> {
     if (name === FINDINGS_LOG_ROTATED) result.rotated = true
     for (const line of text.split("\n")) {
       if (line.trim() === "") continue
+      let value: unknown
       try {
-        const record = JSON.parse(line) as FindingsRecord
-        if (record.v === FINDINGS_LOG_VERSION) result.records.push(record)
-        else result.skipped++
+        value = JSON.parse(line)
       } catch {
         result.skipped++
+        continue
       }
+      const record = recordSchema.safeParse(value)
+      if (record.success) result.records.push(record.data)
+      else result.skipped++
     }
   }
   return result
