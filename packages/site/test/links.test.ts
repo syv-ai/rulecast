@@ -25,7 +25,8 @@ describe("rewriteLinks", () => {
     expect(rewriteLinks("[f](../../README.md#fresh-environments)", "agents/reference/loops.md")).toBe(
       "[f](/rulecast/guides/git-hooks-ci/#fresh-environments)",
     )
-    expect(rewriteLinks("[a](README.md#agents)", "README.md")).toBe("[a](/rulecast/guides/agents/#agents)")
+    expect(rewriteLinks("[a](README.md#agents)", "README.md")).toBe("[a](/rulecast/guides/agents/)")
+    expect(rewriteLinks("[g](README.md#getting-started)", "README.md")).toBe("[g](/rulecast/getting-started/)")
     expect(rewriteLinks("[r](README.md)", "README.md")).toBe("[r](/rulecast/)")
   })
 

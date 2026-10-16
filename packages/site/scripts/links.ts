@@ -16,24 +16,29 @@ function slug(heading: string): string {
     .replace(/ /g, "-")
 }
 
-/** The page holding the README heading `anchor` names: the README is split over several pages. */
-function readmeRoute(anchor: string): string | null {
+/**
+ * The page holding the README heading `anchor` names: the README is split over several pages. A `##`
+ * heading equal to the page's title is dropped from the page, so a link to it keeps no anchor.
+ */
+function readmeRoute(anchor: string): { route: string; anchor?: string } | null {
   for (const page of PAGES) {
     if (!("readme" in page.source)) continue
     const sections = readme()
     for (const heading of page.source.readme) {
-      const headings = [heading, ...[...(sections.get(heading) ?? "").matchAll(/^#{3,6} (.+)$/gm)].map((m) => m[1]!)]
-      if (headings.some((candidate) => slug(candidate.trim()) === anchor)) return page.route
+      if (slug(heading) === anchor)
+        return heading === page.title ? { route: page.route } : { route: page.route, anchor }
+      const subheadings = [...(sections.get(heading) ?? "").matchAll(/^#{3,6} (.+)$/gm)].map((m) => m[1]!)
+      if (subheadings.some((candidate) => slug(candidate.trim()) === anchor)) return { route: page.route, anchor }
     }
   }
   return null
 }
 
-/** The route of the page a repository file is published as, if it is one. */
-function publishedRoute(repoPath: string, anchor?: string): string | null {
-  if (repoPath === "README.md") return (anchor && readmeRoute(anchor)) ?? ""
+/** The route of the page a repository file is published as, if it is one, and the anchor to keep. */
+function publishedRoute(repoPath: string, anchor?: string): { route: string; anchor?: string } | null {
+  if (repoPath === "README.md") return (anchor ? readmeRoute(anchor) : null) ?? { route: "", anchor }
   const page = PAGES.find((candidate) => "file" in candidate.source && candidate.source.file === repoPath)
-  return page ? page.route : null
+  return page ? { route: page.route, anchor } : null
 }
 
 /**
@@ -46,9 +51,9 @@ export function rewriteLinks(markdown: string, sourcePath: string): string {
   return markdown.replace(/\]\((?!https?:|#|mailto:)([^)\s]+)\)/g, (_, target: string) => {
     const [file = "", anchor] = target.split("#")
     const repoPath = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), file))
-    const route = publishedRoute(repoPath, anchor)
-    const hash = anchor ? `#${anchor}` : ""
-    if (route === null) return `](${BLOB}${repoPath}${hash})`
-    return `](${route === "" ? `${BASE}/` : routeUrl(route)}${hash})`
+    const published = publishedRoute(repoPath, anchor)
+    if (published === null) return `](${BLOB}${repoPath}${anchor ? `#${anchor}` : ""})`
+    const hash = published.anchor ? `#${published.anchor}` : ""
+    return `](${published.route === "" ? `${BASE}/` : routeUrl(published.route)}${hash})`
   })
 }
