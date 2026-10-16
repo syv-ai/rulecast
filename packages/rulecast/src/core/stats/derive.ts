@@ -49,9 +49,9 @@ const covers = (record: FindingsRecord, rule: string, file: string) =>
  * Replays the log, oldest first, and returns every life that began at or after `since`. Records
  * from before it are still replayed: a finding first seen then and fixed later is not counted.
  *
- * Two known imprecisions, both from what an id is: editing the offending text without fixing it
- * reads as a fix and a new finding, and a finding the context budget kept out of a delivery still
- * counts as delivered.
+ * Two known imprecisions. An id hashes the finding's source line (D51), so any edit to that line,
+ * fixing it or not, reads as one fixed finding and one new one. And a finding the context budget
+ * kept out of a delivery still counts as delivered.
  */
 export function derive(records: readonly FindingsRecord[], since: Date | null = null): FindingLife[] {
   // Stable: records written in the same millisecond keep their order in the file.
@@ -75,8 +75,9 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
     const stopsOf = (agent: string) => stops.get(`${record.s}\u0000${agent}`) ?? 0
     const found = new Map(record.found.map((finding) => [finding.id, finding]))
     const ignored = new Set(record.ign.map((match) => match.id))
-    // An inline `rulecast-ignore` can change the id it silences, when the match is the whole line
-    // (llm, or an excerpt): the same rule ignored on the line it was last reported on is it.
+    // A trailing `rulecast-ignore` is left out of the line an id hashes, but an id that hashes the
+    // match's text instead (a redacted or whole-file match) can change with one: the same rule
+    // ignored on the line it was last reported on is it.
     const ignoredAt = new Set(record.ign.map((match) => `${match.r}\u0000${match.f}\u0000${match.l}`))
     const seen = (life: Open, finding: { o: string; l: number }) => {
       const outcome = finding.o

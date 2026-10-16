@@ -119,9 +119,9 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `0` | Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed) |
 | `1` | Every rule ran; at least one new error-severity finding |
 | `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
-| `3` | Incomplete: a rule failed to compile, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
 
-On `2` nothing is printed to stdout. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](agents/reference/output.md).
+On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](agents/reference/output.md).
 
 ## Git hooks and CI
 

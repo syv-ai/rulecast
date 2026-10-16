@@ -82,12 +82,20 @@ describe("derive", () => {
     expect(life.state).toBe("suppressed")
   })
 
-  test("an inline rulecast-ignore on a whole-line match changes its id, and still reads as suppressed", () => {
+  test("an inline rulecast-ignore that changes a text-hashed id still reads as suppressed", async () => {
+    // A redacted match hashes its text, not its line, so an ignore inside the text is a new id.
     const rule = { id: RULE, detector: { kind: "llm" } }
-    const at = { file: FILE, line: 3, endLine: 3, column: 1, captures: {} }
-    const idOf = (text: string) => findingIds([{ rule, match: { ...at, text } }], () => [])[0]!
-    const before = idOf("    raise HTTPException(404)")
-    const after = idOf("    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception")
+    const at = { file: FILE, line: 3, endLine: 3, column: 1, captures: {}, redacted: true as const }
+    const idOf = async (text: string) =>
+      (
+        await findingIds(
+          [{ rule, match: { ...at, text } }],
+          () => undefined,
+          async () => null,
+        )
+      )[0]!
+    const before = await idOf("    raise HTTPException(404)")
+    const after = await idOf("    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception")
     expect(after).not.toBe(before)
 
     const lives = derive([record("edit", [[before, "delivered"]]), record("edit", [], { ign: [after] })])

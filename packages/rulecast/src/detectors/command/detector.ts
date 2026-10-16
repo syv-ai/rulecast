@@ -56,6 +56,7 @@ export async function toMatch(
     column: finding.column,
     text: finding.text ?? excerpt(await read(finding.file), finding),
     captures: capturesOf(finding, captures, `result ${index + 1}`),
+    ...(finding.wholeFile && { wholeFile: true }),
   }
 }
 

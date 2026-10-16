@@ -3,10 +3,12 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { NOTHING_STAGED } from "../../src/adapters/cli/format"
+import { appendWork, sessionDir } from "../../src/core/session/session"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { backendConventions, createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
+import { stateDirFor } from "../helpers/home"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -134,6 +136,25 @@ describe("rulecast run: file selection", () => {
   })
 })
 
+describe("rulecast run --session: rules the session disabled", () => {
+  test("a rule a detector failure disabled earlier makes the run incomplete, and says so", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), VIOLATION)
+    await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+    await appendWork(sessionDir(stateDirFor(root), "s1"), [
+      { t: "disabled", rule: "backend/no-httpexception", reason: "regex crashed" },
+    ])
+
+    const result = await run(root, "--session", "s1", "--format", "json")
+    expect(result.code).toBe(3)
+    const json = JSON.parse(result.stdout)
+    expect(json.complete).toBe(false)
+    expect(json.findings).toEqual([])
+    expect(json.warnings.join("\n")).toContain("backend/no-httpexception")
+    expect(json.warnings.join("\n")).toContain("regex crashed")
+  })
+})
+
 /**
  * The DX review's reproductions (plan 10, H1 and H2): a git hook must judge a commit as it will be
  * committed, against HEAD, and a push as it will be pushed.
@@ -161,6 +182,19 @@ describe("rulecast run: staged and pushed content", () => {
     const result = await run(root, "--format", "json")
     expect(result.code).toBe(1)
     expect(lines(result.stdout)).toEqual([3])
+  })
+
+  test("a finding's id hashes the staged line, not the one in the working tree", async () => {
+    const root = await createFixture()
+    const staged = `${OLD}    raise HTTPException(500)\n`
+    await writeFile(path.join(root, USERS), staged)
+    await git(root, "add", USERS)
+    await writeFile(path.join(root, USERS), `${OLD}    raise HTTPException(500)  # and something else\n`)
+    const ids = async () =>
+      JSON.parse((await run(root, "--format", "json")).stdout).findings.map((finding: { id: string }) => finding.id)
+    const withUnstaged = await ids()
+    await writeFile(path.join(root, USERS), staged)
+    expect(withUnstaged).toEqual(await ids())
   })
 
   test("a clean staged file passes whatever the working tree holds", async () => {
