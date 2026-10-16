@@ -48,7 +48,7 @@ Where things live:
 - `detectors/` holds `regex`, `path`, `ast-grep`, `command`, `hook` (pre-commit and lefthook hooks), `linter` (ruff, oxlint, eslint, gitleaks) and `llm`. Tool output is read in one place, `core/detection/outputs/`.
 - `testing/` holds the exported detector and adapter contract suites.
 - `commands/` has one file per CLI command. `init/` is the interactive setup.
-- Catalog rules live in `packages/rules-general`, `rules-python` and `rules-react`, each with `rules.yaml` and the docs its rules cite.
+- Catalog rules live in `packages/rules-general`, `rules-loop-safety`, `rules-python` and `rules-react`, each with `rules.yaml` and the docs its rules cite.
 - `agents/` holds docs written for coding agents (`SETUP.md`, `DRAFT-RULES.md`, `reference/`). URLs to them are pinned to a tag, never to `main`; a test enforces this.
 
 

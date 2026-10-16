@@ -7,6 +7,7 @@ import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
+import { testEnv } from "../helpers/home"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -306,6 +307,18 @@ describe("rulecast run: turning findings and rules off", () => {
     expect((await run(root)).code).toBe(1)
   })
 
+  test("an ignore added in a staged change silences its finding in unattended mode too: run always runs attended", async () => {
+    const root = await createFixture()
+    await writeFile(
+      path.join(root, USERS),
+      "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)  # rulecast-ignore: backend/no-httpexception x\n",
+    )
+    await git(root, "add", USERS)
+    const result = await runCli(root, ["run"], "", { ...testEnv, RULECAST_MODE: "unattended" })
+    expect(result.code).toBe(0)
+    expect(result.stdout).not.toContain(`${USERS}:3`)
+  })
+
   test("enabled: false switches a rule off without deleting it", async () => {
     const rules = fixtureRules.map((entry) =>
       entry.id === "backend/no-httpexception" ? { ...entry, enabled: false } : entry,
@@ -385,5 +398,101 @@ describe("rulecast run: metered rules in a staged run", () => {
     const result = await run(root, "--llm", "--no-llm")
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("--llm and --no-llm cannot be combined")
+  })
+})
+
+/** #29: a run where configured rules could not run must never read as clean. */
+describe("rulecast run: rules that did not run", () => {
+  const MISSING_TOOL = {
+    id: "shell",
+    name: "Shell",
+    files: "\\.py$",
+    detect: { command: { run: ["definitely-not-a-real-binary-9x7", "{{files}}"] } },
+    message: "{{file}}:{{line}} bad.",
+  }
+
+  test("a detector whose tool is missing says incomplete, names the rule in json, and exits 2", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
+    const terminal = await run(root, "--all-files")
+    expect(terminal.code).toBe(2)
+    expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
+    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)\n")
+    // Said once, under "did not run", not again among rulecast's problems.
+    expect(terminal.stdout).not.toContain("rulecast problems:")
+    const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(json.disabled).toEqual([{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }])
+  })
+
+  test("a rule repo that cannot be fetched counts the rules it held", async () => {
+    const missing = path.join(await createProject({}), "no-such-repo.git")
+    const root = await createRepo({
+      ".rulecast-config.yaml": `repos:\n  - repo: ${missing}\n    rev: v1.0.0\n    rules:\n      - id: a\n      - id: b\n`,
+      "a.py": "x = 1\n",
+    })
+    const result = await run(root, "--all-files", "--format", "json")
+    expect(result.code).toBe(2)
+    expect(JSON.parse(result.stdout).disabled).toEqual([
+      { reason: expect.stringContaining(`${missing}@v1.0.0: fetch failed`), rules: ["a", "b"] },
+    ])
+  })
+
+  test("--session names a rule the agent's session disabled, which it skips", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
+    await pipelineAt(root, { kind: "edit", files: ["a.py"], cwd: root, session: { id: "s1" } })
+    const result = await run(root, "--session", "s1", "--format", "json")
+    expect(JSON.parse(result.stdout).disabled).toEqual([
+      { reason: expect.stringMatching(/^command detector: /), rules: ["shell"] },
+    ])
+  })
+
+  test("a clean run has nothing disabled", async () => {
+    const root = await createFixture()
+    expect(JSON.parse((await run(root, "--all-files", "--format", "json")).stdout).disabled).toEqual([])
+  })
+})
+
+describe("rulecast run: a scope: removed rule", () => {
+  const TEST = "tests/test_pricing.py"
+  const ASSERTS = "def test_total():\n    assert total([1, 2]) == 3\n    assert total([]) == 0\n"
+  const rule = {
+    id: "tests/keep-assertions",
+    name: "Assertions are not removed",
+    files: "^tests/",
+    scope: "removed",
+    detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
+    message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed).",
+  }
+
+  test("--from-ref reports an assertion the branch removed; --all-files has no baseline and reports nothing", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([rule]), [TEST]: ASSERTS })
+    await git(root, "checkout", "-q", "-b", "feature")
+    await writeFile(path.join(root, TEST), "def test_total():\n    assert total([1, 2]) == 3\n")
+    await git(root, "commit", "-qam", "drop an assert")
+
+    const ranged = await run(root, "--from-ref", "main", "--format", "json")
+    expect(ranged.code).toBe(1)
+    expect(JSON.parse(ranged.stdout).findings).toEqual([
+      expect.objectContaining({
+        rule: "tests/keep-assertions",
+        status: "new",
+        // The deletion is at the end of the file: its last line, not the one after it.
+        line: 2,
+        message: "tests/test_pricing.py:2 removes assertions (1 of 2 removed).",
+      }),
+    ])
+
+    const all = await run(root, "--all-files")
+    expect(all.code).toBe(0)
+    expect(all.stdout).toContain("no findings")
+  })
+
+  test("a staged run counts against HEAD", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([rule]), [TEST]: ASSERTS })
+    await writeFile(path.join(root, TEST), "def test_total():\n    total([1, 2])\n")
+    await git(root, "add", TEST)
+    const staged = await run(root, "--format", "json")
+    expect(JSON.parse(staged.stdout).findings.map((finding: { message: string }) => finding.message)).toEqual([
+      "tests/test_pricing.py:2 removes assertions (2 of 2 removed).",
+    ])
   })
 })

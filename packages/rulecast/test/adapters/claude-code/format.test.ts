@@ -75,6 +75,72 @@ describe("Claude Code adapter: format", () => {
     expect(output.reason).toContain("raises HTTPException(500)")
   })
 
+  test("attended, a disputed finding goes to the user; unattended, to the run's decisions file or report", () => {
+    const attended = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout).reason
+    expect(attended).toContain("say so to the user")
+    const value = delivery({ findings: [finding()], stop: "block", unattended: true })
+    const output = JSON.parse(format(value, "verify").stdout)
+    expect(output.decision).toBe("block")
+    expect(output.reason).toMatch(/^This project's rulecast rules/)
+    expect(output.reason).toContain("decisions file or final report")
+    expect(output.reason).not.toContain("say so to the user")
+    expect(output.reason).toContain("raises HTTPException(500)")
+  })
+
+  test("an unattended report holds the agent once more, to record what is left as unresolved", () => {
+    const notice = "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced."
+    const value = delivery({ findings: [finding()], stop: "report", unattended: true, notices: [notice] })
+    const output = JSON.parse(format(value, "verify").stdout)
+    // Context for the agent, not only a message for a user who is not there.
+    expect(output.decision).toBe("block")
+    expect(output.reason).toContain("Record each one as unresolved in your final report")
+    expect(output.reason).toContain("raises HTTPException(500)")
+    expect(output.systemMessage).toBe(notice)
+  })
+
+  describe("rules that did not run, unattended (#29)", () => {
+    const disabled = [{ reason: "x.git@v1: not in the cache", hint: "rulecast install", rules: ["a", "b"] }]
+    const LINE = "2 rules disabled: x.git@v1: not in the cache (run rulecast install)"
+
+    test("an incomplete stop holds the agent to report it, and does not ask it to repair rulecast", () => {
+      const output = JSON.parse(format(delivery({ stop: "incomplete", unattended: true, disabled }), "verify").stdout)
+      expect(output.decision).toBe("block")
+      expect(output.reason).toContain("State in your final report")
+      expect(output.reason).toContain("Do not try to repair rulecast's setup")
+      expect(output.reason).toContain(`- ${LINE}`)
+      expect(output.systemMessage).toContain(LINE)
+    })
+
+    test("an incomplete stop keeps telling the user about findings in swept files", () => {
+      const value = delivery({
+        findings: [finding()],
+        swept: [finding().file],
+        stop: "incomplete",
+        unattended: true,
+        disabled,
+      })
+      const output = JSON.parse(format(value, "verify").stdout)
+      expect(output.decision).toBe("block")
+      expect(output.systemMessage).toContain(LINE)
+      expect(output.systemMessage).toContain("changed outside the agent's tool calls")
+      expect(output.systemMessage).toContain(finding().message)
+    })
+
+    test("a block names what was not checked, ahead of the findings", () => {
+      const value = delivery({ findings: [finding()], stop: "block", unattended: true, disabled })
+      const output = JSON.parse(format(value, "verify").stdout)
+      expect(output.reason).toContain(
+        `Not checked (rulecast could not run these rules; say so in your report):\n- ${LINE}`,
+      )
+      expect(output.reason.indexOf(LINE)).toBeLessThan(output.reason.indexOf("raises HTTPException(500)"))
+    })
+
+    test("an allowed stop says it to the user every time", () => {
+      const output = JSON.parse(format(delivery({ stop: "allow", unattended: true, disabled }), "verify").stdout)
+      expect(output).toEqual({ systemMessage: `rulecast: rules that did not run:\n  - ${LINE}` })
+    })
+  })
+
   test("an allowed stop prints nothing", () => {
     const value = delivery({ findings: [finding({ severity: "warning" })], stop: "allow" })
     expect(format(value, "verify")).toEqual({ stdout: "", exitCode: 0 })

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 
+import { LOCAL_COMMAND } from "../../../src/adapters/claude-code/adapter"
 import { mergeHooks, removeHooks, SettingsError } from "../../../src/adapters/claude-code/settings"
 
 const COMMAND = "rulecast hook claude-code"
@@ -91,6 +92,32 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(upgraded.added).toEqual(["PreToolUse (Bash)", "PostToolUse (Bash)", "PostToolUseFailure (Bash)"])
     expect(upgraded.updated).toEqual([])
     expect(upgraded.settings).toEqual(once)
+  })
+
+  test("the guard from before #29 is rewritten in place to the current one", () => {
+    const previous =
+      'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+      "grep -q '\"hook_event_name\": *\"SessionStart\"' && printf '%s' '{}'; exit 0"
+    const older = mergeHooks({}, previous, 60_000).settings
+    const upgraded = mergeHooks(older, LOCAL_COMMAND, 60_000, LOCAL_COMMAND)
+    expect(upgraded.added).toEqual([])
+    expect(upgraded.updated).toContain("Stop")
+    expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
+  })
+
+  test("a released guard is rewritten to the current guard, never to the bare command, without node_modules", () => {
+    // v0.4 and v0.5 committed this. `install` in a clone that has not installed yet asks for the bare
+    // command; swapping the guard for it would exit 127 on every hook.
+    const released =
+      'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+      `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
+    const unguarded = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    for (const older of [released, unguarded]) {
+      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, COMMAND, 60_000, LOCAL_COMMAND)
+      expect(upgraded.added).toEqual([])
+      expect(upgraded.updated).toContain("Stop")
+      expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
+    }
   })
 
   test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {

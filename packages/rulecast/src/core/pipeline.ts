@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/fingerprint"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -15,6 +16,7 @@ import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
+import { type DisabledGroup, disabledRules } from "./disabled"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
@@ -25,7 +27,7 @@ import { appendContext, appendWork, commitSession, openSession, type SessionView
 import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -44,8 +46,18 @@ export interface PipelineOptions {
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
+  /**
+   * Say which configured rules did not run (Delivery.disabled), whatever the mode: `rulecast run`.
+   * An agent's stop says it only in unattended mode, where nobody reads the warning given once (#29).
+   */
+  reportDisabled?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
+  /**
+   * The hook: the session's mode is recorded, so `rulecast run --session` judges the session in the
+   * mode its hooks did. The CLI's own runs never record one.
+   */
+  recordMode?: boolean
 }
 
 export interface PipelineResult {
@@ -74,6 +86,9 @@ const TREE_UNAVAILABLE =
 const SUMMARY_THRESHOLD = 3
 
 const DEFAULT_HINT = "rulecast validate"
+
+/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
+const DISABLED_WARNING = /^(diagnostics?|detector):/
 
 /**
  * The key a summary is delivered under.
@@ -254,6 +269,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
+  if (session && options.recordMode === true) {
+    const { mode, source, detail } = project.mode
+    const recorded = view.work.mode
+    if (recorded === null || recorded.mode !== mode || recorded.source !== source || recorded.detail !== detail) {
+      await appendWork(session.dir, [{ t: "mode", mode, source, detail }])
+    }
+  }
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
@@ -292,6 +314,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -307,6 +330,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let ignored: IgnoredFinding[] = []
   let told: Notice[] = []
   let agentRead: string | null = null
+  let disabledGroups: DisabledGroup[] = []
 
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
@@ -341,7 +365,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -390,8 +417,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
+      (selection) =>
+        !skip.has(selection.rule.detector.kind) &&
+        (options.onlyRules?.has(selection.rule.id) ?? true) &&
+        (event.kind === "verify" || selection.rule.scope !== "removed"),
     )
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
@@ -422,7 +454,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
-    const output = await runDetectionFrom(
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
@@ -434,11 +466,22 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
-    findings = output.findings.map(({ rule, match }) => ({
-      rule,
-      match,
-      status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
-    }))
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = await removedFindings(selections, detected, baselineChanges, fingerprints, read)
+    const output = removed.output
+    const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
+      classify(match, rule.scope, rule.id, baselineChanges, fingerprints)
+    findings = [
+      ...output.findings.map((finding) => ({ ...finding, status: statusOf(finding) })),
+      ...removed.findings.map((finding) => ({ ...finding, status: "new" as const })),
+    ]
+    const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
+    const unsilenced =
+      project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
+    for (const { rule, match, status } of unsilenced) findings.push({ rule, match, status })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
@@ -446,7 +489,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    ignored = output.ignored
+    const kept = new Set(unsilenced.map(({ match }) => match))
+    ignored = output.ignored.filter(({ match }) => !kept.has(match))
     // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
     // what to undo, because nothing could refuse the write before it happened.
     const shellEdited = (file: string) =>
@@ -464,18 +508,33 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
         currentConfigHash: atStop ? await configHash(root) : null,
         ignored: atStop
-          ? ignored.map(({ rule, match, reason }) => ({
-              rule: rule.id,
-              match,
-              reason,
-              status: classify(match, rule.scope, rule.id, baselineChanges, fingerprints),
-            }))
+          ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
           : [],
         told: view.work.noticed,
         refused,
       })
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
+    }
+    // Every time, not once per context: a loop nobody watches must not read "no findings" as
+    // "checked". The session's earlier disables are named too, since they are skipped above unsaid.
+    if (
+      event.kind === "verify" &&
+      (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
+    ) {
+      const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
+      const earlier = [...view.work.disabled].map(([rule, message]) => ({
+        kind: kinds.get(rule) ?? "detector",
+        rules: [rule],
+        message,
+      }))
+      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
+      // there the warning is the once-per-context word to the user, the list the agent's every stop.
+      if (options.reportDisabled === true) {
+        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
+        warnings.splice(0, warnings.length, ...kept)
+      }
     }
     // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
     // skipped in a staged run says which files kept it from running (detection/materialise.ts).
@@ -542,13 +601,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     context: state.context,
     resolver,
     maxBytes: config.context.maxBytes,
-    maxBlocks: config.stopGate.maxBlocks,
+    maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
+    mode: project.mode.mode,
     maxContextChars: options.maxContextChars,
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
     ...(refused.length === 0 ? {} : { refused }),
+    ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.

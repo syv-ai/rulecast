@@ -44,6 +44,9 @@ repos:
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run` |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
+| `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
+| `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
+| `unattended.escalate` | `[]` | Ids of `warning` rules that are `error` in unattended mode |
 | `refuse_gate.max_refusals` | `1` | Writes a `refuse_write` rule may refuse per file per session |
 | `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible`. There is no `llm.model`: every llm rule names its own |
 
@@ -68,14 +71,15 @@ repos:
 | `exclude_types` | no | The file has none of these |
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
-| `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
-| `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below) |
+| `escalate` | no, default `false` | `true`: `error` in [unattended mode](#unattended-mode), whatever `severity` says. The same as listing the id in `unattended.escalate`. A catalog rule's `escalate: true` is turned off with `escalate: false` on its entry |
+| `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it, or, with `removed`, whether a file lost matches (below) |
+| `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
-| `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
+| `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures; a removed rule also has `{{removed}}` and `{{baseline}}` (below) |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
-| `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos |
+| `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos. Read before the rest of the rule, so an older rulecast says to upgrade rather than rejecting a key it does not know |
 
 A rule applies to a file when the top-level `files` and `exclude`, the rule's `files` and `exclude`, and its type keys all match.
 
@@ -116,6 +120,60 @@ Two things to know before reaching for it:
   changed outside the agent's tools, or is over `max_file_bytes` — a `container` rule falls back to
   `instance`. An `llm` rule always does: measuring its baseline would mean a second model call every
   time the agent opens a file.
+
+### Removed rules
+
+`scope: removed` turns the question round. A match is something the code should *keep*, such as
+an assertion in a test, and the finding is a file that has fewer matches than it had at its
+baseline:
+
+```yaml
+- id: tests/keep-assertions
+  files: '(^|/)tests/.*\.py$'
+  scope: removed
+  detect:
+    ast-grep:
+      language: python
+      rule: { kind: assert_statement }
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Put them back, or, if you combined them on purpose, keep that and say so in your report."
+```
+
+There is one finding per file, always new. It sits on the first line the change touched (the
+file's last line, for a deletion at its end). The message says how many went with `{{removed}}`
+and how many the file had at its baseline with `{{baseline}}`, so the example above reads
+`2 of 5 removed`. Its `{{text}}` is always `removed`: deleting one more match is the same finding,
+not a new one, so an unattended run that keeps deleting is blocked at most twice for it, like any
+other finding (see [Unattended mode](#unattended-mode)). A match by itself is never a finding, and adding, moving or rewriting matches is
+nothing as long as the count does not drop. The count is compared when the agent stops and in
+`rulecast run`, not after each edit: an edit may cut an assertion that the next edit pastes
+somewhere else. Matches on a
+line with a `rulecast-ignore` still count, and the finding is not on a matched line, so an ignore
+comment does not silence it; use `enabled: false` or `exclude`.
+
+What it needs:
+
+- **A baseline.** In an agent session that is the file as the agent first read it, or the session's
+  start commit. A file the agent changed before it read it, with its shell, keeps the start commit
+  as its baseline: the read comes after the change. `rulecast run --from-ref`
+  counts against the merge base, and a staged run against `HEAD`. `rulecast run --files` and
+  `--all-files` have no baseline, and a removed rule reports nothing there.
+- **A detector that reads the content it is handed and reports each match in it:** `regex` or
+  `ast-grep`. Not `path`, whose match is the whole file, and not a linter, command or `llm`.
+- **`edit` among its stages,** which is the default for both. A session's baseline is taken when the
+  agent opens a file, by the edit-stage rules. It cannot be combined with `refuse_write`.
+- **A file that still exists.** A deleted file has nothing to count and is not reported. Nor is a
+  renamed one (`git mv`): it is a deleted file and a new one, and the new path has no baseline.
+
+It counts, so it cannot tell which match went: deleting one assertion and adding an unrelated one
+leaves the count where it was. Nor can it tell a deletion from a consolidation: three asserts
+folded into one parametrized test, or several `expect`s into one `toEqual`, lower the count and are
+reported. Say so in the rule's message, so the agent keeps a deliberate consolidation and mentions
+it in its report rather than undoing it. A file over `max_file_bytes` is not counted. Only projects with a
+removed or container rule pay for the baseline measurement.
+
+`examples` on a removed rule show what it counts: a `bad` example has at least one match, which
+deleting would report, and a `good` one has none. `rulecast test --against` does not count a
+removed rule: its matches are what a file keeps, not violations.
 
 ### Turning a rule or a finding off
 
@@ -166,6 +224,77 @@ severity, and the developer is told which file the agent changed.
 `refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`.
 `linter`, `command` and `llm` hand a path to another program, which would read the file as it still
 is, so `rulecast validate` rejects them.
+
+`refuse_write: unattended` refuses only in [unattended mode](#unattended-mode), and is an ordinary
+rule otherwise. Use it for a write a developer could make on purpose, but a loop with nobody
+watching should not. Its requirements are the same as for `true`.
+
+### Unattended mode
+
+The stop gate assumes someone is in the loop. When the agent stops with new `error` findings, the
+gate blocks the stop and the agent gets a turn to fix them. That happens once per user prompt
+(`stop_gate.max_blocks`). After that the findings go to the developer as a message. A goal loop
+(Claude Code's `/goal`), `claude -p`, a scheduled task or a CI job sends one prompt and has nobody
+reading messages, so it gets one block per run. After that enforcement quietly ends.
+
+In unattended mode:
+
+- **The stop gate blocks every stop with new error findings, up to `unattended.max_blocks`** (10)
+  per prompt.
+- **A finding that has blocked two stops no longer blocks.** It is reported instead, so a false
+  positive, with nobody to overrule it, cannot use up the budget. A finding is the same finding when
+  its rule, its file and the text it matched are the same, wherever the line has moved. When the
+  text tells nothing apart (a redacted secret, a hook's whole-file finding), the tool's rule id,
+  message and line are compared too. A `refuse_write` finding in a protected file the agent changed
+  with its shell is the exception: it keeps blocking until the change is reverted.
+- **When nothing is left that may block, the agent is held once more, to report.** This happens when
+  the budget is spent, or when every remaining finding has blocked twice. The agent is given the
+  findings and told to record each one as unresolved in its final report, or in the run's decisions
+  file if it keeps one, and then finish. This happens once per prompt. A later stop is let through
+  with the findings in a message, as in attended mode.
+- **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
+  leaves the code, records the finding and its reason in the decisions file or final report, and
+  carries on. In attended mode it would say so to the developer.
+- **A `rulecast-ignore` does not silence a finding on a line the agent changed during the run,
+  whoever wrote the comment.** Ignores on code the run did not touch keep working. The finding is
+  judged like any other: it blocks, and is reported if it keeps blocking. That includes an edit to
+  code under a comment that was already there: the comment was agreed to for the code as it was.
+  The developer is still told about an ignore on changed code. A `refuse_write` rule works the same
+  way: an ignore does not stop the refusal of a line the write changes, while a write that only
+  restates a line, or an edit that carries it as context, does not change it.
+- **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, as does
+  `escalate: true` on the rule itself, and `refuse_write: unattended` rules refuse writes.
+
+The mode is decided in this order:
+
+1. `RULECAST_MODE`: `unattended`, or `attended` (also `interactive`). It overrides the config, so
+   an orchestrator can set it per run.
+2. `mode:` in `.rulecast-config.yaml`.
+3. `CI` or `GITHUB_ACTIONS` set (and not `false`, in any case, or `0`): unattended.
+4. Otherwise attended.
+
+An unknown `RULECAST_MODE` value is ignored: `rulecast doctor` warns about it, and a hook writes it
+to its debug log. A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
+it would run in from your shell, and where that came from. The mode applies to agent hooks only.
+`rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
+to answer. The exception is `rulecast run --session <id>`, which shows a session's findings: it runs
+in the mode that session's hooks recorded, so it lists what the stop blocks on. For a session
+recorded before modes were, it resolves the mode from its own environment as a hook would.
+
+**With `/goal`.** `/goal` is a Stop hook too. While a goal is active, its evaluator and rulecast
+both run on every stop. A rulecast block is answered by a fixing turn even when the evaluator says
+the goal is met, and the evaluator judges only its own condition. `/goal` sends no new prompt
+between turns, so `unattended.max_blocks` is in effect a budget for the whole run. rulecast does
+not read `stop_hook_active`: it is `true` after any hook's block, `/goal`'s included, so rulecast
+counts its own blocks in its session store instead. Two recorded runs are in
+`docs/evidence/2026-10-16-unattended-goal-runs.md` in the rulecast repository.
+
+```yaml
+mode: unattended
+unattended:
+  max_blocks: 6
+  escalate: [python/no-print]
+```
 
 ### Examples
 
