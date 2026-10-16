@@ -7,6 +7,7 @@ import { rule } from "../../helpers/rules"
 const finding = (id: string, text: string, line = 1, severity: "error" | "warning" = "error") => ({
   rule: rule({ id, severity }),
   match: { file: "a.py", line, endLine: line, column: 1, text, captures: {} },
+  id: `${id}:${line}:${text}`,
   status: "new" as const,
 })
 

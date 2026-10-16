@@ -1,9 +1,8 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
+import { disabledCount, disabledText } from "../../core/disabled"
 import { FINDING_ID_VERSION } from "../../core/finding-id"
 import type { Delivery, Finding, Severity } from "../../core/types"
 import { VERSION } from "../../core/version"
-import { disabledCount, disabledText } from "../../core/disabled"
-import type { Delivery, Finding } from "../../core/types"
 import { renderBacklog, summarise } from "./backlog"
 import { EXIT, SCHEMA_VERSION } from "./contract"
 

@@ -1,7 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) has its own document, for loops that draft rules. The terminal and `agent` formats are for people and agents to read, and can change in any release.
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. Also the JSON of [`rulecast stats`](#rulecast-stats). The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) and [`rulecast stats`](#rulecast-stats) have their own documents. The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -209,43 +208,6 @@ A detector that fails on an example is not a `2`: that example fails, with the d
       "against": null
     }
   ]
-## rulecast stats
-
-`rulecast stats --format json` says, per rule, what became of the findings agent hooks reported: whether the agent fixed them, kept being blocked on them, or silenced them. A loop that improves rules reads it to find rules that are noisy and rules that never fire.
-
-```sh
-rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
-```
-
-```json
-{
-  "schemaVersion": 1,
-  "window": {
-    "since": "2026-09-16T12:00:00.000Z",
-    "firstRecord": "2026-10-01T10:00:00.000Z",
-    "lastRecord": "2026-10-05T09:01:00.000Z",
-    "truncated": false
-  },
-  "sessions": 2,
-  "rules": [
-    {
-      "rule": "backend/no-httpexception",
-      "fired": 1,
-      "blocked": 1,
-      "refused": 0,
-      "fixed": 1,
-      "ignored": 0,
-      "suppressed": 0,
-      "open": 0,
-      "repeated": 0,
-      "medianTurnsToFix": 1,
-      "repeatRate": 0,
-      "suppressionRate": 0,
-      "noisy": []
-    }
-  ],
-  "neverFired": ["frontend/no-generated-edits"],
-  "unknownRules": []
 }
 ```
 
@@ -297,6 +259,49 @@ rulecast stats --since 30d --format json    # 30d, 12h or a date; default: every
 | `exceeded` | `rate` is over `maxRate`, and `smallSample` is `false`. This is what fails the rule. |
 | `smallSample` | Under 25 matching files. `--max-rate` is not applied: a share of a handful of files says nothing about the rule. |
 | `files` | Every violating file with its count, worst first. |
+
+## rulecast stats
+
+`rulecast stats --format json` says, per rule, what became of the findings agent hooks reported: whether the agent fixed them, kept being blocked on them, or silenced them. A loop that improves rules reads it to find rules that are noisy and rules that never fire.
+
+```sh
+rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "window": {
+    "since": "2026-09-16T12:00:00.000Z",
+    "firstRecord": "2026-10-01T10:00:00.000Z",
+    "lastRecord": "2026-10-05T09:01:00.000Z",
+    "truncated": false
+  },
+  "sessions": 2,
+  "rules": [
+    {
+      "rule": "backend/no-httpexception",
+      "fired": 1,
+      "blocked": 1,
+      "refused": 0,
+      "fixed": 1,
+      "ignored": 0,
+      "suppressed": 0,
+      "open": 0,
+      "repeated": 0,
+      "medianTurnsToFix": 1,
+      "repeatRate": 0,
+      "suppressionRate": 0,
+      "noisy": []
+    }
+  ],
+  "neverFired": ["frontend/no-generated-edits"],
+  "unknownRules": []
+}
+```
+
+| Key | Meaning |
+|---|---|
 | `schemaVersion` | The version of this shape. It is versioned apart from `run`'s document, with the same policy: adding a field leaves it at `1`, and removing, renaming or changing the meaning of one bumps it. |
 | `window.since` | The `--since` cut-off, or `null` for everything in the log. Only findings first reported at or after it are counted. |
 | `window.firstRecord`, `window.lastRecord` | The oldest and newest record in the log, or `null` when it is empty. |

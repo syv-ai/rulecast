@@ -27,6 +27,7 @@ export interface Diagnostic {
    * exits 2 instead of reporting a run that checked nothing (adapters/cli/contract.ts).
    */
   fatal?: true
+  /**
    * The rules this error keeps from running when it is not one rule's own: a `repos` entry that
    * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
    */
@@ -115,7 +116,6 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     root,
     config,
     rules: [],
-    diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
     mode: options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env),
     diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error", fatal: true }],
   })

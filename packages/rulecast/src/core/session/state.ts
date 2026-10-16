@@ -83,9 +83,6 @@ export interface ContextState {
   warned: Set<string>
 }
 
-/** The agent a session's events belong to when the payload names no subagent. */
-export const MAIN_AGENT = "main"
-
 export function preexistingKey(rule: string, file: string): string {
   return `${rule} ${file}`
 }

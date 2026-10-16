@@ -16,6 +16,8 @@ export const SCHEMA_VERSION = 1
  * document has nothing in common with the run report, and one changing must not bump the other.
  */
 export const TEST_SCHEMA_VERSION = 1
+
+/**
  * `schemaVersion` of `rulecast stats --format json`: a different document from `run`'s, so its
  * own version, with the same policy.
  */

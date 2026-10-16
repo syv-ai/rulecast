@@ -22,7 +22,6 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
 import { FINDING_ID_VERSION } from "../core/finding-id"
-import { allFiles } from "../core/git"
 import { allFiles, isShallow, mergeBase } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
@@ -276,6 +275,8 @@ async function baselineReport(root: string, now = new Date()): Promise<{ level: 
     level: "ok",
     text: `${BASELINE_FILE} — ${plural(size.entries, "finding")}, ${plural(size.rules, "rule")}, ${plural(size.files, "file")}; ${when}`,
   }
+}
+
 interface CheckLine {
   level: Level
   what: string

@@ -519,10 +519,10 @@ describe("rulecast run: rules that did not run", () => {
     message: "{{file}}:{{line}} bad.",
   }
 
-  test("a detector whose tool is missing says incomplete, names the rule in json, and exits 2", async () => {
+  test("a detector whose tool is missing says incomplete, names the rule in json, and exits 3", async () => {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
     const terminal = await run(root, "--all-files")
-    expect(terminal.code).toBe(2)
+    expect(terminal.code).toBe(3)
     expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
     expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)")
     const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
@@ -536,7 +536,7 @@ describe("rulecast run: rules that did not run", () => {
       "a.py": "x = 1\n",
     })
     const result = await run(root, "--all-files", "--format", "json")
-    expect(result.code).toBe(2)
+    expect(result.code).toBe(3)
     expect(JSON.parse(result.stdout).disabled).toEqual([
       { reason: expect.stringContaining(`${missing}@v1.0.0: fetch failed`), rules: ["a", "b"] },
     ])

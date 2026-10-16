@@ -16,8 +16,8 @@ import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
-import { findingIds } from "./finding-id"
 import { type DisabledGroup, disabledRules } from "./disabled"
+import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
@@ -66,6 +66,7 @@ export interface PipelineOptions {
   committedBaseline?: CommittedBaseline
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
+  /**
    * Say which configured rules did not run (Delivery.disabled), whatever the mode: `rulecast run`.
    * An agent's stop says it only in unattended mode, where nobody reads the warning given once (#29).
    */
