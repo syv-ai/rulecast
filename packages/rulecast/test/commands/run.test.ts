@@ -425,8 +425,9 @@ describe("rulecast run: a scope: removed rule", () => {
       expect.objectContaining({
         rule: "tests/keep-assertions",
         status: "new",
-        line: 3,
-        message: "tests/test_pricing.py:3 removes assertions (1 of 2 removed).",
+        // The deletion is at the end of the file: its last line, not the one after it.
+        line: 2,
+        message: "tests/test_pricing.py:2 removes assertions (1 of 2 removed).",
       }),
     ])
 

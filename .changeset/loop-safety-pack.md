@@ -15,6 +15,8 @@ Only what the change adds is flagged, never what was already there; the deleted-
 
 Three rule-format changes come with it:
 
-- `scope: removed`: a match is something the code should keep, and the finding is a file with fewer matches than at its baseline: the session's, `run --from-ref`'s merge base, or `HEAD` in a staged run. It needs a `regex` or `ast-grep` detector and reports nothing without a baseline (`run --all-files`).
+- `scope: removed`: a match is something the code should keep, and the finding is a file with fewer matches than at its baseline: the session's, `run --from-ref`'s merge base, or `HEAD` in a staged run. It is judged when the agent stops, not after each edit, so an assertion moved over two edits is not reported. It needs a `regex` or `ast-grep` detector and reports nothing without a baseline (`run --all-files`). `rulecast test --against` does not count a removed rule, since its matches are not violations.
 - `escalate: true` on a rule makes it an error in unattended mode, the same as listing it in `unattended.escalate`. Set `escalate: false` on a catalog rule's entry to turn that off.
 - A rule's `minimum_rulecast_version` is now checked before the rest of the rule. A rule that uses a key added in a newer rulecast now says to upgrade, instead of failing on the key it does not know.
+
+Fixed: a file the agent changed with its shell and then read kept the read as its baseline, so the change was no longer new at the stop, and a deleted assertion was no longer counted. A read now never replaces the baseline of a file the session already changed.

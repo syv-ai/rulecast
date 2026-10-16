@@ -135,34 +135,42 @@ baseline:
     ast-grep:
       language: python
       rule: { kind: assert_statement }
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back."
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back, or, if you combined them on purpose, keep that and say so in your report."
 ```
 
-There is one finding per file, always new. It sits on the first line the change touched, and
-`{{text}}` says how many went, for example `2 of 5 removed`. A match by itself is never a finding,
-and adding, moving or rewriting matches is nothing as long as the count does not drop. Matches on a
+There is one finding per file, always new. It sits on the first line the change touched (the
+file's last line, for a deletion at its end), and `{{text}}` says how many went, for example
+`2 of 5 removed`. A match by itself is never a finding, and adding, moving or rewriting matches is
+nothing as long as the count does not drop. The count is compared when the agent stops and in
+`rulecast run`, not after each edit: an edit may cut an assertion that the next edit pastes
+somewhere else. Matches on a
 line with a `rulecast-ignore` still count, and the finding is not on a matched line, so an ignore
 comment does not silence it; use `enabled: false` or `exclude`.
 
 What it needs:
 
 - **A baseline.** In an agent session that is the file as the agent first read it, or the session's
-  start commit; the count at the start commit is taken at the stop, so a file changed with the
-  shell and never read is reported at the stop rather than at the edit. `rulecast run --from-ref`
+  start commit. A file the agent changed before it read it, with its shell, keeps the start commit
+  as its baseline: the read comes after the change. `rulecast run --from-ref`
   counts against the merge base, and a staged run against `HEAD`. `rulecast run --files` and
   `--all-files` have no baseline, and a removed rule reports nothing there.
 - **A detector that reads the content it is handed and reports each match in it:** `regex` or
   `ast-grep`. Not `path`, whose match is the whole file, and not a linter, command or `llm`.
 - **`edit` among its stages,** which is the default for both. A session's baseline is taken when the
   agent opens a file, by the edit-stage rules. It cannot be combined with `refuse_write`.
-- **A file that still exists.** A deleted file has nothing to count and is not reported.
+- **A file that still exists.** A deleted file has nothing to count and is not reported. Nor is a
+  renamed one (`git mv`): it is a deleted file and a new one, and the new path has no baseline.
 
 It counts, so it cannot tell which match went: deleting one assertion and adding an unrelated one
-leaves the count where it was. A file over `max_file_bytes` is not counted. Only projects with a
+leaves the count where it was. Nor can it tell a deletion from a consolidation: three asserts
+folded into one parametrized test, or several `expect`s into one `toEqual`, lower the count and are
+reported. Say so in the rule's message, so the agent keeps a deliberate consolidation and mentions
+it in its report rather than undoing it. A file over `max_file_bytes` is not counted. Only projects with a
 removed or container rule pay for the baseline measurement.
 
 `examples` on a removed rule show what it counts: a `bad` example has at least one match, which
-deleting would report, and a `good` one has none.
+deleting would report, and a `good` one has none. `rulecast test --against` does not count a
+removed rule: its matches are what a file keeps, not violations.
 
 ### Turning a rule or a finding off
 

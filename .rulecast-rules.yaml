@@ -199,14 +199,11 @@
       rule:
         any:
           - kind: assert_statement
-          - pattern: $OBJ.$ASSERT($$$)
-          - pattern: pytest.$RAISES($$$)
-      constraints:
-        ASSERT:
-          regex: ^assert
-        RAISES:
-          regex: ^(raises|warns|deprecated_call|fail)$
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+          - kind: call
+            has:
+              field: function
+              regex: \.\s*assert(_\w*|[A-Z]\w*)?$|^pytest\s*\.\s*(raises|warns|deprecated_call|fail)$
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@packages/rules-loop-safety/loop-safety.md#deleted-assertions"
     - "@packages/rules-loop-safety/loop-safety.md#when-a-test-is-wrong"
@@ -244,15 +241,11 @@
     ast-grep:
       language: typescript
       rule:
-        any:
-          - pattern: expect($$$)
-          - pattern: expect.$SOFT($$$)
-          - pattern: assert($$$)
-          - pattern: assert.$METHOD($$$)
-      constraints:
-        SOFT:
-          regex: ^(soft|poll)$
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+        kind: call_expression
+        has:
+          field: function
+          regex: ^(expect(\s*\.\s*(soft|poll))?|assert(\s*\.\s*\w+)?)$
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@packages/rules-loop-safety/loop-safety.md#deleted-assertions"
     - "@packages/rules-loop-safety/loop-safety.md#when-a-test-is-wrong"
@@ -287,15 +280,11 @@
     ast-grep:
       language: tsx
       rule:
-        any:
-          - pattern: expect($$$)
-          - pattern: expect.$SOFT($$$)
-          - pattern: assert($$$)
-          - pattern: assert.$METHOD($$$)
-      constraints:
-        SOFT:
-          regex: ^(soft|poll)$
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+        kind: call_expression
+        has:
+          field: function
+          regex: ^(expect(\s*\.\s*(soft|poll))?|assert(\s*\.\s*\w+)?)$
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@packages/rules-loop-safety/loop-safety.md#deleted-assertions"
     - "@packages/rules-loop-safety/loop-safety.md#when-a-test-is-wrong"
@@ -356,13 +345,13 @@
           console.log(total(lines))
 - id: loop-safety/no-config-suppressions-python
   name: No weakened Python checker configuration
-  description: "For agents that run unattended: flags a new mypy ignore_missing_imports, ignore_errors, disable_error_code or follow_imports = skip, a loosened mypy flag, a ruff or flake8 ignore or per-file-ignores entry, a lowered pyright typeCheckingMode or report setting, and pytest --deselect, -k, --ignore or -p no: in Python tool configuration. Silencing the checker in its config is the same shortcut as a noqa on the line."
-  files: (^|/)(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|\.?mypy\.ini|\.?ruff\.toml|\.flake8|pyrightconfig\.json)$
+  description: "For agents that run unattended: flags a new mypy ignore_missing_imports, ignore_errors, disable_error_code or follow_imports = skip, a loosened mypy flag, a ruff or flake8 ignore or per-file-ignores entry, a pylint disable list, a lowered pyright typeCheckingMode or report setting, and pytest --deselect, -k, --ignore or -p no: for a checking plugin in Python tool configuration. Silencing the checker in its config is the same shortcut as a noqa on the line."
+  files: (^|/)(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|\.?mypy\.ini|\.?ruff\.toml|\.flake8|pyrightconfig\.json|\.?pylintrc)$
   severity: warning
   escalate: true
   detect:
     regex:
-      pattern: "\\b(ignore_missing_imports|ignore_errors|allow_\\w+|implicit_\\w+)\\s*=\\s*(true|True|1)\\b|\\b(disallow_\\w+|check_untyped_defs|strict\\w*|warn_\\w+)\\s*=\\s*(false|False|0)\\b|\\bfollow_imports\\s*=\\s*[\"']?(skip|silent)\\b|\\b(disable_error_code|(extend[-_])?ignore|(extend[-_])?per[-_]file[-_]ignores)\\s*=\\s*(\\[[^\\]]*\\]|[^\\n]*(\\n[ \\t]+[^\\s=][^\\n=]*)*)|^\\[[^\\]\\n]*per-file-ignores\\](\\n(?!\\s*\\[)[^\\n]*)*|\"?\\btypeCheckingMode\"?\\s*[:=]\\s*[\"']?(off|basic|standard)\\b|\"?\\breport[A-Z]\\w*\"?\\s*[:=]\\s*[\"']?(false|none|warning|information)\\b|--deselect\\b|--ignore(-glob)?[= ]|(^|[\\s\"'\\[,])-k[= ]|-p\\s*no:"
+      pattern: (?<!#[^\n]*)(?<!^[ \t]*;[^\n]*)(?:\b(ignore_missing_imports|allow_untyped_globals|allow_redefinition(_new)?|implicit_optional|implicit_reexport)\s*=\s*(true|True|1)\b|\bignore_errors\s*=\s*(true|True|1)\b(?<=^\[\[?(tool\.)?mypy\b[^\]\n]*\]\]?[^\n]*(\n(?![ \t]*\[)[^\n]*)*\n[ \t]*ignore_errors\s*=\s*(true|True|1))|\b(disallow_\w+|check_untyped_defs|strict\w*|warn_\w+)\s*=\s*(false|False|0)\b|\bfollow_imports\s*=\s*["']?(skip|silent)\b|\b(disable_error_code|disable|(extend[-_])?ignore|(extend[-_])?per[-_]file[-_]ignores)\s*=\s*(\[[^\]]*\]|[^\n]*(\n[ \t]+[^\s=][^\n=]*)*)|^\[[^\]\n]*per-file-ignores\](\n(?!\s*\[)[^\n]*)*|"?\btypeCheckingMode"?\s*[:=]\s*["']?(off|basic|standard)\b|"?\breport[A-Z]\w*"?\s*[:=]\s*["']?(false|none|warning|information)\b|--deselect\b|--ignore(-glob)?[= ]|(^|[\s"'\[,])-k[= ]|-p\s*no:(warnings|doctest|cov|randomly|timeout|mypy|ruff|flake8|pylint|typeguard|beartype)\b)
       flags: m
   message: "{{file}}:{{line}} weakens a checker in its configuration ({{text}}). Fix what the checker or the test reports instead. If you believe the setting is right, or the task asked for it, keep it and say in your report what it was and what it is now."
   context:
@@ -378,6 +367,21 @@
 
           [tool.ruff.lint]
           select = ["E", "F", "B"]
+      - path: pyproject.toml
+        code: |
+          [tool.bumpversion]
+          allow_dirty = true
+
+          [tool.semantic_release]
+          allow_zero_version = true
+
+          [tool.coverage.report]
+          ignore_errors = true
+      - path: pytest.ini
+        code: |
+          [pytest]
+          # Select with -k, or leave a test out with --deselect, on the command line only.
+          addopts = -q -p no:cacheprovider
     bad:
       - path: pyproject.toml
         code: |
@@ -401,6 +405,14 @@
       - path: pyrightconfig.json
         code: |
           { "typeCheckingMode": "basic" }
+      - path: setup.cfg
+        code: |
+          [mypy-legacyrates.*]
+          ignore_errors = True
+      - path: pyproject.toml
+        code: |
+          [tool.pylint."messages control"]
+          disable = ["missing-docstring"]
 - id: loop-safety/no-config-suppressions-js
   name: No weakened JavaScript and TypeScript checker configuration
   description: "For agents that run unattended: flags an ESLint or Biome rule set to off (or ESLint's 0), Biome's linter or recommended set switched off, and a tsconfig strictness flag (strict, noImplicitAny and the other no* checks) set to false. Silencing the checker in its config is the same shortcut as an eslint-disable on the line."
@@ -409,7 +421,8 @@
   escalate: true
   detect:
     regex:
-      pattern: "[\"']?[@\\w/-]+[\"']?\\s*:\\s*\\[?\\s*([\"']off[\"']|off\\b)|[\"']?[@\\w]*[-/][@\\w/-]*[\"']?\\s*:\\s*\\[?\\s*0\\b|\"(strict\\w*|noImplicit\\w+|noUnused\\w+|noUnchecked\\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|useUnknownInCatchVariables|alwaysStrict|recommended|enabled)\"\\s*:\\s*false\\b"
+      pattern: (?<!^[ \t]*(//|#|/?\*)[^\n]*)(?:["']?(?<![\w@/.-])(@?[\w.-]*[-/][\w/.-]*|(no|use)[A-Z]\w*|eqeqeq|curly|camelcase|complexity|radix|semi|quotes|indent|yoda|strict)["']?\s*:\s*\[?\s*(["']off["']|off\b|0\b)|"(strict\w*|noImplicit\w+|noUnused\w+|noUnchecked\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|useUnknownInCatchVariables|alwaysStrict|recommended)"\s*:\s*false\b|"enabled"\s*:\s*false\b(?<="linter"\s*:\s*\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*"enabled"\s*:\s*false))
+      flags: m
   message: "{{file}}:{{line}} weakens a checker in its configuration ({{text}}). Fix what the checker reports instead. If you believe the setting is right, or the task asked for it, keep it and say in your report what it was and what it is now."
   context:
     - "@packages/rules-loop-safety/loop-safety.md#checker-configuration"
@@ -422,6 +435,24 @@
       - path: eslint.config.js
         code: |
           export default [{ rules: { "no-console": "error", eqeqeq: ["error", "always"] } }]
+      - path: biome.json
+        code: |
+          {
+            "vcs": { "enabled": false },
+            "formatter": { "enabled": false },
+            "assist": { "actions": { "source": { "organizeImports": "off" } } }
+          }
+      - path: package.json
+        code: |
+          { "name": "shop", "renovate": { "enabled": false } }
+      - path: eslint.config.js
+        code: |
+          export default [{
+            rules: {
+              // "no-console": "off",
+              "no-console": "error",
+            },
+          }]
     bad:
       - path: tsconfig.json
         code: |
@@ -439,6 +470,9 @@
       - path: biome.json
         code: |
           { "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } } }
+      - path: biome.json
+        code: |
+          { "linter": { "include": ["src"], "enabled": false } }
 - id: loop-safety/no-lowered-thresholds
   name: No changed coverage or failure thresholds
   description: "For agents that run unattended: flags an edit to a coverage threshold (fail_under, --cov-fail-under, coverageThreshold, thresholds, c8 and nyc --lines, codecov target and threshold) or to --max-warnings. Lowering the bar is how a loop makes a coverage or lint gate pass."

@@ -51,22 +51,22 @@ const summary = (findings: { rule: string; line: number; message: string; status
   findings.map(({ rule, line, message, status }) => ({ rule, line, message, status }))
 
 describe("pipeline: removed scope", () => {
-  test("removing an assert in a session is one finding at the edit and at the stop, on the first changed line", async () => {
+  test("removing an assert in a session is one finding at the stop, on the first changed line, and none at the edit", async () => {
     const { send, write } = await scenario()
     await send({ kind: "touch", files: [TEST], completeRead: true })
     await write(BEFORE.replace("    assert total([]) == 0\n", ""))
 
-    const expected = [
+    // The edit may be the first half of a move: the count is judged when the agent stops.
+    expect((await send({ kind: "edit", files: [TEST] })).findings).toEqual([])
+    const stop = await send({ kind: "verify", files: [] })
+    expect(summary(stop.findings)).toEqual([
       {
         rule: "tests/keep-assertions",
         line: 3,
         message: "tests/test_pricing.py:3 removes assertions (1 of 3 removed).",
         status: "new",
       },
-    ]
-    expect(summary((await send({ kind: "edit", files: [TEST] })).findings)).toEqual(expected)
-    const stop = await send({ kind: "verify", files: [] })
-    expect(summary(stop.findings)).toEqual(expected)
+    ])
     // A warning: attended, it does not hold the stop.
     expect(stop.stop).toBe("allow")
   })
@@ -87,6 +87,31 @@ describe("pipeline: removed scope", () => {
     const delivery = await send({ kind: "verify", files: [] })
     expect(delivery.findings).toEqual([])
     expect(delivery.preexistingSummary).toEqual([])
+  })
+
+  test("moving an assert over two edits is nothing: cut at the first, pasted at the second", async () => {
+    const { send, write } = await scenario()
+    await send({ kind: "touch", files: [TEST], completeRead: true })
+    await write(BEFORE.replace("    assert total([]) == 0\n", ""))
+    expect((await send({ kind: "edit", files: [TEST] })).findings).toEqual([])
+    await write(`${BEFORE.replace("    assert total([]) == 0\n", "")}\ndef test_empty():\n    assert total([]) == 0\n`)
+    expect((await send({ kind: "edit", files: [TEST] })).findings).toEqual([])
+    expect((await send({ kind: "verify", files: [] })).findings).toEqual([])
+  })
+
+  test("a deletion at the end of the file is reported on its last line, not past it", async () => {
+    const { send, write } = await scenario()
+    await send({ kind: "touch", files: [TEST], completeRead: true })
+    await write(BEFORE.replace("    assert discount(100, 15) == 85\n", ""))
+    await send({ kind: "edit", files: [TEST] })
+    expect(summary((await send({ kind: "verify", files: [] })).findings)).toEqual([
+      {
+        rule: "tests/keep-assertions",
+        line: 5,
+        message: "tests/test_pricing.py:5 removes assertions (1 of 3 removed).",
+        status: "new",
+      },
+    ])
   })
 
   test("removing every assert from a file still counts: the file has no match left to report on", async () => {
@@ -110,6 +135,23 @@ describe("pipeline: removed scope", () => {
     // count against; the stop reads the file at the start commit and counts there.
     await write(BEFORE.replace("    assert discount(100, 15) == 85\n", "    pass\n"))
     expect((await send({ kind: "edit", files: [TEST] })).findings).toEqual([])
+    expect(summary((await send({ kind: "verify", files: [] })).findings)).toEqual([
+      {
+        rule: "tests/keep-assertions",
+        line: 6,
+        message: "tests/test_pricing.py:6 removes assertions (1 of 3 removed).",
+        status: "new",
+      },
+    ])
+  })
+
+  test("a Read after a shell deletion does not make the deletion the baseline", async () => {
+    const { send, write } = await scenario()
+    await send({ kind: "start", files: [] })
+    await send({ kind: "shell-before", files: [], toolUseId: "toolu_1" })
+    await write(BEFORE.replace("    assert discount(100, 15) == 85\n", "    pass\n"))
+    await send({ kind: "shell-after", files: [], toolUseId: "toolu_1" })
+    await send({ kind: "touch", files: [TEST], completeRead: true })
     expect(summary((await send({ kind: "verify", files: [] })).findings)).toEqual([
       {
         rule: "tests/keep-assertions",
@@ -150,10 +192,46 @@ describe("pipeline: removed scope", () => {
     expect((await send({ kind: "verify", files: [] })).findings).toEqual([])
   })
 
-  test("a project with no removed rule takes no measurement for it", async () => {
-    const { root, send } = await scenario(BEFORE, [keepAssertions("instance")])
+  test("a removed rule's count is measured at touch; a project without one takes no measurement", async () => {
+    const store = async (root: string) =>
+      readFile(path.join(sessionDir(stateDirFor(root), "s1"), "baseline.jsonl"), "utf8")
+    const counted = await scenario()
+    await counted.send({ kind: "touch", files: [TEST], completeRead: true })
+    expect(await store(counted.root)).toContain("fingerprint")
+
+    const plain = await scenario(BEFORE, [keepAssertions("instance")])
+    await plain.send({ kind: "touch", files: [TEST], completeRead: true })
+    expect(await store(plain.root)).not.toContain("fingerprint")
+  })
+
+  const IGNORE = "  # rulecast-ignore: tests/keep-assertions the value is checked elsewhere"
+
+  test("an ignore comment added on an assert is not its removal", async () => {
+    const { send, write } = await scenario()
     await send({ kind: "touch", files: [TEST], completeRead: true })
-    const store = await readFile(path.join(sessionDir(stateDirFor(root), "s1"), "baseline.jsonl"), "utf8")
-    expect(store).not.toContain("fingerprint")
+    await write(BEFORE.replace("assert total([]) == 0", `assert total([]) == 0${IGNORE}`))
+    await send({ kind: "edit", files: [TEST] })
+    expect((await send({ kind: "verify", files: [] })).findings).toEqual([])
+  })
+
+  test("an assert already ignored at the baseline is counted there too", async () => {
+    const { send, write } = await scenario(BEFORE.replace("assert total([]) == 0", `assert total([]) == 0${IGNORE}`))
+    await send({ kind: "touch", files: [TEST], completeRead: true })
+    // Another assert goes: one of three, not one of two.
+    await write(
+      BEFORE.replace("assert total([]) == 0", `assert total([]) == 0${IGNORE}`).replace(
+        "    assert total([1, 2]) == 3\n",
+        "",
+      ),
+    )
+    await send({ kind: "edit", files: [TEST] })
+    expect(summary((await send({ kind: "verify", files: [] })).findings)).toEqual([
+      {
+        rule: "tests/keep-assertions",
+        line: 2,
+        message: "tests/test_pricing.py:2 removes assertions (1 of 3 removed).",
+        status: "new",
+      },
+    ])
   })
 })

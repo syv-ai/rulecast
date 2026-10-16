@@ -19,14 +19,16 @@ A failing test is information about the code. Skipping it, or marking it as expe
 
 Flagged: a test file (the same files as for skipped tests) with fewer assertions than it had before the change.
 
-- Python: `assert` statements, `self.assert*()` and any other `.assert*()` call (unittest, and mock's `assert_called_once_with()`), and `pytest.raises`, `pytest.warns`, `pytest.deprecated_call` and `pytest.fail`.
-- JavaScript and TypeScript: `expect()` (and `expect.soft()` and `expect.poll()`), `assert()` and `assert.*()`.
+- Python: `assert` statements, method calls named `assert`, `assert_*` or `assert` and a capital letter (unittest's `self.assertEqual()`, mock's `assert_called_once_with()`, but not `assertions()`), and `pytest.raises`, `pytest.warns`, `pytest.deprecated_call` and `pytest.fail`.
+- JavaScript and TypeScript: `expect()` (also with a type argument, `expect<T>()`, and `expect.soft()` and `expect.poll()`), `assert()` and `assert.*()`.
 
-The finding is one per file, on the first line the change touched, and says how many assertions went: `1 of 3 removed`. A commented-out assertion counts as removed. Adding, moving or rewriting assertions is not flagged as long as the count does not drop.
+The finding is one per file, on the first line the change touched, and says how many assertions went: `1 of 3 removed`. A commented-out assertion counts as removed. Adding, moving or rewriting assertions is not flagged as long as the count does not drop. The count is compared when the agent stops, not after each edit, so an assertion cut in one edit and pasted in the next is not flagged.
+
+Combining assertions lowers the count too: three asserts folded into one parametrized test, or several `expect`s into one `toEqual`, are flagged. If that is what you meant to do, keep it and say so in your report.
 
 Deleting the assertion that fails makes the test pass and checks nothing. If an assertion is wrong, leave it and report it (below).
 
-The count needs something to compare with. In an agent session that is the file as the agent found it. With `rulecast run --from-ref`, it is the merge base; in a staged run (the pre-commit hook), it is `HEAD`. `rulecast run --files` and `--all-files` have no baseline, so these rules report nothing there.
+The count needs something to compare with. In an agent session that is the file as the agent found it, even when the agent first changed it with its shell and only then read it. With `rulecast run --from-ref`, it is the merge base; in a staged run (the pre-commit hook), it is `HEAD`. `rulecast run --files` and `--all-files` have no baseline, so these rules report nothing there.
 
 ## Checker suppressions
 
@@ -43,15 +45,18 @@ Fix what the checker reports. A suppression the code really needs is the develop
 
 Flagged: an edited line in a checker's configuration that turns a check off or loosens it.
 
-- mypy (`pyproject.toml`, `setup.cfg`, `mypy.ini`, `.mypy.ini`): `ignore_missing_imports` and `ignore_errors` set to true, `disable_error_code`, `follow_imports = skip` or `silent`, an `allow_*` or `implicit_*` flag set to true, and a `disallow_*`, `warn_*`, `strict*` or `check_untyped_defs` flag set to false. Per module (`[[tool.mypy.overrides]]`, `[mypy-module.*]`) too.
+- mypy (`pyproject.toml`, `setup.cfg`, `mypy.ini`, `.mypy.ini`): `ignore_missing_imports` set to true, `ignore_errors` set to true under a mypy section, `disable_error_code`, `follow_imports = skip` or `silent`, `allow_untyped_globals`, `allow_redefinition`, `implicit_optional` or `implicit_reexport` set to true, and a `disallow_*`, `warn_*`, `strict*` or `check_untyped_defs` flag set to false. Per module (`[[tool.mypy.overrides]]`, `[mypy-module.*]`) too.
 - ruff and flake8 (`pyproject.toml`, `ruff.toml`, `.ruff.toml`, `setup.cfg`, `tox.ini`, `.flake8`): `ignore`, `extend-ignore` and `per-file-ignores`, including an entry added inside an existing list or table.
+- pylint (`pyproject.toml`, `setup.cfg`, `.pylintrc`, `pylintrc`): `disable`, including an entry added inside an existing list.
 - pyright (`pyproject.toml`, `pyrightconfig.json`): `typeCheckingMode` set to `off`, `basic` or `standard`, and a `report*` setting set to `false`, `none`, `warning` or `information`.
-- pytest (`pyproject.toml`, `setup.cfg`, `tox.ini`, `pytest.ini`): `--deselect`, `-k`, `--ignore` and `--ignore-glob`, and `-p no:` to switch a plugin off.
-- ESLint (`.eslintrc*`, `eslint.config.*`, `package.json`): a rule set to `"off"`, or to `0` when its name has a `-` or a `/` in it.
-- Biome (`biome.json`, `biome.jsonc`): a rule set to `"off"`, and `"recommended": false` or `"enabled": false`.
+- pytest (`pyproject.toml`, `setup.cfg`, `tox.ini`, `pytest.ini`): `--deselect`, `-k`, `--ignore` and `--ignore-glob`, and `-p no:` for a plugin that checks something: `warnings`, `doctest`, `cov`, `randomly`, `timeout`, `mypy`, `ruff`, `flake8`, `pylint`, `typeguard` and `beartype`. Other plugins, such as `-p no:cacheprovider`, are not flagged.
+- ESLint (`.eslintrc*`, `eslint.config.*`, `package.json`): a rule set to `"off"` or `0`. A rule is a key with a `-` or a `/` in it, or one of the core rules `eqeqeq`, `curly`, `camelcase`, `complexity`, `radix`, `semi`, `quotes`, `indent`, `yoda` and `strict`.
+- Biome (`biome.json`, `biome.jsonc`): a rule (`no*` or `use*`) set to `"off"`, `"recommended": false`, and `"enabled": false` inside `"linter"`. `"enabled": false` elsewhere, such as under `"vcs"` or `"formatter"`, is not flagged.
 - TypeScript (`tsconfig*.json`, `jsconfig.json`): `strict`, `noImplicitAny` and the other `strict*`, `noImplicit*`, `noUnused*` and `noUnchecked*` checks set to `false`.
 
 This is the `noqa` moved out of the code and into the config: the checker stops reporting the problem, and the problem is still there. A `[[tool.mypy.overrides]] ignore_missing_imports = true` for one module is what a real agent wrote when `mypy --strict` stood between it and a green run.
+
+A commented-out line is not flagged: `#` and `;` comments in Python configuration, and lines starting with `//`, `#` or `*` in JavaScript configuration.
 
 `"skipLibCheck": true` is not flagged. It skips checking `.d.ts` files of dependencies, is in nearly every project template, and does not hide errors in the project's own code.
 
@@ -101,11 +106,11 @@ These rules are about who makes the change, not about the change itself. A devel
 
 ## Not covered
 
-- **Deleted test files.** A file that is gone has no content to count. Deleting a whole test file is not flagged.
+- **Deleted and renamed test files.** A file that is gone has no content to count. Deleting a whole test file is not flagged, and nor is renaming one (`git mv`) and deleting assertions in it: the new path has no baseline.
 - **Assertions removed and replaced.** The rule counts, so deleting one assertion and adding an unrelated one leaves the count where it was.
 - **Changed expected values and trivial assertions**, such as `== 3` becoming `== 4`, or `assert True`.
 - **Assertions outside the listed forms**, such as chai's `should`, node:test's `t.equal()` or a project's own assertion helpers.
-- **Other weakening in config**: an ESLint rule turned from `"error"` to `"warn"`, an ESLint rule written as `0` under a name without `-` or `/` (`eqeqeq: 0`), `exclude` and `extend-exclude` lists that take files away from a checker, `ignorePatterns` and `.eslintignore`, and coverage `omit` lists.
+- **Other weakening in config**: an ESLint rule turned from `"error"` to `"warn"`, an ESLint core rule turned off whose name has no `-` or `/` and is not one of those listed above, `exclude` and `extend-exclude` lists that take files away from a checker, `ignorePatterns` and `.eslintignore`, and coverage `omit` lists.
 - **Markers inside strings.** `"# noqa"` in a string literal is flagged. Only lines the change touched are checked, which keeps this rare.
 - **Aliased skips**, such as `from unittest import skip` followed by a bare `@skip`.
 - **Skips written as options or on the test context**: node:test's `test('x', { skip: true })` and `{ todo: true }`, and `t.skip()` or `t.todo()` inside a test. Also Vitest's `ctx.skip()`.

@@ -342,7 +342,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -391,8 +394,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
+      (selection) =>
+        !skip.has(selection.rule.detector.kind) &&
+        (options.onlyRules?.has(selection.rule.id) ?? true) &&
+        (event.kind === "verify" || selection.rule.scope !== "removed"),
     )
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
@@ -436,7 +444,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     )
 
     // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
-    const removed = removedFindings(selections, detected, baselineChanges, fingerprints)
+    const removed = await removedFindings(selections, detected, baselineChanges, fingerprints, read)
     const output = removed.output
     const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
       classify(match, rule.scope, rule.id, baselineChanges, fingerprints)

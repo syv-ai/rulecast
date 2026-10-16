@@ -261,4 +261,16 @@ describe("rulecast test --against", () => {
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("no files under app/other match backend/no-httpexception")
   })
+
+  test("a removed rule is not counted: its matches are what a file keeps, and there is no baseline", async () => {
+    const keep = { ...httpException({ id: "backend/keep-raises", scope: "removed" }), examples: undefined }
+    const root = await project([httpException(), keep], files)
+    const one = await runTest(root, "backend/keep-raises", "--against", "app")
+    expect(one.code).toBe(0)
+    expect(one.stdout).toContain("backend/keep-raises is a removed rule")
+    expect(one.stdout).not.toContain("violation")
+    const all = await runTest(root, "--against", "app")
+    expect(all.stdout).not.toMatch(/backend\/keep-raises +\d/)
+    expect(all.stdout).toContain("not counted: backend/keep-raises (a removed rule")
+  })
 })

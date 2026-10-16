@@ -23,15 +23,17 @@ export interface Removed {
  * way, since its zero is not a count. Matches silenced by a `rulecast-ignore` still count, as they
  * did at the baseline.
  *
- * The finding sits on the first changed line (line 1 when nothing changed, which a count drop
- * without a changed line cannot be). Its `text` says how many went: `2 of 5 removed`.
+ * The finding sits on the first changed line, or the file's last line when that is a deletion at
+ * its end (line 1 when nothing changed, which a count drop without a changed line cannot be). Its `text` says how many went: `2 of 5 removed`.
  */
-export function removedFindings(
+export async function removedFindings(
   selections: readonly Selection[],
   output: DetectionOutput,
   changes: BaselineChanges,
   fingerprints: Fingerprints,
-): Removed {
+  /** The file's content now, as the detectors read it: only to clamp the finding's line. */
+  read: (file: string) => Promise<string | null>,
+): Promise<Removed> {
   const counting = selections.filter((selection) => selection.rule.scope === "removed")
   if (counting.length === 0) return { findings: [], output }
 
@@ -56,7 +58,8 @@ export function removedFindings(
       if (change === undefined || before === undefined) continue
       const after = now.get(key(file, rule.id)) ?? 0
       if (after >= before) continue
-      const line = change.changedLines[0]?.[0] ?? 1
+      // A deletion at the end of the file is marked on the line after the last one: clamped.
+      const line = Math.min(change.changedLines[0]?.[0] ?? 1, await lastLine(read, file))
       findings.push({
         rule,
         match: {
@@ -78,4 +81,13 @@ export function removedFindings(
       ignored: output.ignored.filter(({ rule }) => !ids.has(rule.id)),
     },
   }
+}
+
+/** The file's last line, not counting the empty one after a final newline. At least 1. */
+async function lastLine(read: (file: string) => Promise<string | null>, file: string): Promise<number> {
+  const text = await read(file)
+  if (text === null) return 1
+  const lines = text.split(/\r?\n/)
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop()
+  return Math.max(1, lines.length)
 }
