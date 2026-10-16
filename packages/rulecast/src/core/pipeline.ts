@@ -525,16 +525,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const wanted = (rule: { id: string; detector: { kind: string } }) =>
       !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
-    if (options.reportDisabled === true && disabled.size > 0) {
-      for (const { rule } of selectDetectorRules(project.rules, event.kind, files, new Set())) {
-        if (!disabled.has(rule.id) || !wanted(rule)) continue
-        failed = true
-        warnings.push({
-          key: `disabled:${rule.id}`,
-          text: `${rule.id} did not run: its detector failed earlier in this session (${view.work.disabled.get(rule.id)}), which disabled it for the session.`,
-        })
-      }
-    }
+    // `rulecast run --session`: a rule the session disabled that would have run here did not, which
+    // makes the run incomplete. It is named under `disabled` below, once; one that would not have
+    // run here changes nothing about this run, and is not named.
+    const skippedHere = new Set(
+      options.reportDisabled === true && disabled.size > 0
+        ? selectDetectorRules(project.rules, event.kind, files, new Set())
+            .map(({ rule }) => rule)
+            .filter((rule) => disabled.has(rule.id) && wanted(rule))
+            .map((rule) => rule.id)
+        : [],
+    )
+    if (skippedHere.size > 0) failed = true
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
@@ -662,12 +664,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
     ) {
       const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
-      const earlier = [...view.work.disabled].map(([rule, message]) => ({
-        kind: kinds.get(rule) ?? "detector",
-        rules: [rule],
-        message,
-      }))
-      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` names what kept this run from being complete, and so nothing it did not
+      // count: not another rule's compile error under RULE_ID, nor a disable that would not have run.
+      const scoped = options.reportDisabled === true
+      const earlier = [...view.work.disabled]
+        .filter(([rule]) => !scoped || skippedHere.has(rule))
+        .map(([rule, message]) => ({ kind: kinds.get(rule) ?? "detector", rules: [rule], message }))
+      disabledGroups = disabledRules({
+        diagnostics: scoped ? errors.filter(concernsRun) : errors,
+        detectorErrors: [...output.errors, ...earlier],
+      })
+      // `disabled` and `complete` agree: a run that lists a rule that did not run is incomplete.
+      if (scoped && disabledGroups.length > 0) failed = true
       // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
       // there the warning is the once-per-context word to the user, the list the agent's every stop.
       if (options.reportDisabled === true) {
