@@ -26,7 +26,7 @@ import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
-import type { IgnoredFinding } from "./suppress"
+import { type IgnoredFinding, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface PipelineOptions {
@@ -56,6 +56,12 @@ export interface PipelineOptions {
   committedBaseline?: CommittedBaseline
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
+  /**
+   * `rulecast run --session`: a rule the session disabled after a detector failure, and that would
+   * have run here, is a warning and marks the run failed, so its exit code does not say every rule
+   * ran. A hook leaves this off: it warned when it disabled the rule.
+   */
+  reportDisabled?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
 }
@@ -188,7 +194,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
   const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
   const warnings: Warning[] = compileWarnings(errors)
-  let failed = errors.length > 0
+  // `rulecast run RULE_ID` is incomplete only over what could have changed that rule's result: its
+  // own diagnostics, a failed repos entry that configures it, a config that did not load, or a
+  // diagnostic that names no rule and no entry.
+  const only = options.onlyRules
+  const concernsRun = (diagnostic: Diagnostic) =>
+    only === undefined ||
+    diagnostic.fatal === true ||
+    (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.affects?.some((id) => only.has(id)) ?? true))
+  let failed = errors.some(concernsRun)
   const deadlineMissed: string[] = []
   let session = event.session
     ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
@@ -279,7 +293,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
-  const volatileCaptures = (kind: string) => registry.get(kind)?.volatileCaptures ?? []
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
@@ -415,9 +428,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
-    )
+    const wanted = (rule: { id: string; detector: { kind: string } }) =>
+      !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
+    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
+    if (options.reportDisabled === true && disabled.size > 0) {
+      for (const { rule } of selectDetectorRules(project.rules, event.kind, files, new Set())) {
+        if (!disabled.has(rule.id) || !wanted(rule)) continue
+        failed = true
+        warnings.push({
+          key: `disabled:${rule.id}`,
+          text: `${rule.id} did not run: its detector failed earlier in this session (${view.work.disabled.get(rule.id)}), which disabled it for the session.`,
+        })
+      }
+    }
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
@@ -447,6 +470,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
+    const lines = sourceLines(read)
     const output = await runDetectionFrom(
       {
         detection,
@@ -454,13 +478,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         selections,
         changes,
         read,
+        lines,
         timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
       },
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
+    // From the lines suppression read through `read`, the content detection judged: staged in a
+    // staged run, not the working tree. No file is read again.
+    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
     // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
     const committed =
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined

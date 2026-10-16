@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { expect, test } from "vitest"
 
-import { EXIT_CODES } from "../../src/adapters/cli/contract"
+import { EXIT_CODES, TRY_REPO_EXIT_CODES } from "../../src/adapters/cli/contract"
 import { COMMANDS, commandHelp, usage } from "../../src/commands/help"
 import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
@@ -71,9 +71,12 @@ test("the README's command table lists exactly the commands rulecast has", () =>
 
 test("run --help and try-repo --help print the exit codes", async () => {
   const cwd = await createProject({})
-  for (const command of ["run", "try-repo"]) {
+  for (const [command, codes] of [
+    ["run", EXIT_CODES],
+    ["try-repo", TRY_REPO_EXIT_CODES],
+  ] as const) {
     const result = await runCli(cwd, [command, "--help"])
-    for (const [code, meaning] of EXIT_CODES) expect(result.stdout).toContain(`  ${code}  ${meaning}`)
+    for (const [code, meaning] of codes) expect(result.stdout).toContain(`  ${code}  ${meaning}`)
     expect(result.stdout).toContain("agents/reference/output.md")
   }
 })

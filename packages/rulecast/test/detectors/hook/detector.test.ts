@@ -167,6 +167,8 @@ describe("hook detector: pre-commit hooks", () => {
             ruleId: "trailing-whitespace",
             severity: "error",
           },
+          // Said explicitly, so its id hashes the finding and not the file (core/finding-id.ts).
+          wholeFile: true,
         },
       },
     ])

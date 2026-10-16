@@ -1,4 +1,4 @@
-import { EXIT_CODES } from "../adapters/cli/contract"
+import { EXIT_CODES, TRY_REPO_EXIT_CODES } from "../adapters/cli/contract"
 import { VERSION } from "../core/version"
 
 export interface CommandHelp {
@@ -11,10 +11,10 @@ export interface CommandHelp {
   notes?: string[]
 }
 
-/** `run` and `try-repo` share the contract a loop branches on. */
-const EXIT_NOTES = [
+/** `run` and `try-repo` share the contract a loop branches on; try-repo's 2 also covers its own repo. */
+const exitNotes = (codes: [code: number, meaning: string][]) => [
   "Exit codes:",
-  ...EXIT_CODES.map(([code, meaning]) => `  ${code}  ${meaning}`),
+  ...codes.map(([code, meaning]) => `  ${code}  ${meaning}`),
   "The JSON and SARIF output is documented in agents/reference/output.md.",
 ]
 
@@ -75,7 +75,7 @@ export const COMMANDS: CommandHelp[] = [
     notes: [
       "With --all-files or --files, findings listed in a committed .rulecast/baseline.json are",
       "pre-existing (see rulecast baseline).",
-      ...EXIT_NOTES,
+      ...exitNotes(EXIT_CODES),
     ],
   },
   {
@@ -142,7 +142,7 @@ export const COMMANDS: CommandHelp[] = [
     synopsis: "rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]",
     summary: "Run a rule repo against your project without configuring it",
     flags: [["--ref REV", "The revision of a URL repo (default HEAD)"]],
-    notes: EXIT_NOTES,
+    notes: exitNotes(TRY_REPO_EXIT_CODES),
   },
   {
     name: "clean",

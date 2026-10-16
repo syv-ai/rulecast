@@ -173,7 +173,6 @@ export interface RunInput {
   committedBaseline: boolean
 }
 
-/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
 /** SARIF's rule metadata for the rules that have findings, with the text of the sections they cite. */
 async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>): Promise<RuleMetadata[]> {
   const resolver = createReferenceResolver(project.root)
@@ -226,6 +225,7 @@ function baselineUse(project: CompiledProject, baseline: CommittedBaseline, resu
   }
 }
 
+/** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
 export async function executeRun({ project, ruleId, run, registry, io, committedBaseline }: RunInput): Promise<number> {
   const root = project.root
   // A config file that does not load compiled no rule at all: a report would say "no findings" of
@@ -266,6 +266,7 @@ export async function executeRun({ project, ruleId, run, registry, io, committed
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
     ...(committed === null ? {} : { committedBaseline: committed }),
+    reportDisabled: true,
     // The machine formats report pre-existing findings by id; the others summarise them.
     listPreexisting: run.format === "json" || run.format === "sarif",
   })

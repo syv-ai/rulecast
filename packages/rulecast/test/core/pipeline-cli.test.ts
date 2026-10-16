@@ -96,4 +96,38 @@ describe("pipeline without a session", () => {
     )
     expect(delivery.findings.map((finding) => finding.rule)).toEqual(["frontend/no-generated-edits"])
   })
+
+  test("onlyRules: a rule repo that failed is a failure only when it configures a named rule", async () => {
+    const root = await createFixture()
+    const missing = (ids: string[]) =>
+      writeFile(
+        path.join(root, ".rulecast-config.yaml"),
+        stringify({
+          repos: [
+            { repo: "local", rules: fixtureRules },
+            { repo: "https://example.com/acme/rules", rev: "v1.0.0", rules: ids.map((id) => ({ id })) },
+          ],
+        }),
+      )
+    const only = { onlyRules: new Set(["backend/no-httpexception"]) }
+    await missing(["acme/other"])
+    const unrelated = await pipelineAt(root, { kind: "verify", files: [USERS], cwd: root }, only)
+    expect(unrelated.failed).toBe(false)
+    expect(unrelated.delivery.findings).toHaveLength(1)
+    // Fetched, it would have configured the named rule a second time: the run could have differed.
+    await missing(["backend/no-httpexception"])
+    expect((await pipelineAt(root, { kind: "verify", files: [USERS], cwd: root }, only)).failed).toBe(true)
+  })
+
+  test("onlyRules: a compile error counts only for the named rules", async () => {
+    const root = await createFixture()
+    await writeFile(
+      path.join(root, ".rulecast-config.yaml"),
+      localConfig([...fixtureRules, { id: "broken", name: "Broken", detect: { nope: {} }, message: "m" }]),
+    )
+    const run = (id: string) =>
+      pipelineAt(root, { kind: "verify", files: [USERS], cwd: root }, { onlyRules: new Set([id]) })
+    expect((await run("backend/no-httpexception")).failed).toBe(false)
+    expect((await run("broken")).failed).toBe(true)
+  })
 })
