@@ -60,6 +60,16 @@ Two earlier attempts at sweep 2 failed, and both **changed the page**:
 - `--allowedTools` takes several values, so it swallowed the prompt that followed it: "Input must be provided either through stdin or as a prompt argument". The script now passes the prompt first.
 - The script wrote the batch to a temp directory and told the agent to read it. Under `claude -p` the agent was not allowed to: "Claude requested permissions to read from /var/folders/…/batch.json, but you haven't granted it yet". It ran out of turns. The findings and the doc they cite now go in the prompt. In the same attempt the agent's `Edit` was refused as "a sensitive file", because these scratch repositories sit under `~/.claude/`; the run that worked used `--dangerously-skip-permissions` in place of `--permission-mode acceptEdits`, so **`acceptEdits` with `--allowedTools "Bash(npx rulecast run:*)"` is not verified** on a normal path. The allow-list did refuse the agent's compound commands (`rulecast run …; echo "EXIT=$?"`), and it carried on with single ones.
 
+A review of #45 found five more faults in the script. Each was shown on the script as written, then on the fixed one, in a scratch repository with `npx` wrapping the source CLI, `claude` and `gh` as stubs (the `claude` stub saved its prompt and fixed the bare excepts with `sed`), and a local bare repository as `origin`. Rules: `py/no-print` and `py/no-bare-except` as above, plus a `warning` rule `py/no-todo`. All of them **changed the page**:
+
+| Case | The script as it was | Fixed |
+|---|---|---|
+| 4 `TODO` warnings, 1 `print`, 1 bare `except:` | chose `py/no-todo`; its check exited 0, so no fix and no agent; `git commit` said "nothing to commit", and the script still pushed the branch, ran `gh pr create` and exited 0 | chooses from errors only: `py/no-print`, fixed, pruned, one commit |
+| the same with an untracked `stray.txt` | `git add -A` committed `stray.txt`, the commit's only file | `git add -u`: the fixed files and `.rulecast/baseline.json` (tracked since the baseline commit), not `stray.txt` |
+| two bare excepts, the agent's turn | the prompt named the doc (`docs/conventions.md#errors`) without its text, and each line read `- app/c.py:3 app/c.py:3 has a bare except…` | the prompt holds the section's text from `references[].content`, and each finding once |
+| the per-rule `rulecast run` exiting 3 (simulated by the `npx` wrapper) | the agent was started on an empty list of findings | stops: "rulecast did not check everything" |
+| a pre-commit hook that refuses the commit | pushed and opened the pull request anyway, exit 0 | stops before the push, exit 1 |
+
 ## Babysitting a pull request
 
 A local bare repository as `origin` (inside the scratch directory), and a `feature` branch with one `print`, pushed there.

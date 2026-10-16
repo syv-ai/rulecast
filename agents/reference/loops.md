@@ -2,7 +2,7 @@
 
 An agent loop runs until something tells it to stop. rulecast can be that something: `rulecast run` exits 0 only when every rule ran and nothing new breaks one, and a loop can read an exit code without a model judging a transcript. These recipes use only `rulecast run`, `fix`, `baseline`, `stats`, `test` and `doctor`, with the flags `rulecast <command> --help` lists and the output in [output.md](output.md).
 
-Each recipe was run once, on small scratch repositories, with the commands shown here. What happened, and what was not measured, is in [`docs/evidence/2026-10-16-loop-recipes.md`](../../docs/evidence/2026-10-16-loop-recipes.md).
+Each recipe was run once, on small scratch repositories. What happened, where the runs differed from the commands shown here, and what was not measured, is in [`docs/evidence/2026-10-16-loop-recipes.md`](../../docs/evidence/2026-10-16-loop-recipes.md).
 
 ## Before any loop
 
@@ -51,8 +51,8 @@ case $? in
   *) echo "rulecast did not check everything: see $out/all.json"; exit 1 ;;  # 2 or 3: a person looks
 esac
 
-# This run's batch: the rule with the most new findings.
-rule=$(jq -r '.findings | group_by(.rule) | max_by(length) | .[0].rule' "$out/all.json")
+# This run's batch: the rule with the most new errors. Warnings never fail the check, so they are not swept.
+rule=$(jq -r '[.findings[] | select(.severity == "error")] | group_by(.rule) | max_by(length) | .[0].rule' "$out/all.json")
 git switch -c "rulecast/sweep-$(echo "$rule" | tr / -)-$(date +%Y%m%d)" || exit 1
 
 # Deterministic fixes first, where the rule has one.
@@ -61,30 +61,42 @@ if jq -e --arg r "$rule" 'any(.findings[]; .rule == $r and .fixable == true)' "$
 fi
 
 # An agent takes what is left of this rule.
-if ! npx rulecast run "$rule" --all-files --format json > "$out/batch.json"; then
-  findings=$(jq -r '.findings[] | "- \(.file):\(.line) \(.message)"' "$out/batch.json")
-  docs=$(jq -r '[.references[].ref] | unique | join(", ")' "$out/batch.json")
-  task="Fix these findings of the rulecast rule $rule:
+npx rulecast run "$rule" --all-files --format json > "$out/batch.json"
+case $? in
+  0) ;;                                        # rulecast fix fixed them all
+  1)
+    findings=$(jq -r '.findings[] | "\(.file):\(.line)" as $at
+      | if (.message | startswith($at)) then "- \(.message)" else "- \($at) \(.message)" end' "$out/batch.json")
+    docs=$(jq -r '.references[] | .content // "Read \(.ref)."' "$out/batch.json")
+    task="Fix these findings of the rulecast rule $rule:
 $findings
-They break the convention in $docs: read it first. Change only the files listed. Do not add
-rulecast-ignore comments, and do not edit .rulecast-config.yaml or .rulecast/baseline.json.
-Finish when \`npx rulecast run $rule --all-files\` exits 0, or list the findings you could not fix and why."
-  RULECAST_MODE=unattended claude -p "$task" --max-turns 30 \
-    --permission-mode acceptEdits --allowedTools "Bash(npx rulecast run:*)"
-fi
+
+They break this convention:
+$docs
+
+Change only the files listed. Do not add rulecast-ignore comments, and do not edit
+.rulecast-config.yaml or .rulecast/baseline.json. Finish when \`npx rulecast run $rule --all-files\`
+exits 0, or list the findings you could not fix and why."
+    RULECAST_MODE=unattended claude -p "$task" --max-turns 30 \
+      --permission-mode acceptEdits --allowedTools "Bash(npx rulecast run:*)" ;;
+  *) echo "rulecast did not check everything: see $out/batch.json"; exit 1 ;;
+esac
 
 npx rulecast run "$rule" --all-files || { echo "findings left: the branch is for a person"; exit 1; }
 npx rulecast baseline --prune
-git add -A && git commit -m "fix: $rule findings (rulecast sweep)"
-git push -u origin HEAD
-jq -r --arg r "$rule" '[.findings[] | select(.rule == $r)]
+git add -u && git commit -m "fix: $rule findings (rulecast sweep)" || exit 1
+git push -u origin HEAD || exit 1
+jq -r --arg r "$rule" '[.findings[] | select(.rule == $r and .severity == "error")]
   | "\(length) new findings of \($r):\n" + (map("- \(.file):\(.line)") | join("\n"))' "$out/all.json" |
   gh pr create --draft --title "rulecast sweep: $rule" --body-file -
 ```
 
+Not measured: the agent step with `--permission-mode acceptEdits` and `--allowedTools` on a normal path (the recorded sweep ran the agent with `--dangerously-skip-permissions`, because its scratch repository sat under `~/.claude/`), and `git push` and `gh pr create` against a real remote (they ran against a local bare repository and a stub).
+
 - **One rule per pull request** keeps the review to one doc section and one kind of change.
 - **`rulecast fix`** applies the fixes of `regex` and `ast-grep` rules that have one ([Fixes](rule-format.md#fixes)). It fixes pre-existing findings in the selected files too, so a sweep also burns down that rule's backlog, and `baseline --prune` then drops the entries that are gone, in the same pull request. It never touches a finding with a `rulecast-ignore`, and a fix that leaves the rule matching is undone and listed as `unresolved`. `rulecast fix "$rule" --all-files --dry-run` prints the diff and writes nothing. Its JSON is in [output.md](output.md#rulecast-fix).
-- **The rest goes to an agent.** A finding with no `fixable: true` needs judgment. The findings and the doc they cite go in the agent's prompt, not in a file: a headless agent may not be allowed to read a file outside the project.
+- **The rest goes to an agent.** A finding with no `fixable: true` needs judgment. The findings and the text of the doc sections they cite (`references[].content`) go in the agent's prompt, not in a file: a headless agent may not be allowed to read a file outside the project.
+- **Errors only.** A warning never fails `rulecast run`, so a rule of warnings would leave nothing to fix and nothing to commit. If the commit or the push fails, the script stops before it opens a pull request. `git add -u` stages only files git already tracks: the fixed files and `.rulecast/baseline.json`, not whatever else lies in the checkout.
 - **Drift or backlog.** `findings` holds what is new since the baseline. To burn down the backlog instead, choose from `preexisting`.
 - **A draft pull request is a proposal.** Nothing merges without review.
 
@@ -112,7 +124,7 @@ Not measured: whether each `/loop` iteration counts as a new prompt for the stop
 
 This takes two steps, and only the first runs unattended:
 
-1. **The loop writes a summary.** The findings log is local: agent hooks write it on the machine where they ran, so a cloud routine or a CI job has none. Run this on the developer's machine, from a local cron or `/loop 1w`:
+1. **The loop writes a summary.** The findings log is local: agent hooks write it on the machine where they ran, so a cloud routine or a CI job has none. Run this on the developer's machine, from a local cron job:
 
    ```sh
    npx rulecast stats --since 30d --format json > stats.json
