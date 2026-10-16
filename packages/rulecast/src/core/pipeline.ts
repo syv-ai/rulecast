@@ -273,7 +273,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
-  const volatileCaptures = (kind: string) => registry.get(kind)?.volatileCaptures ?? []
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
@@ -463,7 +462,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     )
 
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
+    // Through `read`, the content detection judged: staged in a staged run, not the working tree.
+    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), read)
     findings = output.findings.map(({ rule, match }, index) => ({
       id: ids[index]!,
       rule,

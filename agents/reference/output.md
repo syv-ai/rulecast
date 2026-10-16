@@ -119,16 +119,18 @@ A loop needs to tell "the same finding as last run" from a new one, across runs,
 
 - the rule id (the alias, when one is set),
 - the file path,
-- the matched text, with runs of whitespace collapsed to one space and the ends trimmed,
+- the source line or lines the match spans, with runs of whitespace collapsed to one space and the ends trimmed, and with a trailing `rulecast-ignore` comment (and the `#`, `//`, `/*` or `<!--` that starts it) left out,
 - the detector's captures, sorted by name (a tool rule's `ruleId` and `message`, a regex's named groups), except captures whose value changes from run to run: an `llm` rule's `reason`,
-- the match's position among identical matches in the file (0 for the first, 1 for the second, …).
+- the finding's position among findings of the same rule in the file whose lines and captures are identical (0 for the first, 1 for the second, …).
 
-The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, and re-indenting the line or checking it out with CRLF line endings does not change it either. These do change it:
+The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, including another violation of the same rule. Re-indenting the line, checking it out with CRLF line endings or adding a `rulecast-ignore` comment to it does not change it either. An id changes when the finding's line changes, which is also when rulecast counts the finding as new:
 
-- Editing the offending text. That is a different violation.
-- Adding an identical violation above it in the same file: the occurrence numbers of the ones below shift.
+- Editing the line, even away from the matched text. The line is different, so it is a different finding.
+- Adding a line identical to it above it in the same file: the occurrence numbers of the ones below shift.
 - Renaming the rule's alias, or moving the file.
 - A tool message that contains a number that moves, such as a line count. The message is part of what the tool reports.
+
+A finding about a whole file hashes its text and captures instead of the file's lines, so an edit to the file keeps its id: a `path` rule's finding (its text is the path), and a hook's finding that covers the whole file (it would reformat the file, or failed without a location). If the file cannot be read, the matched text is hashed in place of its lines.
 
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
 

@@ -69,21 +69,24 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   const selections = selectDetectorRules(rules, "edit", [file], input.disabled)
   if (selections.length === 0) return emptyDelivery()
 
+  // The proposed file for the one being written; anything else a detector reaches for is real.
+  const read = async (name: string) => (name === file ? proposal.content : readSourceFile(input.detection.root, name))
   const output = await runDetection({
     detection: input.detection,
     event: "edit",
     selections,
     changes: new Map(),
-    // The proposed file for the one being written; anything else a detector reaches for is real.
-    read: async (name) => (name === file ? proposal.content : readSourceFile(input.detection.root, name)),
+    read,
     timeoutMs: input.config.timeouts.editDeadlineMs,
   })
 
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
   // Over ignored matches too, as the pipeline numbers them, so a match has one id at guard and verify.
-  const ids = findingIds(
+  // Over the proposal, the lines the guard judged: the ones verify reads once the write is made.
+  const ids = await findingIds(
     [...output.findings, ...output.ignored],
-    (kind) => input.detection.registry.get(kind)?.volatileCaptures ?? [],
+    (kind) => input.detection.registry.get(kind),
+    read,
   )
   const evidence = output.findings
     .map((finding, index) => ({ ...finding, id: ids[index]! }))

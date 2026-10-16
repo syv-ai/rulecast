@@ -4,7 +4,7 @@
 
 `rulecast run` has a stable output contract that scripts and agent loops can rely on. It is written down in `agents/reference/output.md`.
 
-- **Every finding has an `id`.** It is a hash of the rule, the file and the matched text, not the line, so the same violation keeps its id when lines are added above it. That lets a loop tell "the same finding as last run" from a new one. Findings also carry `endLine`.
+- **Every finding has an `id`.** It is a hash of the rule, the file and the finding's source line, not its line number, so the same violation keeps its id when lines are added above it, and changes it when its line is edited. That lets a loop tell "the same finding as last run" from a new one. Findings also carry `endLine`.
 - **The JSON has `schemaVersion: 1` and `complete`.** It also lists pre-existing findings in full under `preexisting`, and ignored findings carry their `id`. Adding a field leaves the version alone; removing, renaming or changing one bumps it.
 - **The SARIF is richer.** Each result has `partialFingerprints` (the id), `baselineState` (`new`, or `unchanged` for pre-existing findings, which are now included so code scanning does not read them as fixed) and `endLine`. Each rule in `tool.driver.rules` has its name, description, severity, and help text taken from the doc sections it cites. `invocations` says whether the run was complete.
 
