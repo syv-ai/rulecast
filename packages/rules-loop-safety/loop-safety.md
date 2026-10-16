@@ -60,7 +60,7 @@ In an unattended run there is nobody to ask. Write the report in the run's decis
 
 These rules are about who makes the change, not about the change itself. A developer who means to skip a test, add a suppression, change a threshold or edit CI does it in an attended session, where the rules are warnings, or by hand.
 
-- For one line, add `# rulecast-ignore: loop-safety/<rule> <reason>` (or `//` in JavaScript and TypeScript). Every new ignore is reported to the developer at the end of the session. In unattended mode an ignore added during the run silences nothing, so this is for a developer, in an attended session or by hand.
+- For one line, add `# rulecast-ignore: loop-safety/<rule> <reason>` (or `//` in JavaScript and TypeScript). Every new ignore is reported to the developer at the end of the session. In unattended mode an ignore does not silence a finding on a line changed during the run, so this is for a developer, in an attended session or by hand.
 - For a whole rule, set `enabled: false` on its entry in `.rulecast-config.yaml`. For some files only, set `exclude` on the entry to a regex for them.
 - For `protected-loop-config`, use `enabled: false` or an `exclude` on its entry, not an ignore comment. It is a path rule: its finding is the whole file, so an ignore on the file's first line silences the rule for that whole file, for good, and a JSON file such as `.claude/settings.json` cannot hold a comment at all.
 - `@ts-expect-error` in a type test (a `*.test-d.ts` file, or a test that checks a call does not compile) is the assertion, not a suppression, and is still flagged. Exclude those files on the `no-new-suppressions` entry, for example `exclude: '\.test-d\.tsx?$'`.
