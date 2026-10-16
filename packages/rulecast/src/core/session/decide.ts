@@ -541,12 +541,18 @@ const OPAQUE_TEXTS = new Set(["", "[redacted]"])
  * Unless the text is one that every finding of the tool shares: then two secrets in one file would
  * be one finding, and the second would never block. There the tool's own rule id and message, and
  * the line, tell them apart, at the cost of a moved finding counting as a new one.
+ *
+ * Captures the match marks volatile (`Match.volatileCaptures`: a removed finding's counts) are never
+ * part of the key. A removed finding's text is the constant `removed`, so one more assertion
+ * deleted is the same finding, and the repeat limit applies to it. Anything else that identifies a
+ * finding, such as a finding id hashing its captures, must leave them out the same way.
  */
 export function findingKey({ rule, match }: ClassifiedFinding): string {
   const text = match.text.trim()
   const parts = [rule.id, match.file, text]
+  const stable = (name: string) => (match.volatileCaptures?.includes(name) ? "" : (match.captures[name] ?? ""))
   if (OPAQUE_TEXTS.has(text)) {
-    parts.push(match.captures.ruleId ?? "", match.captures.message ?? "", String(match.line))
+    parts.push(stable("ruleId"), stable("message"), String(match.line))
   }
   return createHash("sha256").update(parts.join("\n")).digest("hex").slice(0, 16)
 }

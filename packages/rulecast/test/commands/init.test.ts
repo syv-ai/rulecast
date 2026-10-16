@@ -87,6 +87,70 @@ describe("rulecast init --yes", () => {
     expect(ids(await read(root, CONFIG_FILE))).toEqual(["python/thin-routes"])
   })
 
+  test("--yes never installs the loop-safety pack, and says how to add it", async () => {
+    const root = await createRepo({ ...PROJECT, "tests/test_users.py": "def test_get():\n    assert get() is None\n" })
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(ids(await read(root, CONFIG_FILE))).toEqual(PYTHON)
+    expect(result.stdout).toContain("For agents that run with nobody watching")
+    expect(result.stdout).toContain("Add it with: rulecast init --rules loop-safety")
+    // /goal and claude -p are not unattended by themselves: the note names the switch.
+    expect(result.stdout).toContain("RULECAST_MODE=unattended")
+    expect(result.stdout).not.toMatch(/watching: \/goal, claude -p/)
+  })
+
+  test("with part of the pack installed, the note says how many rules are missing", async () => {
+    const root = await createRepo({ ...PROJECT, "tests/test_users.py": "def test_get():\n    assert get() is None\n" })
+    await runCli(root, ["init", "--rules", "loop-safety/no-new-suppressions", "--yes"], "", env)
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      "10 of 11 loop-safety rules not installed. Add them with: rulecast init --rules loop-safety",
+    )
+    expect(result.stdout).not.toContain("Not installed.")
+  })
+
+  test("--rules loop-safety installs the whole pack, and it validates", async () => {
+    const root = await createRepo(PROJECT)
+    const result = await runCli(root, ["init", "--rules", "loop-safety", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(ids(await read(root, CONFIG_FILE))).toEqual([
+      "loop-safety/no-config-suppressions-js",
+      "loop-safety/no-config-suppressions-python",
+      "loop-safety/no-deleted-assertions-js",
+      "loop-safety/no-deleted-assertions-python",
+      "loop-safety/no-deleted-assertions-ts",
+      "loop-safety/no-lowered-thresholds",
+      "loop-safety/no-new-suppressions",
+      "loop-safety/no-skipped-tests-js",
+      "loop-safety/no-skipped-tests-python",
+      "loop-safety/no-skipped-tests-ts",
+      "loop-safety/protected-loop-config",
+    ])
+    expect(result.stdout).toContain("rulecast validate: 11 rules valid")
+    expect(result.stdout).not.toContain("Add it with")
+  })
+
+  test("a config that is already unattended gets the pack's matching rules preselected", async () => {
+    const root = await createRepo({
+      ...PROJECT,
+      "tests/test_users.py": "def test_get():\n    assert get() is None\n",
+      ".rulecast-config.yaml": "mode: unattended\nrepos: []\n",
+    })
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.code).toBe(0)
+    expect(ids(await read(root, CONFIG_FILE))).toEqual(
+      [
+        ...PYTHON,
+        "loop-safety/no-deleted-assertions-python",
+        "loop-safety/no-new-suppressions",
+        "loop-safety/no-skipped-tests-python",
+        // The config file it is written to is one of the pack's protected files.
+        "loop-safety/protected-loop-config",
+      ].sort(),
+    )
+  })
+
   test("re-running only adds rules, keeping the existing text and hooks", async () => {
     const root = await createRepo(PROJECT)
     await runCli(root, ["init", "--yes"], "", env)
@@ -227,7 +291,7 @@ describe("rulecast init in a terminal", () => {
     ])
     const [rules, conventions] = script.asked
     expect([...(rules!.initial as string[])].sort()).toEqual(PYTHON)
-    expect(rules!.values).toHaveLength(9)
+    expect(rules!.values).toHaveLength(20)
     expect(conventions!.values).toEqual(["", "@AGENTS.md", "@AGENTS.md#agents", "@AGENTS.md#errors"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
       { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
@@ -250,6 +314,19 @@ describe("rulecast init in a terminal", () => {
     expect(hint).toContain("llm")
     expect(hint).toContain("haiku")
     expect(hint).toContain("sends")
+  })
+
+  test("the loop-safety pack is offered with its note, but never ticked", async () => {
+    const root = await createRepo({ ...PROJECT, "tests/test_users.py": "def test_get():\n    assert get() is None\n" })
+    const script = scriptedPrompter([[], ACCEPT, "personal", true, true])
+    await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
+
+    const rules = script.asked[0]!
+    expect(rules.values).toContain("loop-safety/no-skipped-tests-python")
+    expect((rules.initial as string[]).filter((id) => id.startsWith("loop-safety/"))).toEqual([])
+    expect(script.shown.some((text) => text.startsWith("Loop safety\nFor agents that run with nobody watching"))).toBe(
+      true,
+    )
   })
 
   test("Ctrl+C exits 130 and writes nothing", async () => {

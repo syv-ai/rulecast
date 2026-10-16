@@ -28,8 +28,11 @@ export interface FingerprintInput {
   ceiling?: { maxFileBytes: number; sizeOf(file: string): Promise<number | null> }
 }
 
+/** The scopes whose rules are measured at the baseline: `container` for ranges, `removed` for a count. */
+const MEASURED = (scope: string) => scope === "container" || scope === "removed"
+
 /**
- * What the project's `container` rules match in these files' baseline content (spec §8).
+ * What the project's `container` and `removed` rules match in these files' baseline content (spec §8).
  *
  * One record per `(file, rule)` pair that was actually measured — including an empty one for a
  * rule that matched nothing, which is the record that lets a later match be called new. A rule
@@ -41,17 +44,20 @@ export interface FingerprintInput {
  * agent opening a file, which §6's consent rule does not allow. Such a container rule classifies
  * as `instance`.
  *
+ * A `removed` rule's matches silenced by a `rulecast-ignore` are recorded too: it counts what the
+ * pattern matches, and an ignore comment added on an assertion must not read as its removal.
+ *
  * Never throws: a baseline that cannot be measured is a baseline that is missing, and the caller
  * already handles that.
  */
 export async function recordFingerprints(input: FingerprintInput): Promise<BaselineRecord[]> {
   // The overwhelmingly common case. Cost is one array scan, not a detector run.
-  if (!input.rules.some((rule) => rule.scope === "container")) return []
+  if (!input.rules.some((rule) => MEASURED(rule.scope))) return []
 
   const guards = (kind: string) => input.detection.registry.get(kind)?.guards === true
   let selections = selectDetectorRules(input.rules, input.event, input.files, input.disabled).filter(
     (selection) =>
-      selection.rule.scope === "container" &&
+      MEASURED(selection.rule.scope) &&
       input.detection.registry.get(selection.rule.detector.kind)?.metered !== true &&
       (input.source === "disk" || guards(selection.rule.detector.kind)),
   )
@@ -79,7 +85,11 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
 
   const key = (file: string, rule: string) => `${file}\u0000${rule}`
   const ranges = new Map<string, [number, number][]>()
-  for (const { rule, match } of output.findings) {
+  const counted = [
+    ...output.findings,
+    ...output.ignored.filter(({ rule }) => rule.scope === "removed").map(({ rule, match }) => ({ rule, match })),
+  ]
+  for (const { rule, match } of counted) {
     const found = ranges.get(key(match.file, rule.id))
     if (found === undefined) ranges.set(key(match.file, rule.id), [[match.line, match.endLine]])
     else found.push([match.line, match.endLine])

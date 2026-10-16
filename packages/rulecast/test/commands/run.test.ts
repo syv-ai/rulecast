@@ -450,3 +450,49 @@ describe("rulecast run: rules that did not run", () => {
     expect(JSON.parse((await run(root, "--all-files", "--format", "json")).stdout).disabled).toEqual([])
   })
 })
+
+describe("rulecast run: a scope: removed rule", () => {
+  const TEST = "tests/test_pricing.py"
+  const ASSERTS = "def test_total():\n    assert total([1, 2]) == 3\n    assert total([]) == 0\n"
+  const rule = {
+    id: "tests/keep-assertions",
+    name: "Assertions are not removed",
+    files: "^tests/",
+    scope: "removed",
+    detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
+    message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed).",
+  }
+
+  test("--from-ref reports an assertion the branch removed; --all-files has no baseline and reports nothing", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([rule]), [TEST]: ASSERTS })
+    await git(root, "checkout", "-q", "-b", "feature")
+    await writeFile(path.join(root, TEST), "def test_total():\n    assert total([1, 2]) == 3\n")
+    await git(root, "commit", "-qam", "drop an assert")
+
+    const ranged = await run(root, "--from-ref", "main", "--format", "json")
+    expect(ranged.code).toBe(1)
+    expect(JSON.parse(ranged.stdout).findings).toEqual([
+      expect.objectContaining({
+        rule: "tests/keep-assertions",
+        status: "new",
+        // The deletion is at the end of the file: its last line, not the one after it.
+        line: 2,
+        message: "tests/test_pricing.py:2 removes assertions (1 of 2 removed).",
+      }),
+    ])
+
+    const all = await run(root, "--all-files")
+    expect(all.code).toBe(0)
+    expect(all.stdout).toContain("no findings")
+  })
+
+  test("a staged run counts against HEAD", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([rule]), [TEST]: ASSERTS })
+    await writeFile(path.join(root, TEST), "def test_total():\n    total([1, 2])\n")
+    await git(root, "add", TEST)
+    const staged = await run(root, "--format", "json")
+    expect(JSON.parse(staged.stdout).findings.map((finding: { message: string }) => finding.message)).toEqual([
+      "tests/test_pricing.py:2 removes assertions (2 of 2 removed).",
+    ])
+  })
+})

@@ -21,7 +21,10 @@ export const COMMANDS: CommandHelp[] = [
       "rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--no-hooks] [--scope shared|personal] [--yes]",
     summary: "Set rulecast up: config, catalog rules, agent hooks",
     flags: [
-      ["--rules id,id", "Install these catalog rules instead of the ones that apply to your files"],
+      [
+        "--rules id,id",
+        "Install these catalog rules, or groups such as loop-safety, instead of the ones that apply to your files",
+      ],
       ["--no-rules", "Install no catalog rules"],
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable"],
       ["--no-agents", "Install no agent hooks"],

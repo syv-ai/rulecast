@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/fingerprint"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -364,7 +365,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the fingerprints taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -413,8 +417,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
+      (selection) =>
+        !skip.has(selection.rule.detector.kind) &&
+        (options.onlyRules?.has(selection.rule.id) ?? true) &&
+        (event.kind === "verify" || selection.rule.scope !== "removed"),
     )
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
@@ -445,7 +454,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
-    const output = await runDetectionFrom(
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
@@ -457,9 +466,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = await removedFindings(selections, detected, baselineChanges, fingerprints, read)
+    const output = removed.output
     const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
       classify(match, rule.scope, rule.id, baselineChanges, fingerprints)
-    findings = output.findings.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    findings = [
+      ...output.findings.map((finding) => ({ ...finding, status: statusOf(finding) })),
+      ...removed.findings.map((finding) => ({ ...finding, status: "new" as const })),
+    ]
     const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
     // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
     // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
