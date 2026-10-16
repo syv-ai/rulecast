@@ -1,4 +1,4 @@
-import { chmod, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, lstat, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import { exitCodeFor } from "../adapters/cli/format"
@@ -10,6 +10,7 @@ import { detectionFor } from "../core/detection/context"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { selectDetectorRules } from "../core/detection/select"
+import { errorMessage } from "../core/errors"
 import { runExamples } from "../core/examples"
 import { unifiedDiff } from "../core/fix/diff"
 import { type FixSite, fixPasses, MAX_PASSES } from "../core/fix/passes"
@@ -63,16 +64,34 @@ function summaryLine(fixed: readonly FixSite[], files: number, dryRun: boolean):
 }
 
 /**
- * Replaces the file's content through a temporary file and a rename, so a reader never sees half of
- * it, keeping its mode and following a symlink rather than replacing it. Null when the file is not
- * what was fixed — it changed since it was read, or it is not UTF-8, which reading it as text would
- * have mangled — and it is left alone.
+ * Why a file a fix changed must not be written, or null. A symlink is not written through, even to
+ * a file inside the project: the file it names is not the one git tracks under this path, and it may
+ * be outside the project, where nothing would show the change. A file below a symlinked directory
+ * that leads out of the project is refused too. A file that is not UTF-8 was mangled by reading it
+ * as text, so its fix is no fix. Asked under --dry-run too, so the diff shows only what a real run
+ * would write.
  */
-async function writeFixed(root: string, file: string, before: string, after: string): Promise<string | null> {
+async function unwritable(root: string, file: string, before: string): Promise<string | null> {
+  const absolute = path.join(root, file)
+  if ((await lstat(absolute)).isSymbolicLink()) return "a symlink"
+  const target = await realpath(absolute)
+  if (path.relative(await realpath(root), target).split(path.sep)[0] === "..") return "outside the project"
+  const bytes = await readFile(target)
+  if (!Buffer.from(bytes.toString("utf8"), "utf8").equals(bytes)) return "not UTF-8"
+  if (!Buffer.from(before, "utf8").equals(bytes)) return "changed while fixing"
+  return null
+}
+
+/**
+ * Replaces the file's content through a temporary file and a rename, so a reader never sees half of
+ * it, keeping its mode. The rename gives the path a new inode: another hard link to the file keeps
+ * the old content. Null when it was written; otherwise why it was not (`unwritable`), and it is left
+ * alone. A failure to write throws, with the file as it was.
+ */
+export async function writeFixed(root: string, file: string, before: string, after: string): Promise<string | null> {
+  const problem = await unwritable(root, file, before)
+  if (problem !== null) return `${file}: ${problem}; left unchanged`
   const target = await realpath(path.join(root, file))
-  if (!Buffer.from(before, "utf8").equals(await readFile(target))) {
-    return `${file}: changed while fixing, or not UTF-8; left unchanged`
-  }
   const { mode } = await stat(target)
   const temporary = `${target}.rulecast-fix-${process.pid}`
   try {
@@ -153,24 +172,34 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
   }
   const passes = await fixPasses({ detection, selections, contents, timeoutMs })
   for (const error of passes.errors) warnings.push(`fixes not applied: ${error}`)
-  if (passes.exhausted) {
-    warnings.push(`fixes were still pending after ${MAX_PASSES} passes: two rules' fixes may undo each other`)
+  for (const file of passes.unsettled) {
+    warnings.push(
+      `fixes were still pending after ${MAX_PASSES} passes, so ${file} was left unchanged: two rules' fixes may undo each other`,
+    )
   }
 
-  let changed = passes.changed
-  let fixed = passes.fixed
-  if (!dryRun) {
-    const skipped = new Set<string>()
-    for (const file of changed) {
-      const problem = await writeFixed(root, file, contents.get(file)!, passes.contents.get(file)!)
-      if (problem !== null) {
-        warnings.push(problem)
-        skipped.add(file)
+  // Each file on its own: one that cannot be written is reported and left, and the rest go ahead.
+  const skipped = new Set<string>()
+  for (const file of passes.changed) {
+    const before = contents.get(file)!
+    let problem: string | null
+    try {
+      if (dryRun) {
+        const why = await unwritable(root, file, before)
+        problem = why === null ? null : `${file}: ${why}; left unchanged`
+      } else {
+        problem = await writeFixed(root, file, before, passes.contents.get(file)!)
       }
+    } catch (error) {
+      problem = `${file}: could not ${dryRun ? "check" : "write"} it (${errorMessage(error)}); left unchanged`
     }
-    changed = changed.filter((file) => !skipped.has(file))
-    fixed = fixed.filter((site) => !skipped.has(site.file))
+    if (problem !== null) {
+      warnings.push(problem)
+      skipped.add(file)
+    }
   }
+  const changed = passes.changed.filter((file) => !skipped.has(file))
+  const fixed = passes.fixed.filter((site) => !skipped.has(site.file))
 
   const check = await checkRun(input, selected)
   let delivery: Delivery = check.result.delivery
