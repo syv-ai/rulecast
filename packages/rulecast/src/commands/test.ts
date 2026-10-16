@@ -105,10 +105,17 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 const touchRule = (id: string) => `${id} is a touch rule: it delivers context and has nothing to test\n`
 
+/**
+ * `--against` counts a rule's matches as violations, and a removed rule's matches are what a file
+ * keeps: its finding is a drop against a baseline, which a count of the files as they are has not got.
+ */
+const removedRule = (id: string) =>
+  `${id} is a removed rule: its matches are what a file keeps, and --against has no baseline to count a drop against`
+
 const ratio = (part: number, whole: number) => (whole === 0 ? "   — " : (part / whole).toFixed(2))
 
 function summaryLine(rule: DetectorRule, result: ExampleResult): string {
-  const id = rule.id.padEnd(36)
+  const id = rule.id.padEnd(Math.max(36, rule.id.length + 2))
   if (result.skipped) return `  ${id}skipped (llm; name the rule to run it)`
   if (result.missing || result.empty) return `  ${id}no examples`
   const passed = result.outcomes.filter((outcome) => outcome.passed).length
@@ -314,10 +321,12 @@ function againstAllText(reports: readonly RuleReport[], maxRate: number | null):
   const header = maxRate === null ? ["rule", "violations", "files"] : ["rule", "violations", "files", "rate"]
   const rows: string[][] = [header]
   const notRun: string[] = []
+  const notCounted: string[] = []
   for (const report of reports) {
     const against = report.against
     if (against === null) {
-      notRun.push(report.rule)
+      if (report.scope === "removed") notCounted.push(report.rule)
+      else notRun.push(report.rule)
       continue
     }
     const files =
@@ -342,6 +351,8 @@ function againstAllText(reports: readonly RuleReport[], maxRate: number | null):
   const out = ["", ...rows.map(line)]
   if (notRun.length > 0)
     out.push("", `  not run: ${notRun.join(", ")} (rulecast test <id> --against runs one; it costs money)`)
+  if (notCounted.length > 0)
+    out.push("", `  not counted: ${notCounted.join(", ")} (a removed rule: its matches are what a file keeps)`)
   out.push(
     "",
     "  The counts are the stock, not how often an edit breaks a rule. rulecast test <id> --against",
@@ -357,7 +368,10 @@ interface RuleReport {
   /** The detector kind; null for a touch rule. */
   detector: string | null
   scope: RuleScope
-  /** `not-run`: a metered rule nobody named. `touch`: a rule with no detector, named. */
+  /**
+   * `not-run`: a metered rule nobody named, or a `removed` rule under `--against`, which has no
+   * baseline to count a drop against. `touch`: a rule with no detector, named.
+   */
   status: "passed" | "failed" | "no-examples" | "not-run" | "touch"
   /** Null under `--against`, and when there was nothing run. */
   examples: Pick<ExampleResult, "outcomes" | "precision" | "recall"> | null
@@ -513,11 +527,14 @@ export async function testCommand(
     const candidates = (await allFiles(root)).filter(under)
     const reports: RuleReport[] = []
     for (const rule of rules) {
-      const measured = notAsked(rule)
-        ? null
-        : await measureAgainst(root, rule, candidates, against, maxRate, detection, timeoutMs)
+      // A removed rule's matches are what a file keeps: a count of them is no violation count.
+      const measured =
+        notAsked(rule) || rule.scope === "removed"
+          ? null
+          : await measureAgainst(root, rule, candidates, against, maxRate, detection, timeoutMs)
       reports.push(againstReport(rule, measured))
     }
+    if (ruleId !== null && rules[0]!.scope === "removed") return print(reports, () => `${removedRule(ruleId)}\n`)
     if (ruleId !== null) return print(reports, () => againstText(rules[0]!, reports[0]!.against!))
     return print(reports, () => againstAllText(reports, maxRate))
   }

@@ -30,7 +30,10 @@ const guarding: Detector<Record<string, never>> = {
   run: async () => ({ findings: [], errors: [] }),
 }
 
-const registry = createRegistry([fake, guarding])
+/** Guards, but its match is the whole file (like `path`): nothing in it can be counted. */
+const whole: Detector<Record<string, never>> = { ...guarding, kind: "whole", wholeFile: true }
+
+const registry = createRegistry([fake, guarding, whole])
 
 const conventions = "# API\n\n## Errors\nMap them.\n"
 
@@ -168,6 +171,7 @@ describe("compile: local rules", () => {
         detectRule("plain"),
         detectRule("wide", { scope: "container" }),
         detectRule("narrow", { scope: "instance" }),
+        detectRule("kept", { scope: "removed", detect: { guarding: {} } }),
       ),
     )
     expect(project.diagnostics).toEqual([])
@@ -175,6 +179,7 @@ describe("compile: local rules", () => {
       ["plain", "instance"],
       ["wide", "container"],
       ["narrow", "instance"],
+      ["kept", "removed"],
     ])
   })
 
@@ -284,6 +289,10 @@ describe("compile: local rules", () => {
         detectRule("refuse-verify-only", { detect: { guarding: {} }, refuse_write: true, stages: ["verify"] }),
         touchRule("refuse-without-detect", { refuse_write: true }),
         touchRule("scope-without-detect", { scope: "container" }),
+        detectRule("removed-uncountable", { scope: "removed" }),
+        detectRule("removed-whole-file", { scope: "removed", detect: { whole: {} } }),
+        detectRule("removed-verify-only", { scope: "removed", detect: { guarding: {} }, stages: ["verify"] }),
+        detectRule("removed-refuse", { scope: "removed", detect: { guarding: {} }, refuse_write: true }),
         touchRule("examples-without-detect", { examples: { bad: [{ path: "a.ts", code: "x" }] } }),
         detectRule("example-unmatched", { files: "\\.py$", examples: { bad: [{ path: "app/a.ts", code: "x" }] } }),
         detectRule("bad-regex", { files: "(" }),
@@ -312,6 +321,16 @@ describe("compile: local rules", () => {
       ["refuse-verify-only", "refuse_write needs edit among the rule's stages"],
       ["refuse-without-detect", "refuse_write needs detect: there is nothing to refuse a write for"],
       ["scope-without-detect", "scope needs detect: there is nothing to classify"],
+      [
+        "removed-uncountable",
+        "scope: removed needs a detector that reads the file's content and reports each match in it; fake cannot",
+      ],
+      [
+        "removed-whole-file",
+        "scope: removed needs a detector that reads the file's content and reports each match in it; whole cannot",
+      ],
+      ["removed-verify-only", "scope: removed needs edit among the rule's stages"],
+      ["removed-refuse", "refuse_write cannot be combined with scope: removed: its matches are what the rule keeps"],
       ["examples-without-detect", "examples need detect: there is nothing to run them against"],
       ["example-unmatched", `example path "app/a.ts" does not match this rule's files`],
       ["bad-regex", expect.stringMatching(/^files: invalid regex: /)],

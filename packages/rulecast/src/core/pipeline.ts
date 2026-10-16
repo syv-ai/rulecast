@@ -3,6 +3,7 @@ import path from "node:path"
 
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -446,7 +447,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the container ranges taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -498,8 +502,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    const wanted = (rule: { id: string; detector: { kind: string } }) =>
-      !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
+    const wanted = (rule: { id: string; scope: string; detector: { kind: string } }) =>
+      !skip.has(rule.detector.kind) &&
+      (options.onlyRules?.has(rule.id) ?? true) &&
+      (event.kind === "verify" || rule.scope !== "removed")
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
     // `rulecast run --session`: a rule the session disabled that would have run here did not, which
     // makes the run incomplete. It is named under `disabled` below, once; one that would not have
@@ -543,7 +551,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       }
     }
     const lines = sourceLines(read)
-    const output = await runDetectionFrom(
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
@@ -556,10 +564,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = await removedFindings(selections, detected, baselineChanges, containers, read)
+    const output = removed.output
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
     // From the lines suppression read through `read`, the content detection judged: staged in a
     // staged run, not the working tree. No file is read again.
-    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
+    const ids = await findingIds(
+      [...output.findings, ...output.ignored, ...removed.findings],
+      (kind) => registry.get(kind),
+      lines,
+    )
     // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
     const committed =
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
@@ -571,10 +586,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         : baselineHas(committed, rule.id, match.file, id)
           ? "preexisting"
           : "new"
-    findings = output.findings.map(({ rule, match }, index) => {
-      const id = ids[index]!
-      return { id, rule, match, status: statusOf(rule, match, id) }
-    })
+    const removedFrom = output.findings.length + output.ignored.length
+    findings = [
+      ...output.findings.map(({ rule, match }, index) => {
+        const id = ids[index]!
+        return { id, rule, match, status: statusOf(rule, match, id) }
+      }),
+      // The drop is the change's by construction: always new.
+      ...removed.findings.map(({ rule, match }, index) => ({
+        id: ids[removedFrom + index]!,
+        rule,
+        match,
+        status: "new" as const,
+      })),
+    ]
     const classifiedIgnores = output.ignored.map((item, index) => {
       const id = ids[output.findings.length + index]!
       return { ...item, id, status: statusOf(item.rule, item.match, id) }

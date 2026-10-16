@@ -27,8 +27,13 @@ export interface BaselineInput {
 }
 
 /**
- * On `touch`: a snapshot of every file that has none, and what the project's `container` rules
- * match in it — measured here because the content on disk is still the baseline.
+ * On `touch`: a snapshot of every file that has none, and what the project's `container` and
+ * `removed` rules match in it — measured here because the content on disk is still the baseline.
+ *
+ * Not for a file in `changed`: one this session already edited (with its shell, which needs no read
+ * first) or swept. Its content on disk is no longer what the session started from, so a snapshot of
+ * it would make the change the baseline: a verify would drop the file as unchanged, and a removed
+ * rule would count from after the deletion. Its baseline stays the start snapshot or the commit.
  *
  * Records are in append order: each snapshot before the container ranges taken from it. Only
  * `edit`-stage rules are measured: those are the cheap in-process ones by construction (§13, slow
@@ -38,8 +43,16 @@ export async function touchRecords(
   input: BaselineInput,
   state: BaselineState,
   files: readonly string[],
+  changed: ReadonlySet<string> = new Set(),
 ): Promise<BaselineRecord[]> {
-  return (await snapshotRecords(input, state, files, null)).records
+  return (
+    await snapshotRecords(
+      input,
+      state,
+      files.filter((file) => !changed.has(file)),
+      null,
+    )
+  ).records
 }
 
 /** Most dirty files snapshotted at session start; the rest fall back to the start commit. */

@@ -171,8 +171,8 @@ const OPT_IN_PACKS: Record<string, { title: string; note: string }> = {
     title: "Loop safety",
     note:
       "For agents that run with nobody watching. It catches the shortcuts a loop takes to make tests " +
-      "pass: skipped or focused tests, new lint, type and coverage suppressions, changed coverage " +
-      "thresholds, and edits to CI, git hooks or rulecast's own config. Warnings while you watch; errors, " +
+      "pass: skipped or focused tests, deleted assertions, new lint, type and coverage suppressions in " +
+      "the code or in checker config, changed coverage thresholds, and edits to CI, git hooks or rulecast's own config. Warnings while you watch; errors, " +
       "and refused edits to that config, in unattended mode (set RULECAST_MODE=unattended or " +
       "`mode: unattended` for /goal, claude -p and scheduled runs; on by itself in CI).",
   },
