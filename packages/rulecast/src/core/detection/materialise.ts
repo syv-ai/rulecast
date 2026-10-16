@@ -108,6 +108,7 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
   return withScratchTree(input.detection.root, STAGED_DIR, entries, async (dir) => {
     const prefix = `${dir}/`
     const strip = (file: string) => (file.startsWith(prefix) ? file.slice(prefix.length) : file)
+    const lines = input.lines
     const output = await runDetection({
       ...input,
       selections: selections
@@ -119,6 +120,7 @@ async function fromScratch(input: DetectionInput, selections: Selection[]): Prom
       changes: new Map([...input.changes].map(([file, change]) => [prefix + file, change])),
       // Anything reading through `read` under a scratch path is asking about the real file.
       read: (file) => input.read(strip(file)),
+      lines: lines && ((file) => lines(strip(file))),
     })
     return {
       findings: output.findings.map(({ rule, match }) => ({ rule, match: { ...match, file: strip(match.file) } })),

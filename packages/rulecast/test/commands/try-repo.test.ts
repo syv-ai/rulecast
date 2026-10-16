@@ -118,4 +118,14 @@ describe("rulecast try-repo", () => {
     expect(empty.code).toBe(2)
     expect(empty.stderr).toContain(".rulecast-rules.yaml not found")
   })
+
+  test("a repo that cannot be fetched exits 2, and try-repo --help says so", async () => {
+    const root = await createFixture()
+    const missing = await runCli(root, ["try-repo", "file:///nonexistent/rulecast-rules", "--all-files"])
+    expect(missing.code).toBe(2)
+    expect(missing.stdout).toBe("")
+    const help = (await runCli(root, ["try-repo", "--help"])).stdout
+    expect(help).toMatch(/ {2}2 {2}[^\n]*the rule repo cannot be fetched/)
+    expect(help).not.toMatch(/ {2}3 {2}[^\n]*a rule repo could not be fetched/)
+  })
 })

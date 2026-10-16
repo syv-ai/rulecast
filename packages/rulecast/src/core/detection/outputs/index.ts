@@ -28,6 +28,8 @@ export interface ToolFinding {
   text: string | null
   /** The tool's other string fields on the finding, for a rule's `captures`. */
   properties: Record<string, string>
+  /** About the file as a whole, not its range: `Match.wholeFile`. Never set by a parser. */
+  wholeFile?: true
 }
 
 export type LinePreset = (typeof LINE_PRESETS)[number]
