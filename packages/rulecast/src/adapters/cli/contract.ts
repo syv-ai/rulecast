@@ -29,6 +29,6 @@ export const EXIT_CODES: [code: number, meaning: string][] = [
   [EXIT.failed, "rulecast could not run: usage, a config file that does not load, git, or an internal error"],
   [
     EXIT.incomplete,
-    "Incomplete: a rule failed to compile, a detector failed or timed out. Findings that were produced are still reported. Wins over 1",
+    "Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1",
   ],
 ]
