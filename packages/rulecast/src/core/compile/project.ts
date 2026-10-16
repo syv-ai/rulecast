@@ -50,6 +50,13 @@ export interface CompileOptions {
    * answers an agent, and a commit or a CI job run by `rulecast run` has no agent to answer.
    */
   env?: Env
+  /** A mode already resolved, used instead of `env`: the one a session's hooks recorded (run --session). */
+  mode?: ActiveMode
+}
+
+function modeOf(config: Config, options: CompileOptions): ActiveMode {
+  if (options.mode !== undefined) return options.mode
+  return options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env)
 }
 
 /** Reads each absolute path at most once per compile; null when missing. */
@@ -100,7 +107,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     config,
     rules: [],
     diagnostics: [{ source: CONFIG_FILE, rule: null, message, level: "error" }],
-    mode: options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env),
+    mode: modeOf(config, options),
   })
 
   const data =
@@ -121,7 +128,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   })
   if (typeof global === "string") return configFailure(global, config)
 
-  const mode = options.env === undefined ? ATTENDED : resolveMode(config.mode, options.env)
+  const mode = modeOf(config, options)
   const diagnostics: Diagnostic[] = []
   const compiled: Compiled[] = []
   const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }

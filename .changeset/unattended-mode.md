@@ -13,4 +13,4 @@ Set `RULECAST_MODE=unattended`, or `mode: unattended` in `.rulecast-config.yaml`
 - In unattended mode a `rulecast-ignore` does not silence a finding on a line the agent changed during the run, whoever wrote the comment; ignores on code the run did not touch keep working. This holds in the stop gate and in `refuse_write`'s refusal.
 - `unattended.escalate: [rule-id, ...]` makes chosen warning rules errors, and `refuse_write: unattended` makes a rule refuse writes only in this mode.
 
-The mode applies to agent hooks only. `rulecast run`, in a git hook or a CI job, always runs the rules as written, so a CI job's exit code does not change. `rulecast doctor` shows the active mode and where it came from. Attended behaviour is unchanged.
+The mode applies to agent hooks only. `rulecast run`, in a git hook or a CI job, always runs the rules as written, so a CI job's exit code does not change. `rulecast run --session <id>` runs in the mode the session's hooks ran in, so it lists the same findings the stop blocks on. `rulecast doctor` shows the active mode and where it came from. Attended behaviour is unchanged.

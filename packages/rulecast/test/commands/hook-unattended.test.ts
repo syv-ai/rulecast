@@ -9,6 +9,7 @@ import { fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
 import { stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload, type Payload } from "../helpers/payloads"
+import { pipelineAt } from "../helpers/pipeline"
 
 /**
  * Unattended mode (#24) through the hook command, with recorded Claude Code payloads: what a goal
@@ -43,7 +44,17 @@ async function session(settings: Record<string, unknown> = {}, env: Env = testEn
     const { stdout } = await hook(stops++ === 0 ? "stop" : "stop.after-block")
     return stdout === "" ? null : JSON.parse(stdout)
   }
-  return { root, edit, stop }
+  /** `rulecast run --session s1` as the agent runs it from its shell: the findings' lines, by rule. */
+  const runSession = async (runEnv: Env = testEnv) => {
+    const { stdout } = await runCli(root, ["run", "--session", "s1", "--format", "json"], "", runEnv)
+    const { findings, ignored } = JSON.parse(stdout)
+    const line = (finding: { rule: string; line: number }) => `${finding.rule}:${finding.line}`
+    return [
+      ...findings.map(line),
+      ...ignored.map((finding: { rule: string; line: number }) => `ignored ${line(finding)}`),
+    ]
+  }
+  return { root, edit, stop, runSession }
 }
 
 /** What the agent or the user was shown at a stop, by kind. */
@@ -323,5 +334,38 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
       "raises HTTPException(500)",
     )
     expect(await stop()).toEqual({ systemMessage: expect.stringContaining(ADDED_NOTICE) })
+  })
+
+  describe("rulecast run --session judges in the mode the session ran in", () => {
+    const added = `def get():\n    raise HTTPException(404)\n${IGNORED}`
+
+    test("unattended: the finding the stop blocks on is listed, whatever the shell's environment", async () => {
+      const { edit, stop, runSession } = await session({}, UNATTENDED_ENV)
+      await edit(USERS, added)
+      expect(kindOf(await stop())).toBe("block")
+      // The overflow message sends the agent here "for the full list": it must hold what blocked.
+      expect(await runSession()).toEqual(["backend/no-httpexception:3"])
+    })
+
+    test("attended: the added ignore silences the finding here too", async () => {
+      const { edit, stop, runSession } = await session()
+      await edit(USERS, added)
+      expect(kindOf(await stop())).toBe("systemMessage")
+      expect(await runSession()).toEqual(["ignored backend/no-httpexception:3"])
+      // A shell that says unattended does not change what an attended session was judged by.
+      expect(await runSession(UNATTENDED_ENV)).toEqual(["ignored backend/no-httpexception:3"])
+    })
+
+    test("a session recorded before the mode was: resolved from the environment", async () => {
+      const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(fixtureRules) })
+      await writeFile(path.join(root, USERS), added)
+      await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+      const listed = async (env: Env) => {
+        const { stdout } = await runCli(root, ["run", "--session", "s1", "--format", "json"], "", env)
+        return JSON.parse(stdout).findings.map((finding: { line: number }) => finding.line)
+      }
+      expect(await listed(UNATTENDED_ENV)).toContain(3)
+      expect(await listed(testEnv)).not.toContain(3)
+    })
   })
 })
