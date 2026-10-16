@@ -21,19 +21,31 @@ import { CorruptStoreError } from "./jsonl"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
-import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
+import {
+  appendContext,
+  appendWork,
+  commitSession,
+  openSession,
+  readWork,
+  type SessionView,
+  sessionDir,
+} from "./session/session"
 import {
   claimedByOther,
   dirtyAtStart,
   editedBy,
   emptyContext,
   emptyWork,
+  hasOwnTree,
   MAIN_AGENT,
+  pendingByOther,
   referenceSeq,
   referenceState,
+  sweptFor,
   type WorkRecord,
+  type WorkState,
 } from "./session/state"
-import { isGone, treeChanges, treeState } from "./session/tree"
+import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
@@ -211,6 +223,28 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
+  /**
+   * What changed since the agent's latest recorded state that no tool call explains: not a file any
+   * agent edited, and for a subagent, not one another agent's edit tool may be writing. The main
+   * agent sweeps those too: a sibling's write takes its file back from the sweep when it is
+   * recorded, and a claim that never wrote cannot hide a file from the stop that owns integration.
+   * A subagent with no state of its own sweeps nothing — the session's latest may be a sibling's,
+   * taken before that sibling's command wrote — and leaves it to the main agent's stop.
+   */
+  function between(work: WorkState, agent: string, now: TreeState): string[] {
+    if (!hasOwnTree(work, agent)) return []
+    const reference = referenceState(work, agent)
+    const gap = reference === null ? null : treeChanges(reference, now)
+    if (gap === null || gap.gitOperation) return []
+    const edited = new Set(work.edited)
+    const since = referenceSeq(work, agent)
+    return relevant(
+      gap.files.filter(
+        (file) => !edited.has(file) && (agent === MAIN_AGENT || !claimedByOther(work, agent, file, since)),
+      ),
+    )
+  }
+
   if (event.kind === "shell-before") {
     // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
     // agent's last recorded state happened between its calls — the user's editor, a formatter, a
@@ -220,23 +254,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const now = open ? await treeState(root) : null
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
-      const reference = referenceState(work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      // Any agent's edits, and a sibling's edit tool still writing: neither happened between calls.
-      const edited = new Set(work.edited)
-      const since = referenceSeq(work, open.agent)
-      const swept =
-        gap === null || gap.gitOperation
-          ? []
-          : relevant(
-              gap.files.filter(
-                (file) => !isGone(now, file) && !edited.has(file) && !claimedByOther(work, open.agent, file, since),
-              ),
-            )
+      const swept = between(work, open.agent, now).filter((file) => !isGone(now, file))
       const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
       if (session !== null) {
         await appendWork(open.dir, [
-          ...swept.map((file) => ({ t: "swept" as const, file })),
+          ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
       }
@@ -287,19 +309,25 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const open = session
     const now = open ? await treeState(root) : null
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
-    const reference = referenceState(view.work, open.agent, event.toolUseId)
+    // Read after the snapshot: a sibling that claimed and wrote before it must be seen to have.
+    const work = await readingStore(() => readWork(open.dir), emptyWork())
+    if (session === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    const reference = referenceState(work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
     const call = reference === null ? null : treeChanges(reference, now)
-    // A file another agent's edit tool claimed during the call is that agent's write. Another
-    // agent's shell call running alongside cannot be told apart, and its changes count here too.
-    const since = referenceSeq(view.work, open.agent, event.toolUseId)
-    const files =
-      call === null || call.gitOperation
-        ? []
-        : relevant(
-            call.files.filter((file) => !isGone(now, file) && !claimedByOther(view.work, open.agent, file, since)),
-          )
+    // A file another agent's edit tool wrote or was writing during the call is that agent's write.
+    // Another agent's shell call running alongside cannot be told apart, and its changes count here too.
+    const since = referenceSeq(work, open.agent, event.toolUseId)
+    const changed = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    const theirs = changed.filter((file) => claimedByOther(work, open.agent, file, since))
+    // A write still in flight is swept meanwhile: its PostToolUse takes the file back, and if it
+    // never comes, the file is still reported at a stop rather than lost.
+    const inFlight = theirs.filter((file) => pendingByOther(work, open.agent, file))
+    await appendWork(open.dir, [
+      ...inFlight.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
+      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+    ])
+    const files = changed.filter((file) => !theirs.includes(file))
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
@@ -312,11 +340,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const open = session
     // Before the guard decides anything, and whether or not a rule refuses writes: a shell call
     // running alongside must not take this write for its own.
-    if (open) {
-      await appendWork(
-        open.dir,
-        relevant(event.files).map((file) => ({ t: "claimed" as const, agent: open.agent, file })),
-      )
+    const claimed = relevant(event.files)
+    if (open && claimed.length > 0) {
+      await appendWork(open.dir, [{ t: "claimed", agent: open.agent, files: claimed, at: Date.now() }])
     }
     const delivery = await guardWrite({
       detection,
@@ -331,6 +357,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
       recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
     })
+    // A refused write never happens: what it claimed is free again.
+    if (open && claimed.length > 0 && delivery.findings.length > 0) {
+      await appendWork(open.dir, [{ t: "released", agent: open.agent }])
+    }
     return { delivery, failed, deadlineMissed }
   }
 
@@ -405,7 +435,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // edited is never swept: it was changed by a tool call, only not by this agent's.
       requested = relevant(editedBy(view.work, session.agent))
       if (options.stopGate === true) {
-        swept = await sweep(session, new Set(relevant(view.work.edited)))
+        swept = await sweep(session)
         requested = [...requested, ...swept]
       }
     }
@@ -547,28 +577,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   /**
    * At a stop: what changed since the agent's latest recorded state that no call of its explains —
-   * a job it left running, a formatter, the user's own edits — joined with what earlier calls'
-   * before hooks already swept. A git operation in between sweeps nothing. Never a file any agent
-   * edited, or one another agent's edit tool is writing: those were tool calls, if not this agent's.
+   * a job it left running, a formatter, the user's own edits — joined with what earlier comparisons
+   * of this agent's swept (every agent's, at the main agent's stop). A git operation in between
+   * sweeps nothing.
    */
-  async function sweep(open: { dir: string; agent: string }, edited: ReadonlySet<string>): Promise<string[]> {
+  async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
     const now = await treeState(root)
+    // Read after the snapshot, as at a shell call's after hook.
+    const work = now === null ? view.work : await readingStore(() => readWork(open.dir), view.work)
     let found: string[] = []
-    if (now !== null) {
-      const reference = referenceState(view.work, open.agent)
-      const since = referenceSeq(view.work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      if (gap !== null && !gap.gitOperation) {
-        found = relevant(
-          gap.files.filter((file) => !edited.has(file) && !claimedByOther(view.work, open.agent, file, since)),
-        )
-      }
+    if (now !== null && session !== null && hasOwnTree(work, open.agent)) {
+      found = between(work, open.agent, now)
       await appendWork(open.dir, [
-        ...found.map((file) => ({ t: "swept" as const, file })),
+        ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
         { t: "tree", phase: "stop", agent: open.agent, state: now },
       ])
     }
-    const all = [...new Set([...relevant(view.work.swept), ...found])].filter((file) => !edited.has(file))
+    const edited = new Set(work.edited)
+    const all = [...new Set([...relevant(sweptFor(work, open.agent)), ...found])].filter((file) => !edited.has(file))
     return now === null ? all : all.filter((file) => !isGone(now, file))
   }
 
