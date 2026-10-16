@@ -1,3 +1,4 @@
+import type { ActiveMode } from "../config/mode"
 import type { TreeState } from "./tree"
 
 /** The agent of a session event without a subagent id: the one that owns integration. */
@@ -30,6 +31,8 @@ export type WorkRecord =
    * blocking. `agent`: whose comparison found it; absent in stores written before it was recorded.
    */
   | { t: "swept"; file: string; agent?: string }
+  /** The mode the hooks ran this session in, so `rulecast run --session` judges as they did. */
+  | { t: "mode"; mode: ActiveMode["mode"]; source: ActiveMode["source"]; detail: string }
 
 export type ContextRecord =
   | { t: "reset" }
@@ -77,6 +80,8 @@ export interface WorkState {
    * an interrupted command never records its after.
    */
   openShells: Map<string, { agent: string; shared: boolean }>
+  /** The mode last recorded; null in a session recorded before modes were. */
+  mode: ActiveMode | null
 }
 
 export interface ContextState {
@@ -118,6 +123,7 @@ export function emptyWork(): WorkState {
     beforeTrees: new Map(),
     startTree: null,
     openShells: new Map(),
+    mode: null,
   }
 }
 
@@ -188,6 +194,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       case "noticed":
         state.noticed.add(record.key)
+        break
+      case "mode":
+        state.mode = { mode: record.mode, source: record.source, detail: record.detail }
         break
     }
   }
