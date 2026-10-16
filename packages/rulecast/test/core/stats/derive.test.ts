@@ -257,6 +257,26 @@ describe("ruleStats", () => {
     ])
   })
 
+  test("unattended ignore attempts count towards suppressionRate and noisy, and stay their own count", () => {
+    // 10 fired: 1 suppressed, 1 attempted, 8 fixed. Either alone is under the threshold; together at it.
+    const lives = Array.from({ length: 10 }, (_, index) =>
+      life({
+        id: String(index),
+        state: index === 0 ? "suppressed" : "fixed",
+        suppressAttempts: index === 1 ? 2 : 0,
+      }),
+    )
+    expect(ruleStats(lives)[0]).toMatchObject({
+      suppressed: 1,
+      suppressAttempted: 1,
+      suppressionRate: NOISY_SUPPRESSION_RATE,
+      noisy: ["suppressed"],
+    })
+    // A finding in both counts once.
+    const both = [life({ id: "x", state: "suppressed", suppressAttempts: 1 }), life({ id: "y" })]
+    expect(ruleStats(both)[0]).toMatchObject({ suppressed: 1, suppressAttempted: 1, suppressionRate: 0.5 })
+  })
+
   test("a rule that has fired too few times is never noisy, whatever its rates", () => {
     const lives = Array.from({ length: NOISY_MIN_FIRED - 1 }, (_, index) =>
       life({ id: String(index), state: "suppressed", stopsPresent: 3 }),

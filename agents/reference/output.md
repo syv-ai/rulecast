@@ -361,18 +361,18 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
 | `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
 | `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
-| `suppressed` | Dropped by a `rulecast-ignore` comment. That includes a comment on the finding's own line that changed its id, which happens when the match is the whole line, as with `llm` rules. |
-| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`, and not in `suppressionRate`. |
+| `suppressed` | Dropped by a `rulecast-ignore` comment. An id leaves a trailing `rulecast-ignore` out of the line it hashes, so a comment on the finding's own line keeps its id; for a match whose id hashes its text (a redacted or whole-file one), the same rule ignored on the line the finding was last reported on counts too. |
+| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`. They do count towards `suppressionRate` and `noisy`: the agent wanted them silenced. |
 | `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
-| `repeatRate`, `suppressionRate` | `repeated / fired` and `suppressed / fired`, to two decimals. |
-| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and at least 20% were suppressed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
+| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. Changed without a `schemaVersion` bump: `suppressionRate` used to leave `suppressAttempted` out, and now counts it. |
+| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, an ignore tried. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
 
 Things to know when reading the counts:
 
-- A finding's identity is its [id](#finding-ids). Editing the offending text without fixing it changes the id, so it counts as one fixed finding and one new one.
+- A finding's identity is its [id](#finding-ids), which hashes its source line. So any edit to that line, fixing it or not, counts as one fixed finding and one new one, unless the edit only adds a trailing `rulecast-ignore`.
 - A finding the context budget kept out of a delivery still counts as reported.
 - Only agent hooks write the log. `rulecast run`, git hooks and CI do not, and findings that were there before the session or are in files the user changed during it are not counted.
 
