@@ -159,6 +159,8 @@ The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v
 rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
 ```
 
+A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist.
+
 ```json
 {
   "schemaVersion": 1,
@@ -178,6 +180,7 @@ rulecast stats --since 30d --format json    # 30d, 12h or a date; default: every
       "fixed": 1,
       "ignored": 0,
       "suppressed": 0,
+      "prevented": 0,
       "open": 0,
       "repeated": 0,
       "medianTurnsToFix": 1,
@@ -199,9 +202,10 @@ rulecast stats --since 30d --format json    # 30d, 12h or a date; default: every
 | `window.truncated` | The log has been rotated and does not reach back to `since`, so older findings may be missing. |
 | `sessions` | Agent sessions with a record in the window. |
 | `rules` | One entry per rule with a finding in the window, most fired first. |
-| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. |
-| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. |
-| `skippedLines` | Lines of the log that could not be read. Present only when there were any. |
+| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. Left out when anything in the config did not compile (see `notCompiled`). |
+| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. Left out when anything in the config did not compile. |
+| `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
+| `skippedLines` | Lines of the log that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
 
@@ -212,7 +216,8 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
 | `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
 | `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
-| `suppressed` | Dropped by a `rulecast-ignore` comment. |
+| `suppressed` | Dropped by a `rulecast-ignore` comment. That includes a comment on the finding's own line that changed its id, which happens when the match is the whole line, as with `llm` rules. |
+| `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
@@ -229,6 +234,6 @@ Things to know when reading the counts:
 
 The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
 
-The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Two hooks that rotate at the same moment can drop the older history. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
 
 Its format is internal and can change in any release. The `stats` JSON above is the contract.

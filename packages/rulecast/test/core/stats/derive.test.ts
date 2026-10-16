@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-
+import { findingIds } from "../../../src/core/finding-id"
 import {
   derive,
   type FindingLife,
@@ -82,6 +82,28 @@ describe("derive", () => {
     expect(life.state).toBe("suppressed")
   })
 
+  test("an inline rulecast-ignore on a whole-line match changes its id, and still reads as suppressed", () => {
+    const rule = { id: RULE, detector: { kind: "llm" } }
+    const at = { file: FILE, line: 3, endLine: 3, column: 1, captures: {} }
+    const idOf = (text: string) => findingIds([{ rule, match: { ...at, text } }], () => [])[0]!
+    const before = idOf("    raise HTTPException(404)")
+    const after = idOf("    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception")
+    expect(after).not.toBe(before)
+
+    const lives = derive([record("edit", [[before, "delivered"]]), record("edit", [], { ign: [after] })])
+    expect(only(lives)).toMatchObject({ id: before, state: "suppressed" })
+  })
+
+  test("an ignore on another line, or of another rule, does not suppress it", () => {
+    const first = record("edit", [["a", "delivered"]])
+    const moved = record("edit", [], { ign: ["z"] })
+    moved.ign[0]!.l = 9
+    const other = record("edit", [], { ign: ["y"] })
+    other.ign[0]!.r = OTHER
+    expect(only(derive([first, moved])).state).toBe("fixed")
+    expect(only(derive([first, other])).state).toBe("fixed")
+  })
+
   test("a later check where its rule did not run proves nothing", () => {
     const lives = derive([
       record("edit", [["a", "delivered"]]),
@@ -94,6 +116,32 @@ describe("derive", () => {
   test("refused at the guard, then gone at the edit: fixed, refused once", () => {
     const life = only(derive([record("guard", [["a", "refused"]]), record("edit")]))
     expect(life).toMatchObject({ state: "fixed", turnsToFix: 0, refusals: 1 })
+  })
+
+  test("refused, then abandoned: at the agent's next stop it was prevented", () => {
+    const lives = derive([
+      record("guard", [["a", "refused"]]),
+      record("guard", [["a", "refused"]]),
+      record("stop", [], { ran: [] }),
+    ])
+    expect(only(lives)).toMatchObject({ state: "prevented", refusals: 2, turnsToFix: null })
+    expect(ruleStats(lives)[0]).toMatchObject({ prevented: 1, open: 0, fixed: 0 })
+  })
+
+  test("refused, then written anyway: a stop that finds it keeps it, so it is ignored, not prevented", () => {
+    const lives = derive([
+      record("guard", [["a", "refused"]]),
+      record("edit", [["a", "delivered"]]),
+      record("stop", [], { ran: [] }),
+    ])
+    expect(only(lives).state).toBe("open")
+    const kept = derive([record("guard", [["a", "refused"]]), record("stop", [["a", "blocked"]])])
+    expect(only(kept).state).toBe("ignored")
+  })
+
+  test("another agent's stop does not settle a refusal", () => {
+    const lives = derive([record("guard", [["a", "refused"]]), record("stop", [], { a: "sub", ran: [] })])
+    expect(only(lives).state).toBe("open")
   })
 
   test("a guard proves nothing gone: the write it judged has not happened", () => {

@@ -51,6 +51,54 @@ describe("findings log", () => {
     expect(again.records.at(0)?.at).toBe("2026-10-03T00:00:00.000Z")
   })
 
+  test("hooks that reach the cap together rotate once and lose no history", async () => {
+    const stateDir = await dir()
+    const old = line(record("2026-10-01T00:00:00.000Z"))
+    const full = Math.ceil(FINDINGS_LOG_MAX_BYTES / old.length)
+    await writeFile(path.join(stateDir, FINDINGS_LOG), old.repeat(full))
+    const writers = 8
+    await Promise.all(
+      Array.from({ length: writers }, (_, index) =>
+        appendFindingsLog(stateDir, record(`2026-10-02T00:00:0${index}.000Z`), () => {}),
+      ),
+    )
+    const read = await readFindingsLog(stateDir)
+    expect(read.records.filter(({ at }) => at === "2026-10-01T00:00:00.000Z")).toHaveLength(full)
+    expect(read.records.filter(({ at }) => at.startsWith("2026-10-02"))).toHaveLength(writers)
+  })
+
+  test("a partial last line is left in place, never truncated: the next record starts on a line of its own", async () => {
+    const stateDir = await dir()
+    const partial = '{"v":1,"at":"2026-10-01T00:00:00.000Z","s":"s1"'
+    await writeFile(path.join(stateDir, FINDINGS_LOG), `${line(record("2026-10-01T00:00:00.000Z"))}${partial}`)
+    await appendFindingsLog(stateDir, record("2026-10-02T00:00:00.000Z"), () => {})
+    expect(await readFile(path.join(stateDir, FINDINGS_LOG), "utf8")).toBe(
+      `${line(record("2026-10-01T00:00:00.000Z"))}${partial}\n${line(record("2026-10-02T00:00:00.000Z"))}`,
+    )
+    const read = await readFindingsLog(stateDir)
+    expect(read.skipped).toBe(1)
+    expect(read.records).toHaveLength(2)
+  })
+
+  test("a record of this version with the wrong shape is skipped and counted", async () => {
+    const stateDir = await dir()
+    const { found: _, ...noFound } = record("2026-10-01T00:00:00.000Z")
+    await writeFile(
+      path.join(stateDir, FINDINGS_LOG),
+      [
+        JSON.stringify({ v: 1 }),
+        JSON.stringify(noFound),
+        JSON.stringify({ ...record("2026-10-01T00:00:00.000Z"), found: [{ r: "x", id: 3 }] }),
+        "null",
+        JSON.stringify(record("2026-10-02T00:00:00.000Z")),
+        "",
+      ].join("\n"),
+    )
+    const read = await readFindingsLog(stateDir)
+    expect(read.skipped).toBe(4)
+    expect(read.records.map(({ at }) => at)).toEqual(["2026-10-02T00:00:00.000Z"])
+  })
+
   test("below the cap it appends in place", async () => {
     const stateDir = await dir()
     await appendFindingsLog(stateDir, record("2026-10-01T00:00:00.000Z"), () => {})
