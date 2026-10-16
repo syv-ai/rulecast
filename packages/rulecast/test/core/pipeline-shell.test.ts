@@ -334,6 +334,88 @@ describe("the Stop sweep", () => {
   })
 })
 
+describe("a shell call alongside another agent", () => {
+  const violation = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
+  const claim = { kind: "guard" as const, files: [USERS], intent: { content: violation } }
+
+  test("a sibling's Edit during the call is the sibling's, not the call's", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    // sub1 runs a long command; meanwhile sub2's Edit tool writes, PreToolUse to PostToolUse.
+    const call = await session.shell(
+      async () => {
+        await session.send({ ...claim, agentId: "sub2" })
+        await session.write(USERS, violation)
+        await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
+      },
+      { agentId: "sub1" },
+    )
+    expect(call.findings).toEqual([])
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
+  })
+
+  test("the sibling's PostToolUse after the call ends: its PreToolUse claim already says whose it is", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(
+      async () => {
+        await session.send({ ...claim, agentId: "sub2" })
+        await session.write(USERS, violation)
+      },
+      { agentId: "sub1" },
+    )
+    expect(call.findings).toEqual([])
+    await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
+  })
+
+  test("without a PreToolUse claim, the sibling's PostToolUse before the call ends is the claim", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(
+      async () => {
+        await session.write(USERS, violation)
+        await session.send({ kind: "edit", files: [USERS], agentId: "sub2" })
+      },
+      { agentId: "sub1" },
+    )
+    expect(call.findings).toEqual([])
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
+  })
+
+  test("a sibling's write still in flight at the next before hook is not swept", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {}, { agentId: "sub1" })
+    await session.send({ ...claim, agentId: "sub2" })
+    await session.write(USERS, violation)
+    await session.shell(async () => {}, { agentId: "sub1" })
+    expect((await session.work()).swept).toEqual([])
+  })
+
+  // The documented limitation: a tree diff has no writer, so overlapping shell calls in one
+  // working tree each take the other's changes for their own. Worktrees keep them apart.
+  test("two overlapping shell calls: both are attributed the file", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
+    await session.send({ kind: "shell-before", files: [], toolUseId: "b", agentId: "sub2" })
+    await session.write(USERS, violation)
+    const first = await session.send({ kind: "shell-after", files: [], toolUseId: "a", agentId: "sub1" })
+    const second = await session.send({ kind: "shell-after", files: [], toolUseId: "b", agentId: "sub2" })
+    expect(lines(first)).toEqual([`${USERS}:3`])
+    expect(lines(second)).toEqual([`${USERS}:3`])
+    expect((await session.work()).editors.get(USERS)).toEqual(new Set(["sub1", "sub2"]))
+  })
+})
+
 describe("refuse_write under Bash", () => {
   const GENERATED = "frontend/no-generated-edits"
   /** The fixture, with its generated-client rule (a warning) made to refuse writes. */
