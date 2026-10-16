@@ -47,6 +47,11 @@ export interface PipelineOptions {
   stopGate?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
+  /**
+   * The hook: the session's mode is recorded, so `rulecast run --session` judges the session in the
+   * mode its hooks did. The CLI's own runs never record one.
+   */
+  recordMode?: boolean
 }
 
 export interface PipelineResult {
@@ -255,6 +260,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
+  if (session && options.recordMode === true) {
+    const { mode, source, detail } = project.mode
+    const recorded = view.work.mode
+    if (recorded === null || recorded.mode !== mode || recorded.source !== source || recorded.detail !== detail) {
+      await appendWork(session.dir, [{ t: "mode", mode, source, detail }])
+    }
+  }
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).

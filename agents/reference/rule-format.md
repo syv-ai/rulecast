@@ -277,7 +277,9 @@ An unknown `RULECAST_MODE` value is ignored: `rulecast doctor` warns about it, a
 to its debug log. A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
 it would run in from your shell, and where that came from. The mode applies to agent hooks only.
 `rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
-to answer.
+to answer. The exception is `rulecast run --session <id>`, which shows a session's findings: it runs
+in the mode that session's hooks recorded, so it lists what the stop blocks on. For a session
+recorded before modes were, it resolves the mode from its own environment as a hook would.
 
 **With `/goal`.** `/goal` is a Stop hook too. While a goal is active, its evaluator and rulecast
 both run on every stop. A rulecast block is answered by a fixing turn even when the evaluator says
