@@ -445,6 +445,33 @@ describe("rulecast test --format json", () => {
     ])
   })
 
+  test("a rule that failed to compile fails the run, and its diagnostic is on stderr", async () => {
+    const broken = httpException({
+      id: "backend/broken",
+      examples: { bad: [{ path: PY, code: "x\n", expect: { lines: [9] } }] },
+    })
+    const root = await project([httpException(), broken])
+    const result = await runTest(root, "--format", "json")
+    expect(result.code).toBe(1)
+    expect(json(result.stdout)).toMatchObject({ passed: false })
+    expect(json(result.stdout).rules.map((rule: { rule: string }) => rule.rule)).toEqual(["backend/no-httpexception"])
+    expect(result.stderr).toContain("backend/broken")
+    expect(result.stderr).toContain("expects line 9")
+    const text = await runTest(root)
+    expect(text.code).toBe(1)
+    expect(text.stdout).toContain("1 rule did not compile: backend/broken")
+    // Naming a rule that compiled tests that rule alone; another rule's diagnostic is not its failure.
+    expect((await runTest(root, "backend/no-httpexception")).code).toBe(0)
+  })
+
+  test("a config that does not load exits 2, rather than passing with nothing tested", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": "repos: [" })
+    const result = await runTest(root, "--format", "json")
+    expect(result.code).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain(".rulecast-config.yaml")
+  })
+
   test("a usage error prints nothing on stdout and exits 2", async () => {
     const root = await project([httpException()])
     for (const argv of [
@@ -505,6 +532,16 @@ describe("rulecast test --against --max-rate", () => {
     const result = await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.5")
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("  rate 0.17: within --max-rate 0.5")
+  })
+
+  test("a rate that rounds to --max-rate shows enough digits to tell which side it is on", async () => {
+    // 126 of 250 is 0.504: printed as 0.50 it read "rate 0.50: over --max-rate 0.5".
+    const close = await project([httpException()], services(126, 124))
+    const closer = await runTest(close, "backend/no-httpexception", "--against", ".", "--max-rate", "0.5")
+    expect(closer.code).toBe(1)
+    expect(closer.stdout).toContain("  rate 0.504: over --max-rate 0.5")
+    const table = await runTest(close, "--against", ".", "--max-rate", "0.5")
+    expect(table.stdout).toContain("0.504 over")
   })
 
   test("is not applied to too few matching files", async () => {

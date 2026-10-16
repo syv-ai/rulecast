@@ -9,8 +9,8 @@
 - **A new `baseline` list** holds edits: `{ path, before, after, expect: { new: [...], preexisting: [...] } }`. `rulecast test` sorts the rule's findings in `after` into new and pre-existing by the rule's `scope`, the way an agent session would. This catches a rule that reports code an edit did not touch as new.
 - **`--against PATH --max-rate 0.5`** exits 1 when a rule flags more than that share of the files it matches. It is not applied under 25 matching files.
 
-`rulecast validate` rejects an `expect` on a `good` example, an empty `expect`, and an expected line past the end of its example. `agents/DRAFT-RULES.md` now asks for these expectations and gates on `--against . --max-rate 0.5`.
+`rulecast validate` rejects an `expect` on a `good` example, an empty `expect`, an expected line past the end of its example, and a `count` below the number of `lines` it pins. `agents/DRAFT-RULES.md` now asks for these expectations and gates on `--against . --max-rate 0.5`.
 
-Terminal output without the new flags is unchanged.
+`rulecast test` without a rule id now exits 1 when a rule failed to compile, with its diagnostic on stderr; it used to leave the rule out and pass. A config that does not load exits 2. Terminal output is otherwise unchanged without the new flags.
 
 **Breaking, for plugin code only:** the exported `RuleExamples` type has a required `baseline` list, and `bad` examples are `BadRuleExample` (exported, with the optional `expect`). Code that builds a `RuleExamples` value itself must add `baseline: []`.

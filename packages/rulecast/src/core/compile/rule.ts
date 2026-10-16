@@ -191,9 +191,15 @@ export async function compileRule(
   // A line past the end can never be found, so the example could only ever fail — and the author
   // would read the failure as the rule's.
   for (const [index, example] of (examples?.bad ?? []).entries()) {
-    const past = beyondEnd(example.expect?.lines ?? [], example.code)
-    if (past !== null)
-      return `example bad[${index}] expects line ${past}; its code has ${lineCount(example.code)} lines`
+    const pinned = example.expect?.lines ?? []
+    const past = beyondEnd(pinned, example.code)
+    if (past !== null) return `example bad[${index}] expects line ${past}; its code has ${lines(example.code)}`
+    // Each finding starts on one line, so fewer findings than distinct lines can never pass.
+    const distinct = new Set(pinned).size
+    const count = example.expect?.count
+    if (count !== undefined && count < distinct) {
+      return `example bad[${index}] expects ${plural(count, "finding")} on ${plural(distinct, "line")}; a finding starts on one line`
+    }
   }
   for (const [index, example] of (examples?.baseline ?? []).entries()) {
     const past = beyondEnd([...example.expect.new, ...example.expect.preexisting], example.after)
@@ -253,16 +259,18 @@ export async function compileRule(
   return { rule, warnings }
 }
 
-/** Lines in an example's code, not counting the empty one after a final newline. */
+/**
+ * Lines in an example's code, not counting the empty one after a final newline. Empty code is one
+ * line: a finding about the file itself, a `path` rule's, is on line 1 of an empty file.
+ */
 function lineCount(code: string): number {
   const lines = code.split(/\r?\n/)
-  return lines.at(-1) === "" ? lines.length - 1 : lines.length
+  return Math.max(1, lines.at(-1) === "" ? lines.length - 1 : lines.length)
 }
 
-function lines(code: string): string {
-  const count = lineCount(code)
-  return `${count} ${count === 1 ? "line" : "lines"}`
-}
+const plural = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
+
+const lines = (code: string) => plural(lineCount(code), "line")
 
 function beyondEnd(lines: readonly number[], code: string): number | null {
   const count = lineCount(code)

@@ -295,17 +295,25 @@ function judgeBaseline(
   const label = { new: "new", preexisting: "pre-existing" }
   const failures: string[] = []
   const lines = [...new Set([...expected.new, ...expected.preexisting, ...found.new, ...found.preexisting])]
+  // Each status is compared exactly: an expected new finding on a line does not excuse a
+  // pre-existing one there too. A finding that has only the other status than expected is one
+  // failure, "expected new, was pre-existing", not a missing one and an unexpected one.
+  const swapped = (line: number, status: "new" | "preexisting", other: "new" | "preexisting") =>
+    expected[status].includes(line) &&
+    !found[status].has(line) &&
+    found[other].has(line) &&
+    !expected[other].includes(line)
   for (const line of lines.sort((a, b) => a - b)) {
     for (const status of ["new", "preexisting"] as const) {
       const other = status === "new" ? "preexisting" : "new"
       const wanted = expected[status].includes(line)
       if (wanted && !found[status].has(line)) {
         failures.push(
-          found[other].has(line)
+          swapped(line, status, other)
             ? `line ${line}: expected ${label[status]}, was ${label[other]}`
             : `line ${line}: expected a ${label[status]} finding, found none`,
         )
-      } else if (!wanted && found[status].has(line) && !expected[other].includes(line)) {
+      } else if (!wanted && found[status].has(line) && !swapped(line, other, status)) {
         failures.push(`line ${line}: unexpected ${label[status]} finding`)
       }
     }

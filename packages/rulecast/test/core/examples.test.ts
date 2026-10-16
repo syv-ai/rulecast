@@ -392,6 +392,18 @@ describe("judge", () => {
     [{ new: [4], preexisting: [] }, [at(4, "preexisting")], undefined, ["line 4: expected new, was pre-existing"]],
     [{ new: [], preexisting: [2] }, [], undefined, ["line 2: expected a pre-existing finding, found none"]],
     [{ new: [], preexisting: [] }, [at(5, "new")], undefined, ["line 5: unexpected new finding"]],
+    [
+      { new: [4], preexisting: [] },
+      [at(4, "new"), at(4, "preexisting")],
+      undefined,
+      ["line 4: unexpected pre-existing finding"],
+    ],
+    [
+      { new: [4], preexisting: [4] },
+      [at(4, "new")],
+      undefined,
+      ["line 4: expected a pre-existing finding, found none"],
+    ],
     [{ fires: false } as const, [], "boom", ["the detector failed: boom"]],
   ] satisfies [ExampleExpectation, ExampleFinding[], string | undefined, string[]][])(
     "%j with %j",

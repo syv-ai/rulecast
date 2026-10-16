@@ -2,7 +2,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { TEST_SCHEMA_VERSION } from "../adapters/cli/contract"
-import { compile } from "../core/compile/project"
+import { compile, diagnosticText } from "../core/compile/project"
 import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import type { RuleScope } from "../core/config/schema"
@@ -265,12 +265,25 @@ async function measureAgainst(
   }
 }
 
+/**
+ * A rate to two decimals, or as many more as it takes to show which side of `--max-rate` it is on:
+ * 126 of 250 is 0.504, over 0.5, and printed as "0.50" it read as equal to the limit it broke.
+ */
+function rateText(rate: number, maxRate: number): string {
+  for (let digits = 2; digits <= 6; digits++) {
+    const shown = rate.toFixed(digits)
+    if (Math.sign(Number(shown) - maxRate) === Math.sign(rate - maxRate)) return shown
+  }
+  return String(rate)
+}
+
 /** The `--max-rate` verdict, for the terminal. */
 function rateLine(against: AgainstReport): string {
   if (against.smallSample) {
     return `  --max-rate not applied: only ${plural(against.matchingFiles, "matching file")}`
   }
-  return `  rate ${against.rate?.toFixed(2)}: ${against.exceeded ? "over" : "within"} --max-rate ${against.maxRate}`
+  const rate = rateText(against.rate ?? 0, against.maxRate ?? 0)
+  return `  rate ${rate}: ${against.exceeded ? "over" : "within"} --max-rate ${against.maxRate}`
 }
 
 function againstText(rule: DetectorRule, against: AgainstReport): string {
@@ -316,7 +329,7 @@ function againstAllText(reports: readonly RuleReport[], maxRate: number | null):
           ? ""
           : against.smallSample
             ? "not applied (too few files)"
-            : `${against.rate?.toFixed(2)}${against.exceeded ? " over" : ""}`,
+            : `${rateText(against.rate ?? 0, maxRate)}${against.exceeded ? " over" : ""}`,
       )
     }
     rows.push(row)
@@ -354,16 +367,30 @@ interface RuleReport {
 
 interface TestReport {
   schemaVersion: number
-  /** Exit 0 exactly when true: no example failed, and no rule is over `--max-rate`. */
+  /**
+   * Exit 0 exactly when true: every rule compiled, no example failed, and no rule is over
+   * `--max-rate`.
+   */
   passed: boolean
   rules: RuleReport[]
 }
 
-const report = (rules: RuleReport[]): TestReport => ({
+/**
+ * `uncompiled`: the rules (or rule repos) that failed to compile, which are in no report's `rules`.
+ * A rule that does not compile was tested by nothing, so the run does not pass.
+ */
+const report = (rules: RuleReport[], uncompiled: readonly string[] = []): TestReport => ({
   schemaVersion: TEST_SCHEMA_VERSION,
-  passed: rules.every((rule) => rule.status !== "failed"),
+  passed: uncompiled.length === 0 && rules.every((rule) => rule.status !== "failed"),
   rules,
 })
+
+/** The terminal's line for the rules that failed to compile; their diagnostics are on stderr. */
+function uncompiledText(uncompiled: readonly string[]): string {
+  if (uncompiled.length === 0) return ""
+  const what = uncompiled.length === 1 ? "rule did" : "rules did"
+  return `  ${uncompiled.length} ${what} not compile: ${uncompiled.join(", ")} (rulecast validate shows why)\n\n`
+}
 
 function againstReport(rule: DetectorRule, against: AgainstReport | null): RuleReport {
   const status = against === null ? "not-run" : against.exceeded ? "failed" : "passed"
@@ -445,11 +472,20 @@ export async function testCommand(
   const { ruleId, against, maxRate, format } = parseTestArgs(args)
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
+  // A config that does not load compiled no rule at all: "passed" over nothing would be a lie.
+  const fatal = project.diagnostics.find((diagnostic) => diagnostic.fatal === true)
+  if (fatal !== undefined) throw new Error(`${diagnosticText(fatal)} (run ${fatal.hint ?? "rulecast validate"})`)
   const named = ruleId === null ? undefined : project.rules.find((rule) => rule.id === ruleId)
   if (ruleId !== null && named === undefined) throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
 
-  const print = (result: TestReport, text: () => string): number => {
-    io.stdout(format === "json" ? `${JSON.stringify(result, null, 2)}\n` : text())
+  // Testing every rule includes the ones that did not compile: they are left out of the rules, so
+  // without this a broken rule read as "passed". A named rule is tested alone.
+  const errors = ruleId === null ? project.diagnostics.filter((diagnostic) => diagnostic.level === "error") : []
+  const uncompiled = [...new Set(errors.map((diagnostic) => diagnostic.rule ?? diagnostic.source))]
+  const print = (rules: RuleReport[], text: () => string): number => {
+    const result = report(rules, uncompiled)
+    for (const diagnostic of errors) io.stderr(`rulecast: ${diagnosticText(diagnostic)}\n`)
+    io.stdout(format === "json" ? `${JSON.stringify(result, null, 2)}\n` : `${text()}${uncompiledText(uncompiled)}`)
     return result.passed ? 0 : 1
   }
 
@@ -463,7 +499,7 @@ export async function testCommand(
       examples: null,
       against: null,
     }
-    return print(report([touch]), () => touchRule(named.id))
+    return print([touch], () => touchRule(named.id))
   }
   const stateDir = ensureProjectState(cacheHome(io.env), root)
   const resolver = createReferenceResolver(root)
@@ -482,8 +518,8 @@ export async function testCommand(
         : await measureAgainst(root, rule, candidates, against, maxRate, detection, timeoutMs)
       reports.push(againstReport(rule, measured))
     }
-    if (ruleId !== null) return print(report(reports), () => againstText(rules[0]!, reports[0]!.against!))
-    return print(report(reports), () => againstAllText(reports, maxRate))
+    if (ruleId !== null) return print(reports, () => againstText(rules[0]!, reports[0]!.against!))
+    return print(reports, () => againstAllText(reports, maxRate))
   }
 
   const results: { rule: DetectorRule; result: ExampleResult }[] = []
@@ -491,5 +527,8 @@ export async function testCommand(
     const result = notAsked(rule) ? skippedResult(rule.id) : await runExamples({ detection, rule, timeoutMs })
     results.push({ rule, result })
   }
-  return print(report(results.map(({ rule, result }) => examplesReport(rule, result))), () => examplesText(results))
+  return print(
+    results.map(({ rule, result }) => examplesReport(rule, result)),
+    () => examplesText(results),
+  )
 }
