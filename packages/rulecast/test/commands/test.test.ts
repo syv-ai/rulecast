@@ -38,6 +38,12 @@ describe("rulecast test", () => {
     expect(result.stdout).toContain("1 rule passed")
   })
 
+  test("a rule id longer than the column still leaves a gap before the score", async () => {
+    const long = "loop-safety/no-config-suppressions-python"
+    const root = await project([httpException({ id: long })])
+    expect((await runTest(root)).stdout).toContain(`${long}  2/2`)
+  })
+
   test("a good example the rule fires on exits 1 and shows the line it fired at", async () => {
     const root = await project([
       httpException({

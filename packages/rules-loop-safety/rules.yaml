@@ -2,8 +2,9 @@
 #
 # The shortcuts an agent takes when its goal is "the tests pass": skip the test, silence the
 # checker, lower the bar, or change what judges the run. Every rule is a warning while someone is
-# watching and, through `escalate: true`, an error in unattended mode. All are `scope: instance`,
-# so only what the change adds is flagged; an `it.skip` that was already there is pre-existing.
+# watching and, through `escalate: true`, an error in unattended mode. All but the deleted-assertion
+# rules are `scope: instance`, so only what the change adds is flagged; an `it.skip` that was
+# already there is pre-existing. The deleted-assertion rules are `scope: removed`: they count.
 #
 # Skipped and focused tests use ast-grep, not a linter. A linter rule exists (oxlint's jest and
 # vitest no-disabled-tests and no-focused-tests), but it reports nothing unless its plugin is
@@ -181,6 +182,144 @@
           it("rates are fresh", function () {
             if (!process.env.RATES) this.skip()
           })
+# Deleting an assertion leaves nothing to match, so these count instead (`scope: removed`): the
+# finding is that a file has fewer assertions than at its baseline. ast-grep, so a commented-out
+# assertion counts as removed. With `scope: removed` the examples show what is counted: a `bad`
+# example has something to count, and deleting it is the finding; a `good` one has nothing.
+- id: no-deleted-assertions-python
+  name: No removed Python assertions
+  description: "For agents that run unattended: flags a Python test file with fewer assert statements, unittest assert* calls, mock assert_* calls or pytest.raises blocks than it had before the change. Deleting the assertion that fails is a way to make pytest pass."
+  files: '(^|/)(test[^/]*|[^/]*_test|conftest)\.py$|(^|/)tests?/.*\.py$'
+  severity: warning
+  escalate: true
+  scope: removed
+  detect:
+    ast-grep:
+      language: python
+      rule:
+        any:
+          - kind: assert_statement
+          - pattern: $OBJ.$ASSERT($$$)
+          - pattern: pytest.$RAISES($$$)
+      constraints:
+        ASSERT:
+          regex: '^assert'
+        RAISES:
+          regex: '^(raises|warns|deprecated_call|fail)$'
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+  context:
+    - "@loop-safety.md#deleted-assertions"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: tests/test_pricing.py
+        code: |
+          def test_discount():
+              # assert discount(100, 15) == 85
+              result = discount(100, 15)
+    bad:
+      - path: tests/test_pricing.py
+        code: |
+          def test_discount():
+              assert discount(100, 15) == 85
+      - path: shop/tests.py
+        code: |
+          class CartTests(TestCase):
+              def test_total(self):
+                  self.assertEqual(total([1, 2]), 3)
+      - path: tests/test_rates.py
+        code: |
+          def test_rejects_none():
+              with pytest.raises(ValueError):
+                  total(None)
+              mailer.send.assert_called_once()
+# Two rules, as with skipped tests: the tsx parser misreads generics in a .ts file as JSX.
+- id: no-deleted-assertions-ts
+  name: No removed TypeScript assertions
+  description: "For agents that run unattended: flags a .ts test file with fewer expect(), assert() or assert.* calls than it had before the change. Deleting the assertion that fails is a way to make a test run pass."
+  files: '\.(test|spec|cy|e2e)\.[cm]?ts$|(^|/)(__tests__|tests?|e2e|cypress)/.*\.[cm]?ts$'
+  severity: warning
+  escalate: true
+  scope: removed
+  detect:
+    ast-grep:
+      language: typescript
+      rule:
+        any:
+          - pattern: expect($$$)
+          - pattern: expect.$SOFT($$$)
+          - pattern: assert($$$)
+          - pattern: assert.$METHOD($$$)
+      constraints:
+        SOFT:
+          regex: '^(soft|poll)$'
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+  context:
+    - "@loop-safety.md#deleted-assertions"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: src/cart.test.ts
+        code: |
+          const id = <T>(x: T) => x
+          it("totals the lines", () => {
+            // expect(total([1, 2])).toBe(3)
+            const expected = id(3)
+          })
+    bad:
+      - path: src/cart.test.ts
+        code: |
+          it("totals the lines", () => {
+            expect(total([1, 2])).toBe(3)
+          })
+      - path: tests/rates.spec.mts
+        code: |
+          test("rates are fresh", async () => {
+            assert.ok(await rates.fresh())
+          })
+- id: no-deleted-assertions-js
+  name: No removed JavaScript and TSX assertions
+  description: "For agents that run unattended: flags a .js, .jsx or .tsx test file with fewer expect(), assert() or assert.* calls than it had before the change. Deleting the assertion that fails is a way to make a test run pass."
+  files: '\.(test|spec|cy|e2e)\.([cm]?js|jsx|tsx)$|(^|/)(__tests__|tests?|e2e|cypress)/.*\.([cm]?js|jsx|tsx)$'
+  severity: warning
+  escalate: true
+  scope: removed
+  detect:
+    ast-grep:
+      language: tsx
+      rule:
+        any:
+          - pattern: expect($$$)
+          - pattern: expect.$SOFT($$$)
+          - pattern: assert($$$)
+          - pattern: assert.$METHOD($$$)
+      constraints:
+        SOFT:
+          regex: '^(soft|poll)$'
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why."
+  context:
+    - "@loop-safety.md#deleted-assertions"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: src/Cart.test.tsx
+        code: |
+          test("shows the total", () => {
+            render(<Cart lines={[1, 2]} />)
+            // expect(screen.getByText("3")).toBeTruthy()
+          })
+    bad:
+      - path: src/Cart.test.jsx
+        code: |
+          test("shows the total", () => {
+            render(<Cart lines={[1, 2]} />)
+            expect(screen.getByText("3")).toBeTruthy()
+          })
+      - path: test/rates.js
+        code: |
+          it("rates are fresh", function () {
+            assert(rates.fresh())
+          })
 # Comment markers, so regex. A linter rule covers one tool's own markers at most, and it obeys
 # inline disables itself. `rulecast-ignore:` is not matched: an ignore suppresses findings on its
 # own line, so it would suppress this rule's finding on it. Session oversight reports every new one.
@@ -219,6 +358,96 @@
         code: |
           // eslint-disable-next-line no-console
           console.log(total(lines))
+# Checker settings live in TOML, INI and JSON, so regex, as for thresholds. Two rules, one per
+# ecosystem, to keep each pattern readable. A list or an INI value that spans lines is matched
+# whole, so an entry added inside an existing `ignore = [...]` counts as a change to it.
+# Like no-lowered-thresholds, the rule sees the file as it is now: it cannot tell a key that was
+# loosened from one that was set the same way and moved.
+- id: no-config-suppressions-python
+  name: No weakened Python checker configuration
+  description: "For agents that run unattended: flags a new mypy ignore_missing_imports, ignore_errors, disable_error_code or follow_imports = skip, a loosened mypy flag, a ruff or flake8 ignore or per-file-ignores entry, a lowered pyright typeCheckingMode or report setting, and pytest --deselect, -k, --ignore or -p no: in Python tool configuration. Silencing the checker in its config is the same shortcut as a noqa on the line."
+  files: '(^|/)(pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|\.?mypy\.ini|\.?ruff\.toml|\.flake8|pyrightconfig\.json)$'
+  severity: warning
+  escalate: true
+  detect:
+    regex:
+      pattern: '\b(ignore_missing_imports|ignore_errors|allow_\w+|implicit_\w+)\s*=\s*(true|True|1)\b|\b(disallow_\w+|check_untyped_defs|strict\w*|warn_\w+)\s*=\s*(false|False|0)\b|\bfollow_imports\s*=\s*["'']?(skip|silent)\b|\b(disable_error_code|(extend[-_])?ignore|(extend[-_])?per[-_]file[-_]ignores)\s*=\s*(\[[^\]]*\]|[^\n]*(\n[ \t]+[^\s=][^\n=]*)*)|^\[[^\]\n]*per-file-ignores\](\n(?!\s*\[)[^\n]*)*|"?\btypeCheckingMode"?\s*[:=]\s*["'']?(off|basic|standard)\b|"?\breport[A-Z]\w*"?\s*[:=]\s*["'']?(false|none|warning|information)\b|--deselect\b|--ignore(-glob)?[= ]|(^|[\s"''\[,])-k[= ]|-p\s*no:'
+      flags: m
+  message: "{{file}}:{{line}} weakens a checker in its configuration ({{text}}). Fix what the checker or the test reports instead. If you believe the setting is right, or the task asked for it, keep it and say in your report what it was and what it is now."
+  context:
+    - "@loop-safety.md#checker-configuration"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: pyproject.toml
+        code: |
+          [tool.mypy]
+          strict = true
+          disallow_untyped_defs = true
+
+          [tool.ruff.lint]
+          select = ["E", "F", "B"]
+    bad:
+      - path: pyproject.toml
+        code: |
+          [[tool.mypy.overrides]]
+          module = "legacyrates"
+          ignore_missing_imports = true
+      - path: ruff.toml
+        code: |
+          [lint.per-file-ignores]
+          "app/rates.py" = ["ANN401"]
+      - path: setup.cfg
+        code: |
+          [flake8]
+          extend-ignore =
+              E203,
+              F401
+      - path: pytest.ini
+        code: |
+          [pytest]
+          addopts = -q --deselect tests/test_rates.py::test_live
+      - path: pyrightconfig.json
+        code: |
+          { "typeCheckingMode": "basic" }
+- id: no-config-suppressions-js
+  name: No weakened JavaScript and TypeScript checker configuration
+  description: "For agents that run unattended: flags an ESLint or Biome rule set to off (or ESLint's 0), Biome's linter or recommended set switched off, and a tsconfig strictness flag (strict, noImplicitAny and the other no* checks) set to false. Silencing the checker in its config is the same shortcut as an eslint-disable on the line."
+  files: '(^|/)(\.eslintrc(\.(json|jsonc|js|cjs|mjs|ya?ml))?|eslint\.config\.[cm]?[jt]s|biome\.jsonc?|[jt]sconfig[^/]*\.json|package\.json)$'
+  severity: warning
+  escalate: true
+  detect:
+    regex:
+      pattern: '["'']?[@\w/-]+["'']?\s*:\s*\[?\s*(["'']off["'']|off\b)|["'']?[@\w]*[-/][@\w/-]*["'']?\s*:\s*\[?\s*0\b|"(strict\w*|noImplicit\w+|noUnused\w+|noUnchecked\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|useUnknownInCatchVariables|alwaysStrict|recommended|enabled)"\s*:\s*false\b'
+  message: "{{file}}:{{line}} weakens a checker in its configuration ({{text}}). Fix what the checker reports instead. If you believe the setting is right, or the task asked for it, keep it and say in your report what it was and what it is now."
+  context:
+    - "@loop-safety.md#checker-configuration"
+    - "@loop-safety.md#when-a-test-is-wrong"
+  examples:
+    good:
+      - path: tsconfig.json
+        code: |
+          { "compilerOptions": { "strict": true, "skipLibCheck": true, "target": "es2022" } }
+      - path: eslint.config.js
+        code: |
+          export default [{ rules: { "no-console": "error", eqeqeq: ["error", "always"] } }]
+    bad:
+      - path: tsconfig.json
+        code: |
+          { "compilerOptions": { "strict": false } }
+      - path: tsconfig.app.json
+        code: |
+          { "compilerOptions": { "noImplicitAny": false } }
+      - path: eslint.config.mjs
+        code: |
+          export default [{ rules: { "@typescript-eslint/no-explicit-any": "off" } }]
+      - path: .eslintrc.yml
+        code: |
+          rules:
+            no-console: off
+      - path: biome.json
+        code: |
+          { "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } } }
 # Thresholds sit in TOML, INI, YAML, JSON and JS config, and no AST detector reads all of them.
 # A detector never sees the baseline's text, so raising a threshold fires as well as lowering it.
 # One pattern serves every file, so codecov's `target: 80%` and `threshold: 1%` match in any file

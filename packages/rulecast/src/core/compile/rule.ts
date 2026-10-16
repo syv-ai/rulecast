@@ -29,6 +29,8 @@ export interface CompiledRule {
    * How a finding of this rule is classified against the baseline (spec §8). `instance` — the
    * default, and every rule before 0.2 — is new when the match touches a changed line. `container`
    * is new when the node the match spans was not already violating the rule at the baseline.
+   * `removed` inverts the question: a match is what the rule keeps, and a file with fewer matches
+   * than at its baseline is one finding (baseline/removed.ts).
    */
   scope: RuleScope
   /**
@@ -135,6 +137,20 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
         return `refuse_write needs a detector that can judge a file before it is written; ${detector.kind} cannot`
       }
       if (!stages.includes("edit")) return "refuse_write needs edit among the rule's stages"
+    }
+    if (data.scope === "removed") {
+      // Counting at the baseline means measuring content that is no longer on disk (a commit's) or
+      // soon will not be (a snapshot's), through `read`; a whole-file match has nothing to count.
+      const implementation = context.registry.get(detector.kind)
+      if (implementation?.guards !== true || implementation.wholeFile === true || implementation.metered === true) {
+        return `scope: removed needs a detector that reads the file's content and reports each match in it; ${detector.kind} cannot`
+      }
+      // A session's baseline is a snapshot: line hashes, with the content gone. Its count is taken
+      // on touch, by the edit-stage rules only (baseline/stage.ts).
+      if (!stages.includes("edit")) return "scope: removed needs edit among the rule's stages"
+      if (data.refuse_write) {
+        return "refuse_write cannot be combined with scope: removed: its matches are what the rule keeps"
+      }
     }
     const known = new Set<string>([...CORE_VARIABLES, ...detector.captures])
     const unknown = templateVariables(data.message).find((name) => !known.has(name))

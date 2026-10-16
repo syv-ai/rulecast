@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import path from "node:path"
 
 import { classify } from "./baseline/fingerprint"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -422,7 +423,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
-    const output = await runDetectionFrom(
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
@@ -434,9 +435,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = removedFindings(selections, detected, baselineChanges, fingerprints)
+    const output = removed.output
     const statusOf = ({ rule, match }: { rule: CompiledRule; match: Match }) =>
       classify(match, rule.scope, rule.id, baselineChanges, fingerprints)
-    findings = output.findings.map((finding) => ({ ...finding, status: statusOf(finding) }))
+    findings = [
+      ...output.findings.map((finding) => ({ ...finding, status: statusOf(finding) })),
+      ...removed.findings.map((finding) => ({ ...finding, status: "new" as const })),
+    ]
     const classifiedIgnores = output.ignored.map((finding) => ({ ...finding, status: statusOf(finding) }))
     // Unattended, an ignore on a line changed this session silences nothing: nobody is there to
     // agree to it, so its finding takes the unattended path and is reported if it keeps blocking.

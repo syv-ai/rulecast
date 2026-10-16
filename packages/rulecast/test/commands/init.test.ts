@@ -105,7 +105,7 @@ describe("rulecast init --yes", () => {
     const result = await runCli(root, ["init", "--yes"], "", env)
     expect(result.code).toBe(0)
     expect(result.stdout).toContain(
-      "5 of 6 loop-safety rules not installed. Add them with: rulecast init --rules loop-safety",
+      "10 of 11 loop-safety rules not installed. Add them with: rulecast init --rules loop-safety",
     )
     expect(result.stdout).not.toContain("Not installed.")
   })
@@ -115,6 +115,11 @@ describe("rulecast init --yes", () => {
     const result = await runCli(root, ["init", "--rules", "loop-safety", "--yes"], "", env)
     expect(result.code).toBe(0)
     expect(ids(await read(root, CONFIG_FILE))).toEqual([
+      "loop-safety/no-config-suppressions-js",
+      "loop-safety/no-config-suppressions-python",
+      "loop-safety/no-deleted-assertions-js",
+      "loop-safety/no-deleted-assertions-python",
+      "loop-safety/no-deleted-assertions-ts",
       "loop-safety/no-lowered-thresholds",
       "loop-safety/no-new-suppressions",
       "loop-safety/no-skipped-tests-js",
@@ -122,7 +127,7 @@ describe("rulecast init --yes", () => {
       "loop-safety/no-skipped-tests-ts",
       "loop-safety/protected-loop-config",
     ])
-    expect(result.stdout).toContain("rulecast validate: 6 rules valid")
+    expect(result.stdout).toContain("rulecast validate: 11 rules valid")
     expect(result.stdout).not.toContain("Add it with")
   })
 
@@ -137,6 +142,7 @@ describe("rulecast init --yes", () => {
     expect(ids(await read(root, CONFIG_FILE))).toEqual(
       [
         ...PYTHON,
+        "loop-safety/no-deleted-assertions-python",
         "loop-safety/no-new-suppressions",
         "loop-safety/no-skipped-tests-python",
         // The config file it is written to is one of the pack's protected files.
@@ -285,7 +291,7 @@ describe("rulecast init in a terminal", () => {
     ])
     const [rules, conventions] = script.asked
     expect([...(rules!.initial as string[])].sort()).toEqual(PYTHON)
-    expect(rules!.values).toHaveLength(15)
+    expect(rules!.values).toHaveLength(20)
     expect(conventions!.values).toEqual(["", "@AGENTS.md", "@AGENTS.md#agents", "@AGENTS.md#errors"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
       { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },

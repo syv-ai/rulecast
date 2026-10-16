@@ -88,7 +88,7 @@ const touchRule = (id: string) => `${id} is a touch rule: it delivers context an
 const ratio = (part: number, whole: number) => (whole === 0 ? "   — " : (part / whole).toFixed(2))
 
 function summaryLine(rule: DetectorRule, result: ExampleResult): string {
-  const id = rule.id.padEnd(36)
+  const id = rule.id.padEnd(Math.max(36, rule.id.length + 2))
   if (result.skipped) return `  ${id}skipped (llm; name the rule to run it)`
   if (result.missing || result.empty) return `  ${id}no examples`
   const passed = result.outcomes.filter((outcome) => outcome.passed).length

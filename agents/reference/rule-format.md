@@ -72,7 +72,7 @@ repos:
 | `stages` | no | Subset of `touch`, `edit`, `verify` (below) |
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
 | `escalate` | no, default `false` | `true`: `error` in [unattended mode](#unattended-mode), whatever `severity` says. The same as listing the id in `unattended.escalate`. A catalog rule's `escalate: true` is turned off with `escalate: false` on its entry |
-| `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it (below) |
+| `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it, or, with `removed`, whether a file lost matches (below) |
 | `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
@@ -120,6 +120,49 @@ Two things to know before reaching for it:
   changed outside the agent's tools, or is over `max_file_bytes` — a `container` rule falls back to
   `instance`. An `llm` rule always does: measuring its baseline would mean a second model call every
   time the agent opens a file.
+
+### Removed rules
+
+`scope: removed` turns the question round. A match is something the code should *keep*, such as
+an assertion in a test, and the finding is a file that has fewer matches than it had at its
+baseline:
+
+```yaml
+- id: tests/keep-assertions
+  files: '(^|/)tests/.*\.py$'
+  scope: removed
+  detect:
+    ast-grep:
+      language: python
+      rule: { kind: assert_statement }
+  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back."
+```
+
+There is one finding per file, always new. It sits on the first line the change touched, and
+`{{text}}` says how many went, for example `2 of 5 removed`. A match by itself is never a finding,
+and adding, moving or rewriting matches is nothing as long as the count does not drop. Matches on a
+line with a `rulecast-ignore` still count, and the finding is not on a matched line, so an ignore
+comment does not silence it; use `enabled: false` or `exclude`.
+
+What it needs:
+
+- **A baseline.** In an agent session that is the file as the agent first read it, or the session's
+  start commit; the count at the start commit is taken at the stop, so a file changed with the
+  shell and never read is reported at the stop rather than at the edit. `rulecast run --from-ref`
+  counts against the merge base, and a staged run against `HEAD`. `rulecast run --files` and
+  `--all-files` have no baseline, and a removed rule reports nothing there.
+- **A detector that reads the content it is handed and reports each match in it:** `regex` or
+  `ast-grep`. Not `path`, whose match is the whole file, and not a linter, command or `llm`.
+- **`edit` among its stages,** which is the default for both. A session's baseline is taken when the
+  agent opens a file, by the edit-stage rules. It cannot be combined with `refuse_write`.
+- **A file that still exists.** A deleted file has nothing to count and is not reported.
+
+It counts, so it cannot tell which match went: deleting one assertion and adding an unrelated one
+leaves the count where it was. A file over `max_file_bytes` is not counted. Only projects with a
+removed or container rule pay for the baseline measurement.
+
+`examples` on a removed rule show what it counts: a `bad` example has at least one match, which
+deleting would report, and a `good` one has none.
 
 ### Turning a rule or a finding off
 

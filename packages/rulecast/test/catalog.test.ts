@@ -25,7 +25,12 @@ const CATALOG = [
   "loop-safety/no-skipped-tests-python",
   "loop-safety/no-skipped-tests-ts",
   "loop-safety/no-skipped-tests-js",
+  "loop-safety/no-deleted-assertions-python",
+  "loop-safety/no-deleted-assertions-ts",
+  "loop-safety/no-deleted-assertions-js",
   "loop-safety/no-new-suppressions",
+  "loop-safety/no-config-suppressions-python",
+  "loop-safety/no-config-suppressions-js",
   "loop-safety/no-lowered-thresholds",
   "loop-safety/protected-loop-config",
   "python/no-httpexception-in-services",
@@ -45,12 +50,133 @@ interface Case {
   file: string
   content: string
   fires: boolean
+  /**
+   * The file as committed before the change: the case is then a verify against that commit. A
+   * `scope: removed` rule has nothing to count against without one.
+   */
+  before?: string
 }
+
+const PY_ASSERTS =
+  "class Rates(TestCase):\n    def test_fresh(self):\n        self.assertTrue(rates.fresh())\n\n\ndef test_total():\n    assert total([1, 2]) == 3\n    with pytest.raises(ValueError):\n        total(None)\n"
+const TS_EXPECTS = 'it("totals the lines", () => {\n  expect(total([1, 2])).toBe(3)\n  expect(total([])).toBe(0)\n})\n'
+const TSX_EXPECTS =
+  'test("shows the total", () => {\n  render(<Cart lines={[1, 2]} />)\n  expect(screen.getByText("3")).toBeTruthy()\n  assert.ok(screen)\n})\n'
+const MYPY = '[project]\nname = "shop"\n\n[tool.mypy]\nstrict = true\n'
+const RUFF = '[tool.ruff.lint]\nselect = ["E", "F"]\nignore = ["E501"]\n'
+const TSCONFIG = '{\n  "compilerOptions": {\n    "strict": true,\n    "target": "es2022"\n  }\n}\n'
 
 const SERVICE_OK = "def get_user(session, user_id):\n    return crud.get_user(session, user_id)\n"
 const COMPONENT_OK = "export function UserList() {\n  const { data } = useUsers()\n  return <List items={data} />\n}\n"
 
 const cases: Case[] = [
+  {
+    rule: "loop-safety/no-deleted-assertions-python",
+    kind: "verify",
+    file: "tests/test_rates.py",
+    before: PY_ASSERTS,
+    content: PY_ASSERTS.replace("    assert total([1, 2]) == 3\n", ""),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-python",
+    kind: "verify",
+    file: "tests/test_rates.py",
+    before: PY_ASSERTS,
+    // Commented out is removed: the parser does not count a comment.
+    content: PY_ASSERTS.replace("        self.assertTrue", "        # self.assertTrue"),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-python",
+    kind: "verify",
+    file: "tests/test_rates.py",
+    before: PY_ASSERTS,
+    content: `${PY_ASSERTS}    assert total([]) == 0\n`,
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-ts",
+    kind: "verify",
+    file: "src/cart.test.ts",
+    before: TS_EXPECTS,
+    content: TS_EXPECTS.replace("  expect(total([])).toBe(0)\n", "  // expect(total([])).toBe(0)\n"),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-ts",
+    kind: "verify",
+    file: "src/cart.test.ts",
+    before: TS_EXPECTS,
+    // Rewritten with a different expected value: not covered, and not this rule.
+    content: TS_EXPECTS.replace("toBe(0)", "toBe(1)"),
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-js",
+    kind: "verify",
+    file: "src/Cart.test.tsx",
+    before: TSX_EXPECTS,
+    content: TSX_EXPECTS.replace("  assert.ok(screen)\n", ""),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-deleted-assertions-js",
+    kind: "verify",
+    file: "src/Cart.test.tsx",
+    before: TSX_EXPECTS,
+    content: TSX_EXPECTS.replace("  render(", "  cleanup()\n  render("),
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-python",
+    kind: "verify",
+    file: "pyproject.toml",
+    // What the agent wrote in the loop-safety pack's run 3 (docs/evidence/2026-10-16-loop-safety-pack.md).
+    before: MYPY,
+    content: `${MYPY}\n[[tool.mypy.overrides]]\nmodule = "legacyrates"\nignore_missing_imports = true\n`,
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-python",
+    kind: "verify",
+    file: "pyproject.toml",
+    before: RUFF,
+    content: RUFF.replace('["E501"]', '[\n    "E501",\n    "F401",\n]'),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-python",
+    kind: "verify",
+    file: "pyproject.toml",
+    // An existing ignore is not the change's: a line added next to it is no finding.
+    before: RUFF,
+    content: `${RUFF}line-length = 100\n`,
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-python",
+    kind: "verify",
+    file: "pyproject.toml",
+    content: `${MYPY}disallow_untyped_defs = true\n`,
+    fires: false,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-js",
+    kind: "verify",
+    file: "tsconfig.json",
+    before: TSCONFIG,
+    content: TSCONFIG.replace('"strict": true', '"strict": false'),
+    fires: true,
+  },
+  {
+    rule: "loop-safety/no-config-suppressions-js",
+    kind: "verify",
+    file: "tsconfig.json",
+    before: TSCONFIG,
+    content: TSCONFIG.replace('"target": "es2022"', '"target": "es2023"'),
+    fires: false,
+  },
   {
     rule: "generated-code",
     kind: "verify",
@@ -504,13 +630,20 @@ describe("catalog rules", () => {
     }
   })
 
-  test.each(cases)("$rule on $file ($kind) fires: $fires", async ({ rule, kind, file, content, fires }) => {
-    const root = await createProject({ [file]: content })
+  test.each(cases)("$rule on $file ($kind) fires: $fires", async ({ rule, kind, file, content, fires, before }) => {
+    let root: string
+    let baseCommit: string | undefined
+    if (before === undefined) root = await createProject({ [file]: content })
+    else {
+      root = await createRepo({ [file]: before })
+      baseCommit = await git(root, "rev-parse", "HEAD")
+      await writeFile(path.join(root, file), content)
+    }
     await stubAgentCli(root, "claude")
     const { delivery } = await runPipeline({
       project: { root, config: defaultConfig(), rules, diagnostics: [], mode: ATTENDED },
       stateDir: stateDirFor(root),
-      event: { kind, files: [file], cwd: root },
+      event: { kind, files: [file], cwd: root, ...(baseCommit === undefined ? {} : { baseCommit }) },
       registry,
       maxContextChars: null,
     })
