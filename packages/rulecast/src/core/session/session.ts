@@ -1,5 +1,6 @@
 import path from "node:path"
 
+import type { ActiveMode } from "../config/mode"
 import { appendRecords, readRecords } from "../jsonl"
 import type { Decision } from "./decide"
 import { withLock } from "./lock"
@@ -37,6 +38,11 @@ export async function openSession(dir: string, agent: string): Promise<SessionVi
     readRecords<ContextRecord>(contextFile(dir, agent)),
   ])
   return { work: foldWork(work), context: foldContext(context) }
+}
+
+/** The mode the session's hooks recorded; null for a session that recorded none. */
+export async function recordedMode(dir: string): Promise<ActiveMode | null> {
+  return foldWork(await readRecords<WorkRecord>(workFile(dir))).mode
 }
 
 /** Re-reads the session under the lock, decides, appends the decision's records. */

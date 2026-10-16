@@ -2,9 +2,11 @@ import {
   BUDGET_MS,
   type Measurement,
   measureEditHook,
+  measureNewWorktree,
   measureShellHooks,
   SHELL_BEFORE_ADDED_MS,
   type ShellMeasurement,
+  type WorktreeMeasurement,
 } from "./perf-fixture"
 
 const bold = (s: string) => `\u001B[1m${s}\u001B[0m`
@@ -53,8 +55,29 @@ function shellReport(result: ShellMeasurement): { text: string; pass: boolean } 
   return { text, pass: beforePass && afterPass }
 }
 
+/** Report only (#29): a new worktree's first edit is not the warm hook the budget is about. */
+function worktreeReport(result: WorktreeMeasurement, warm: Measurement): string {
+  const row = (name: string, m: Measurement) => `  ${name.padEnd(17)}${ms(m.p50)}  ${ms(m.p95)}  ${ms(m.max)}`
+  return [
+    `${bold("rulecast in a new worktree")} ${dim(`· ${result.worktrees} worktrees · report only`)}`,
+    "",
+    dim("                       p50      p95      max"),
+    row("session start", result.sessionStart),
+    row("first edit", result.firstEdit),
+    row("first edit, cold", result.coldHome),
+    row("new session", result.newSession),
+    row("warm edit", warm),
+    "",
+    `  ${dim("cold: an empty per-project detector cache (the fixture pins no rule repos)")}`,
+    `  ${dim("new session: the same first edit in the warm checkout itself")}`,
+    `  ${dim(`without node_modules: ${result.depsMissing}`)}`,
+    "",
+  ].join("\n")
+}
+
 const result = await measureEditHook()
 process.stdout.write(report(result))
 const shell = shellReport(await measureShellHooks())
 process.stdout.write(`\n${shell.text}`)
+process.stdout.write(`\n${worktreeReport(await measureNewWorktree(), result)}`)
 process.exitCode = result.p95 < BUDGET_MS && shell.pass ? 0 : 1

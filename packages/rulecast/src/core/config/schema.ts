@@ -8,7 +8,14 @@ export type Stage = (typeof STAGES)[number]
 
 export const RULE_ID = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/
 
-export const RULE_SCOPES = ["instance", "container"] as const
+/**
+ * Whether a person answers the agent (`attended`) or nobody does: a goal loop, `claude -p`, a
+ * scheduled task, CI (`unattended`). Resolved in core/config/mode.ts; only agent hooks act on it.
+ */
+export const MODES = ["attended", "unattended"] as const
+export type Mode = (typeof MODES)[number]
+
+export const RULE_SCOPES = ["instance", "container", "removed"] as const
 export type RuleScope = (typeof RULE_SCOPES)[number]
 
 const idSchema = z.string().regex(RULE_ID, "must be lowercase segments separated by /")
@@ -75,13 +82,17 @@ const ruleKeys = {
   stages: stagesSchema.optional(),
   minimum_rulecast_version: versionSchema.optional(),
   severity: z.enum(["error", "warning"]).optional(),
+  /** true: `error` in unattended mode, as if `unattended.escalate` named the rule. A catalog default an override can turn off. */
+  escalate: z.boolean().optional(),
   /**
    * What the convention belongs to (§8). `instance`: the token the detector matched, classified by
    * whether the agent's edit touched it. `container`: the node the match spans, classified by
-   * whether that node already violated the rule at the baseline.
+   * whether that node already violated the rule at the baseline. `removed`: a match is something
+   * the rule keeps, and the finding is a file with fewer matches than at its baseline.
    */
   scope: z.enum(RULE_SCOPES).optional(),
-  refuse_write: z.boolean().optional(),
+  /** `unattended`: refuse only when no one is in the loop (core/config/mode.ts); `true`: always. */
+  refuse_write: z.union([z.boolean(), z.literal("unattended")]).optional(),
   /** false: compiled and listed, selected for nothing. The way to switch a catalog rule off without deleting it. */
   enabled: z.boolean().optional(),
   detect: z
@@ -163,6 +174,22 @@ export const configSchema = z
       .object({ max_refusals: z.number().int().nonnegative().default(1) })
       .strict()
       .default({}),
+    /** Overrides detection from CI / GITHUB_ACTIONS; RULECAST_MODE overrides this. */
+    mode: z.enum(MODES).optional(),
+    unattended: z
+      .object({
+        /**
+         * Stops blocked per agent per prompt when nobody is in the loop, in place of
+         * stop_gate.max_blocks. A goal-driven or headless run sends one prompt, so the attended
+         * default of 1 would give the whole run one block; a finding that blocks twice stops
+         * blocking whatever this says (session/decide.ts), so a false positive cannot use it all.
+         */
+        max_blocks: z.number().int().nonnegative().default(10),
+        /** Warning rules, by the id findings show, that are errors when nobody is in the loop. */
+        escalate: z.array(idSchema).default([]),
+      })
+      .strict()
+      .default({}),
     llm: z
       .object({
         // No `model`: every llm rule names its own (plan 6a, Decision 1).
@@ -187,6 +214,8 @@ export const configSchema = z
     timeouts: { editDeadlineMs: input.timeouts.edit_deadline_ms, verifyMs: input.timeouts.verify_ms },
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
     refuseGate: { maxRefusals: input.refuse_gate.max_refusals },
+    mode: input.mode ?? null,
+    unattended: { maxBlocks: input.unattended.max_blocks, escalate: input.unattended.escalate },
     llm: {
       provider: input.llm.provider,
       baseUrl: input.llm.base_url,

@@ -42,6 +42,8 @@ test("<command> --help and help <command> print that command's synopsis and flag
   }
   // The flag the review found missing from the usage.
   expect(commandHelp("test")).toContain("--against PATH...")
+  expect(commandHelp("doctor")).toContain("--ci")
+  expect(commandHelp("doctor")).toContain("--from-ref REF")
 })
 
 test("a usage error prints that command's help, not every command's", async () => {

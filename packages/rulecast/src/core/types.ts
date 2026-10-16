@@ -1,5 +1,7 @@
 import type { ZodType, ZodTypeDef } from "zod"
 
+import type { DisabledGroup } from "./disabled"
+
 /**
  * `start`: the session began or resumed. `shell-before` / `shell-after`: around one call of the
  * agent's shell tool, whose writes rulecast finds by comparing the working tree (session/tree.ts).
@@ -64,7 +66,10 @@ export interface Match {
   endLine: number
   column: number
   text: string
-  /** Exactly the names the detector declared for the rule. */
+  /**
+   * Exactly the names the detector declared for the rule, plus, on a `scope: removed` finding, its
+   * counts (REMOVED_VARIABLES).
+   */
   captures: Record<string, string>
   /**
    * The match is about the file as a whole (a hook would reformat it), not the lines it spans, so
@@ -77,6 +82,13 @@ export interface Match {
    * the text and captures, never the source line.
    */
   redacted?: true
+  /**
+   * Captures that are not part of what the finding *is*, only of what its message says: a removed
+   * finding's counts, which change with every further deletion while the finding stays the same.
+   * Whatever identifies a finding across runs (the stop gate's `findingKey`, a finding id) leaves
+   * them out, as it does a detector's own volatile captures.
+   */
+  volatileCaptures?: readonly string[]
 }
 
 export interface ChangeSet {
@@ -338,7 +350,15 @@ export interface Delivery {
   preexistingSummary: { rule: string; file: string; count: number }[]
   references: DeliveredReference[]
   touches: string[]
-  stop: "block" | "allow" | "capReached" | null
+  /**
+   * At an agent's stop. `report`: unattended only — the gate will not block for these findings
+   * again, so the agent is held once more to record them as unresolved (session/decide.ts `gate`).
+   * `incomplete`: unattended only — nothing blocks, but configured rules did not run, so the main
+   * agent is held once per prompt to say in its report that those checks did not happen.
+   */
+  stop: "block" | "allow" | "capReached" | "report" | "incomplete" | null
+  /** Decided in unattended mode: nobody answers the agent, so the adapter words its stop for that. */
+  unattended?: true
   warnings: string[]
   /** `message` template per rule with findings: the skeleton a grouped rendering prints once. */
   templates: Record<string, string>
@@ -363,6 +383,16 @@ export interface Delivery {
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.
    */
   notices?: string[]
+  /**
+   * Configured rules that did not run (#29), grouped by why. Set at every stop in unattended mode —
+   * not once per context, as warnings are — and on every `rulecast run`. Never priced into the budget.
+   */
+  disabled?: DisabledGroup[]
+  /**
+   * For the agent, each said once per session: what changes how it should read this delivery, such
+   * as another agent's shell call running alongside its own. Printed first, so a cut never drops it.
+   */
+  agentNotices?: string[]
 }
 
 export interface AdapterInput {
@@ -393,6 +423,11 @@ export interface AdapterInstall {
     verifyMs: number,
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
+  /**
+   * Whether the installed hooks run only the project's own rulecast (node_modules/.bin), so one on
+   * the PATH does not count (`doctor`). Absent: the adapter cannot tell.
+   */
+  local?(settings: unknown): boolean
 }
 
 export interface Adapter {

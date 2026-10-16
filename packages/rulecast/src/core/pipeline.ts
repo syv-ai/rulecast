@@ -3,6 +3,7 @@ import path from "node:path"
 
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -16,6 +17,7 @@ import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
 import type { DetectorRegistry } from "./detection/registry"
 import { selectDetectorRules, selectTouchRules } from "./detection/select"
+import { type DisabledGroup, disabledRules } from "./disabled"
 import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
@@ -24,11 +26,23 @@ import { type ClassifiedFinding, type DecideInput, type Decision, decide } from 
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
-import { dirtyAtStart, emptyContext, emptyWork, referenceState, type WorkRecord } from "./session/state"
-import { isGone, treeChanges, treeState } from "./session/tree"
+import {
+  dirtyAtStart,
+  editedBy,
+  emptyContext,
+  emptyWork,
+  hasOwnTree,
+  MAIN_AGENT,
+  referenceState,
+  sharedShell,
+  sweptFor,
+  type WorkRecord,
+  type WorkState,
+} from "./session/state"
+import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
 import { type IgnoredFinding, sourceLines } from "./suppress"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -58,13 +72,20 @@ export interface PipelineOptions {
   /** Render pre-existing findings in full into `Delivery.preexisting` (rulecast run's JSON and SARIF). */
   listPreexisting?: boolean
   /**
-   * `rulecast run --session`: a rule the session disabled after a detector failure, and that would
-   * have run here, is a warning and marks the run failed, so its exit code does not say every rule
-   * ran. A hook leaves this off: it warned when it disabled the rule.
+   * Say which configured rules did not run (Delivery.disabled), whatever the mode: `rulecast run`.
+   * An agent's stop says it only in unattended mode, where nobody reads the warning given once (#29).
+   * `rulecast run --session` also marks the run failed for a rule the session disabled after a
+   * detector failure, and that would have run here, so its exit code does not say every rule ran.
+   * A hook leaves this off: it warned when it disabled the rule.
    */
   reportDisabled?: boolean
   /** Debug log sink. */
   log?: (line: string) => void
+  /**
+   * The hook: the session's mode is recorded, so `rulecast run --session` judges the session in the
+   * mode its hooks did. The CLI's own runs never record one.
+   */
+  recordMode?: boolean
 }
 
 export interface PipelineResult {
@@ -94,6 +115,13 @@ type Warning = { key: string; text: string }
 const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
 
+/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
+const SHARED_TREE =
+  "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
+  "command to every file that changed while it ran, so findings here and at your stop may be another " +
+  "agent's. Give each agent that runs in parallel its own worktree (in Claude Code, a subagent with " +
+  "`isolation: worktree`)."
+
 /**
  * Above this many warnings of one kind, they collapse into one carrying a count and an example.
  *
@@ -104,6 +132,9 @@ const TREE_UNAVAILABLE =
 const SUMMARY_THRESHOLD = 3
 
 const DEFAULT_HINT = "rulecast validate"
+
+/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
+const DISABLED_WARNING = /^(diagnostics?|detector):/
 
 /**
  * The key a summary is delivered under.
@@ -202,11 +233,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const concernsRun = (diagnostic: Diagnostic) =>
     only === undefined ||
     diagnostic.fatal === true ||
-    (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.affects?.some((id) => only.has(id)) ?? true))
+    (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.rules?.some((id) => only.has(id)) ?? true))
   let failed = errors.some(concernsRun)
   const deadlineMissed: string[] = []
   let session = event.session
-    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? "main" }
+    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? MAIN_AGENT }
     : null
 
   /**
@@ -239,6 +270,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
+  /**
+   * What changed since the agent's latest recorded state that no tool call explains: not a file any
+   * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
+   * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
+   */
+  function between(work: WorkState, agent: string, now: TreeState): string[] {
+    if (!hasOwnTree(work, agent)) return []
+    const reference = referenceState(work, agent)
+    const gap = reference === null ? null : treeChanges(reference, now)
+    if (gap === null || gap.gitOperation) return []
+    const edited = new Set(work.edited)
+    return relevant(gap.files.filter((file) => !edited.has(file)))
+  }
+
   if (event.kind === "shell-before") {
     // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
     // agent's last recorded state happened between its calls — the user's editor, a formatter, a
@@ -248,17 +293,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const now = open ? await treeState(root) : null
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
-      const reference = referenceState(work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      const edited = new Set(work.edited)
-      const swept =
-        gap === null || gap.gitOperation
-          ? []
-          : relevant(gap.files.filter((file) => !isGone(now, file) && !edited.has(file)))
+      const swept = between(work, open.agent, now).filter((file) => !isGone(now, file))
       const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
       if (session !== null) {
         await appendWork(open.dir, [
-          ...swept.map((file) => ({ t: "swept" as const, file })),
+          ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
       }
@@ -292,6 +331,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
+  if (session && options.recordMode === true) {
+    const { mode, source, detail } = project.mode
+    const recorded = view.work.mode
+    if (recorded === null || recorded.mode !== mode || recorded.source !== source || recorded.detail !== detail) {
+      await appendWork(session.dir, [{ t: "mode", mode, source, detail }])
+    }
+  }
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
@@ -301,6 +347,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
   const refused: NonNullable<Delivery["refused"]> = []
+  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
+  const agentNotices: string[] = []
+  const withAgentNotices = (): Pick<Delivery, "agentNotices"> => (agentNotices.length === 0 ? {} : { agentNotices })
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -311,9 +360,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
     const call = reference === null ? null : treeChanges(reference, now)
     const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    // Another agent's shell call ran during this one, and this one is held to files: those may be the
+    // other's writes (README, Agents). Hooks key on the session's directory, so an overlap alone may be
+    // a command that ran elsewhere; with no files there is nothing to misattribute. Told once per agent.
+    const sharedKey = `shared-tree:${open.agent}`
+    const shared =
+      files.length > 0 && sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    if (shared) agentNotices.push(SHARED_TREE)
+    await appendWork(open.dir, [
+      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+      ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
+    ])
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
@@ -330,6 +389,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -364,6 +424,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
+  let disabledGroups: DisabledGroup[] = []
 
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
@@ -398,7 +459,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the container ranges taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -419,15 +483,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "edit" || event.kind === "verify") {
     let requested = relevant(event.files)
     if (event.kind === "edit" && session) {
+      const agent = session.agent
       await appendWork(
         session.dir,
-        requested.map((file) => ({ t: "edited" as const, file, ...(via === undefined ? {} : { via }) })),
+        requested.map((file) => ({ t: "edited" as const, file, agent, ...(via === undefined ? {} : { via }) })),
       )
     }
     if (event.kind === "verify" && event.files.length === 0 && session) {
-      requested = relevant(view.work.edited)
+      // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
+      // edited is never swept: it was changed by a tool call, only not by this agent's.
+      requested = relevant(editedBy(view.work, session.agent))
       if (options.stopGate === true) {
-        swept = await sweep(session, new Set(requested))
+        swept = await sweep(session)
         requested = [...requested, ...swept]
       }
     }
@@ -447,8 +514,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    const wanted = (rule: { id: string; detector: { kind: string } }) =>
-      !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
+    const wanted = (rule: { id: string; scope: string; detector: { kind: string } }) =>
+      !skip.has(rule.detector.kind) &&
+      (options.onlyRules?.has(rule.id) ?? true) &&
+      (event.kind === "verify" || rule.scope !== "removed")
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
     if (options.reportDisabled === true && disabled.size > 0) {
       for (const { rule } of selectDetectorRules(project.rules, event.kind, files, new Set())) {
@@ -464,7 +535,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
     if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
-      const recent = [...view.work.edited].reverse()
+      const recent = [...editedBy(view.work, session?.agent ?? MAIN_AGENT)].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)
         if (budget === undefined) continue
@@ -490,7 +561,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       }
     }
     const lines = sourceLines(read)
-    const output = await runDetectionFrom(
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
@@ -503,25 +574,52 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = await removedFindings(selections, detected, baselineChanges, containers, read)
+    const output = removed.output
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
     // From the lines suppression read through `read`, the content detection judged: staged in a
     // staged run, not the working tree. No file is read again.
-    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
+    const ids = await findingIds(
+      [...output.findings, ...output.ignored, ...removed.findings],
+      (kind) => registry.get(kind),
+      lines,
+    )
     // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
     const committed =
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
         ? options.committedBaseline
         : undefined
-    findings = output.findings.map(({ rule, match }, index) => {
-      const id = ids[index]!
-      const status: ClassifiedFinding["status"] =
-        committed === undefined
-          ? classify(match, rule.scope, rule.id, baselineChanges, containers)
-          : baselineHas(committed, rule.id, match.file, id)
-            ? "preexisting"
-            : "new"
-      return { id, rule, match, status }
+    const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] =>
+      committed === undefined
+        ? classify(match, rule.scope, rule.id, baselineChanges, containers)
+        : baselineHas(committed, rule.id, match.file, id)
+          ? "preexisting"
+          : "new"
+    const removedFrom = output.findings.length + output.ignored.length
+    findings = [
+      ...output.findings.map(({ rule, match }, index) => {
+        const id = ids[index]!
+        return { id, rule, match, status: statusOf(rule, match, id) }
+      }),
+      // The drop is the change's by construction: always new.
+      ...removed.findings.map(({ rule, match }, index) => ({
+        id: ids[removedFrom + index]!,
+        rule,
+        match,
+        status: "new" as const,
+      })),
+    ]
+    const classifiedIgnores = output.ignored.map((item, index) => {
+      const id = ids[output.findings.length + index]!
+      return { ...item, id, status: statusOf(item.rule, item.match, id) }
     })
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
+    const unsilenced =
+      project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
+    for (const { id, rule, match, status } of unsilenced) findings.push({ id, rule, match, status })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
@@ -529,7 +627,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    ignored = output.ignored.map((item, index) => ({ ...item, id: ids[output.findings.length + index]! }))
+    const kept = new Set(unsilenced.map(({ match }) => match))
+    ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),
       ...output.timedOut.flatMap((timeout) => timeout.rules),
@@ -557,18 +656,33 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
         currentConfigHash: atStop ? await configHash(root) : null,
         ignored: atStop
-          ? ignored.map(({ rule, match, reason }) => ({
-              rule: rule.id,
-              match,
-              reason,
-              status: classify(match, rule.scope, rule.id, baselineChanges, containers),
-            }))
+          ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
           : [],
         told: view.work.noticed,
         refused,
       })
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
+    }
+    // Every time, not once per context: a loop nobody watches must not read "no findings" as
+    // "checked". The session's earlier disables are named too, since they are skipped above unsaid.
+    if (
+      event.kind === "verify" &&
+      (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
+    ) {
+      const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
+      const earlier = [...view.work.disabled].map(([rule, message]) => ({
+        kind: kinds.get(rule) ?? "detector",
+        rules: [rule],
+        message,
+      }))
+      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
+      // there the warning is the once-per-context word to the user, the list the agent's every stop.
+      if (options.reportDisabled === true) {
+        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
+        warnings.splice(0, warnings.length, ...kept)
+      }
     }
     // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
     // skipped in a staged run says which files kept it from running (detection/materialise.ts).
@@ -605,28 +719,28 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   /**
    * At a stop: what changed since the agent's latest recorded state that no call of its explains —
-   * a job it left running, a formatter, the user's own edits — joined with what earlier calls'
-   * before hooks already swept. A git operation in between sweeps nothing. Never the agent's own
-   * edited files, which stay its own.
+   * a job it left running, a formatter, the user's own edits — joined with what earlier comparisons
+   * of this agent's swept (every agent's, at the main agent's stop). A git operation in between
+   * sweeps nothing.
    */
-  async function sweep(open: { dir: string; agent: string }, edited: ReadonlySet<string>): Promise<string[]> {
+  async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
     const now = await treeState(root)
+    const work = view.work
     let found: string[] = []
-    if (now !== null) {
-      const reference = referenceState(view.work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      if (gap !== null && !gap.gitOperation) found = relevant(gap.files.filter((file) => !edited.has(file)))
+    if (now !== null && hasOwnTree(work, open.agent)) {
+      found = between(work, open.agent, now)
       await appendWork(open.dir, [
-        ...found.map((file) => ({ t: "swept" as const, file })),
+        ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
         { t: "tree", phase: "stop", agent: open.agent, state: now },
       ])
     }
-    const all = [...new Set([...relevant(view.work.swept), ...found])].filter((file) => !edited.has(file))
+    const edited = new Set(work.edited)
+    const all = [...new Set([...relevant(sweptFor(work, open.agent)), ...found])].filter((file) => !edited.has(file))
     return now === null ? all : all.filter((file) => !isGone(now, file))
   }
 
   const inputFor = (state: SessionView): DecideInput => ({
-    agent: session?.agent ?? "main",
+    agent: session?.agent ?? MAIN_AGENT,
     findings,
     touches: touches.filter((rule) => !state.context.touched.has(rule.id)),
     agentRead,
@@ -635,7 +749,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     context: state.context,
     resolver,
     maxBytes: config.context.maxBytes,
-    maxBlocks: config.stopGate.maxBlocks,
+    maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
+    mode: project.mode.mode,
     maxContextChars: options.maxContextChars,
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
@@ -643,6 +758,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
     ...(refused.length === 0 ? {} : { refused }),
+    ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.
@@ -665,6 +781,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
+    Object.assign(decision.delivery, withAgentNotices())
     return decision.delivery
   }
 
