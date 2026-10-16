@@ -21,7 +21,10 @@ export const COMMANDS: CommandHelp[] = [
       "rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--no-hooks] [--scope shared|personal] [--yes]",
     summary: "Set rulecast up: config, catalog rules, agent hooks",
     flags: [
-      ["--rules id,id", "Install these catalog rules instead of the ones that apply to your files"],
+      [
+        "--rules id,id",
+        "Install these catalog rules, or groups such as loop-safety, instead of the ones that apply to your files",
+      ],
       ["--no-rules", "Install no catalog rules"],
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable"],
       ["--no-agents", "Install no agent hooks"],
@@ -92,9 +95,12 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "doctor",
-    synopsis: "rulecast doctor",
+    synopsis: "rulecast doctor [--ci] [--from-ref REF]",
     summary: "Compile, check the environment and hooks, dry-run every rule",
-    flags: [],
+    flags: [
+      ["--ci", "Check what a CI or headless run needs; exit 2 if rulecast would run degraded. On by itself under CI"],
+      ["--from-ref REF", "Also check that rulecast run --from-ref REF finds a merge base here (implies --ci)"],
+    ],
   },
   {
     name: "autoupdate",

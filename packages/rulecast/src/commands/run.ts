@@ -1,14 +1,16 @@
 import { parseArgs } from "node:util"
 
 import { CLI_FORMATS, type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
-import { type CompiledProject, compile } from "../core/compile/project"
+import { type CompiledProject, type CompileOptions, compile } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { WORKTREE } from "../core/content"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
+import { CorruptStoreError } from "../core/jsonl"
 import { runPipeline } from "../core/pipeline"
 import { fetchingRepos } from "../core/repos/provider"
+import { recordedMode, sessionDir } from "../core/session/session"
 import type { ContentSource } from "../core/types"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
@@ -187,6 +189,7 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     maxContextChars: null,
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
+    reportDisabled: true,
   })
   const text = formatDelivery(result.delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,
@@ -205,11 +208,33 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
   return exitCodeFor(result.delivery, result.failed)
 }
 
+/**
+ * A run is attended: a commit or a CI job has no agent to answer. A run over a session is the
+ * session's picture, so it takes the mode the session's hooks recorded, or, for a session recorded
+ * before modes were, resolves it as they would have.
+ */
+async function modeFor(root: string, run: RunArgs, io: CliIo): Promise<Pick<CompileOptions, "mode" | "env">> {
+  if (run.session === null) return {}
+  let recorded = null
+  try {
+    recorded = await recordedMode(sessionDir(ensureProjectState(cacheHome(io.env), root), run.session))
+  } catch (error) {
+    // The pipeline reads the store again, and says it could not.
+    if (!(error instanceof CorruptStoreError)) throw error
+  }
+  return recorded === null ? { env: io.env } : { mode: recorded }
+}
+
 export async function runCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const run = parseRunArgs(args)
   if (run.ref !== null) throw new UsageError("--ref only applies to try-repo")
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
-  const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
+  const project = await compile({
+    root,
+    registry,
+    repos: fetchingRepos(cacheHome(io.env)),
+    ...(await modeFor(root, run, io)),
+  })
   return executeRun({ project, ruleId: run.leading[0] ?? null, run, registry, io })
 }

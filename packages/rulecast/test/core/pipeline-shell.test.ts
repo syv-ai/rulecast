@@ -247,6 +247,28 @@ describe("a shell call's changes go through the edit event", () => {
     expect(work.swept).toEqual([USERS])
   })
 
+  test("a Read after the shell edit keeps the earlier baseline: the edit is still new at Stop", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(() => session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`))
+    // The agent reads the file it just changed. Its content now is not what the session started from.
+    await session.send({ kind: "touch", files: [USERS], completeRead: true })
+    expect((await session.baseline()).snapshots.has(USERS)).toBe(false)
+    expect(lines(await session.send({ kind: "verify", files: [] }))).toEqual([`${USERS}:3`])
+  })
+
+  test("a Read after a sweep keeps the earlier baseline too", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {})
+    await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)\n`)
+    await session.shell(async () => {})
+    await session.send({ kind: "touch", files: [USERS], completeRead: true })
+    expect((await session.baseline()).snapshots.has(USERS)).toBe(false)
+  })
+
   test("a call without a tool use id compares with the agent's latest state", async () => {
     const root = await createFixture()
     const session = sessionAt(root)

@@ -85,10 +85,17 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 const touchRule = (id: string) => `${id} is a touch rule: it delivers context and has nothing to test\n`
 
+/**
+ * `--against` counts a rule's matches as violations, and a removed rule's matches are what a file
+ * keeps: its finding is a drop against a baseline, which a count of the files as they are has not got.
+ */
+const removedRule = (id: string) =>
+  `${id} is a removed rule: its matches are what a file keeps, and --against has no baseline to count a drop against`
+
 const ratio = (part: number, whole: number) => (whole === 0 ? "   — " : (part / whole).toFixed(2))
 
 function summaryLine(rule: DetectorRule, result: ExampleResult): string {
-  const id = rule.id.padEnd(36)
+  const id = rule.id.padEnd(Math.max(36, rule.id.length + 2))
   if (result.skipped) return `  ${id}skipped (llm; name the rule to run it)`
   if (result.missing || result.empty) return `  ${id}no examples`
   const passed = result.outcomes.filter((outcome) => outcome.passed).length
@@ -232,9 +239,14 @@ async function reportAgainstAll(
   const candidates = (await allFiles(root)).filter(under)
   const rows: [string, string, string][] = [["rule", "violations", "files"]]
   const notRun: string[] = []
+  const notCounted: string[] = []
   for (const rule of rules) {
     if (isMetered(rule)) {
       notRun.push(rule.id)
+      continue
+    }
+    if (rule.scope === "removed") {
+      notCounted.push(rule.id)
       continue
     }
     const count = await countAgainst(root, rule, candidates, detection, timeoutMs)
@@ -249,6 +261,8 @@ async function reportAgainstAll(
   const out = ["", ...rows.map(([id, n, files]) => `  ${id.padEnd(idWidth + 2)}${n.padStart(countWidth)}  ${files}`)]
   if (notRun.length > 0)
     out.push("", `  not run: ${notRun.join(", ")} (rulecast test <id> --against runs one; it costs money)`)
+  if (notCounted.length > 0)
+    out.push("", `  not counted: ${notCounted.join(", ")} (a removed rule: its matches are what a file keeps)`)
   out.push(
     "",
     "  The counts are the stock, not how often an edit breaks a rule. rulecast test <id> --against",
@@ -289,6 +303,10 @@ export async function testCommand(
   const detection = detectionFor(project, registry, stateDir, resolver)
   const timeoutMs = project.config.timeouts.verifyMs
 
+  if (against.length > 0 && ruleId !== null && rules[0]!.scope === "removed") {
+    io.stdout(`${removedRule(ruleId)}\n`)
+    return 0
+  }
   if (against.length > 0 && ruleId !== null)
     return await reportAgainst(root, rules[0]!, against, detection, timeoutMs, io)
   if (against.length > 0) {
