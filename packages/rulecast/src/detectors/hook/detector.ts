@@ -106,6 +106,7 @@ async function hookFinding(
     severity: "error",
     text: "",
     properties: {},
+    wholeFile: true,
   }
 }
 

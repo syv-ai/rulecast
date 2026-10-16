@@ -39,7 +39,7 @@ import {
 } from "./session/state"
 import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
-import type { IgnoredFinding } from "./suppress"
+import { type IgnoredFinding, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
@@ -319,7 +319,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
-  const volatileCaptures = (kind: string) => registry.get(kind)?.volatileCaptures ?? []
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
@@ -524,6 +523,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
+    const lines = sourceLines(read)
     const output = await runDetectionFrom(
       {
         detection,
@@ -531,13 +531,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         selections,
         changes,
         read,
+        lines,
         timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
       },
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
+    // From the lines suppression read through `read`, the content detection judged: staged in a
+    // staged run, not the working tree. No file is read again.
+    const ids = await findingIds([...output.findings, ...output.ignored], (kind) => registry.get(kind), lines)
     // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
     const committed =
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined

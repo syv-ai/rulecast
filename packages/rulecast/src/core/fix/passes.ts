@@ -2,6 +2,7 @@ import type { DetectionContext } from "../detection/context"
 import { type DetectionOutput, runDetection } from "../detection/run"
 import type { Selection } from "../detection/select"
 import { findingIds } from "../finding-id"
+import { sourceLines } from "../suppress"
 import type { Match, TextEdit } from "../types"
 
 /**
@@ -182,15 +183,17 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
     .filter((selection) => selection.files.length > 0)
   if (selections.length === 0) return result
 
-  const volatile = (kind: string) => input.detection.registry.get(kind)?.volatileCaptures ?? []
   const ignored = new Map<string, Ignored[]>()
   const detect = async (texts: ReadonlyMap<string, string>, first = false): Promise<Found[] | null> => {
+    const read = async (file: string) => texts.get(file) ?? null
+    const lines = sourceLines(read)
     const output: DetectionOutput = await runDetection({
       detection: input.detection,
       event: "verify",
       selections,
       changes: new Map(),
-      read: async (file) => texts.get(file) ?? null,
+      read,
+      lines,
       timeoutMs: input.timeoutMs,
       fixes: true,
     })
@@ -200,7 +203,11 @@ export async function fixPasses(input: FixInput): Promise<FixResult> {
       return null
     }
     // Over ignored matches too, as the pipeline numbers them, so an id here is the id `run` reports.
-    const ids = findingIds([...output.findings, ...output.ignored], volatile)
+    const ids = await findingIds(
+      [...output.findings, ...output.ignored],
+      (kind) => input.detection.registry.get(kind),
+      lines,
+    )
     if (first) {
       for (const [index, { rule, match }] of output.ignored.entries()) {
         const [start, end] = linesOf(texts.get(match.file)!, match)

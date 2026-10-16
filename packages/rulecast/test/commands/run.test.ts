@@ -219,6 +219,19 @@ describe("rulecast run: staged and pushed content", () => {
     expect(lines(result.stdout)).toEqual([3])
   })
 
+  test("a finding's id hashes the staged line, not the one in the working tree", async () => {
+    const root = await createFixture()
+    const staged = `${OLD}    raise HTTPException(500)\n`
+    await writeFile(path.join(root, USERS), staged)
+    await git(root, "add", USERS)
+    await writeFile(path.join(root, USERS), `${OLD}    raise HTTPException(500)  # and something else\n`)
+    const ids = async () =>
+      JSON.parse((await run(root, "--format", "json")).stdout).findings.map((finding: { id: string }) => finding.id)
+    const withUnstaged = await ids()
+    await writeFile(path.join(root, USERS), staged)
+    expect(withUnstaged).toEqual(await ids())
+  })
+
   test("a clean staged file passes whatever the working tree holds", async () => {
     const root = await createFixture()
     await writeFile(path.join(root, USERS), `${OLD}# a comment\n`)
