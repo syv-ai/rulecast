@@ -31,6 +31,42 @@ const stagesSchema = z.array(z.enum(STAGES)).nonempty()
  */
 const exampleSchema = z.object({ path: z.string().min(1), code: z.string() }).strict()
 
+const linesSchema = z.array(z.number().int().positive())
+
+/**
+ * A `bad` example, optionally pinning what the rule finds in it. Without `expect` it passes on at
+ * least one finding, as it always has.
+ */
+const badExampleSchema = exampleSchema
+  .extend({
+    expect: z
+      .object({
+        /** The exact number of matches. */
+        count: z.number().int().positive().optional(),
+        /** The lines the matches are on, as a set: each has one, and no match is on another. */
+        lines: linesSchema.nonempty().optional(),
+      })
+      .strict()
+      .refine((expect) => expect.count !== undefined || expect.lines !== undefined, "expect needs count or lines")
+      .optional(),
+  })
+  .strict()
+
+/**
+ * A file before and after an edit, and which of the rule's findings in `after` are the edit's.
+ * Its own list rather than a `before` on a `bad` example: a baseline case can rightly expect no new
+ * finding, and a `bad` example that expects none is a contradiction.
+ */
+const baselineExampleSchema = z
+  .object({
+    path: z.string().min(1),
+    before: z.string(),
+    after: z.string(),
+    /** Lines of findings by status, as sets. A status not listed must have no findings. */
+    expect: z.object({ new: linesSchema.default([]), preexisting: linesSchema.default([]) }).strict(),
+  })
+  .strict()
+
 /** Every rule key except id. No defaults: compileRule applies them after overrides are merged. */
 const ruleKeys = {
   alias: idSchema.optional(),
@@ -62,15 +98,24 @@ const ruleKeys = {
     .optional(),
   message: z.string().optional(),
   context: z.array(referenceInputSchema).optional(),
-  /** Code the rule must flag (`bad`) and must not (`good`), run by `rulecast test`. */
+  /**
+   * Code the rule must flag (`bad`) and must not (`good`), and edits whose findings it must sort
+   * into new and pre-existing (`baseline`), run by `rulecast test`.
+   */
   examples: z
-    .object({ good: z.array(exampleSchema).default([]), bad: z.array(exampleSchema).default([]) })
+    .object({
+      good: z.array(exampleSchema).default([]),
+      bad: z.array(badExampleSchema).default([]),
+      baseline: z.array(baselineExampleSchema).default([]),
+    })
     .strict()
     .optional(),
 }
 
 export type RuleExample = z.infer<typeof exampleSchema>
-export type RuleExamples = { good: RuleExample[]; bad: RuleExample[] }
+export type BadRuleExample = z.infer<typeof badExampleSchema>
+export type BaselineRuleExample = z.infer<typeof baselineExampleSchema>
+export type RuleExamples = { good: RuleExample[]; bad: BadRuleExample[]; baseline: BaselineRuleExample[] }
 
 /** A config entry selecting a rule from a rule repo; every key but id overrides the manifest rule's. */
 export const overrideSchema = z.object({ id: idSchema, ...ruleKeys }).strict()

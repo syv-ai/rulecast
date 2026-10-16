@@ -9,7 +9,7 @@ Load these when you need them. Relative links resolve against this file's own UR
 
 Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
 
-The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them.
+The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them. The gates in steps 5 and 6 do not change that. They make a rule safe to propose, not to adopt: a loop that runs without the developer only ever proposes rules, and never adopts one. The developer decides.
 
 ## 1. Read
 
@@ -55,9 +55,14 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
    - **It contradicts the doc, or matches no file at all**: it assumes a layer, a library or a layout the project doesn't have, or its cited section says the opposite of the doc. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree.
    - **You can't tell**: treat it as a contradiction and propose. Proposing costs nothing, because the developer decides; staying silent hides the question.
 
-For checkable conventions, prefer `path` (the file itself is the break), then `regex`, then `ast-grep`. Write the narrowest pattern that catches the break: a noisy rule gets ignored.
+For checkable conventions, use `path` when the file itself is the break. Otherwise use the first of these that can see the break:
 
-If the project already runs a tool that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml` or `lefthook.yml` — a `hook` or `command` rule using it beats a new pattern: the tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
+1. **`linter`**: a rule of a linter the project runs, or could run (ruff, oxlint, eslint). The linter already knows the language.
+2. **`command`** or **`hook`**: a tool the project already runs that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml` or `lefthook.yml`. The tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
+3. **`ast-grep`**: a pattern over the code's syntax, which never matches inside a comment or a string.
+4. **`regex`**: only for a pattern that is text rather than code, such as a comment marker, the content of a string or a file header.
+
+Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
 **Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
 
@@ -90,10 +95,12 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
    - `files`: a regex searched in the repo-relative path. Anchor it with `^` so it matches the directory you mean.
    - `message`: what is wrong at `{{file}}:{{line}}` and what to do instead, in one or two sentences.
    - `context`: the doc section the rule enforces, as `@<file>#<heading-slug>`. The slug is the heading in lowercase, punctuation dropped, spaces turned into `-`.
-3. Give it `examples`: two `good` and two `bad`, no two the same. Each is a `path` the rule matches and the `code` at it.
+3. Give it `examples`: two `good`, two `bad` and one `baseline`, no two the same. Each `good` and `bad` example is a `path` the rule matches and the `code` at it.
    - Quote real code first. Search the files the rule matches for an actual violation to use as `bad` and compliant code for `good`; a violation the repository already has is the best `bad` example there is.
    - Where it has none, which is usual in a small or clean repository, write your own: the smallest code that shows the break for `bad`, and for `good` a near miss, code that looks like the break and is not. Invented examples are fine. Say which ones are invented in the summary.
    - A `path` rule judges the file name, not its code: give it `bad` examples only, at paths the rule must refuse.
+   - Every `bad` example gets `expect: { lines: [...] }`: the line or lines the violation is on, counted from 1. Without it, a pattern that fires on the wrong line still passes.
+   - The `baseline` example is an edit: `before` already has one violation, and `after` adds unrelated code above it and a second violation. It expects the old violation, on the line it moved to, as `preexisting`, and the added one as `new`. It catches a rule that reports code the edit did not touch as the edit's: a pattern that spans lines, an `ast-grep` match on a whole function, a `scope: container` rule. A `path` rule has none to give: the file is either the break or it is not.
 
    ```yaml
    examples:
@@ -104,16 +111,31 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
      bad:
        - path: backend/app/services/users.py
          code: |
+           user = create(name)
            print("created user", user.id)
+         expect: { lines: [2] }
+     baseline:
+       - path: backend/app/services/users.py
+         before: |
+           print("created user", user.id)
+         after: |
+           user = create(name)
+           print("created user", user.id)
+           print("done")
+         expect: { new: [3], preexisting: [2] }
    ```
 
-4. Run `rulecast validate` and fix every diagnostic for your rule.
-5. Run `rulecast test <id>`. Every example must pass.
-   - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires means it is too broad.
+4. Run `rulecast validate` and fix every diagnostic for your rule. An `expect` line past the end of its example is one of them.
+5. Run `rulecast test <id> --format json`. The rule passes this gate when its `status` is `passed`. Otherwise each failing outcome's `failures` says why ([reference/output.md](reference/output.md#rulecast-test) has the fields).
+   - A `bad` example with no finding means the pattern is too narrow. A `good` example that fires, or a `bad` one that fires on a line it does not expect, means it is too broad.
+   - A `baseline` example whose old violation comes out `new` means the rule reports code the edit did not touch: a pattern that spans more lines than the violation, or a rule that needs `scope: container`.
    - A `regex` pattern also matches inside comments and strings. If the only hits it finds in the code are prose — a comment that names `process.env` — that is a slip: use `ast-grep`, which matches code, not text.
    - A slip is not a revision: a typo, a missing escape, or `\s` crossing a line break (`rulecast test` shows what a failing example matched, and says when it crossed a line). Fix slips as often as you find them.
    - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
-6. Run `rulecast test <id> --against .` (`rulecast test --against .` prints one line for every rule, for checking a whole config at once). The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule. Report both numbers to the developer — violations, and how many of the matching files they are in — and the note it prints, before asking them to keep it. In a small repository the note is the same for every rule ("too few matching files"): report the counts and judge the rule by its doc. Neither the numbers nor the note decide it. The developer does.
+6. Run `rulecast test <id> --against . --max-rate 0.5 --format json` (without the id it measures every rule, for checking a whole config at once). The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule.
+   - **Exit 1, `against.exceeded: true`**: the rule flags more than half the files it matches. Do not propose it as written. Tell the developer it may describe the code as it is rather than a convention, and propose a narrower `files`, or a touch rule instead.
+   - **`against.smallSample: true`**: under 25 matching files, the rate is not applied, because a share of a handful of files says nothing. Report the counts and judge the rule by its doc.
+   - Either way, report both numbers to the developer — `violations`, and `violatingFiles` of `matchingFiles` — before asking them to keep it. Passing the gate is necessary, not sufficient: neither the numbers nor the gate decide it. The developer does.
 7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
@@ -131,7 +153,7 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 ## 4. Finish
 
-Run `rulecast validate` and `rulecast test` a last time; both must be clean. Bare `rulecast test` does not run `llm` rules, because each example costs money, and names them under "not run": run `rulecast test <id>` for each of those. Then summarise:
+Run `rulecast validate` and `rulecast test --format json` a last time; `validate` must be clean and the document must say `passed: true`. Bare `rulecast test` does not run `llm` rules, because each example costs money, and gives them `status: not-run`: run `rulecast test <id> --format json` for each of those. Then summarise:
 
 - the rules kept: id, one line each, and the `--against` count (touch rules have no count);
 - where the doc could be read two ways, and the reading you chose;

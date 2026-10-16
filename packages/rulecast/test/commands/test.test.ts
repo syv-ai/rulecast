@@ -1,6 +1,7 @@
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
+import { TEST_SCHEMA_VERSION } from "../../src/adapters/cli/contract"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
@@ -23,6 +24,8 @@ const httpException = (extra: Record<string, unknown> = {}) => ({
 
 const project = (rules: Record<string, unknown>[], files: Record<string, string> = {}) =>
   createRepo({ ".rulecast-config.yaml": localConfig(rules), ...files })
+
+const json = (stdout: string) => JSON.parse(stdout)
 
 const runTest = (cwd: string, ...argv: string[]) => runCli(cwd, ["test", ...argv])
 
@@ -254,5 +257,212 @@ describe("rulecast test --against", () => {
     const result = await runTest(root, "backend/no-httpexception", "--against", "app/other")
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("no files under app/other match backend/no-httpexception")
+  })
+})
+
+describe("rulecast test --format json", () => {
+  test("prints one document: a version, a verdict, and every outcome with its findings", async () => {
+    const root = await project([
+      httpException({
+        examples: {
+          good: [{ path: PY, code: "def get():\n    raise NotFound()\n" }],
+          bad: [
+            { path: PY, code: "def get():\n    raise HTTPException(404)\n", expect: { lines: [2] } },
+            { path: PY, code: "def get():\n    raise HTTPException(404)\n    return\n", expect: { lines: [3] } },
+          ],
+        },
+      }),
+    ])
+    const result = await runTest(root, "--format", "json")
+    expect(result.code).toBe(1)
+    const document = json(result.stdout)
+    expect(Object.keys(document)).toEqual(["schemaVersion", "passed", "rules"])
+    expect(document.schemaVersion).toBe(TEST_SCHEMA_VERSION)
+    expect(document.passed).toBe(false)
+    const [rule] = document.rules
+    expect(rule).toMatchObject({
+      rule: "backend/no-httpexception",
+      detector: "regex",
+      scope: "instance",
+      status: "failed",
+      against: null,
+      examples: { precision: { correct: 2, total: 2 }, recall: { matched: 2, total: 2 } },
+    })
+    expect(rule.examples.outcomes.map((outcome: { failures: string[] }) => outcome.failures)).toEqual([
+      [],
+      [],
+      ["expected lines [3], found [2]"],
+    ])
+    expect(rule.examples.outcomes[1]).toEqual({
+      kind: "bad",
+      index: 0,
+      path: PY,
+      passed: true,
+      expected: { fires: true, lines: [2] },
+      findings: [
+        {
+          line: 2,
+          endLine: 2,
+          column: 5,
+          text: "raise HTTPException",
+          message: `${PY}:2 raises HTTPException`,
+        },
+      ],
+      failures: [],
+    })
+  })
+
+  test("a failing pinned example in the terminal says what it expected and where it fired", async () => {
+    const root = await project([
+      httpException({
+        examples: { bad: [{ path: PY, code: "def get():\n    raise HTTPException(404)\n", expect: { count: 2 } }] },
+      }),
+    ])
+    const result = await runTest(root)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("bad[0] app/services/users.py — expected 2 findings, found 1")
+    expect(result.stdout).toContain("bad[0] app/services/users.py — fired at line 2")
+  })
+
+  test("a failing baseline example in the terminal names the line and its status", async () => {
+    const root = await project([
+      httpException({
+        examples: {
+          baseline: [
+            {
+              path: PY,
+              before: "raise HTTPException(1)\n",
+              after: "x = 1\nraise HTTPException(1)\n",
+              expect: { new: [2] },
+            },
+          ],
+        },
+      }),
+    ])
+    const result = await runTest(root)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("baseline[0] app/services/users.py — line 2: expected new, was pre-existing")
+    expect(result.stdout).toContain("baseline[0] app/services/users.py — fired at line 2 (pre-existing)")
+  })
+
+  test("statuses for a passing rule, a rule with no examples, a touch rule and an unnamed llm rule", async () => {
+    const root = await project(
+      [
+        httpException(),
+        httpException({ id: "backend/bare", examples: undefined }),
+        {
+          id: "backend/judgement",
+          name: "Judgement",
+          files: "^app/services/.*\\.py$",
+          detect: { llm: { model: "haiku", question: "Does this need judgement?" } },
+          message: "{{file}}:{{line}} needs judgement",
+          examples: { bad: [{ path: PY, code: "pass\n" }] },
+        },
+        { id: "ctx", name: "Context", files: "\\.py$", stages: ["touch"], context: ["@docs/x.md"] },
+      ],
+      { "docs/x.md": "# X\n" },
+    )
+    await stubAgentCli(root, "claude")
+    const result = await runTest(root, "--format", "json")
+    expect(result.code).toBe(0)
+    const document = json(result.stdout)
+    expect(document.passed).toBe(true)
+    expect(document.rules.map((rule: { rule: string; status: string }) => [rule.rule, rule.status])).toEqual([
+      ["backend/no-httpexception", "passed"],
+      ["backend/bare", "no-examples"],
+      ["backend/judgement", "not-run"],
+    ])
+    const touch = await runTest(root, "ctx", "--format", "json")
+    expect(json(touch.stdout).rules).toEqual([
+      { rule: "ctx", detector: null, scope: "instance", status: "touch", examples: null, against: null },
+    ])
+  })
+
+  test("a usage error prints nothing on stdout and exits 2", async () => {
+    const root = await project([httpException()])
+    for (const argv of [
+      ["--format", "yaml"],
+      ["--max-rate", "0.5"],
+      ["--against", ".", "--max-rate", "1.5"],
+      ["--against", ".", "--max-rate", "x"],
+      ["--against", ".", "--max-rate", ""],
+    ]) {
+      const result = await runTest(root, ...argv, "--format", argv[0] === "--format" ? argv[1]! : "json")
+      expect(result.code, argv.join(" ")).toBe(2)
+      expect(result.stdout).toBe("")
+    }
+    expect((await runTest(root, "--max-rate", "0.5")).stderr).toContain("--max-rate needs --against")
+    expect((await runTest(root, "--against", ".", "--max-rate", "2")).stderr).toContain(
+      "--max-rate takes a share of files between 0 and 1, such as 0.2",
+    )
+    expect((await runTest(root, "--format", "yaml")).stderr).toContain('unknown format "yaml" (use terminal or json)')
+  })
+})
+
+describe("rulecast test --against --max-rate", () => {
+  /** `violating` files with the violation and `clean` without, all matching the rule. */
+  const services = (violating: number, clean: number) => ({
+    ...Object.fromEntries(
+      Array.from({ length: violating }, (_, i) => [`app/services/bad${i}.py`, "raise HTTPException(1)\n"]),
+    ),
+    ...Object.fromEntries(Array.from({ length: clean }, (_, i) => [`app/services/clean${i}.py`, "pass\n"])),
+  })
+
+  test("exits 1 when the share of violating files is over it, and says so", async () => {
+    const root = await project([httpException()], services(20, 10))
+    const result = await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.5")
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("  rate 0.67: over --max-rate 0.5")
+    const document = json(
+      (await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.5", "--format", "json"))
+        .stdout,
+    )
+    expect(document.passed).toBe(false)
+    expect(document.rules[0]).toMatchObject({ status: "failed", examples: null })
+    expect(document.rules[0].against).toMatchObject({
+      paths: ["."],
+      matchingFiles: 30,
+      violatingFiles: 20,
+      violations: 20,
+      maxRate: 0.5,
+      exceeded: true,
+      smallSample: false,
+    })
+    expect(document.rules[0].against.rate).toBeCloseTo(20 / 30)
+    // Every violating file, not the terminal's ten.
+    expect(document.rules[0].against.files).toHaveLength(20)
+  })
+
+  test("exits 0 when within it", async () => {
+    const root = await project([httpException()], services(5, 25))
+    const result = await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.5")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("  rate 0.17: within --max-rate 0.5")
+  })
+
+  test("is not applied to too few matching files", async () => {
+    const root = await project([httpException()], services(4, 0))
+    const result = await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.1")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("  --max-rate not applied: only 4 matching files")
+    const document = json(
+      (await runTest(root, "backend/no-httpexception", "--against", ".", "--max-rate", "0.1", "--format", "json"))
+        .stdout,
+    )
+    expect(document.rules[0].against).toMatchObject({ rate: 1, exceeded: false, smallSample: true })
+  })
+
+  test("without a rule id, any rule over it exits 1, and each row shows its rate", async () => {
+    const other = httpException({ id: "backend/no-other", files: "^app/other/", examples: undefined })
+    const root = await project([httpException(), other], services(20, 10))
+    const result = await runTest(root, "--against", ".", "--max-rate", "0.5")
+    expect(result.code).toBe(1)
+    const lines = result.stdout.split("\n")
+    expect(lines).toContain("  rule                      violations  files           rate")
+    expect(lines).toContain("  backend/no-httpexception          20  20 of 30        0.67 over")
+    expect(lines).toContain("  backend/no-other                   0  no files match")
+    const document = json((await runTest(root, "--against", ".", "--max-rate", "0.5", "--format", "json")).stdout)
+    expect(document.rules.map((rule: { status: string }) => rule.status)).toEqual(["failed", "passed"])
+    expect(document.rules[1].against).toMatchObject({ matchingFiles: 0, rate: null, exceeded: false })
   })
 })

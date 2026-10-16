@@ -159,8 +159,22 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
 
   // An example the rule would never be given is an example that passes for the wrong reason. This
   // checks the rule's own filter, not the project's global one: the example documents the rule.
-  for (const example of [...(data.examples?.good ?? []), ...(data.examples?.bad ?? [])]) {
+  const examples = data.examples
+  for (const example of [...(examples?.good ?? []), ...(examples?.bad ?? []), ...(examples?.baseline ?? [])]) {
     if (!filter(example.path)) return `example path "${example.path}" does not match this rule's files`
+  }
+  // A line past the end can never be found, so the example could only ever fail — and the author
+  // would read the failure as the rule's.
+  for (const [index, example] of (examples?.bad ?? []).entries()) {
+    const past = beyondEnd(example.expect?.lines ?? [], example.code)
+    if (past !== null)
+      return `example bad[${index}] expects line ${past}; its code has ${lineCount(example.code)} lines`
+  }
+  for (const [index, example] of (examples?.baseline ?? []).entries()) {
+    const past = beyondEnd([...example.expect.new, ...example.expect.preexisting], example.after)
+    if (past !== null) {
+      return `example baseline[${index}] expects line ${past}; its after has ${lines(example.after)}`
+    }
   }
 
   const references: ReferenceSpec[] = []
@@ -201,4 +215,20 @@ export async function compileRule(input: RuleInput, context: RuleContext): Promi
     context: references,
     examples: data.examples ?? null,
   }
+}
+
+/** Lines in an example's code, not counting the empty one after a final newline. */
+function lineCount(code: string): number {
+  const lines = code.split(/\r?\n/)
+  return lines.at(-1) === "" ? lines.length - 1 : lines.length
+}
+
+function lines(code: string): string {
+  const count = lineCount(code)
+  return `${count} ${count === 1 ? "line" : "lines"}`
+}
+
+function beyondEnd(lines: readonly number[], code: string): number | null {
+  const count = lineCount(code)
+  return lines.find((line) => line > count) ?? null
 }

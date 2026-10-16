@@ -231,10 +231,14 @@ unattended:
 
 ### Examples
 
-`examples` holds `good` code the rule must leave alone and `bad` code it must flag. `rulecast test`
-runs them; `rulecast test <id> --against <paths>` fires the rule over real files and says how many
-violations it would produce and in how many of the files it matches. Without an id,
-`rulecast test --against <paths>` prints that count for every rule, one line each.
+`examples` holds `good` code the rule must leave alone, `bad` code it must flag, and `baseline`
+edits whose findings it must sort into new and pre-existing. `rulecast test` runs them;
+`rulecast test <id> --against <paths>` fires the rule over real files and says how many violations
+it would produce and in how many of the files it matches. Without an id,
+`rulecast test --against <paths>` prints that count for every rule, one line each. Add
+`--max-rate 0.5` to exit 1 when a rule flags more than that share of the files it matches; under 25
+matching files it is not applied, because a share of a handful of files says nothing. `--format json`
+prints the results as a document ([output.md](output.md#rulecast-test)).
 
 ```yaml
 examples:
@@ -245,13 +249,40 @@ examples:
   bad:
     - path: backend/app/services/users.py
       code: |
+        user = create(name)
         print("created user", user.id)
+      expect: { lines: [2] }
+  baseline:
+    - path: backend/app/services/users.py
+      before: |
+        print("created user", user.id)
+      after: |
+        user = create(name)
+        print("created user", user.id)
+        print("done")
+      expect: { new: [3], preexisting: [2] }
 ```
 
 - **`path` is required** and must match the rule's own `files`, `exclude` and type keys — those, and
   `ast-grep`'s choice of parser, are all decided by the path, so an example without the right one
   tests a different rule. A path the rule would never be given is a `rulecast validate` error.
-- **A `bad` example passes on at least one finding**, not an exact count.
+- **A `bad` example passes on at least one finding**, unless its `expect` says more:
+  - `count`: exactly this many matches.
+  - `lines`: the lines the matches are on. Compared as a set: every listed line has a match, and
+    no match is on a line not listed. Two matches on one line need the line once.
+
+  Pin `lines` when it matters that the rule fires on the right line, not merely somewhere: an
+  over-broad pattern passes a bare `bad` example by matching the wrong line. A line past the end of
+  `code` is a `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
+- **A `baseline` example is an edit.** `before` is the file when the agent first opens it, `after`
+  the file once it has edited it. `rulecast test` sorts the rule's findings in `after` into new and
+  pre-existing the way a session would, by the rule's own [`scope`](#instance-and-container-rules),
+  and the example passes when the lines of each match `expect.new` and `expect.preexisting`, as
+  sets. A status left out must have no findings, so `expect: {}` means "no finding at all". It
+  catches a rule that reports code the edit did not touch as new: a regex that spans lines, an
+  `ast-grep` rule that matches a whole function, a `container` rule. An `llm` rule's baseline is
+  never measured, as in a session, so an `llm` `container` rule classifies as `instance` here too.
+  Baseline examples count towards neither precision nor recall.
 - A `path` rule has no `good` example to give: every file it matches is a violation by definition.
 - An `llm` rule's examples are only run when you name the rule — `rulecast test` on its own skips
   them, because running one costs a model call.

@@ -193,9 +193,51 @@ describe("compile: local rules", () => {
     expect(withExamples?.examples).toEqual({
       good: [{ path: "a.ts", code: "fine\n" }],
       bad: [{ path: "a.ts", code: "bad\n" }],
+      baseline: [],
     })
-    expect(declaredEmpty?.examples).toEqual({ good: [], bad: [] })
+    expect(declaredEmpty?.examples).toEqual({ good: [], bad: [], baseline: [] })
     expect(without?.examples).toBeNull()
+  })
+
+  test("example expectations are checked against the example they pin", async () => {
+    const project = await compileConfig(
+      local(
+        detectRule("pinned", {
+          examples: {
+            bad: [{ path: "a.ts", code: "bad\nbad\n", expect: { count: 2, lines: [1, 2] } }],
+            baseline: [{ path: "a.ts", before: "bad\n", after: "x\nbad\n", expect: { preexisting: [2] } }],
+          },
+        }),
+        detectRule("expect-on-good", { examples: { good: [{ path: "a.ts", code: "x", expect: { count: 1 } }] } }),
+        detectRule("expect-empty", { examples: { bad: [{ path: "a.ts", code: "x", expect: {} }] } }),
+        detectRule("line-past-end", {
+          examples: {
+            bad: [
+              { path: "a.ts", code: "x\n" },
+              { path: "a.ts", code: "a\nb\n", expect: { lines: [9] } },
+            ],
+          },
+        }),
+        detectRule("baseline-past-end", {
+          examples: { baseline: [{ path: "a.ts", before: "x\n", after: "x\n", expect: { new: [3] } }] },
+        }),
+        detectRule("baseline-unmatched", {
+          files: "\\.py$",
+          examples: { baseline: [{ path: "a.ts", before: "", after: "", expect: {} }] },
+        }),
+      ),
+    )
+    expect(project.rules.map((rule) => rule.id)).toEqual(["pinned"])
+    expect(project.rules[0]?.examples?.baseline).toEqual([
+      { path: "a.ts", before: "bad\n", after: "x\nbad\n", expect: { new: [], preexisting: [2] } },
+    ])
+    expect(project.diagnostics.map((d) => [d.rule, d.message])).toEqual([
+      ["expect-on-good", expect.stringMatching(/^examples\.good\.0: .*expect/)],
+      ["expect-empty", expect.stringMatching(/^examples\.bad\.0\.expect: expect needs count or lines/)],
+      ["line-past-end", "example bad[1] expects line 9; its code has 2 lines"],
+      ["baseline-past-end", "example baseline[0] expects line 3; its after has 1 line"],
+      ["baseline-unmatched", `example path "a.ts" does not match this rule's files`],
+    ])
   })
 
   test("an unknown scope is a schema error naming the key", async () => {
