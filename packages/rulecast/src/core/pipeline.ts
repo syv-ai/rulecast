@@ -21,22 +21,23 @@ import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
-import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import {
-  claimedByOther,
   dirtyAtStart,
   editedBy,
   emptyContext,
   emptyWork,
+  hasOwnTree,
   MAIN_AGENT,
-  referenceSeq,
   referenceState,
+  sweptFor,
   type WorkRecord,
+  type WorkState,
 } from "./session/state"
-import { isGone, treeChanges, treeState } from "./session/tree"
+import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
@@ -54,6 +55,8 @@ export interface PipelineOptions {
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
   skipDetectorKinds?: ReadonlySet<string>
+  /** Give every detector every file, past the file budget it declares: `rulecast baseline`, which asked for all of them. */
+  ignoreFileBudgets?: boolean
   /** Run only these rules (rulecast run RULE_ID); touch rules are unaffected. */
   onlyRules?: ReadonlySet<string>
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
@@ -69,6 +72,9 @@ export interface PipelineOptions {
   /**
    * Say which configured rules did not run (Delivery.disabled), whatever the mode: `rulecast run`.
    * An agent's stop says it only in unattended mode, where nobody reads the warning given once (#29).
+   * `rulecast run --session` also marks the run failed for a rule the session disabled after a
+   * detector failure, and that would have run here, so its exit code does not say every rule ran.
+   * A hook leaves this off: it warned when it disabled the rule.
    */
   reportDisabled?: boolean
   /** Debug log sink. */
@@ -112,6 +118,9 @@ const TREE_UNAVAILABLE =
 const SUMMARY_THRESHOLD = 3
 
 const DEFAULT_HINT = "rulecast validate"
+
+/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
+const DISABLED_WARNING = /^(diagnostics?|detector):/
 
 /**
  * The key a summary is delivered under.
@@ -203,7 +212,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
   const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
   const warnings: Warning[] = compileWarnings(errors)
-  let failed = errors.length > 0
+  // `rulecast run RULE_ID` is incomplete only over what could have changed that rule's result: its
+  // own diagnostics, a failed repos entry that configures it, a config that did not load, or a
+  // diagnostic that names no rule and no entry.
+  const only = options.onlyRules
+  const concernsRun = (diagnostic: Diagnostic) =>
+    only === undefined ||
+    diagnostic.fatal === true ||
+    (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.rules?.some((id) => only.has(id)) ?? true))
+  let failed = errors.some(concernsRun)
   const deadlineMissed: string[] = []
   let session = event.session
     ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? MAIN_AGENT }
@@ -239,6 +256,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
+  /**
+   * What changed since the agent's latest recorded state that no tool call explains: not a file any
+   * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
+   * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
+   */
+  function between(work: WorkState, agent: string, now: TreeState): string[] {
+    if (!hasOwnTree(work, agent)) return []
+    const reference = referenceState(work, agent)
+    const gap = reference === null ? null : treeChanges(reference, now)
+    if (gap === null || gap.gitOperation) return []
+    const edited = new Set(work.edited)
+    return relevant(gap.files.filter((file) => !edited.has(file)))
+  }
+
   if (event.kind === "shell-before") {
     // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
     // agent's last recorded state happened between its calls — the user's editor, a formatter, a
@@ -248,23 +279,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const now = open ? await treeState(root) : null
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
-      const reference = referenceState(work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      // Any agent's edits, and a sibling's edit tool still writing: neither happened between calls.
-      const edited = new Set(work.edited)
-      const since = referenceSeq(work, open.agent)
-      const swept =
-        gap === null || gap.gitOperation
-          ? []
-          : relevant(
-              gap.files.filter(
-                (file) => !isGone(now, file) && !edited.has(file) && !claimedByOther(work, open.agent, file, since),
-              ),
-            )
+      const swept = between(work, open.agent, now).filter((file) => !isGone(now, file))
       const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
       if (session !== null) {
         await appendWork(open.dir, [
-          ...swept.map((file) => ({ t: "swept" as const, file })),
+          ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
       }
@@ -320,15 +339,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
     await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
     const call = reference === null ? null : treeChanges(reference, now)
-    // A file another agent's edit tool claimed during the call is that agent's write. Another
-    // agent's shell call running alongside cannot be told apart, and its changes count here too.
-    const since = referenceSeq(view.work, open.agent, event.toolUseId)
-    const files =
-      call === null || call.gitOperation
-        ? []
-        : relevant(
-            call.files.filter((file) => !isGone(now, file) && !claimedByOther(view.work, open.agent, file, since)),
-          )
+    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
@@ -339,20 +350,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
     // that reads it later would not have the value this branch checked.
     const open = session
-    // Before the guard decides anything, and whether or not a rule refuses writes: a shell call
-    // running alongside must not take this write for its own.
-    if (open) {
-      await appendWork(
-        open.dir,
-        relevant(event.files).map((file) => ({ t: "claimed" as const, agent: open.agent, file })),
-      )
-    }
     const delivery = await guardWrite({
       detection,
       config,
       event,
       rules: project.rules,
       disabled,
+      mode: project.mode.mode,
       work: view.work,
       resolver,
       maxContextChars: options.maxContextChars,
@@ -384,6 +388,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  /** Unattended: ignores the agent wrote, which silenced nothing. The findings log keeps the attempt. */
+  let tried: IgnoredFinding[] = []
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
@@ -454,7 +460,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // edited is never swept: it was changed by a tool call, only not by this agent's.
       requested = relevant(editedBy(view.work, session.agent))
       if (options.stopGate === true) {
-        swept = await sweep(session, new Set(relevant(view.work.edited)))
+        swept = await sweep(session)
         requested = [...requested, ...swept]
       }
     }
@@ -474,13 +480,25 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(
-      (selection) => !skip.has(selection.rule.detector.kind) && (options.onlyRules?.has(selection.rule.id) ?? true),
+    const wanted = (rule: { id: string; detector: { kind: string } }) =>
+      !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
+    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
+    // `rulecast run --session`: a rule the session disabled that would have run here did not, which
+    // makes the run incomplete. It is named under `disabled` below, once; one that would not have
+    // run here changes nothing about this run, and is not named.
+    const skippedHere = new Set(
+      options.reportDisabled === true && disabled.size > 0
+        ? selectDetectorRules(project.rules, event.kind, files, new Set())
+            .map(({ rule }) => rule)
+            .filter((rule) => disabled.has(rule.id) && wanted(rule))
+            .map((rule) => rule.id)
+        : [],
     )
+    if (skippedHere.size > 0) failed = true
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
-    if (event.kind === "verify") {
+    if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
       const recent = [...editedBy(view.work, session?.agent ?? MAIN_AGENT)].reverse()
       for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
         const budget = registry.get(kind)?.fileBudget?.(detection.settings)
@@ -539,8 +557,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       const id = ids[output.findings.length + index]!
       return { ...item, id, status: statusOf(item.rule, item.match, id) }
     })
-    // Unattended, an ignore on a line changed this session silences nothing: nobody is there to
-    // agree to it, so its finding takes the unattended path and is reported if it keeps blocking.
+    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
+    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
+    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
     const unsilenced =
       project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
     for (const { id, rule, match, status } of unsilenced) findings.push({ id, rule, match, status })
@@ -552,6 +571,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     const kept = new Set(unsilenced.map(({ match }) => match))
+    tried = unsilenced.map(({ status: _, ...item }) => item)
     ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),
@@ -595,12 +615,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
     ) {
       const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
-      const earlier = [...view.work.disabled].map(([rule, message]) => ({
-        kind: kinds.get(rule) ?? "detector",
-        rules: [rule],
-        message,
-      }))
-      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` names what kept this run from being complete, and so nothing it did not
+      // count: not another rule's compile error under RULE_ID, nor a disable that would not have run.
+      const scoped = options.reportDisabled === true
+      const earlier = [...view.work.disabled]
+        .filter(([rule]) => !scoped || skippedHere.has(rule))
+        .map(([rule, message]) => ({ kind: kinds.get(rule) ?? "detector", rules: [rule], message }))
+      disabledGroups = disabledRules({
+        diagnostics: scoped ? errors.filter(concernsRun) : errors,
+        detectorErrors: [...output.errors, ...earlier],
+      })
+      // `disabled` and `complete` agree: a run that lists a rule that did not run is incomplete.
+      if (scoped && disabledGroups.length > 0) failed = true
+      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
+      // there the warning is the once-per-context word to the user, the list the agent's every stop.
+      if (options.reportDisabled === true) {
+        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
+        warnings.splice(0, warnings.length, ...kept)
+      }
     }
     // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
     // skipped in a staged run says which files kept it from running (detection/materialise.ts).
@@ -637,28 +669,23 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   /**
    * At a stop: what changed since the agent's latest recorded state that no call of its explains —
-   * a job it left running, a formatter, the user's own edits — joined with what earlier calls'
-   * before hooks already swept. A git operation in between sweeps nothing. Never a file any agent
-   * edited, or one another agent's edit tool is writing: those were tool calls, if not this agent's.
+   * a job it left running, a formatter, the user's own edits — joined with what earlier comparisons
+   * of this agent's swept (every agent's, at the main agent's stop). A git operation in between
+   * sweeps nothing.
    */
-  async function sweep(open: { dir: string; agent: string }, edited: ReadonlySet<string>): Promise<string[]> {
+  async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
     const now = await treeState(root)
+    const work = view.work
     let found: string[] = []
-    if (now !== null) {
-      const reference = referenceState(view.work, open.agent)
-      const since = referenceSeq(view.work, open.agent)
-      const gap = reference === null ? null : treeChanges(reference, now)
-      if (gap !== null && !gap.gitOperation) {
-        found = relevant(
-          gap.files.filter((file) => !edited.has(file) && !claimedByOther(view.work, open.agent, file, since)),
-        )
-      }
+    if (now !== null && hasOwnTree(work, open.agent)) {
+      found = between(work, open.agent, now)
       await appendWork(open.dir, [
-        ...found.map((file) => ({ t: "swept" as const, file })),
+        ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
         { t: "tree", phase: "stop", agent: open.agent, state: now },
       ])
     }
-    const all = [...new Set([...relevant(view.work.swept), ...found])].filter((file) => !edited.has(file))
+    const edited = new Set(work.edited)
+    const all = [...new Set([...relevant(sweptFor(work, open.agent)), ...found])].filter((file) => !edited.has(file))
     return now === null ? all : all.filter((file) => !isGone(now, file))
   }
 
@@ -712,18 +739,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
    * CLI run has no session, and `run --session` replays a stop that was already logged. After the
    * decision, so a stop knows whether it blocked, and outside the session lock.
    */
-  async function logFindings(agent: string, stop: Delivery["stop"]): Promise<void> {
+  async function logFindings(agent: string, decision: Decision): Promise<void> {
     const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && options.stopGate === true ? "stop" : null
     if (ev === null || ran === undefined || event.session === undefined) return
     // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
     const theirs = new Set(swept)
     const protectedKeys = new Set(refused.map(({ rule, file }) => `${rule} ${file}`))
-    const outcome = ({ rule, match }: ClassifiedFinding): WriteOutcome => {
-      const reverting = protectedKeys.has(`${rule.id} ${match.file}`)
-      // The gate's own test (session/decide.ts). Once #24's unattended mode lands, its `report`
-      // stop is a block that ends the loop, and counts as blocked too.
-      if (ev === "stop") return stop === "block" && (rule.severity === "error" || reverting) ? "blocked" : "delivered"
-      return reverting ? "refused" : "delivered"
+    const outcome = (finding: ClassifiedFinding): WriteOutcome => {
+      // The gate's own verdict (session/decide.ts): a block or an unattended report, and only the
+      // findings it rests on, so not one past the repeat limit that merely rides along.
+      if (ev === "stop") return decision.blocking?.has(findingKey(finding)) === true ? "blocked" : "delivered"
+      return protectedKeys.has(`${finding.rule.id} ${finding.match.file}`) ? "refused" : "delivered"
     }
     const checked = new Map<string, string[]>()
     for (const [rule, files] of ran) {
@@ -742,6 +768,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           .filter(({ status, match }) => status === "new" && !theirs.has(match.file))
           .map((finding) => ({ ...finding, outcome: outcome(finding) })),
         ignored: ignored.filter(({ match }) => !theirs.has(match.file)),
+        tried: tried.filter(({ match }) => !theirs.has(match.file)),
         ran: checked,
       }),
       log,
@@ -766,6 +793,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     } else throw error
     decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
   }
-  await logFindings(session.agent, decision.delivery.stop)
+  await logFindings(session.agent, decision)
   return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
 }

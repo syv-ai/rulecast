@@ -397,6 +397,11 @@ export interface AdapterInstall {
     verifyMs: number,
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
+  /**
+   * Whether the installed hooks run only the project's own rulecast (node_modules/.bin), so one on
+   * the PATH does not count (`doctor`). Absent: the adapter cannot tell.
+   */
+  local?(settings: unknown): boolean
 }
 
 export interface Adapter {

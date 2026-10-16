@@ -97,25 +97,26 @@ describe("rulecast fix", () => {
   })
 
   test("a fix that writes its own violation back is reverted and reported unresolved, and exits 1", async () => {
-    const shorten = {
-      id: "py/shorten",
-      name: "Shorten",
+    // Fine on its example; on "(x)" the fix's own text matches the first alternative.
+    const comma = {
+      id: "py/comma",
+      name: "Comma",
       files: "\\.py$",
-      detect: { regex: { pattern: "ab", fix: "b" } },
-      message: "{{file}}:{{line}} ab",
-      examples: { bad: [{ path: "a.py", code: "ab\n", fixed: "b\n" }] },
+      detect: { regex: { pattern: "(?<=\\()x|x(?=\\))", fix: "x," } },
+      message: "{{file}}:{{line}} x",
+      examples: { bad: [{ path: "a.py", code: "x)\n", fixed: "x,)\n" }] },
     }
-    const root = await repo([shorten], { "app.py": "aab\nab\n" })
+    const root = await repo([comma], { "app.py": "(x)\nx)\n" })
     const result = await fix(root, "--all-files", "--format", "json")
     expect(result.code).toBe(1)
     const parsed = JSON.parse(result.stdout)
-    expect(parsed.unresolved).toEqual([expect.objectContaining({ rule: "py/shorten", file: "app.py", line: 1 })])
-    expect(parsed.fixed).toEqual([expect.objectContaining({ rule: "py/shorten", file: "app.py", line: 2 })])
-    expect(await read(root, "app.py")).toBe("aab\nb\n")
+    expect(parsed.unresolved).toEqual([expect.objectContaining({ rule: "py/comma", file: "app.py", line: 1 })])
+    expect(parsed.fixed).toEqual([expect.objectContaining({ rule: "py/comma", file: "app.py", line: 2 })])
+    expect(await read(root, "app.py")).toBe("(x)\nx,)\n")
     expect(parsed.findings.map((finding: { line: number }) => finding.line)).toEqual([1])
     // Nothing left to try: the second run is a no-op.
     expect((await fix(root, "--all-files")).stdout).toContain("nothing fixed")
-    expect(await read(root, "app.py")).toBe("aab\nb\n")
+    expect(await read(root, "app.py")).toBe("(x)\nx,)\n")
   })
 
   test("a rulecast-ignore'd finding is not fixed", async () => {
@@ -136,9 +137,19 @@ describe("rulecast fix", () => {
     const result = await fix(root, "--all-files")
     expect(result.code).toBe(1)
     expect(result.stdout).toContain(
-      "the fix for py/logger fails its examples, so it was not applied (run rulecast test py/logger)",
+      "the fix for py/logger fails its examples (bad[0]), so it was not applied (run rulecast test py/logger)",
     )
     expect(await read(root, "app.py")).toBe(VIOLATIONS)
+  })
+
+  test("a failing baseline example says nothing about the fix, which is applied", async () => {
+    const baseline = { path: "a.py", before: 'print("hi")\n', after: 'x = 1\nprint("hi")\n', expect: { new: [2] } }
+    const root = await repo([{ ...LOGGER, examples: { ...LOGGER.examples, baseline: [baseline] } }])
+    expect((await runCli(root, ["test", "py/logger"])).code).toBe(1)
+    const result = await fix(root, "--all-files")
+    expect(result.stdout).not.toContain("fails its examples")
+    expect(result.code).toBe(0)
+    expect(await read(root, "app.py")).toBe('log.info("a")\nx = 1\nlog.info(b, c)\n')
   })
 
   test("RULE_ID fixes that rule only, and checks only it", async () => {

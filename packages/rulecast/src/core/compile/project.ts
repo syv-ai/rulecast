@@ -23,13 +23,15 @@ export interface Diagnostic {
   /** What a hook tells the developer to run; default "rulecast validate". Missing repos: "rulecast install". */
   hint?: string
   /**
-   * The config file itself did not load, so no rule was compiled. A hook still warns; `rulecast run`
-   * exits 2 instead of reporting a run that checked nothing (adapters/cli/contract.ts).
+   * The config file itself did not load, so no rule was compiled: nothing else is said beside it. A
+   * hook still warns; `rulecast run` exits 2 instead of reporting a run that checked nothing
+   * (adapters/cli/contract.ts).
    */
   fatal?: true
   /**
    * The rules this error keeps from running when it is not one rule's own: a `repos` entry that
    * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
+   * `rulecast run RULE_ID` counts such an entry only when it names that rule.
    */
   rules?: string[]
 }

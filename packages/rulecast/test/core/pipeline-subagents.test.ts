@@ -25,7 +25,15 @@ async function scenario() {
   }
   const stop = (agentId?: string) => send({ kind: "verify", files: [], agentId })
   const work = async () => (await openSession(sessionDir(stateDirFor(root), "s1"), "main")).work
-  return { send, edit, stop, work }
+  let calls = 0
+  /** One shell call: its before hook, what the command does, its after hook. */
+  const shell = async (act: () => Promise<unknown>, agentId?: string) => {
+    const toolUseId = `toolu_${++calls}`
+    await send({ kind: "shell-before", files: [], toolUseId, agentId })
+    await act()
+    return send({ kind: "shell-after", files: [], toolUseId, agentId })
+  }
+  return { send, edit, stop, work, shell, root }
 }
 
 const violation = (file: string) => `${fixtureFiles[file] ?? "def get():\n"}    raise HTTPException(500)\n`
@@ -87,5 +95,39 @@ describe("a subagent's stop verifies its own edits", () => {
     await edit(USERS, violation(USERS))
     expect((await stop("sub1")).stop).toBe("allow")
     expect((await stop()).stop).toBe("block")
+  })
+})
+
+describe("agents acting at the same moment", () => {
+  test("a subagent that never used the shell sweeps nothing: a sibling's command may still be writing", async () => {
+    const { send, stop, root } = await scenario()
+    await send({ kind: "start", files: [] })
+    await send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
+    await writeFile(path.join(root, USERS), violation(USERS))
+    const other = await stop("sub2")
+    expect(other.swept).toBeUndefined()
+    expect(other.findings).toEqual([])
+  })
+
+  test("a subagent's first shell call sweeps nothing: the session's latest state may be a sibling's", async () => {
+    const { send, shell, work, root } = await scenario()
+    await send({ kind: "start", files: [] })
+    await send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
+    await writeFile(path.join(root, USERS), violation(USERS))
+    await shell(async () => {}, "sub2")
+    expect((await work()).swept).toEqual([])
+  })
+
+  test("a subagent's stop shows what it swept, not what another agent swept; the main stop shows both", async () => {
+    const { send, stop, shell, root } = await scenario()
+    await send({ kind: "start", files: [] })
+    await shell(async () => {}, "sub1")
+    // The user's own edit, between sub1's calls: sub1's next before hook sweeps it.
+    await writeFile(path.join(root, USERS), violation(USERS))
+    await shell(async () => {}, "sub1")
+    await shell(async () => {}, "sub2")
+    expect((await stop("sub2")).swept).toBeUndefined()
+    expect((await stop("sub1")).swept).toEqual([USERS])
+    expect((await stop()).swept).toEqual([USERS])
   })
 })

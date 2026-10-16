@@ -107,16 +107,19 @@ function disabledBlock(delivery: Delivery): string[] {
   return groups.length === 0 ? [] : ["did not run:", ...groups.map((group) => `  - ${disabledText(group)}`), ""]
 }
 
-/** The tail's word on rulecast's own state: incomplete when rules did not run, else the problem count. */
+/** The tail's word on rulecast's own state: incomplete when rules did not run, and the problem count. */
 function problemsTail(delivery: Delivery): string {
   const groups = delivery.disabled ?? []
-  if (groups.length > 0) {
-    const count = disabledCount(groups)
-    return count === 0
-      ? " · incomplete: no rules ran (see above)"
-      : ` · incomplete: ${plural(count, "rule")} did not run (see above)`
-  }
-  return delivery.warnings.length === 0 ? "" : ` · rulecast: ${plural(delivery.warnings.length, "problem")} (see above)`
+  const count = disabledCount(groups)
+  const incomplete =
+    groups.length === 0
+      ? ""
+      : count === 0
+        ? " · incomplete: no rules ran (see above)"
+        : ` · incomplete: ${plural(count, "rule")} did not run (see above)`
+  const problems =
+    delivery.warnings.length === 0 ? "" : ` · rulecast: ${plural(delivery.warnings.length, "problem")} (see above)`
+  return `${incomplete}${problems}`
 }
 
 function terminal(delivery: Delivery, options: FormatOptions): string {

@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util"
 
 import { STATS_SCHEMA_VERSION } from "../adapters/cli/contract"
-import { compile } from "../core/compile/project"
+import { compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { cacheHome, projectStateDir } from "../core/home"
@@ -24,23 +24,43 @@ export interface StatsDocument {
   }
   sessions: number
   rules: RuleStats[]
-  /** Enabled detector rules in the current config with no finding in the window. */
-  neverFired: string[]
+  /**
+   * Enabled detector rules in the current config with no finding in the window. Left out, with
+   * `unknownRules`, when part of the config did not compile: its rules would read as removed.
+   */
+  neverFired?: string[]
   /** Rules in the window that are no longer in the config. */
-  unknownRules: string[]
+  unknownRules?: string[]
+  /** What did not compile (a rule repo not fetched, a bad rule); present only when anything did not. */
+  notCompiled?: string[]
   /** Lines of the log that could not be read; present only when there were any. */
   skippedLines?: number
 }
 
 const UNITS: Record<string, number> = { d: 24 * 60 * 60 * 1000, h: 60 * 60 * 1000 }
 
-/** `30d`, `12h`, or an ISO date. */
+const DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/
+
+/**
+ * `30d`, `12h`, or an ISO date. A date alone is midnight UTC; a time must carry its offset (`Z` or
+ * `+02:00`), since one without is the local time to `Date` and a date alone is not.
+ */
 export function parseSince(value: string, now: Date): Date {
   const relative = /^(\d+)([dh])$/.exec(value)
   if (relative !== null) return new Date(now.getTime() - Number(relative[1]) * UNITS[relative[2]!]!)
-  const date = /^\d{4}-\d{2}-\d{2}/.test(value) ? new Date(value) : null
-  if (date === null || Number.isNaN(date.getTime())) {
-    throw new UsageError(`--since "${value}" is not a duration or a date (use 30d, 12h or 2026-09-01)`)
+  const parts = DATE.exec(value)
+  const date = parts === null ? null : new Date(value)
+  // `Date` rolls 2026-02-30 over into March: the day must come back as written.
+  const day = parts === null ? null : new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])))
+  if (
+    date === null ||
+    day === null ||
+    Number.isNaN(date.getTime()) ||
+    day.toISOString().slice(0, 10) !== value.slice(0, 10)
+  ) {
+    throw new UsageError(
+      `--since "${value}" is not a duration or a date (use 30d, 12h, 2026-09-01 or 2026-09-01T10:00Z)`,
+    )
   }
   return date
 }
@@ -52,6 +72,7 @@ const COLUMNS: [header: string, value: (rule: RuleStats) => string][] = [
   ["fixed", (rule) => String(rule.fixed)],
   ["ignored", (rule) => String(rule.ignored)],
   ["suppressed", (rule) => String(rule.suppressed)],
+  ["prevented", (rule) => String(rule.prevented)],
   ["open", (rule) => String(rule.open)],
   ["repeated", (rule) => String(rule.repeated)],
   ["turns to fix", (rule) => (rule.medianTurnsToFix === null ? "-" : String(rule.medianTurnsToFix))],
@@ -84,8 +105,12 @@ function terminal(document: StatsDocument): string {
     }
     out.push("")
   }
-  if (document.neverFired.length > 0) out.push(`never fired: ${document.neverFired.join(", ")}`, "")
-  if (document.unknownRules.length > 0) out.push(`no longer configured: ${document.unknownRules.join(", ")}`, "")
+  if (document.neverFired !== undefined && document.neverFired.length > 0)
+    out.push(`never fired: ${document.neverFired.join(", ")}`, "")
+  if (document.unknownRules !== undefined && document.unknownRules.length > 0)
+    out.push(`no longer configured: ${document.unknownRules.join(", ")}`, "")
+  if (document.notCompiled !== undefined)
+    out.push("some rules did not compile (see above), so unused and removed rules are not listed", "")
   if (document.window.truncated) out.push("the log was rotated: findings older than its first record are gone", "")
   if (document.skippedLines !== undefined)
     out.push(`${document.skippedLines} unreadable lines in the log were skipped`, "")
@@ -94,7 +119,7 @@ function terminal(document: StatsDocument): string {
 
 /**
  * `rulecast stats [--since 30d] [--format terminal|json]`: per rule, what became of the findings
- * agent hooks reported — fixed, ignored at a stop, suppressed — read from the project's findings log
+ * agent hooks reported — fixed, ignored at a stop, suppressed, prevented — read from the project's findings log
  * (core/stats/log.ts). Read-only: it never fetches a rule repo and never exits 1.
  */
 export async function statsCommand(
@@ -122,6 +147,10 @@ export async function statsCommand(
   }
 
   const project = await compile({ root, registry, repos: cachedRepos(home) })
+  const notCompiled = project.diagnostics
+    .filter((diagnostic) => diagnostic.level === "error")
+    .map((diagnostic) => diagnosticText(diagnostic))
+  for (const text of notCompiled) io.stderr(`rulecast stats: not compiled: ${text}\n`)
   const lives = derive(records, since)
   const rules = ruleStats(lives)
   const fired = new Set(rules.map((rule) => rule.rule))
@@ -143,12 +172,16 @@ export async function statsCommand(
     },
     sessions: new Set(windowed.map((record) => record.s)).size,
     rules,
-    // Touch rules have no detector and never fire a finding.
-    neverFired: project.rules
-      .filter((rule) => rule.enabled && rule.detector !== null && !fired.has(rule.id))
-      .map((rule) => rule.id)
-      .sort(),
-    unknownRules: [...fired].filter((rule) => !configured.has(rule)).sort(),
+    ...(notCompiled.length > 0
+      ? { notCompiled }
+      : {
+          // Touch rules have no detector and never fire a finding.
+          neverFired: project.rules
+            .filter((rule) => rule.enabled && rule.detector !== null && !fired.has(rule.id))
+            .map((rule) => rule.id)
+            .sort(),
+          unknownRules: [...fired].filter((rule) => !configured.has(rule)).sort(),
+        }),
     ...(skipped > 0 ? { skippedLines: skipped } : {}),
   }
   io.stdout(values.format === "json" ? `${JSON.stringify(document, null, 2)}\n` : terminal(document))

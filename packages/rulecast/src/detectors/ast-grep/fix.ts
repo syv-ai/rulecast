@@ -27,7 +27,9 @@ function substitute(node: FixNode, variable: Metavariable, source: string): stri
  * `@ast-grep/napi` has no metavariable-aware fix (`SgNode.replace` inserts text literally), so the
  * substitution is done here. A fix spanning lines has lines 2+ indented by the indentation of the
  * line the match starts on, as ast-grep's CLI does: a fix written flush left lands at the match's
- * depth. Values are inserted as they are in the source, after that indentation is added.
+ * depth. Its line breaks are the file's, read from the line the match starts on (or, on a last line
+ * with none, the line before it), so a CRLF file stays CRLF. Values are inserted as they are in the
+ * source, after that indentation is added.
  *
  * The range's `index` is a UTF-16 offset, the unit a JavaScript string indexes by, although napi's
  * types call it a byte offset: test/detectors/ast-grep/fix.test.ts pins that with non-ASCII text
@@ -37,10 +39,12 @@ export function fixEdit(node: FixNode, fix: string, variables: Metavariable[], s
   const range = node.range()
   const lineStart = source.lastIndexOf("\n", range.start.index - 1) + 1
   const indent = /^[ \t]*/.exec(source.slice(lineStart, range.start.index))![0]
+  const lineEnd = source.indexOf("\n", range.start.index)
+  const crlf = lineEnd === -1 ? source[lineStart - 2] === "\r" : source[lineEnd - 1] === "\r"
   const indented = fix
-    .split("\n")
+    .split(/\r?\n/)
     .map((line, index) => (index === 0 || line === "" ? line : indent + line))
-    .join("\n")
+    .join(crlf ? "\r\n" : "\n")
   const byName = new Map(variables.map((variable) => [variable.name, variable]))
   const text = indented.replace(METAVARIABLE, (whole, multi: string | undefined, single: string | undefined) => {
     const variable = byName.get((multi ?? single)!)

@@ -125,7 +125,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
 | `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
 
-On `2` nothing is printed to stdout. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md).
+On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md).
 
 ## Git hooks and CI
 
@@ -198,7 +198,7 @@ A CI job, a cloud agent session or a new container starts with nothing installed
 
 1. Install dependencies (`npm ci` or `pnpm install`) before the agent starts. Without them the agent hooks do nothing, and in unattended mode every stop says so.
 2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
-3. Run `npx rulecast doctor --ci` before the agent step. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run. Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
+3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (a committed hook command runs only `node_modules/.bin/rulecast`, so a global or `npx` rulecast does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
 4. Check out with `fetch-depth: 0` if you use `--from-ref`.
 5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
 6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
@@ -297,12 +297,12 @@ prompt to paste.
 With subagents, each one's stop checks only the files it edited, so it is never asked to fix
 another agent's code. The main agent's stop checks everything the session changed: a problem that
 only shows when two subagents' changes meet is caught there. A file two subagents both edit can
-block either of them.
+block either of them. A change no agent's tool call made, such as your own edit, is reported at the
+main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
 
-Agents running in parallel in one working tree can't be told apart when both change files through
-the shell: each is held to what the other wrote during its command. A file one of them writes with
-its Edit or Write tool stays that agent's. For parallel agents that use the shell, give each its
-own worktree (in Claude Code, a subagent with `isolation: worktree`).
+When agents run in parallel in one working tree and one of them changes files with the shell, it
+can be blamed for what the others wrote while its command ran, with any tool. For parallel agents,
+give each its own worktree (in Claude Code, a subagent with `isolation: worktree`).
 
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](https://github.com/syv-ai/rulecast/blob/main/packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
 
@@ -331,7 +331,7 @@ The edit hook is budgeted to finish in under 500 ms at p95 — measured from pro
 
 The hook before every Bash call only records the working tree: it is held to 150 ms over a hook that does nothing, and adds 135–150 ms at p95 on a 20,000-file repository (`microsoft/vscode`), nearly all of it git finding untracked files. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget.
 
-A new worktree's first edit hook took p50 477 ms and p95 490 ms, against 252 ms for a warm edit in the same project (10 worktrees, report only). A new session in an existing checkout costs nothing extra (253 ms), and an empty cache home costs nothing extra either (477 ms). The difference is macOS checking each executable the first time it runs from a new path: the project's own `command` script and the `node_modules/.bin` linter shim each took about 200 ms on their first run and 10–60 ms after that. Run them once beforehand and the first edit costs the same as a warm one. SessionStart in a new worktree takes 174 ms. A worktree needs no preparation.
+A new worktree's first edit hook took p50 477 ms and p95 490 ms, against 252 ms for a warm edit in the same project (10 worktrees, report only). A new session in an existing checkout costs nothing extra (253 ms), and neither does an empty per-project detector cache (477 ms). The fixture pins no rule repos, so this says nothing about a missing one: hooks never fetch, and its rules do not run until `rulecast install` (see [Fresh environments](#fresh-environments)). The difference is macOS checking each executable the first time it runs from a new path: the project's own `command` script and the `node_modules/.bin` linter shim each took about 200 ms on their first run and 10–60 ms after that. Run them once beforehand and the first edit costs the same as a warm one. SessionStart in a new worktree takes 174 ms. A worktree needs no preparation.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 

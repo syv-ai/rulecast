@@ -16,9 +16,13 @@ rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 | `0` | Every rule ran, and no new finding has severity `error`. Warnings and pre-existing findings are allowed. | the report |
 | `1` | Every rule ran, and at least one new finding has severity `error`. | the report |
 | `2` | rulecast could not run: a usage error, a config file that does not load (YAML, schema, `minimum_rulecast_version`), git, or an internal error. | empty; the message is on stderr |
-| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. The findings of the rules that did run are still reported. | the report, with `complete: false` |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. With `--session`, also a rule whose detector failed earlier in that session, which disabled it. The findings of the rules that did run are still reported. | the report, with `complete: false` |
 
 `3` wins over `1`: a `1` promises that every rule ran. A loop can stop on `0`, fix and retry on `1`, and needs a person on `2` or `3`.
+
+`rulecast run RULE_ID` is incomplete only over that rule: its own compile error, or a rule repo that failed and configures it. Another repo that could not be fetched is still a warning, but not a `3`.
+
+`try-repo` fetches the repo it tries before anything runs, so a repo that cannot be fetched, or has no manifest, exits `2`.
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
@@ -91,9 +95,9 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `backlog` | Counts per rule and per file, new and pre-existing together. |
 | `preexistingSummary` | Pre-existing findings counted per rule and file. |
 | `references` | The doc sections the new findings' rules cite, with their text when it was read. |
-| `warnings` | rulecast's own problems: a broken rule, a detector that failed, a timeout, an ignore without a reason. Not findings. |
+| `warnings` | rulecast's own problems other than the rules in `disabled`: a timeout, an ignore without a reason, a file budget. Not findings. |
 | `skipped` | `llm` rules a staged run or `--no-llm` left out, when they matched a checked file. |
-| `disabled` | Rules that did not run, grouped by why: `[{ "reason": "…: not in the cache (run rulecast install)", "rules": ["python/no-bare-except"] }]`. A rule repo that could not be fetched, a detector whose tool is missing, a rule that failed to compile. Empty when every rule ran. When it is not empty, `complete` is `false` and the exit code is 3. |
+| `disabled` | Rules that did not run, grouped by why: `[{ "reason": "…: not in the cache (run rulecast install)", "rules": ["python/no-bare-except"] }]`. A rule repo that could not be fetched, a detector whose tool is missing, a rule that failed to compile, and with `--session` a rule the session disabled that would have run here. Each rule is named once, here and not again in `warnings`. With `RULE_ID`, only what concerns that rule. Empty when every rule ran. When it is not empty, `complete` is `false` and the exit code is 3. |
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |
@@ -126,7 +130,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `unresolved` | Findings whose fix left the rule matching the text it wrote: the fix was undone. Same shape as `fixed`. |
 | `diff` | With `--dry-run` only: a unified diff of every change. |
 
-The exit codes are `run`'s, from that check: `0` when no new error finding is left, `1` when one is (a rule with no fix, an unresolved fix, a rule whose fix failed its own examples), `3` when a rule did not run, `2` when rulecast could not run. Under `--dry-run` nothing is written, so the check reads the files unfixed and leaves out the findings the fixes would remove: the code is an estimate, and a fix that would create or remove another tool's finding is not seen. A rule whose fix fails its examples is named in `warnings`.
+The exit codes are `run`'s, from that check: `0` when no new error finding is left, `1` when one is (a rule with no fix, an unresolved fix, a rule whose fix failed its own examples), `3` when a rule did not run, `2` when rulecast could not run. Under `--dry-run` nothing is written, so the check reads the files unfixed and leaves out the findings the fixes would remove: the code is an estimate, and a fix that would create or remove another tool's finding is not seen. A rule whose fix fails its `good` or `bad` examples is named in `warnings`, with the examples that failed; a failing `baseline` example does not stop its fix.
 
 ### Finding ids
 
@@ -147,13 +151,22 @@ The line number is **not** part of it, so a finding keeps its id when lines are 
 
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
 
+A merged finding (`count` above 1) carries its earliest match's id, so fixing that one match gives the merged finding a new id while the rest are still there. A loop that compares merged findings should compare `rule` and `file` as well as `id`.
+
 The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v1`. If what the id hashes ever changes, that key changes with it, and `schemaVersion` is bumped.
 
 ### Committed baseline
 
 `rulecast baseline` writes `.rulecast/baseline.json`, the ids of every finding there is today, to be committed. A run that has no baseline of its own (`--all-files`, `--files`, or a staged run before the first commit) treats a finding whose id is listed as pre-existing, and only the rest can fail it. A session, `--from-ref` or a staged run's `HEAD` always wins over the file, and agent hooks never read it.
 
-Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry the run no longer finds, in a file a rule that ran on it checked, is stale; `rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run is neither matched nor stale. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
+Because it is keyed by id, the rules above apply: a finding whose text was edited, or whose file moved, is new. An entry is stale when:
+
+- the run no longer finds it, in a file the rule ran on and checked;
+- its file was deleted;
+- its rule is gone from a config that compiled without errors (a rule missing because its repo could not be fetched or it failed to compile is not gone);
+- its rule no longer matches the file, or no longer has the `verify` stage.
+
+`rulecast baseline --prune` drops stale entries and never adds any. An entry for a rule that did not run (disabled, failed, or left out by `--no-llm`) is neither matched nor stale. `rulecast baseline` and `--force` give metered rules every file, past `llm.max_files_per_verify`; with `--no-llm` they name the rules left out, and `--force` keeps the old file's entries of every rule that did not run. A file that is not JSON or not a baseline makes `run` exit 2. A file whose ids are from another id scheme is a warning, and every finding is new.
 
 ### Version policy
 
@@ -187,11 +200,11 @@ rulecast test <rule-id> --against . --max-rate 0.5 --format json
 
 | Code | Meaning | stdout |
 |---|---|---|
-| `0` | Every example that ran passed, and no rule is over `--max-rate`. | the report |
-| `1` | An example failed, or a rule is over `--max-rate`. | the report |
-| `2` | rulecast could not run: a usage error, no config, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
+| `0` | Every rule compiled, every example that ran passed, and no rule is over `--max-rate`. | the report |
+| `1` | An example failed, a rule is over `--max-rate`, or, without a rule id, a rule failed to compile. | the report; each compile diagnostic is on stderr |
+| `2` | rulecast could not run: a usage error, no config or one that does not load, an unknown rule id, or a detector that failed under `--against`. | empty; the message is on stderr |
 
-A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`.
+A detector that fails on an example is not a `2`: that example fails, with the detector's message as its `error`. Neither is a rule that failed to compile: it is in no entry of `rules`, since nothing tested it, and `passed` is `false`. `rulecast validate` says why. A named rule is tested alone, so another rule's compile error does not fail it; a named rule that did not compile is an unknown rule id.
 
 `--format json` prints one document:
 
@@ -286,6 +299,8 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
 ```
 
+A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist.
+
 ```json
 {
   "schemaVersion": 1,
@@ -305,6 +320,8 @@ rulecast stats --since 30d --format json    # 30d, 12h or a date; default: every
       "fixed": 1,
       "ignored": 0,
       "suppressed": 0,
+      "suppressAttempted": 0,
+      "prevented": 0,
       "open": 0,
       "repeated": 0,
       "medianTurnsToFix": 1,
@@ -326,20 +343,23 @@ rulecast stats --since 30d --format json    # 30d, 12h or a date; default: every
 | `window.truncated` | The log has been rotated and does not reach back to `since`, so older findings may be missing. |
 | `sessions` | Agent sessions with a record in the window. |
 | `rules` | One entry per rule with a finding in the window, most fired first. |
-| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. |
-| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. |
-| `skippedLines` | Lines of the log that could not be read. Present only when there were any. |
+| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. Left out when anything in the config did not compile (see `notCompiled`). |
+| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. Left out when anything in the config did not compile. |
+| `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
+| `skippedLines` | Lines of the log that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
 
 | Key | Meaning |
 |---|---|
 | `fired` | Findings first reported in the window. |
-| `blocked` | Of those, findings that kept a stop from going through at least once. |
+| `blocked` | Of those, findings that kept a stop from going through at least once. In unattended mode that includes the final stop that holds the agent to report what is left, and leaves out a finding that has already blocked twice and so no longer blocks. |
 | `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
 | `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
 | `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
-| `suppressed` | Dropped by a `rulecast-ignore` comment. |
+| `suppressed` | Dropped by a `rulecast-ignore` comment. That includes a comment on the finding's own line that changed its id, which happens when the match is the whole line, as with `llm` rules. |
+| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`, and not in `suppressionRate`. |
+| `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
@@ -356,6 +376,6 @@ Things to know when reading the counts:
 
 The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
 
-The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Two hooks that rotate at the same moment can drop the older history. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
 
 Its format is internal and can change in any release. The `stats` JSON above is the contract.

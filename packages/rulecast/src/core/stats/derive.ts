@@ -15,10 +15,12 @@ export interface FindingLife {
   firstAt: string
   /**
    * `fixed`: a later check ran its rule on its file and it was gone. `suppressed`: a
-   * `rulecast-ignore` dropped it. `ignored`: still there at a stop when the log ends. `open`: still
-   * there, and no stop has seen it — the session is still going, or ended without one.
+   * `rulecast-ignore` dropped it. `prevented`: only ever on refused writes, and the agent's next
+   * stop came without it — it never reached the file. `ignored`: still there at a stop when the log
+   * ends. `open`: still there, and no stop has seen it — the session is still going, or ended
+   * without one.
    */
-  state: "fixed" | "suppressed" | "ignored" | "open"
+  state: "fixed" | "suppressed" | "prevented" | "ignored" | "open"
   /** Events that reported it. */
   deliveries: number
   /** Stops it was still there at. */
@@ -27,6 +29,8 @@ export interface FindingLife {
   blocks: number
   /** Writes refused, or shell writes the agent was told to revert, over it. */
   refusals: number
+  /** Events at which it carried a `rulecast-ignore` the agent wrote that silenced nothing (unattended). */
+  suppressAttempts: number
   /** For a fixed one: the agent's stops between its first report and the fix; 0 is the same turn. */
   turnsToFix: number | null
 }
@@ -36,6 +40,8 @@ export const REPEAT_AFTER = 2
 
 interface Open extends FindingLife {
   stopsAtOpen: number
+  /** Where it was last reported. */
+  line: number
 }
 
 const covers = (record: FindingsRecord, rule: string, file: string) =>
@@ -58,7 +64,7 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
   const stops = new Map<string, number>()
   const lives: FindingLife[] = []
   const close = (life: Open, state: FindingLife["state"], turnsToFix: number | null = null) => {
-    const { stopsAtOpen: _, ...settled } = life
+    const { stopsAtOpen: _, line: __, ...settled } = life
     lives.push({ ...settled, state, turnsToFix })
   }
 
@@ -71,8 +77,15 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
     const stopsOf = (agent: string) => stops.get(`${record.s}\u0000${agent}`) ?? 0
     const found = new Map(record.found.map((finding) => [finding.id, finding]))
     const ignored = new Set(record.ign.map((match) => match.id))
-    const seen = (life: Open, outcome: string) => {
+    // An inline `rulecast-ignore` can change the id it silences, when the match is the whole line
+    // (llm, or an excerpt): the same rule ignored on the line it was last reported on is it.
+    const ignoredAt = new Set(record.ign.map((match) => `${match.r}\u0000${match.f}\u0000${match.l}`))
+    const tried = new Set((record.tried ?? []).map((match) => match.id))
+    const seen = (life: Open, finding: { id: string; o: string; l: number }) => {
+      const outcome = finding.o
+      life.line = finding.l
       life.deliveries++
+      if (tried.has(finding.id)) life.suppressAttempts++
       if (record.ev === "stop") life.stopsPresent++
       if (outcome === "blocked") life.blocks++
       if (outcome === "refused") life.refusals++
@@ -80,13 +93,17 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
 
     for (const [id, life] of session) {
       const finding = found.get(id)
-      if (finding !== undefined) seen(life, finding.o)
-      else if (ignored.has(id)) {
+      if (finding !== undefined) seen(life, finding)
+      else if (ignored.has(id) || ignoredAt.has(`${life.rule}\u0000${life.file}\u0000${life.line}`)) {
         session.delete(id)
         close(life, "suppressed")
       } else if (covers(record, life.rule, life.file)) {
         session.delete(id)
         close(life, "fixed", stopsOf(life.agent) - life.stopsAtOpen)
+      } else if (record.ev === "stop" && record.a === life.agent && life.refusals === life.deliveries) {
+        // A refused write the agent gave up on: the file was never edited, so no check will see it gone.
+        session.delete(id)
+        close(life, "prevented")
       }
     }
     for (const finding of record.found) {
@@ -103,10 +120,12 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
         stopsPresent: 0,
         blocks: 0,
         refusals: 0,
+        suppressAttempts: 0,
         turnsToFix: null,
         stopsAtOpen: stopsOf(record.a),
+        line: finding.l,
       }
-      seen(life, finding.o)
+      seen(life, finding)
       session.set(finding.id, life)
     }
     // After the lives: a finding gone at this stop was fixed in the turn that is ending.
@@ -139,6 +158,9 @@ export interface RuleStats {
   fixed: number
   ignored: number
   suppressed: number
+  /** Findings the agent wrote a `rulecast-ignore` for that silenced nothing, as in unattended mode. */
+  suppressAttempted: number
+  prevented: number
   open: number
   repeated: number
   medianTurnsToFix: number | null
@@ -183,6 +205,8 @@ export function ruleStats(lives: readonly FindingLife[]): RuleStats[] {
       fixed: count((life) => life.state === "fixed"),
       ignored: count((life) => life.state === "ignored"),
       suppressed,
+      suppressAttempted: count((life) => life.suppressAttempts > 0),
+      prevented: count((life) => life.state === "prevented"),
       open: count((life) => life.state === "open"),
       repeated,
       medianTurnsToFix: median(group.flatMap((life) => (life.turnsToFix === null ? [] : [life.turnsToFix]))),

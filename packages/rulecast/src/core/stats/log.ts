@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { z } from "zod"
 
 import { errorMessage, isNotFound } from "../errors"
 import { appendRecordsCapped } from "../jsonl"
@@ -63,6 +64,11 @@ export interface FindingsRecord {
   found: LoggedFinding[]
   /** Matches a `rulecast-ignore` dropped this event. */
   ign: LoggedMatch[]
+  /**
+   * Unattended: matches whose `rulecast-ignore` the agent wrote this session, which silenced
+   * nothing (they are in `found` as well). Absent when there are none.
+   */
+  tried?: LoggedMatch[]
 }
 
 const located = (rule: { id: string }, match: Match, id: string): LoggedMatch => ({
@@ -80,6 +86,8 @@ export interface EventFindings {
   at: Date
   findings: readonly { id: string; rule: { id: string }; match: Match; outcome: WriteOutcome }[]
   ignored: readonly { id?: string; rule: { id: string }; match: Match }[]
+  /** Ignores that silenced nothing (unattended). */
+  tried?: readonly { id?: string; rule: { id: string }; match: Match }[]
   ran: ReadonlyMap<string, readonly string[]>
 }
 
@@ -102,6 +110,9 @@ export function findingsRecord(event: EventFindings): FindingsRecord | null {
     })
   }
   if (event.ev !== "stop" && files.length === 0 && event.findings.length === 0) return null
+  const tried = (event.tried ?? []).flatMap(({ id, rule, match }) =>
+    id === undefined ? [] : [located(rule, match, id)],
+  )
   return {
     v: FINDINGS_LOG_VERSION,
     at: event.at.toISOString(),
@@ -113,6 +124,7 @@ export function findingsRecord(event: EventFindings): FindingsRecord | null {
     ran,
     found: event.findings.map(({ id, rule, match, outcome }) => ({ ...located(rule, match, id), o: outcome })),
     ign: event.ignored.flatMap(({ id, rule, match }) => (id === undefined ? [] : [located(rule, match, id)])),
+    ...(tried.length === 0 ? {} : { tried }),
   }
 }
 
@@ -136,10 +148,27 @@ export async function appendFindingsLog(
   }
 }
 
+const loggedMatchSchema = z.object({ r: z.string(), id: z.string(), f: z.string(), l: z.number() })
+
+/** What the reader accepts: a parseable line of this version can still be cut short or hand-edited. */
+const recordSchema = z.object({
+  v: z.literal(FINDINGS_LOG_VERSION),
+  at: z.string(),
+  s: z.string(),
+  a: z.string(),
+  ev: z.enum(["edit", "stop", "guard"]),
+  via: z.literal("shell").optional(),
+  files: z.array(z.string()),
+  ran: z.record(z.array(z.number().int().nonnegative())),
+  found: z.array(loggedMatchSchema.extend({ o: z.enum(["delivered", "blocked", "refused"]) })),
+  ign: z.array(loggedMatchSchema),
+  tried: z.array(loggedMatchSchema).optional(),
+}) satisfies z.ZodType<FindingsRecord>
+
 export interface FindingsLog {
   /** Oldest first: the rotated file, then the current one. */
   records: FindingsRecord[]
-  /** Lines that were not a record this version understands. */
+  /** Lines that were not a whole record this version understands. */
   skipped: number
   /** The log has been rotated at least once, so its oldest records may be gone. */
   rotated: boolean
@@ -159,13 +188,16 @@ export async function readFindingsLog(stateDir: string): Promise<FindingsLog> {
     if (name === FINDINGS_LOG_ROTATED) result.rotated = true
     for (const line of text.split("\n")) {
       if (line.trim() === "") continue
+      let value: unknown
       try {
-        const record = JSON.parse(line) as FindingsRecord
-        if (record.v === FINDINGS_LOG_VERSION) result.records.push(record)
-        else result.skipped++
+        value = JSON.parse(line)
       } catch {
         result.skipped++
+        continue
       }
+      const record = recordSchema.safeParse(value)
+      if (record.success) result.records.push(record.data)
+      else result.skipped++
     }
   }
   return result

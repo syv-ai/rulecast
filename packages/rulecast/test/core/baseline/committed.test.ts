@@ -137,9 +137,14 @@ describe("pruning", () => {
   })
 
   test("the verdict: a rule that ran on the file checked it; disabled, failed or not-run rules did not", () => {
-    const rule = (id: string, enabled = true) => ({ id, enabled, matches: (file: string) => file.endsWith(".py") })
+    const rule = (id: string, enabled = true, stages = ["verify"]) => ({
+      id,
+      enabled,
+      stages,
+      matches: (file: string) => file.endsWith(".py"),
+    })
     const verdict = entryVerdict({
-      rules: [rule("ran"), rule("off", false), rule("failed")],
+      rules: [rule("ran"), rule("off", false), rule("failed"), rule("edit-only", true, ["edit"])],
       compiledCleanly: true,
       ran: new Map([["ran", ["a.py"]]]),
       exists: (file) => file !== "deleted.py",
@@ -151,6 +156,8 @@ describe("pruning", () => {
     expect(verdict("off", "a.py")).toBe("unchecked")
     expect(verdict("failed", "a.py")).toBe("unchecked")
     expect(verdict("removed", "a.py")).toBe("gone")
+    // A rule that no longer verifies will never check its entries again.
+    expect(verdict("edit-only", "a.py")).toBe("gone")
     // A rule missing because its repo was not fetched, or it failed to compile, has not been removed.
     const broken = entryVerdict({ rules: [], compiledCleanly: false, ran: new Map(), exists: () => true })
     expect(broken("removed", "a.py")).toBe("unchecked")

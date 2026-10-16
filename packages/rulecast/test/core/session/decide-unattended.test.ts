@@ -33,6 +33,7 @@ describe("gate, unattended", () => {
     expect(gate(fresh, foldWork([]), "main", 3, new Set(), "unattended")).toEqual({
       stop: "block",
       work: [{ t: "stopBlock", agent: "main", findings: [findingKey(fresh[0]!)] }],
+      blocking: [findingKey(fresh[0]!)],
     })
   })
 
@@ -59,6 +60,49 @@ describe("gate, unattended", () => {
     expect(stops([same, same, same, same], 10, [[], [], [], prompt])).toEqual(["block", "block", "report", "report"])
   })
 
+  test("findings whose text says nothing about them are told apart by what the tool said, and where", () => {
+    const secret = (line: number, ruleId: string) => ({
+      ...finding("a/secrets", "[redacted]", line),
+      match: { file: "a.py", line, endLine: line, column: 1, text: "[redacted]", captures: { ruleId, message: "m" } },
+    })
+    expect(findingKey(secret(1, "aws"))).not.toBe(findingKey(secret(9, "aws")))
+    expect(findingKey(secret(1, "aws"))).not.toBe(findingKey(secret(1, "github")))
+    const hook = (message: string) => ({
+      ...finding("a/hook", ""),
+      match: { file: "a.py", line: 1, endLine: 3, column: 1, text: "", captures: { ruleId: "fmt", message } },
+    })
+    expect(findingKey(hook("would reformat"))).not.toBe(findingKey(hook("trailing whitespace")))
+    // A second secret in the file still blocks after the first one has used up its repeats.
+    expect(stops([[secret(1, "aws")], [secret(1, "aws")], [secret(1, "aws"), secret(9, "aws")]], 10)).toEqual([
+      "block",
+      "block",
+      "block",
+    ])
+  })
+
+  test("a refuse_write finding in a file the shell changed is never let go by the repeat limit", () => {
+    const refused = { ...finding("a/protected", "x"), rule: rule({ id: "a/protected", refuseWrite: true }) }
+    const shell: WorkRecord[] = [{ t: "edited", file: "a.py", via: "shell" }]
+    expect(stops([[refused], [refused], [refused], [refused]], 10, [shell])).toEqual([
+      "block",
+      "block",
+      "block",
+      "block",
+    ])
+  })
+
+  test("a refuse_write finding the shell put there still ends at the budget: blocked, then reported", () => {
+    const refused = { ...finding("a/protected", "x"), rule: rule({ id: "a/protected", refuseWrite: true }) }
+    const shell: WorkRecord[] = [{ t: "edited", file: "a.py", via: "shell" }]
+    expect(stops([[refused], [refused], [refused], [refused], [refused]], 3, [shell])).toEqual([
+      "block",
+      "block",
+      "block",
+      "report",
+      "capReached",
+    ])
+  })
+
   test("warnings never block, and a budget of 0 goes straight to the report", () => {
     expect(stops([[finding("a/rule", "w", 1, "warning")]], 3)).toEqual(["allow"])
     expect(stops([[finding("a/rule", "e")], [finding("a/rule", "e")]], 0)).toEqual(["report", "capReached"])
@@ -66,7 +110,11 @@ describe("gate, unattended", () => {
 
   test("attended, nothing of this applies: the record carries no findings and there is no report", () => {
     const fresh = [finding("a/rule", "bad")]
-    expect(gate(fresh, foldWork([]), "main", 1)).toEqual({ stop: "block", work: [{ t: "stopBlock", agent: "main" }] })
+    expect(gate(fresh, foldWork([]), "main", 1)).toEqual({
+      stop: "block",
+      work: [{ t: "stopBlock", agent: "main" }],
+      blocking: [findingKey(fresh[0]!)],
+    })
     const after = foldWork([{ t: "stopBlock", agent: "main" }])
     expect(gate(fresh, after, "main", 1).stop).toBe("capReached")
   })
@@ -87,14 +135,25 @@ describe("gate, unattended, when configured rules did not run", () => {
     expect(incomplete([finding("a/rule", "bad")], []).stop).toBe("block")
   })
 
-  test("a capped stop that has had its report is held for what did not run", () => {
-    const work: WorkRecord[] = [{ t: "stopReport", agent: "main" }]
+  test("a block or report that carried the list is the hold: a capped stop after it is not held again", () => {
+    const records: WorkRecord[] = []
+    const same = [finding("a/rule", "same")]
+    const sequence = [same, same, same, same, []].map((fresh) => {
+      const result = incomplete(fresh, records)
+      records.push(...result.work)
+      return result.stop
+    })
+    expect(sequence).toEqual(["block", "block", "report", "capReached", "allow"])
+  })
+
+  test("a capped stop is never turned into a hold", () => {
     const same = finding("a/rule", "same")
-    const blocked: WorkRecord[] = [
+    const work: WorkRecord[] = [
       { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
       { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+      { t: "stopReport", agent: "main" },
     ]
-    expect(incomplete([same], [...blocked, ...work]).stop).toBe("incomplete")
+    expect(incomplete([same], work).stop).toBe("capReached")
   })
 
   test("never a subagent, and never attended", () => {

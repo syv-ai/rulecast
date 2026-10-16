@@ -4,6 +4,9 @@ export class SettingsError extends Error {}
 
 const RULECAST_HOOK = /\brulecast\b.*\bhook claude-code\b/
 
+/** A command that runs the project's own rulecast: the guard of any release, or the bare path before it. */
+const PROJECT_RULECAST = /node_modules\/\.bin\/rulecast\b/
+
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -52,7 +55,9 @@ function hooksOf(settings: unknown): JsonObject {
  * Adds rulecast's hooks to Claude Code settings. Entries that are not rulecast's are never modified
  * or removed. rulecast's own, when their command is not the current one, are rewritten in place and
  * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. An entry
- * whose command is `keep` is current whatever `command` is.
+ * whose command is `keep` is current whatever `command` is, and one that runs the project's own
+ * rulecast in an older form is rewritten to `keep`, never to `command`: in a clone without
+ * node_modules `command` is the bare one, which exits 127 on every hook.
  */
 export function mergeHooks(
   settings: unknown,
@@ -76,7 +81,8 @@ export function mergeHooks(
             const current = (hook as JsonObject).command
             if (!isRulecastHook(hook) || current === command || current === keep) return hook
             changed = true
-            return { ...(hook as JsonObject), command }
+            const local = keep !== undefined && PROJECT_RULECAST.test(current as string)
+            return { ...(hook as JsonObject), command: local ? keep : command }
           }),
         }
       })
@@ -91,6 +97,16 @@ export function mergeHooks(
     added.push(matcher === undefined ? event : `${event} (${matcher})`)
   }
   return { settings: { ...(settings as JsonObject), hooks: merged }, added, updated }
+}
+
+/** Whether rulecast's hooks here all run the project's own rulecast: a guard runs nothing else. */
+export function runsProjectRulecast(settings: unknown): boolean {
+  const commands = Object.values(hooksOf(settings))
+    .flatMap((groups) => (Array.isArray(groups) ? groups : []))
+    .flatMap((group) => (isObject(group) && Array.isArray(group.hooks) ? group.hooks : []))
+    .filter(isRulecastHook)
+    .map((hook) => (hook as JsonObject).command as string)
+  return commands.length > 0 && commands.every((command) => PROJECT_RULECAST.test(command))
 }
 
 /**

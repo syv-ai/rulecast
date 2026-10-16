@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
-
+import { stringify } from "yaml"
 import { STATS_SCHEMA_VERSION } from "../../src/adapters/cli/contract"
 import { parseSince } from "../../src/commands/stats"
 import { FINDINGS_LOG, type FindingsRecord } from "../../src/core/stats/log"
+
 import { runCli } from "../helpers/cli"
-import { createFixture } from "../helpers/fixture"
+import { createFixture, fixtureRules } from "../helpers/fixture"
 import { stateDirFor } from "../helpers/home"
 
 const RULE = "backend/no-httpexception"
@@ -70,6 +71,8 @@ describe("rulecast stats", () => {
           fixed: 1,
           ignored: 0,
           suppressed: 0,
+          suppressAttempted: 0,
+          prevented: 0,
           open: 0,
           repeated: 0,
           medianTurnsToFix: 1,
@@ -85,6 +88,8 @@ describe("rulecast stats", () => {
           fixed: 0,
           ignored: 1,
           suppressed: 0,
+          suppressAttempted: 0,
+          prevented: 0,
           open: 0,
           repeated: 0,
           medianTurnsToFix: null,
@@ -106,9 +111,9 @@ describe("rulecast stats", () => {
       [
         "2 sessions since 2026-10-01T10:00:00.000Z",
         "",
-        "rule                      fired  blocked  refused  fixed  ignored  suppressed  open  repeated  turns to fix",
-        "backend/no-httpexception      1        1        0      1        0           0     0         0             1",
-        "old/renamed-rule              1        0        0      0        1           0     0         0             -",
+        "rule                      fired  blocked  refused  fixed  ignored  suppressed  prevented  open  repeated  turns to fix",
+        "backend/no-httpexception      1        1        0      1        0           0          0     0         0             1",
+        "old/renamed-rule              1        0        0      0        1           0          0     0         0             -",
         "",
         "never fired: frontend/no-generated-edits",
         "",
@@ -125,6 +130,32 @@ describe("rulecast stats", () => {
     expect(document.sessions).toBe(1)
     expect(document.rules.map((rule: { rule: string }) => rule.rule)).toEqual(["old/renamed-rule"])
     expect(document.neverFired).toEqual([RULE, "frontend/no-generated-edits"].sort())
+  })
+
+  test("a rule repo that did not compile: errors on stderr, and no never-fired or unknown rules", async () => {
+    const root = await projectWithLog(RECORDS)
+    await writeFile(
+      path.join(root, ".rulecast-config.yaml"),
+      stringify({
+        repos: [
+          { repo: "local", rules: fixtureRules },
+          { repo: "https://example.invalid/rules", rev: "v1.0.0", rules: [{ id: "old/renamed-rule" }] },
+        ],
+      }),
+    )
+    const result = await runCli(root, ["stats", "--format", "json"])
+    expect(result.code).toBe(0)
+    expect(result.stderr).toContain("rulecast stats: not compiled: https://example.invalid/rules@v1.0.0")
+    const document = JSON.parse(result.stdout)
+    expect(document).not.toHaveProperty("neverFired")
+    expect(document).not.toHaveProperty("unknownRules")
+    expect(document.notCompiled).toEqual([expect.stringContaining("https://example.invalid/rules@v1.0.0")])
+    expect(document.rules).toHaveLength(2)
+
+    const terminal = await runCli(root, ["stats"])
+    expect(terminal.stdout).not.toContain("never fired")
+    expect(terminal.stdout).not.toContain("no longer configured")
+    expect(terminal.stdout).toContain("some rules did not compile")
   })
 
   test("unreadable lines are skipped and counted", async () => {
@@ -150,6 +181,8 @@ describe("rulecast stats", () => {
     for (const args of [
       ["--since", "a month"],
       ["--since", "30m"],
+      ["--since", "2026-02-30"],
+      ["--since", "2026-09-01T10:00"],
       ["--format", "sarif"],
     ]) {
       const result = await runCli(root, ["stats", ...args])
@@ -163,5 +196,14 @@ describe("rulecast stats", () => {
     expect(parseSince("30d", now).toISOString()).toBe("2026-09-16T12:00:00.000Z")
     expect(parseSince("12h", now).toISOString()).toBe("2026-10-16T00:00:00.000Z")
     expect(parseSince("2026-09-01", now).toISOString()).toBe("2026-09-01T00:00:00.000Z")
+    expect(parseSince("2026-09-01T10:00:00Z", now).toISOString()).toBe("2026-09-01T10:00:00.000Z")
+    expect(parseSince("2026-09-01T10:00+02:00", now).toISOString()).toBe("2026-09-01T08:00:00.000Z")
+  })
+
+  test("--since rejects a date that does not exist, and a time with no offset", () => {
+    const now = new Date("2026-10-16T12:00:00.000Z")
+    for (const value of ["2026-02-30", "2026-13-01", "2026-09-01T25:00Z", "2026-09-01T10:00", "2026-09-01x"]) {
+      expect(() => parseSince(value, now), value).toThrow(/--since/)
+    }
   })
 })

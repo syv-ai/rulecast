@@ -105,6 +105,74 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
   })
 
+  test("a released guard is rewritten to the current guard, never to the bare command, without node_modules", () => {
+    // v0.4 and v0.5 committed this. `install` in a clone that has not installed yet asks for the bare
+    // command; swapping the guard for it would exit 127 on every hook.
+    const released =
+      'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+      `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
+    const unguarded = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    for (const older of [released, unguarded]) {
+      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, COMMAND, 60_000, LOCAL_COMMAND)
+      expect(upgraded.added).toEqual([])
+      expect(upgraded.updated).toContain("Stop")
+      expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
+    }
+  })
+
+  test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {
+    expect(() => mergeHooks(bad, COMMAND, 60_000)).toThrow(SettingsError)
+  })
+})
+
+describe("Claude Code settings: removeHooks", () => {
+  const dash = { type: "command", command: "dash-hook stop" }
+
+  test("removes everything mergeHooks added", () => {
+    expect(removeHooks(mergeHooks({}, COMMAND, 60_000).settings)).toEqual({
+      settings: {},
+      removed: [
+        "PreToolUse (Edit|Write)",
+        "PreToolUse (Bash)",
+        "PostToolUse (Read)",
+        "PostToolUse (Edit|Write)",
+        "PostToolUse (Bash)",
+        "PostToolUseFailure (Bash)",
+        "Stop",
+        "SubagentStop",
+        "UserPromptSubmit",
+        "SessionStart (startup|resume|compact)",
+        "SessionStart (clear|fork)",
+      ],
+    })
+  })
+
+  test("keeps every other setting, group and hook, and does not mutate its input", () => {
+    const existing = {
+      permissions: { allow: ["Bash(pnpm test)"] },
+      hooks: {
+        PostToolUse: [{ matcher: "Read", hooks: [dash, hook(5)] }],
+        Stop: [{ hooks: [dash] }],
+        Notification: [],
+      },
+    }
+    const merged = mergeHooks(existing, COMMAND, 60_000).settings
+    const input = structuredClone(merged)
+    const { settings, removed } = removeHooks(input)
+    expect(input).toEqual(merged)
+    expect(settings).toEqual({
+      permissions: existing.permissions,
+      hooks: { PostToolUse: [{ matcher: "Read", hooks: [dash] }], Stop: [{ hooks: [dash] }], Notification: [] },
+    })
+    expect(removed).toContain("PostToolUse (Read)")
+  })
+
+  test("settings without rulecast hooks come back unchanged", () => {
+    const settings = { hooks: { Stop: [{ hooks: [dash] }] } }
+    expect(removeHooks(settings)).toEqual({ settings, removed: [] })
+    expect(removeHooks({})).toEqual({ settings: {}, removed: [] })
+  })
+
   test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {
     expect(() => removeHooks(bad)).toThrow(SettingsError)
   })

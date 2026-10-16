@@ -64,6 +64,19 @@ describe("ast-grep fix", () => {
     expect(apply(text, edits)).toBe("if (x) {\n    if (debug) {\n      logger.debug(a)\n    }\n}\n")
   })
 
+  test("a multi-line fix uses the file's line endings", async () => {
+    const text = "if (x) {\r\n    console.log(a)\r\n}\r\n"
+    const edits = await fixesOf(text, {
+      language: "typescript",
+      rule: { pattern: "console.log($A)" },
+      fix: "if (debug) {\n  logger.debug($A)\n}",
+    })
+    expect(apply(text, edits)).toBe("if (x) {\r\n    if (debug) {\r\n      logger.debug(a)\r\n    }\r\n}\r\n")
+    const last = "x()\r\nconsole.log(a)"
+    const atEnd = await fixesOf(last, { language: "typescript", rule: { pattern: "console.log($A)" }, fix: "a(\n$A)" })
+    expect(apply(last, atEnd)).toBe("x()\r\na(\r\na)")
+  })
+
   test("offsets are UTF-16 code units, as JavaScript strings index: non-ASCII before the match", async () => {
     // napi's types call `index` a byte offset. It is not: "é" is 2 bytes and "😀" is 4 in UTF-8,
     // and 1 and 2 code units, so a byte offset would land 3 characters past the match.

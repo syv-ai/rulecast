@@ -3,11 +3,12 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { NOTHING_STAGED } from "../../src/adapters/cli/format"
+import { appendWork, sessionDir } from "../../src/core/session/session"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { backendConventions, createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
-import { testEnv } from "../helpers/home"
+import { stateDirFor, testEnv } from "../helpers/home"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -132,6 +133,60 @@ describe("rulecast run: file selection", () => {
       { stopGate: true },
     )
     expect(stop.delivery.stop).toBe("block")
+  })
+})
+
+describe("rulecast run --session: rules the session disabled", () => {
+  test("a rule a detector failure disabled earlier makes the run incomplete, and says so", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), VIOLATION)
+    await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+    await appendWork(sessionDir(stateDirFor(root), "s1"), [
+      { t: "disabled", rule: "backend/no-httpexception", reason: "regex crashed" },
+    ])
+
+    const result = await run(root, "--session", "s1", "--format", "json")
+    expect(result.code).toBe(3)
+    const json = JSON.parse(result.stdout)
+    expect(json.complete).toBe(false)
+    expect(json.findings).toEqual([])
+    // Named once, under `disabled`, and not again among the warnings (#29 and #25 on integration).
+    expect(json.disabled).toEqual([{ reason: "regex detector: regex crashed", rules: ["backend/no-httpexception"] }])
+    expect(json.warnings.join("\n")).not.toContain("backend/no-httpexception")
+
+    const terminal = await run(root, "--session", "s1")
+    expect(terminal.code).toBe(3)
+    expect(terminal.stdout.match(/regex crashed/g)).toHaveLength(1)
+    expect(terminal.stdout).toContain("incomplete: 1 rule did not run")
+    expect(terminal.stdout).not.toContain("rulecast problems:")
+  })
+
+  test("a disabled rule that would not have run here is not listed, and the run is complete", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), VIOLATION)
+    await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+    await appendWork(sessionDir(stateDirFor(root), "s1"), [
+      { t: "disabled", rule: "frontend/no-generated-edits", reason: "path crashed" },
+    ])
+
+    const result = await run(root, "--session", "s1", "backend/no-httpexception", "--format", "json")
+    const json = JSON.parse(result.stdout)
+    expect(json).toMatchObject({ complete: true, disabled: [] })
+    expect(result.code).toBe(1)
+  })
+})
+
+describe("rulecast run RULE_ID: another rule's problem", () => {
+  test("a rule that failed to compile is not that run's, in `disabled` or the exit code", async () => {
+    const bad = { ...fixtureRules[0]!, id: "backend/bad", detect: { regex: { pattern: "(" } } }
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([fixtureRules[0]!, bad]),
+      [USERS]: fixtureFiles[USERS]!,
+      "conventions/backend.md": backendConventions,
+    })
+    const result = await run(root, "--all-files", "backend/no-httpexception", "--format", "json")
+    expect(JSON.parse(result.stdout)).toMatchObject({ complete: true, disabled: [] })
+    expect(result.code).toBe(1)
   })
 })
 
@@ -306,7 +361,8 @@ describe("rulecast run: the output contract", () => {
     const parsed = json(result.stdout)
     expect(parsed.complete).toBe(false)
     expect(parsed.findings.map((finding: { rule: string }) => finding.rule)).toEqual([regexRule.id])
-    expect(parsed.warnings.join("\n")).toContain("scripts/broken")
+    // Named once, under `disabled` (#29), not again among the warnings.
+    expect(parsed.disabled.flatMap((group: { rules: string[] }) => group.rules)).toEqual(["scripts/broken"])
   })
 
   test("a verify timeout is exit 3", async () => {
@@ -335,7 +391,9 @@ describe("rulecast run: the output contract", () => {
     const result = await run(root, "--all-files")
     expect(result.code).toBe(3)
     expect(result.stdout).toContain(`${USERS}:2:5  error    ${regexRule.id}`)
-    expect(result.stdout).toContain("backend/bad")
+    expect(result.stdout).toContain("did not run:\n  - 1 rule disabled: .rulecast-config.yaml: ")
+    const parsed = json((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(parsed.disabled.flatMap((group: { rules: string[] }) => group.rules)).toEqual(["backend/bad"])
   })
 
   test.each([
@@ -537,7 +595,9 @@ describe("rulecast run: rules that did not run", () => {
     const terminal = await run(root, "--all-files")
     expect(terminal.code).toBe(3)
     expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
-    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)")
+    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)\n")
+    // Said once, under "did not run", not again among rulecast's problems.
+    expect(terminal.stdout).not.toContain("rulecast problems:")
     const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
     expect(json.disabled).toEqual([{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }])
   })
@@ -557,11 +617,15 @@ describe("rulecast run: rules that did not run", () => {
 
   test("--session names a rule the agent's session disabled, which it skips", async () => {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
+    // Changed in the session, so the rule would have run on it here.
+    await writeFile(path.join(root, "a.py"), "x = 2\n")
     await pipelineAt(root, { kind: "edit", files: ["a.py"], cwd: root, session: { id: "s1" } })
     const result = await run(root, "--session", "s1", "--format", "json")
-    expect(JSON.parse(result.stdout).disabled).toEqual([
-      { reason: expect.stringMatching(/^command detector: /), rules: ["shell"] },
-    ])
+    expect(result.code).toBe(3)
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      complete: false,
+      disabled: [{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }],
+    })
   })
 
   test("a clean run has nothing disabled", async () => {

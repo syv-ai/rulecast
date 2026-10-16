@@ -190,7 +190,10 @@ In unattended mode:
   per prompt.
 - **A finding that has blocked two stops no longer blocks.** It is reported instead, so a false
   positive, with nobody to overrule it, cannot use up the budget. A finding is the same finding when
-  its rule, its file and the text it matched are the same, wherever the line has moved.
+  its rule, its file and the text it matched are the same, wherever the line has moved. When the
+  text tells nothing apart (a redacted secret, a hook's whole-file finding), the tool's rule id,
+  message and line are compared too. A `refuse_write` finding in a protected file the agent changed
+  with its shell is the exception: it keeps blocking until the change is reverted.
 - **When nothing is left that may block, the agent is held once more, to report.** This happens when
   the budget is spent, or when every remaining finding has blocked twice. The agent is given the
   findings and told to record each one as unresolved in its final report, or in the run's decisions
@@ -199,9 +202,13 @@ In unattended mode:
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
-- **A `rulecast-ignore` added during the session silences nothing.** Its finding blocks and is
-  reported like any other, and the developer is still told about the comment. Ignores that were
-  already in the code keep working.
+- **A `rulecast-ignore` does not silence a finding on a line the agent changed during the run,
+  whoever wrote the comment.** Ignores on code the run did not touch keep working. The finding is
+  judged like any other: it blocks, and is reported if it keeps blocking. That includes an edit to
+  code under a comment that was already there: the comment was agreed to for the code as it was.
+  The developer is still told about an ignore on changed code. A `refuse_write` rule works the same
+  way: an ignore does not stop the refusal of a line the write changes, while a write that only
+  restates a line, or an edit that carries it as context, does not change it.
 - **Rules can be stricter.** `unattended.escalate` makes named `warning` rules errors, as does
   `escalate: true` on the rule itself, and `refuse_write: unattended` rules refuse writes.
 
@@ -210,10 +217,11 @@ The mode is decided in this order:
 1. `RULECAST_MODE`: `unattended`, or `attended` (also `interactive`). It overrides the config, so
    an orchestrator can set it per run.
 2. `mode:` in `.rulecast-config.yaml`.
-3. `CI` or `GITHUB_ACTIONS` set (and not `false` or `0`): unattended.
+3. `CI` or `GITHUB_ACTIONS` set (and not `false`, in any case, or `0`): unattended.
 4. Otherwise attended.
 
-A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
+An unknown `RULECAST_MODE` value is ignored: `rulecast doctor` warns about it, and a hook writes it
+to its debug log. A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
 it would run in from your shell, and where that came from. The mode applies to agent hooks only.
 `rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
 to answer.
@@ -262,12 +270,18 @@ examples:
   baseline:
     - path: backend/app/services/users.py
       before: |
-        print("created user", user.id)
+        def create_user(name):
+            user = create(name)
+            print("created user", user.id)
+            return user
       after: |
-        user = create(name)
-        print("created user", user.id)
-        print("done")
-      expect: { new: [3], preexisting: [2] }
+        def create_user(name):
+            user = create(name)
+            user.save()
+            print("created user", user.id)
+            print("saved")
+            return user
+      expect: { new: [5], preexisting: [4] }
 ```
 
 - **`path` is required** and must match the rule's own `files`, `exclude` and type keys — those, and
@@ -275,20 +289,28 @@ examples:
   tests a different rule. A path the rule would never be given is a `rulecast validate` error.
 - **A `bad` example passes on at least one finding**, unless its `expect` says more:
   - `count`: exactly this many matches.
-  - `lines`: the lines the matches are on. Compared as a set: every listed line has a match, and
-    no match is on a line not listed. Two matches on one line need the line once.
+  - `lines`: the line each match starts on (line 1 for a finding about the whole file, such as a
+    `path` rule's). Compared as a set: every listed line has a match starting on it, and no match
+    starts on a line not listed. Two matches on one line need the line once.
 
   Pin `lines` when it matters that the rule fires on the right line, not merely somewhere: an
   over-broad pattern passes a bare `bad` example by matching the wrong line. A line past the end of
-  `code` is a `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
+  `code` (empty `code` counts as one line), or a `count` below the number of `lines`, is a
+  `rulecast validate` error. `good` examples take no `expect`: theirs is "nothing".
 - **A `baseline` example is an edit.** `before` is the file when the agent first opens it, `after`
   the file once it has edited it. `rulecast test` sorts the rule's findings in `after` into new and
   pre-existing the way a session would, by the rule's own [`scope`](#instance-and-container-rules),
-  and the example passes when the lines of each match `expect.new` and `expect.preexisting`, as
-  sets. A status left out must have no findings, so `expect: {}` means "no finding at all". It
-  catches a rule that reports code the edit did not touch as new: a regex that spans lines, an
-  `ast-grep` rule that matches a whole function, a `container` rule. An `llm` rule's baseline is
-  never measured, as in a session, so an `llm` `container` rule classifies as `instance` here too.
+  and the example passes when the start lines of its new findings are exactly `expect.new` and
+  those of its pre-existing ones exactly `expect.preexisting`, as sets. A status left out must have
+  no findings, so `expect: {}` means "no finding at all". It catches a rule that reports code the
+  edit did not touch as new: a regex that spans lines, an `ast-grep` rule that matches a whole
+  function, a `container` rule. To catch a match that is too wide, put the edit's unrelated line
+  inside the block that holds the old violation, next to it but not on it, as above.
+- **Some rules have no baseline example to give.** A `path` rule's file is the break or it is not.
+  An `llm` rule only reports lines the edit changed, so an untouched old violation is never
+  reported, as in a session; its baseline is never measured either, so an `llm` `container` rule
+  classifies as `instance`. A `hook` rule's finding about the whole file (line 1) is new after any
+  edit to the file.
   Baseline examples count towards neither precision nor recall.
 - A `path` rule has no `good` example to give: every file it matches is a violation by definition.
 - An `llm` rule's examples are only run when you name the rule — `rulecast test` on its own skips
@@ -352,8 +374,21 @@ back, so under a hook a fixable finding is delivered like any other.
   finding of a fixable rule in those files, pre-existing ones too, and then checks them as
   `rulecast run` would; `--dry-run` prints the diff and writes nothing. A fix after which the rule
   still matches the text it wrote is undone and reported as unresolved, so a second run changes
-  nothing. Findings with a `rulecast-ignore` are left alone. Fixes stay within one match in one
-  file: no fix spans files, and `llm` and tool rules have none.
+  nothing. The exception is a file still changing after 10 passes, such as `aa` → `a` on a long run
+  of `a`s: what the passes did is written, a warning says it is not finished, and the next run goes
+  on from there. Findings with a `rulecast-ignore` are left alone. An ignored match over several
+  lines protects every line of it, so a finding of the same rule nested inside it is not fixed
+  either. Fixes stay within one match in one file: no fix spans files, and `llm` and tool rules have
+  none.
+- **What it will not write:** a symlink (it is reported, not followed), a file with a symlinked
+  directory in its path, a file whose real path is outside the project, a file that is not UTF-8, and
+  a file that changed after it was read, checked again just before it is replaced. A file whose text
+  comes back to an earlier one while fixes are still pending after 10 passes (two rules undoing each
+  other) is left as it was, and so is a file where a fix would move a `rulecast-ignore` comment away
+  from the finding it is for; their findings are reported as unresolved. A file that cannot be
+  written is reported, and the others are still written. `--dry-run` leaves out the same files. A
+  file is replaced through a rename, so its mode is kept, but another hard link to it keeps the old
+  content.
 
 ### Messages
 

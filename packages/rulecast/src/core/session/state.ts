@@ -12,8 +12,6 @@ export type WorkRecord =
    * absent in stores written before it was recorded.
    */
   | { t: "edited"; file: string; via?: "shell"; agent?: string }
-  /** An agent's edit tool is about to write `file` (PreToolUse): a shell call running alongside did not write it. */
-  | { t: "claimed"; agent: string; file: string }
   | { t: "accessed"; agent: string; file: string }
   /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
   | { t: "stopBlock"; agent: string; findings?: string[] }
@@ -27,8 +25,11 @@ export type WorkRecord =
   | { t: "noticed"; key: string }
   /** The working tree at session start, before and after a shell call, and at a stop (session/tree.ts). */
   | { t: "tree"; phase: "start" | "before" | "after" | "stop"; agent: string; toolUseId?: string; state: TreeState }
-  /** Changed outside any of the agent's tool calls, found by comparing tree states: reported, never blocking. */
-  | { t: "swept"; file: string }
+  /**
+   * Changed outside any of the agent's tool calls, found by comparing tree states: reported, never
+   * blocking. `agent`: whose comparison found it; absent in stores written before it was recorded.
+   */
+  | { t: "swept"; file: string; agent?: string }
 
 export type ContextRecord =
   | { t: "reset" }
@@ -42,8 +43,6 @@ export interface WorkState {
   edited: string[]
   /** Who edited each file. */
   editors: Map<string, Set<string>>
-  /** The last write each file was claimed for by an agent's edit tool: by whom, and the record's position in the store. */
-  lastClaim: Map<string, { agent: string; seq: number }>
   stopBlocks: Map<string, number>
   /** How many stops each finding has blocked, by `blockedKey(agent, finding)`. Never reset: a prompt does not make a false positive true. */
   blockedFindings: Map<string, number>
@@ -62,16 +61,14 @@ export interface WorkState {
   editedVia: Map<string, "tool" | "shell">
   /** Unique, least recently swept first; a file the agent edits leaves it. */
   swept: string[]
+  /** The agents whose comparisons swept each file in `swept`. */
+  sweptBy: Map<string, Set<string>>
   /** Each agent's last recorded tree state, of any phase. The store is append-only, so record order is time order. */
   latestTree: Map<string, TreeState>
   /** The last tree state any agent recorded. */
   sessionLatestTree: TreeState | null
   /** The state recorded before each shell call, by its tool use id. */
   beforeTrees: Map<string, TreeState>
-  /** The store positions of latestTree, sessionLatestTree and beforeTrees, in the same keys. */
-  latestTreeSeq: Map<string, number>
-  sessionLatestTreeSeq: number | null
-  beforeTreeSeq: Map<string, number>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
 }
@@ -99,7 +96,6 @@ export function emptyWork(): WorkState {
   return {
     edited: [],
     editors: new Map(),
-    lastClaim: new Map(),
     stopBlocks: new Map(),
     blockedFindings: new Map(),
     stopReports: new Set(),
@@ -110,12 +106,10 @@ export function emptyWork(): WorkState {
     noticed: new Set(),
     editedVia: new Map(),
     swept: [],
+    sweptBy: new Map(),
     latestTree: new Map(),
     sessionLatestTree: null,
     beforeTrees: new Map(),
-    latestTreeSeq: new Map(),
-    sessionLatestTreeSeq: null,
-    beforeTreeSeq: new Map(),
     startTree: null,
   }
 }
@@ -126,33 +120,26 @@ export function emptyContext(): ContextState {
 
 export function foldWork(records: readonly WorkRecord[]): WorkState {
   const state = emptyWork()
-  // The store is append-only, so a record's position is its place in time.
-  for (const [seq, record] of records.entries()) {
+  for (const record of records) {
     switch (record.t) {
       case "edited": {
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
         state.editedVia.set(record.file, record.via ?? "tool")
         state.swept = state.swept.filter((file) => file !== record.file)
+        state.sweptBy.delete(record.file)
         const agent = record.agent ?? ANY_AGENT
         state.editors.set(record.file, new Set([...(state.editors.get(record.file) ?? []), agent]))
-        // A shell call's changes are not a claim: they are what a claim is compared against.
-        if (record.via === undefined) state.lastClaim.set(record.file, { agent, seq })
         break
       }
-      case "claimed":
-        state.lastClaim.set(record.file, { agent: record.agent, seq })
-        break
       case "swept":
         state.swept = [...state.swept.filter((file) => file !== record.file), record.file]
+        state.sweptBy.set(record.file, new Set([...(state.sweptBy.get(record.file) ?? []), record.agent ?? ANY_AGENT]))
         break
       case "tree":
         state.latestTree.set(record.agent, record.state)
-        state.latestTreeSeq.set(record.agent, seq)
         state.sessionLatestTree = record.state
-        state.sessionLatestTreeSeq = seq
         if (record.phase === "before" && record.toolUseId !== undefined) {
           state.beforeTrees.set(record.toolUseId, record.state)
-          state.beforeTreeSeq.set(record.toolUseId, seq)
         }
         // A resumed session records another start; what was dirty is what was dirty at the first.
         if (record.phase === "start" && state.startTree === null) state.startTree = record.state
@@ -206,20 +193,18 @@ export function referenceState(work: WorkState, agent: string, toolUseId?: strin
   return before ?? work.latestTree.get(agent) ?? work.sessionLatestTree
 }
 
-/** The store position of the state referenceState returns, by the same fallbacks; null when there is none. */
-export function referenceSeq(work: WorkState, agent: string, toolUseId?: string): number | null {
-  const before = toolUseId === undefined ? undefined : work.beforeTreeSeq.get(toolUseId)
-  return before ?? work.latestTreeSeq.get(agent) ?? work.sessionLatestTreeSeq
+/** The swept files an agent's stop reports: those its own comparisons found, and every one for the main agent. */
+export function sweptFor(work: WorkState, agent: string): string[] {
+  if (agent === MAIN_AGENT) return work.swept
+  return work.swept.filter((file) => {
+    const by = work.sweptBy.get(file)
+    return by?.has(agent) === true || by?.has(ANY_AGENT) === true
+  })
 }
 
-/**
- * Whether another agent's edit tool claimed `file` after the state at store position `since`: a
- * change to it measured from that state is that agent's write, not this one's. A claim is recorded
- * before the tool writes (PreToolUse), so it never arrives after the write it announces.
- */
-export function claimedByOther(work: WorkState, agent: string, file: string, since: number | null): boolean {
-  const claim = work.lastClaim.get(file)
-  return claim !== undefined && claim.agent !== agent && claim.agent !== ANY_AGENT && claim.seq > (since ?? -1)
+/** Whether `agent` has a tree state of its own to compare with: the main agent always counts as having one. */
+export function hasOwnTree(work: WorkState, agent: string): boolean {
+  return agent === MAIN_AGENT || work.latestTree.has(agent)
 }
 
 /**
