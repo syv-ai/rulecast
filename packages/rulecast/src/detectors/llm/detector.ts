@@ -144,6 +144,8 @@ export const llmDetector: Detector<LlmConfig> = {
   kind: "llm",
   schema: llmSchema,
   captures: () => ["reason"],
+  // The model words its reason afresh on every call; a finding's id must not change with it.
+  volatileCaptures: ["reason"],
   // verify only by default (spec §6): a model call is far too slow for an edit hook. A rule opts
   // in with `stages: [edit, verify]`.
   events: () => ["verify"],

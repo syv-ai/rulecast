@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest"
 import { snapshotOf } from "../../../src/core/baseline/hash"
 import {
   appendBaseline,
-  fingerprintRecord,
+  containerRecord,
   readBaseline,
   snapshotRecord,
   startRecord,
@@ -17,7 +17,7 @@ describe("baseline store", () => {
       started: false,
       startCommit: null,
       snapshots: new Map(),
-      fingerprints: new Map(),
+      containers: new Map(),
     })
   })
 
@@ -35,31 +35,31 @@ describe("baseline store", () => {
     expect([...snapshot.lines]).toEqual([...first.lines])
   })
 
-  test("round-trips fingerprints, first writer wins per file and rule", async () => {
+  test("round-trips containers, first writer wins per file and rule", async () => {
     const dir = await createProject({})
     await appendBaseline(dir, [
-      fingerprintRecord("src/routes.py", "slim-routes", [
+      containerRecord("src/routes.py", "slim-routes", [
         [10, 40],
         [60, 95],
       ]),
-      fingerprintRecord("src/routes.py", "docstrings", []),
+      containerRecord("src/routes.py", "docstrings", []),
     ])
-    await appendBaseline(dir, [fingerprintRecord("src/routes.py", "slim-routes", [[1, 2]])])
+    await appendBaseline(dir, [containerRecord("src/routes.py", "slim-routes", [[1, 2]])])
     const state = await readBaseline(dir)
-    expect(state.fingerprints.get("src/routes.py")!.get("slim-routes")).toEqual([
+    expect(state.containers.get("src/routes.py")!.get("slim-routes")).toEqual([
       [10, 40],
       [60, 95],
     ])
     // Measured and clean is not the same as never measured: an empty record is a record.
-    expect(state.fingerprints.get("src/routes.py")!.get("docstrings")).toEqual([])
-    expect(state.fingerprints.get("src/routes.py")!.has("lifecycle")).toBe(false)
+    expect(state.containers.get("src/routes.py")!.get("docstrings")).toEqual([])
+    expect(state.containers.get("src/routes.py")!.has("lifecycle")).toBe(false)
   })
 
-  test("a store written before fingerprints existed still reads", async () => {
+  test("a store written before containers existed still reads", async () => {
     const dir = await createProject({})
     await appendBaseline(dir, [startRecord("abc123"), snapshotRecord("src/a.ts", snapshotOf("a\n"))])
     const state = await readBaseline(dir)
-    expect(state.fingerprints).toEqual(new Map())
+    expect(state.containers).toEqual(new Map())
     expect(state.snapshots.has("src/a.ts")).toBe(true)
   })
 

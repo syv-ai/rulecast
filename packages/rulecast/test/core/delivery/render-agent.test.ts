@@ -6,9 +6,11 @@ import { emptyDelivery, type Finding } from "../../../src/core/types"
 const finding = (overrides: Partial<Finding>): Finding => ({
   rule: "api/no-client",
   severity: "error",
+  id: "id",
   status: "new",
   file: "src/Card.tsx",
   line: 3,
+  endLine: 3,
   column: 1,
   message: "src/Card.tsx:3 imports the client.\nUse a query hook.",
   count: 1,

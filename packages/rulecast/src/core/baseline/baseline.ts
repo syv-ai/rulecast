@@ -24,7 +24,7 @@ export interface BaselineChanges {
   /**
    * Baseline content, for the files whose baseline was read from a commit rather than a snapshot.
    *
-   * Kept because a verify can afford to measure a `container` rule's fingerprints on demand and
+   * Kept because a verify can afford to measure a `container` rule's ranges on demand and
    * this is the content to measure them against — read once here rather than fetched from git
    * again. Files with a snapshot are absent: a snapshot is line hashes, and the content it was
    * taken from is gone.

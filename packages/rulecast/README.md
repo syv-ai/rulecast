@@ -111,6 +111,19 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 
 `rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.
 
+### Exit codes
+
+`rulecast run` and `rulecast try-repo` exit with:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed) |
+| `1` | Every rule ran; at least one new error-severity finding |
+| `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
+| `3` | Incomplete: a rule failed to compile, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
+
+On `2` nothing is printed to stdout. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md).
+
 ## Git hooks and CI
 
 The same rule reports the same line the same way in an agent hook, a git hook and CI. What counts as new is a match on a line you changed; a violation that was already there is backlog, shown and never failing.
@@ -166,7 +179,7 @@ jobs:
       - run: npm ci
       - run: npx rulecast run --from-ref origin/${{ github.base_ref }} --format sarif > rulecast.sarif
       - uses: github/codeql-action/upload-sarif@v3
-        if: always() # rulecast exits 1 on findings, which is when the upload matters
+        if: always() # rulecast exits 1 on findings and 3 when a rule could not run, which is when the upload matters
         with:
           sarif_file: rulecast.sarif
 ```

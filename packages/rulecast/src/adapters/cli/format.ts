@@ -1,6 +1,9 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
-import type { Delivery, Finding } from "../../core/types"
+import { FINDING_ID_VERSION } from "../../core/finding-id"
+import type { Delivery, Finding, Severity } from "../../core/types"
+import { VERSION } from "../../core/version"
 import { renderBacklog, summarise } from "./backlog"
+import { EXIT, SCHEMA_VERSION } from "./contract"
 
 export const CLI_FORMATS = ["terminal", "agent", "json", "sarif"] as const
 export type CliFormat = (typeof CLI_FORMATS)[number]
@@ -14,9 +17,25 @@ export interface FormatOptions {
   /** What was checked, so that "no findings" can never mean "nothing was looked at". Absent: not said. */
   checked?: { files: number; selection: "staged" | "files" | "all" | "range" | "session" }
   /** Findings a `rulecast-ignore` comment dropped: counted under the backlog, listed in json. */
-  ignored?: { rule: string; file: string; line: number; reason: string }[]
+  ignored?: { id?: string; rule: string; file: string; line: number; reason: string }[]
   /** Rules left out because their detector is metered (a staged run, or --no-llm) and they matched a checked file. */
   skipped?: string[]
+  /** False when some rules did not run (exit 3): json's `complete`, SARIF's `executionSuccessful`. Absent: true. */
+  complete?: boolean
+  /** SARIF's `tool.driver.rules`, for the rules with findings. Absent: ids only. */
+  rules?: RuleMetadata[]
+}
+
+/** What SARIF says about a rule: built by `run` from the compiled rules and their cited sections. */
+export interface RuleMetadata {
+  id: string
+  name: string
+  description: string | null
+  severity: Severity
+  /** Where the rule comes from: "local", or the rule repo. */
+  source: string
+  /** The rule's `context` refs, in order, with each section's text; null when it does not resolve. */
+  context: { ref: string; content: string | null }[]
 }
 
 /** The ignores are part of the stock a team owes, so the backlog says how many there are. */
@@ -144,7 +163,11 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
 function json(delivery: Delivery, options: FormatOptions): string {
   return JSON.stringify(
     {
+      schemaVersion: SCHEMA_VERSION,
+      complete: options.complete !== false,
       findings: delivery.findings,
+      // In full, by id, when the run asked for them (PipelineOptions.listPreexisting).
+      preexisting: delivery.preexisting ?? [],
       // Always, whatever flags were given: a consumer that did not ask for it can ignore a key, and
       // one that wanted it cannot conjure it. This is the number a team tracks over time.
       backlog: summarise(delivery),
@@ -163,24 +186,80 @@ function json(delivery: Delivery, options: FormatOptions): string {
   )
 }
 
-function sarif(delivery: Delivery): string {
-  const rules = [...new Set(delivery.findings.map((finding) => finding.rule))].map((id) => ({ id }))
+/** Where the docs say what the output means; SARIF viewers link the tool's name to it. */
+const INFORMATION_URI = "https://syv-ai.github.io/rulecast/"
+
+/** The key a finding's id is published under in `partialFingerprints`, versioned like the id itself. */
+const FINGERPRINT_KEY = `rulecastFindingId/v${FINDING_ID_VERSION}`
+
+/** A rule's cited sections as SARIF help: each one's text under its ref, or where to read them. */
+function sarifHelp(context: RuleMetadata["context"]): { text: string; markdown: string } | undefined {
+  if (context.length === 0) return undefined
+  const resolved = context.filter((entry): entry is { ref: string; content: string } => entry.content !== null)
+  if (resolved.length === 0) {
+    const text = `See ${context.map((entry) => entry.ref).join(", ")}`
+    return { text, markdown: text }
+  }
+  return {
+    text: resolved.map((entry) => `${entry.ref}\n\n${entry.content}`).join("\n\n"),
+    markdown: resolved.map((entry) => `**${entry.ref}**\n\n${entry.content}`).join("\n\n"),
+  }
+}
+
+function sarifRule(id: string, metadata: RuleMetadata | undefined) {
+  if (metadata === undefined) return { id }
+  const help = sarifHelp(metadata.context)
+  return {
+    id,
+    name: metadata.name,
+    shortDescription: { text: metadata.name },
+    ...(metadata.description === null ? {} : { fullDescription: { text: metadata.description } }),
+    ...(help === undefined ? {} : { help }),
+    defaultConfiguration: { level: metadata.severity },
+    properties: { context: metadata.context.map((entry) => entry.ref), source: metadata.source },
+  }
+}
+
+/**
+ * SARIF 2.1.0, for code scanning. Pre-existing findings are results too, with `baselineState`
+ * "unchanged": left out, GitHub would read every one of them as fixed. A finding's id is its
+ * `partialFingerprints` entry, so an upload matches the same finding across runs.
+ */
+function sarif(delivery: Delivery, options: FormatOptions): string {
+  const findings = [
+    ...delivery.findings.map((finding) => ({ finding, baselineState: "new" })),
+    ...(delivery.preexisting ?? []).map((finding) => ({ finding, baselineState: "unchanged" })),
+  ]
+  const ids = [...new Set(findings.map(({ finding }) => finding.rule))]
+  const metadata = new Map((options.rules ?? []).map((rule) => [rule.id, rule]))
+  const rules = ids.map((id) => sarifRule(id, metadata.get(id)))
+  const indexOf = new Map(ids.map((id, index) => [id, index]))
   return JSON.stringify(
     {
       $schema: "https://json.schemastore.org/sarif-2.1.0.json",
       version: "2.1.0",
       runs: [
         {
-          tool: { driver: { name: "rulecast", rules } },
-          results: delivery.findings.map((finding) => ({
+          tool: { driver: { name: "rulecast", version: VERSION, informationUri: INFORMATION_URI, rules } },
+          invocations: [
+            {
+              executionSuccessful: options.complete !== false,
+              toolExecutionNotifications: delivery.warnings.map((text) => ({ level: "warning", message: { text } })),
+            },
+          ],
+          results: findings.map(({ finding, baselineState }) => ({
             ruleId: finding.rule,
+            ruleIndex: indexOf.get(finding.rule),
             level: finding.severity,
             message: { text: finding.message },
+            baselineState,
+            partialFingerprints: { [FINGERPRINT_KEY]: finding.id },
+            ...(finding.count > 1 ? { occurrenceCount: finding.count } : {}),
             locations: [
               {
                 physicalLocation: {
                   artifactLocation: { uri: finding.file },
-                  region: { startLine: finding.line, startColumn: finding.column },
+                  region: { startLine: finding.line, startColumn: finding.column, endLine: finding.endLine },
                 },
               },
             ],
@@ -202,11 +281,15 @@ export function formatDelivery(delivery: Delivery, format: CliFormat, options: F
     case "json":
       return json(delivery, options)
     case "sarif":
-      return sarif(delivery)
+      return sarif(delivery, options)
   }
 }
 
-export function exitCodeFor(delivery: Delivery, failed: boolean): number {
-  if (failed) return 2
-  return delivery.findings.some((finding) => finding.severity === "error") ? 1 : 0
+/**
+ * `run`'s exit code (adapters/cli/contract.ts). An incomplete run is 3 even with error findings: a
+ * 1 promises every rule ran, and a loop that trusts it would stop checking what never ran.
+ */
+export function exitCodeFor(delivery: Delivery, complete: boolean): number {
+  if (!complete) return EXIT.incomplete
+  return delivery.findings.some((finding) => finding.severity === "error") ? EXIT.violations : EXIT.clean
 }

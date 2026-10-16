@@ -6,6 +6,7 @@ import { readSourceFile } from "./detection/per-rule"
 import { isInserted, propose } from "./detection/proposal"
 import { runDetection } from "./detection/run"
 import { selectDetectorRules } from "./detection/select"
+import { findingIds } from "./finding-id"
 import { assemble, trim } from "./session/decide"
 import { type ContextRecord, refusalKey, type WorkRecord, type WorkState } from "./session/state"
 import { type Delivery, type Event, emptyDelivery } from "./types"
@@ -79,9 +80,10 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   })
 
   const wholeFile = (kind: string) => input.detection.registry.get(kind)?.wholeFile === true
-  const evidence = output.findings.filter(({ rule, match }) =>
-    isInserted(proposal, match, wholeFile(rule.detector.kind)),
-  )
+  const ids = findingIds(output.findings, (kind) => input.detection.registry.get(kind)?.volatileCaptures ?? [])
+  const evidence = output.findings
+    .map((finding, index) => ({ ...finding, id: ids[index]! }))
+    .filter(({ rule, match }) => isInserted(proposal, match, wholeFile(rule.detector.kind)))
   if (evidence.length === 0) return emptyDelivery()
 
   // The refuse gate, like the stop gate: a rule that has had its say about a file lets the next
@@ -101,7 +103,7 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
   // result — so the sections it carried are recorded as delivered, and the next delivery points
   // back to them instead of sending them again.
   const assembled = await assemble({
-    findings: refusing.map(({ rule, match }) => ({ rule, match, status: "new" as const })),
+    findings: refusing.map(({ id, rule, match }) => ({ id, rule, match, status: "new" as const })),
     resolver: input.resolver,
     maxBytes: input.config.context.maxBytes,
   })

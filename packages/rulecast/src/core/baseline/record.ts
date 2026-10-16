@@ -4,9 +4,9 @@ import type { DetectionContext } from "../detection/context"
 import { runDetection } from "../detection/run"
 import { selectDetectorRules } from "../detection/select"
 import type { DetectorEvent } from "../types"
-import { type BaselineRecord, fingerprintRecord } from "./store"
+import { type BaselineRecord, containerRecord } from "./store"
 
-export interface FingerprintInput {
+export interface ContainerInput {
   /** The project's detection context (detection/context.ts). */
   detection: DetectionContext
   /** The files to measure. `read` must serve each one's *baseline* content, not what is on disk now. */
@@ -36,7 +36,7 @@ export interface FingerprintInput {
  * that errored, timed out or was skipped by the size ceiling emits nothing, so classification
  * falls back to `instance` rather than pretending the file was clean.
  *
- * Rules of a `metered` detector — `llm` today — are never measured. A fingerprint run is a second
+ * Rules of a `metered` detector — `llm` today — are never measured. A container measurement is a second
  * evaluation of the rule, and for a metered detector that is a billed call as a side effect of the
  * agent opening a file, which §6's consent rule does not allow. Such a container rule classifies
  * as `instance`.
@@ -44,7 +44,7 @@ export interface FingerprintInput {
  * Never throws: a baseline that cannot be measured is a baseline that is missing, and the caller
  * already handles that.
  */
-export async function recordFingerprints(input: FingerprintInput): Promise<BaselineRecord[]> {
+export async function recordContainers(input: ContainerInput): Promise<BaselineRecord[]> {
   // The overwhelmingly common case. Cost is one array scan, not a detector run.
   if (!input.rules.some((rule) => rule.scope === "container")) return []
 
@@ -88,7 +88,7 @@ export async function recordFingerprints(input: FingerprintInput): Promise<Basel
   const records: BaselineRecord[] = []
   for (const { rule, files } of selections) {
     if (unmeasured.has(rule.id)) continue
-    for (const file of files) records.push(fingerprintRecord(file, rule.id, ranges.get(key(file, rule.id)) ?? []))
+    for (const file of files) records.push(containerRecord(file, rule.id, ranges.get(key(file, rule.id)) ?? []))
   }
   return records
 }

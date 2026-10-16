@@ -38,12 +38,12 @@ One JSON per case.
   "baseline": "file content at the baseline, or null for no baseline at all",
   "current": "file content now",
   "scope": "instance | container",
-  "fingerprints": [[1, 5]],
+  "containerRanges": [[1, 5]],
   "match": [1, 6],
   "expected": "new | preexisting"
 }
 ```
 
-`fingerprints` is the container rule's recorded baseline ranges: `[]` means measured and clean, `null` means no record was ever written. `classify` cannot tell *why* a record is missing — no snapshot, past the deadline, over `max_file_bytes`, or a metered detector — so one `null` case stands for all four. The baseline is supplied as a snapshot, so nothing here needs git.
+`containerRanges` is the container rule's recorded baseline ranges: `[]` means measured and clean, `null` means no record was ever written. `classify` cannot tell *why* a record is missing — no snapshot, past the deadline, over `max_file_bytes`, or a metered detector — so one `null` case stands for all four. The baseline is supplied as a snapshot, so nothing here needs git.
 
 `container-boundary-first-line` and `container-boundary-last-line` were added after an off-by-one in `classify`'s overlap test (`<=` to `<` on either end) went uncaught by every other case — and by all 74 tests in `test/core/baseline`, `test/core/pipeline-container.test.ts` and `test/commands/run.test.ts`. Keep them.

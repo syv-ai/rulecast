@@ -5,7 +5,7 @@ import { isNew } from "./baseline"
 import type { LineMap } from "./changes"
 
 /** Where a `container` rule's baseline matches are recorded: file → rule → ranges. */
-export type Fingerprints = ReadonlyMap<string, ReadonlyMap<string, [number, number][]>>
+export type ContainerRanges = ReadonlyMap<string, ReadonlyMap<string, [number, number][]>>
 
 /**
  * Where a baseline range sits in the current file, or null when none of it survived.
@@ -36,7 +36,7 @@ export function mapRange(map: LineMap, [start, end]: [number, number]): [number,
  * than to the token inside it. An edit that adds one `if` to an already-long route does not make
  * the route newly non-slim; an edit that pushes a compliant route over does.
  *
- * Without a fingerprint record, `container` falls back to `instance`. That is the safe direction:
+ * Without a container record, `container` falls back to `instance`. That is the safe direction:
  * instance over-reports where the container comparison under-reports, and it is what a missing
  * baseline has always meant.
  */
@@ -45,11 +45,11 @@ export function classify(
   scope: RuleScope,
   rule: string,
   changes: BaselineChanges,
-  fingerprints: Fingerprints,
+  containers: ContainerRanges,
 ): "new" | "preexisting" {
   const instance = () => (isNew(match, changes.sets) ? "new" : "preexisting")
   if (scope === "instance") return instance()
-  const recorded = fingerprints.get(match.file)?.get(rule)
+  const recorded = containers.get(match.file)?.get(rule)
   const map = changes.maps.get(match.file)
   if (recorded === undefined || map === undefined) return instance()
   for (const range of recorded) {

@@ -9,9 +9,11 @@ const event = (kind: EventKind): Event => ({ kind, files: [], cwd: "/project", s
 const finding = (overrides: Partial<Finding> = {}): Finding => ({
   rule: "backend/no-httpexception",
   severity: "error",
+  id: "id",
   status: "new",
   file: "app/services/users.py",
   line: 3,
+  endLine: 3,
   column: 5,
   message: "app/services/users.py:3 raises HTTPException(500). Raise a domain exception.",
   count: 1,

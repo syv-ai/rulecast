@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { snapshotOf } from "../../../src/core/baseline/hash"
 import { type BaselineInput, changesFor, touchRecords } from "../../../src/core/baseline/stage"
-import { type BaselineState, fingerprintRecord, mergeFingerprints } from "../../../src/core/baseline/store"
+import { type BaselineState, containerRecord, mergeContainers } from "../../../src/core/baseline/store"
 import { memoryCache } from "../../../src/core/detection/cache"
 import { createRegistry } from "../../../src/core/detection/registry"
 import { headCommit } from "../../../src/core/git"
@@ -48,19 +48,19 @@ const emptyState = (): BaselineState => ({
   started: true,
   startCommit: null,
   snapshots: new Map(),
-  fingerprints: new Map(),
+  containers: new Map(),
 })
 
 describe("touchRecords", () => {
-  test("every snapshot comes before any fingerprint, because they are appended in one write", async () => {
+  test("every snapshot comes before any container record, because they are appended in one write", async () => {
     const root = await createProject({ "a.py": "x = 1  # TODO\n", "b.py": "y = 2\n" })
     const records = await touchRecords(input(root), emptyState(), ["a.py", "b.py"])
     const kinds = records.map((record) => record.t)
-    expect(kinds).toEqual(["snapshot", "snapshot", "fingerprint", "fingerprint"])
+    expect(kinds).toEqual(["snapshot", "snapshot", "container", "container"])
     // An empty record is a measurement too: b.py was clean, so a later match there is new.
-    expect(records.filter((record) => record.t === "fingerprint")).toEqual([
-      fingerprintRecord("a.py", "no-todo", [[1, 1]]),
-      fingerprintRecord("b.py", "no-todo", []),
+    expect(records.filter((record) => record.t === "container")).toEqual([
+      containerRecord("a.py", "no-todo", [[1, 1]]),
+      containerRecord("b.py", "no-todo", []),
     ])
   })
 
@@ -82,15 +82,15 @@ describe("changesFor", () => {
     const root = await createProject({ "a.py": "x = 1\ny = 2\n" })
     const state = emptyState()
     state.snapshots.set("a.py", snapshotOf("x = 1\n"))
-    state.fingerprints.set("a.py", new Map([["no-todo", []]]))
+    state.containers.set("a.py", new Map([["no-todo", []]]))
 
     const result = await changesFor(input(root), { kind: "edit" }, state, ["a.py"])
     expect(result.records).toEqual([])
     expect(result.changes.sets.get("a.py")?.changedLines).toEqual([[2, 2]])
-    expect(result.fingerprints.get("a.py")?.get("no-todo")).toEqual([])
+    expect(result.containers.get("a.py")?.get("no-todo")).toEqual([])
   })
 
-  test("a verify measures a commit baseline's missing fingerprints into a copy, not into the state it was handed", async () => {
+  test("a verify measures a commit baseline's missing containers into a copy, not into the state it was handed", async () => {
     // The pipeline used to merge straight into the session's BaselineState. The stage hands back a
     // merged copy, so a caller holding the state sees exactly what it read.
     const root = await createRepo({ "a.py": "x = 1  # TODO\n" })
@@ -100,8 +100,8 @@ describe("changesFor", () => {
 
     // A verify fills in verify-stage rules; the shared fixture rule is edit-only.
     const result = await changesFor({ ...input(root), rules: [onVerify] }, { kind: "verify" }, state, ["a.py"])
-    expect(result.records).toEqual([fingerprintRecord("a.py", "no-todo", [[1, 1]])])
-    expect(result.fingerprints.get("a.py")?.get("no-todo")).toEqual([[1, 1]])
+    expect(result.records).toEqual([containerRecord("a.py", "no-todo", [[1, 1]])])
+    expect(result.containers.get("a.py")?.get("no-todo")).toEqual([[1, 1]])
     expect(state).toEqual(before)
   })
 
@@ -122,12 +122,12 @@ describe("changesFor", () => {
   })
 })
 
-describe("mergeFingerprints", () => {
+describe("mergeContainers", () => {
   test("the first record for a file and rule wins, as the store's lock-free appends require", () => {
-    const merged = mergeFingerprints(new Map(), [
-      fingerprintRecord("a.py", "r", [[1, 2]]),
-      fingerprintRecord("a.py", "r", [[5, 9]]),
-      fingerprintRecord("a.py", "other", []),
+    const merged = mergeContainers(new Map(), [
+      containerRecord("a.py", "r", [[1, 2]]),
+      containerRecord("a.py", "r", [[5, 9]]),
+      containerRecord("a.py", "other", []),
     ])
     expect(merged.get("a.py")?.get("r")).toEqual([[1, 2]])
     // Present and empty is a measurement — "clean" — and must not read as absent.
@@ -136,8 +136,8 @@ describe("mergeFingerprints", () => {
   })
 
   test("leaves what was already there alone", () => {
-    const into: BaselineState["fingerprints"] = new Map([["a.py", new Map([["r", [[1, 1]]]])]])
-    mergeFingerprints(into, [fingerprintRecord("a.py", "r", [[7, 7]])])
+    const into: BaselineState["containers"] = new Map([["a.py", new Map([["r", [[1, 1]]]])]])
+    mergeContainers(into, [containerRecord("a.py", "r", [[7, 7]])])
     expect(into.get("a.py")?.get("r")).toEqual([[1, 1]])
   })
 })

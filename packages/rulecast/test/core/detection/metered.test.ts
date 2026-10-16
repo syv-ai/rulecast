@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { z } from "zod"
 
-import { recordFingerprints } from "../../../src/core/baseline/record"
+import { recordContainers } from "../../../src/core/baseline/record"
 import { memoryCache } from "../../../src/core/detection/cache"
 import { createRegistry } from "../../../src/core/detection/registry"
 import { type Detector, defaultDetectorSettings } from "../../../src/core/types"
@@ -80,9 +80,9 @@ describe("a metered detector, by declaration", () => {
     expect(result.failed).toBe(false)
   })
 
-  test("a container rule of a metered kind is never fingerprinted, so opening a file costs nothing", async () => {
+  test("a container rule of a metered kind is never measured, so opening a file costs nothing", async () => {
     const paid = paidDetector()
-    const records = await recordFingerprints({
+    const records = await recordContainers({
       detection: {
         root: "/project",
         registry: createRegistry([...builtinDetectors, paid]),
@@ -111,9 +111,9 @@ describe("a metered detector, by declaration", () => {
     expect(paid.calls).toBe(0)
   })
 
-  test("the same container rule without the declaration is fingerprinted — the test above is not vacuous", async () => {
+  test("the same container rule without the declaration is measured — the test above is not vacuous", async () => {
     const free = { ...paidDetector(), metered: false }
-    const records = await recordFingerprints({
+    const records = await recordContainers({
       detection: {
         root: "/project",
         registry: createRegistry([...builtinDetectors, free]),
@@ -138,6 +138,6 @@ describe("a metered detector, by declaration", () => {
       timeoutMs: 1_000,
       source: "disk",
     })
-    expect(records).toEqual([{ t: "fingerprint", file: "app/a.py", rule: "paid/container", ranges: [[1, 1]] }])
+    expect(records).toEqual([{ t: "container", file: "app/a.py", rule: "paid/container", ranges: [[1, 1]] }])
   })
 })

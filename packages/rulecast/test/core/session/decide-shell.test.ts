@@ -11,6 +11,7 @@ const at = (file: string, line: number): Match => ({ file, line, endLine: line, 
 const finding = (file: string, line = 1, severity: "error" | "warning" = "error", id = "a/rule") => ({
   rule: rule({ id, severity }),
   match: at(file, line),
+  id: "id",
   status: "new" as const,
 })
 
@@ -33,6 +34,7 @@ describe("gate: refuse_write under the shell", () => {
   const protectedFinding = (file: string) => ({
     rule: rule({ id: "client/generated", severity: "warning", refuseWrite: true }),
     match: at(file, 1),
+    id: "id",
     status: "new" as const,
   })
   const workWith = (via: "tool" | "shell") => ({ ...emptyWork(), editedVia: new Map([["api.ts", via]]) })
@@ -109,6 +111,7 @@ describe("decide at a stop with swept files", () => {
     const long = (file: string, id: string) => ({
       rule: rule({ id, message: `{{file}}:{{line}} ${"explains the convention at length. ".repeat(12)}` }),
       match: at(file, 1),
+      id: "id",
       status: "new" as const,
     })
     // Swept findings first in input order: the floor must still keep the blocking rule.

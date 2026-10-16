@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { NOTHING_STAGED } from "../../src/adapters/cli/format"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
-import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
+import { backendConventions, createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
@@ -268,6 +268,121 @@ describe("rulecast run: rules and errors", () => {
   })
 })
 
+describe("rulecast run: the output contract", () => {
+  const regexRule = fixtureRules[0]!
+  /** A command rule whose tool always fails with exit 2, which the rule declares an error. */
+  const brokenTool = {
+    id: "scripts/broken",
+    name: "Broken tool",
+    files: "^app/.*\\.py$",
+    detect: { command: { run: ["node", "-e", "process.exit(2)"], output: "json", exit_codes: { error: [2] } } },
+    message: "{{file}}:{{line}} never fires.",
+  }
+  const json = (stdout: string) => JSON.parse(stdout)
+
+  test("a finding keeps its id after unrelated lines are inserted above it", async () => {
+    const root = await createFixture()
+    const before = json((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(before.schemaVersion).toBe(1)
+    const [finding] = before.findings.filter((entry: { rule: string }) => entry.rule === regexRule.id)
+    expect(finding).toMatchObject({ id: expect.stringMatching(/^[0-9a-f]{16}$/), line: 2, endLine: 2 })
+
+    await writeFile(path.join(root, USERS), `import os\n\n\n${fixtureFiles[USERS]}`)
+    const after = json((await run(root, "--all-files", "--format", "json")).stdout)
+    const [moved] = after.findings.filter((entry: { rule: string }) => entry.rule === regexRule.id)
+    expect(moved.line).toBe(5)
+    expect(moved.id).toBe(finding.id)
+  })
+
+  test("a detector that fails is exit 3, and the findings of the rules that ran are still reported", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([regexRule, brokenTool]),
+      [USERS]: fixtureFiles[USERS]!,
+      "conventions/backend.md": backendConventions,
+    })
+    const result = await run(root, "--all-files", "--format", "json")
+    expect(result.code).toBe(3)
+    const parsed = json(result.stdout)
+    expect(parsed.complete).toBe(false)
+    expect(parsed.findings.map((finding: { rule: string }) => finding.rule)).toEqual([regexRule.id])
+    expect(parsed.warnings.join("\n")).toContain("scripts/broken")
+  })
+
+  test("a verify timeout is exit 3", async () => {
+    const slow = {
+      ...brokenTool,
+      id: "scripts/slow",
+      detect: { command: { run: ["node", "-e", "setTimeout(() => {}, 5000)"], output: "json" } },
+    }
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([regexRule, slow], { timeouts: { verify_ms: 300 } }),
+      [USERS]: fixtureFiles[USERS]!,
+      "conventions/backend.md": backendConventions,
+    })
+    const result = await run(root, "--all-files", "--format", "json")
+    expect(result.code).toBe(3)
+    expect(json(result.stdout)).toMatchObject({ complete: false, findings: [{ rule: regexRule.id }] })
+  })
+
+  test("one rule that fails to compile is exit 3 beside a rule that fires, not a hidden 2", async () => {
+    const bad = { ...regexRule, id: "backend/bad", detect: { regex: { pattern: "(" } } }
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([regexRule, bad]),
+      [USERS]: fixtureFiles[USERS]!,
+      "conventions/backend.md": backendConventions,
+    })
+    const result = await run(root, "--all-files")
+    expect(result.code).toBe(3)
+    expect(result.stdout).toContain(`${USERS}:2:5  error    ${regexRule.id}`)
+    expect(result.stdout).toContain("backend/bad")
+  })
+
+  test.each([
+    ["an unparseable config", "repos: ["],
+    ["a config newer than rulecast", localConfig([regexRule], { minimum_rulecast_version: "99.0.0" })],
+  ])("%s is exit 2, with nothing on stdout", async (_, config) => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": config,
+      [USERS]: fixtureFiles[USERS]!,
+      "conventions/backend.md": backendConventions,
+    })
+    for (const format of ["terminal", "json", "sarif"]) {
+      const result = await run(root, "--all-files", "--format", format)
+      expect(result).toMatchObject({ code: 2, stdout: "" })
+      expect(result.stderr).toContain(".rulecast-config.yaml")
+      expect(result.stderr).toContain("rulecast validate")
+    }
+  })
+
+  test("sarif reports a pre-existing finding as unchanged, with the id json gives it", async () => {
+    const root = await createFixture()
+    await git(root, "checkout", "-q", "-b", "feature")
+    await writeFile(path.join(root, USERS), VIOLATION)
+    const result = await run(root, "--from-ref", "main", "--format", "sarif")
+    expect(result.code).toBe(1)
+    const sarifRun = JSON.parse(result.stdout).runs[0]
+    const states = sarifRun.results.map(
+      (entry: { baselineState: string; locations: { physicalLocation: { region: { startLine: number } } }[] }) => [
+        entry.locations[0]!.physicalLocation.region.startLine,
+        entry.baselineState,
+      ],
+    )
+    expect(states).toEqual([
+      [3, "new"],
+      [2, "unchanged"],
+    ])
+    expect(sarifRun.tool.driver.rules[0]).toMatchObject({
+      id: regexRule.id,
+      help: { markdown: expect.stringContaining("Services raise domain exceptions.") },
+    })
+    expect(sarifRun.invocations[0].executionSuccessful).toBe(true)
+
+    const parsed = json((await run(root, "--from-ref", "main", "--format", "json")).stdout)
+    expect(parsed.preexisting).toMatchObject([{ status: "preexisting", line: 2 }])
+    expect(sarifRun.results[1].partialFingerprints["rulecastFindingId/v1"]).toBe(parsed.preexisting[0].id)
+  })
+})
+
 describe("rulecast run: turning findings and rules off", () => {
   test("a rulecast-ignore drops the finding, and the backlog counts it", async () => {
     const root = await createFixture()
@@ -280,7 +395,13 @@ describe("rulecast run: turning findings and rules off", () => {
     expect(result.stdout).toContain("ignored: 1 finding by rulecast-ignore comments")
     const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
     expect(json.ignored).toEqual([
-      { rule: "backend/no-httpexception", file: USERS, line: 3, reason: "legacy endpoint" },
+      {
+        id: expect.stringMatching(/^[0-9a-f]{16}$/),
+        rule: "backend/no-httpexception",
+        file: USERS,
+        line: 3,
+        reason: "legacy endpoint",
+      },
     ])
   })
 
