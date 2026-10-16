@@ -125,7 +125,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | Key | Meaning |
 |---|---|
 | `dryRun` | Whether `--dry-run` was given. |
-| `fixed` | `id`, `rule`, `file`, `line` of each finding a fix was applied to. The id and line are the finding's before the fix. |
+| `fixed` | `id`, `rule`, `file`, `line` of each finding a fix was applied to. The id is the one `run` reports on the files as they were, even for a finding fixed in a later pass after another rule's fix changed its line; the line is where it was when its fix was applied. |
 | `changedFiles` | The files the fixes changed (or would change). |
 | `unresolved` | Findings whose fix left the rule matching the text it wrote: the fix was undone. Same shape as `fixed`. |
 | `diff` | With `--dry-run` only: a unified diff of every change. |
@@ -138,16 +138,20 @@ A loop needs to tell "the same finding as last run" from a new one, across runs,
 
 - the rule id (the alias, when one is set),
 - the file path,
-- the matched text, with runs of whitespace collapsed to one space and the ends trimmed,
+- the source line or lines the match spans, with runs of whitespace collapsed to one space and the ends trimmed, and with a trailing `rulecast-ignore` comment left out, together with the punctuation that opens it in whatever syntax (`#`, `//`, `/*`, `/**`, `{/*`, `<!--`, `--`, `;`),
 - the detector's captures, sorted by name (a tool rule's `ruleId` and `message`, a regex's named groups), except captures whose value changes from run to run: an `llm` rule's `reason`,
-- the match's position among identical matches in the file (0 for the first, 1 for the second, …).
+- the finding's position among findings of the same rule in the file whose lines and captures are identical (0 for the first, 1 for the second, …).
 
-The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, and re-indenting the line or checking it out with CRLF line endings does not change it either. These do change it:
+The line number is **not** part of it, so a finding keeps its id when lines are added or removed above it, including another violation of the same rule. Re-indenting the line, checking it out with CRLF line endings or adding a `rulecast-ignore` comment to it does not change it either. An id changes when the finding's line changes, which is also when rulecast counts the finding as new:
 
-- Editing the offending text. That is a different violation.
-- Adding an identical violation above it in the same file: the occurrence numbers of the ones below shift.
+- Editing the line, even away from the matched text. The line is different, so it is a different finding.
+- Adding a line identical to it above it in the same file: the occurrence numbers of the ones below shift.
 - Renaming the rule's alias, or moving the file.
 - A tool message that contains a number that moves, such as a line count. The message is part of what the tool reports.
+
+Only an ignore that comment punctuation introduces is left out. One inside a string literal (`"rulecast-ignore: …"`) is part of the line, unless the string itself starts with comment punctuation (`"# rulecast-ignore: …"`). The punctuation run is taken whole, so write a space before the comment: in `f();// rulecast-ignore: …` the `);` goes with the `//`, and adding that comment changes the id.
+
+A finding about a whole file hashes its text and captures instead of the file's lines, so an edit to the file keeps its id: a `path` rule's finding (its text is the path), and a hook's finding that covers the whole file (it would reformat the file, or failed without a location). Such a finding says it is about the whole file; one that merely spans every line of its file still hashes its lines. A secret a tool reports (gitleaks) hashes its redacted text and captures, never its line, so no part of the secret goes into the id; two secrets of one rule in one file are told apart by their order. If the file cannot be read, the matched text is hashed in place of its lines.
 
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
 
@@ -247,7 +251,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `passed` | `true` exactly when the exit code is 0. |
 | `rules` | One entry per rule tested: every detector rule, or the one named. |
 | `rules[].rule`, `detector`, `scope` | The rule's id, its detector kind (`null` for a touch rule) and its `scope`. |
-| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money); `touch` (a named touch rule: nothing to test). |
+| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money; or, under `--against`, a `scope: removed` rule, whose matches are what a file keeps and which has no baseline there to count a drop against); `touch` (a named touch rule: nothing to test). |
 | `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
 | `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
 
@@ -357,18 +361,18 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
 | `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
 | `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
-| `suppressed` | Dropped by a `rulecast-ignore` comment. That includes a comment on the finding's own line that changed its id, which happens when the match is the whole line, as with `llm` rules. |
-| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`, and not in `suppressionRate`. |
+| `suppressed` | Dropped by a `rulecast-ignore` comment. An id leaves a trailing `rulecast-ignore` out of the line it hashes, so a comment on the finding's own line keeps its id; for a match whose id hashes its text (a redacted or whole-file one), the same rule ignored on the line the finding was last reported on counts too. |
+| `suppressAttempted` | Findings the agent wrote a `rulecast-ignore` comment for that silenced nothing, because in unattended mode an ignore the agent adds does not count. They stay findings, so they are counted in the other keys as well, never as `suppressed`. They do count towards `suppressionRate` and `noisy`: the agent wanted them silenced. |
 | `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
-| `repeatRate`, `suppressionRate` | `repeated / fired` and `suppressed / fired`, to two decimals. |
-| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and at least 20% were suppressed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
+| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. Changed without a `schemaVersion` bump: `suppressionRate` used to leave `suppressAttempted` out, and now counts it. |
+| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, an ignore tried. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
 
 Things to know when reading the counts:
 
-- A finding's identity is its [id](#finding-ids). Editing the offending text without fixing it changes the id, so it counts as one fixed finding and one new one.
+- A finding's identity is its [id](#finding-ids), which hashes its source line. So any edit to that line, fixing it or not, counts as one fixed finding and one new one, unless the edit only adds a trailing `rulecast-ignore`.
 - A finding the context budget kept out of a delivery still counts as reported.
 - Only agent hooks write the log. `rulecast run`, git hooks and CI do not, and findings that were there before the session or are in files the user changed during it are not counted.
 

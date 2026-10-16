@@ -68,6 +68,17 @@ export interface Match {
   text: string
   /** Exactly the names the detector declared for the rule. */
   captures: Record<string, string>
+  /**
+   * The match is about the file as a whole (a hook would reformat it), not the lines it spans, so
+   * its id (core/finding-id.ts) hashes its text and captures. A kind whose every match is the
+   * whole file says so once, with `Detector.wholeFile`.
+   */
+  wholeFile?: true
+  /**
+   * The source at the match is itself sensitive (a secret) and `text` was redacted: its id hashes
+   * the text and captures, never the source line.
+   */
+  redacted?: true
 }
 
 export interface ChangeSet {
@@ -367,6 +378,11 @@ export interface Delivery {
    * not once per context, as warnings are — and on every `rulecast run`. Never priced into the budget.
    */
   disabled?: DisabledGroup[]
+  /**
+   * For the agent, each said once per session: what changes how it should read this delivery, such
+   * as another agent's shell call running alongside its own. Printed first, so a cut never drops it.
+   */
+  agentNotices?: string[]
 }
 
 export interface AdapterInput {

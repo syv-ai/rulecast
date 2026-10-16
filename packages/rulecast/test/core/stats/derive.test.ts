@@ -82,12 +82,20 @@ describe("derive", () => {
     expect(life.state).toBe("suppressed")
   })
 
-  test("an inline rulecast-ignore on a whole-line match changes its id, and still reads as suppressed", () => {
+  test("an inline rulecast-ignore that changes a text-hashed id still reads as suppressed", async () => {
+    // A redacted match hashes its text, not its line, so an ignore inside the text is a new id.
     const rule = { id: RULE, detector: { kind: "llm" } }
-    const at = { file: FILE, line: 3, endLine: 3, column: 1, captures: {} }
-    const idOf = (text: string) => findingIds([{ rule, match: { ...at, text } }], () => [])[0]!
-    const before = idOf("    raise HTTPException(404)")
-    const after = idOf("    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception")
+    const at = { file: FILE, line: 3, endLine: 3, column: 1, captures: {}, redacted: true as const }
+    const idOf = async (text: string) =>
+      (
+        await findingIds(
+          [{ rule, match: { ...at, text } }],
+          () => undefined,
+          async () => null,
+        )
+      )[0]!
+    const before = await idOf("    raise HTTPException(404)")
+    const after = await idOf("    raise HTTPException(404)  # rulecast-ignore: backend/no-httpexception")
     expect(after).not.toBe(before)
 
     const lives = derive([record("edit", [[before, "delivered"]]), record("edit", [], { ign: [after] })])
@@ -247,6 +255,26 @@ describe("ruleStats", () => {
       ["at/both", ["repeats", "suppressed"], NOISY_REPEAT_RATE, NOISY_SUPPRESSION_RATE],
       ["below/both", [], 0.2, 0.1],
     ])
+  })
+
+  test("unattended ignore attempts count towards suppressionRate and noisy, and stay their own count", () => {
+    // 10 fired: 1 suppressed, 1 attempted, 8 fixed. Either alone is under the threshold; together at it.
+    const lives = Array.from({ length: 10 }, (_, index) =>
+      life({
+        id: String(index),
+        state: index === 0 ? "suppressed" : "fixed",
+        suppressAttempts: index === 1 ? 2 : 0,
+      }),
+    )
+    expect(ruleStats(lives)[0]).toMatchObject({
+      suppressed: 1,
+      suppressAttempted: 1,
+      suppressionRate: NOISY_SUPPRESSION_RATE,
+      noisy: ["suppressed"],
+    })
+    // A finding in both counts once.
+    const both = [life({ id: "x", state: "suppressed", suppressAttempts: 1 }), life({ id: "y" })]
+    expect(ruleStats(both)[0]).toMatchObject({ suppressed: 1, suppressAttempted: 1, suppressionRate: 0.5 })
   })
 
   test("a rule that has fired too few times is never noisy, whatever its rates", () => {

@@ -415,3 +415,43 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     expect(await stop()).toEqual({ systemMessage: expect.stringContaining(ADDED_NOTICE) })
   })
 })
+
+describe("hook claude-code: a removed assertion in unattended mode", () => {
+  const TEST = "tests/test_pricing.py"
+  const rule = {
+    id: "tests/keep-assertions",
+    name: "Assertions are not removed",
+    files: "^tests/",
+    severity: "warning",
+    escalate: true,
+    scope: "removed",
+    detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
+    message: "{{file}}:{{line}} removes assertions ({{text}}). Make the test pass instead.",
+  }
+
+  test("a deleted assert blocks the stop, escalated to an error; attended it is a warning that lets the stop through", async () => {
+    const files = { [TEST]: "def test_total():\n    assert total([1, 2]) == 3\n    assert total([]) == 0\n" }
+    const weakened = "def test_total():\n    assert total([1, 2]) == 3\n"
+    const run = async (env: Env) => {
+      const root = await createRepo({ ...files, ".rulecast-config.yaml": localConfig([rule]) })
+      const hook = (name: string, file?: string) =>
+        runCli(
+          root,
+          ["hook", "claude-code"],
+          JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" })),
+          env,
+        )
+      await writeFile(path.join(root, TEST), weakened)
+      await hook("post-tool-use.edit", TEST)
+      const { stdout } = await hook("stop")
+      return stdout === "" ? null : JSON.parse(stdout)
+    }
+
+    const unattended = await run({ ...testEnv, RULECAST_MODE: "unattended" })
+    expect(kindOf(unattended)).toBe("block")
+    expect(unattended.reason).toContain("error tests/keep-assertions")
+    expect(unattended.reason).toContain("removes assertions (1 of 2 removed)")
+
+    expect(kindOf(await run(testEnv))).not.toBe("block")
+  })
+})

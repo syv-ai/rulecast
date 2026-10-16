@@ -3,6 +3,7 @@ import path from "node:path"
 
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
+import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
 import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
@@ -33,13 +34,14 @@ import {
   hasOwnTree,
   MAIN_AGENT,
   referenceState,
+  sharedShell,
   sweptFor,
   type WorkRecord,
   type WorkState,
 } from "./session/state"
 import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
-import type { IgnoredFinding } from "./suppress"
+import { type IgnoredFinding, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
@@ -107,6 +109,13 @@ type Warning = { key: string; text: string }
 /** Said once: without a working tree to compare, shell edits are seen only after the session. */
 const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
+
+/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
+const SHARED_TREE =
+  "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
+  "command to every file that changed while it ran, so findings here and at your stop may be another " +
+  "agent's. Give each agent that runs in parallel its own worktree (in Claude Code, a subagent with " +
+  "`isolation: worktree`)."
 
 /**
  * Above this many warnings of one kind, they collapse into one carrying a count and an example.
@@ -319,7 +328,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     : empty()
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
-  const volatileCaptures = (kind: string) => registry.get(kind)?.volatileCaptures ?? []
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
@@ -327,6 +335,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
   const refused: NonNullable<Delivery["refused"]> = []
+  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
+  const agentNotices: string[] = []
+  const withAgentNotices = (): Pick<Delivery, "agentNotices"> => (agentNotices.length === 0 ? {} : { agentNotices })
 
   if (event.kind === "shell-after") {
     // What changed during the call, against the state recorded before it. A moved HEAD is git's
@@ -337,10 +348,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    await appendWork(open.dir, [{ t: "tree", phase: "after", agent: open.agent, ...id, state: now }])
+    // Another agent's shell call ran during this one, in the same tree: each takes the other's
+    // writes for its own (README, Agents). Told once per agent, on the hook that can reach it.
+    const sharedKey = `shared-tree:${open.agent}`
+    const shared = sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    if (shared) agentNotices.push(SHARED_TREE)
+    await appendWork(open.dir, [
+      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+      ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
+    ])
     const call = reference === null ? null : treeChanges(reference, now)
     const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
-    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    if (files.length === 0) return { delivery: { ...emptyDelivery(), ...withAgentNotices() }, failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
     event = { ...event, kind: "edit", files }
@@ -428,7 +447,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the container ranges taken from them (baseline/stage.ts).
-    if (session) await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files)))
+    if (session) {
+      const changed = new Set([...view.work.edited, ...view.work.swept])
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+    }
   }
 
   if (event.kind === "start" && session) {
@@ -480,8 +502,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
 
     const skip = options.skipDetectorKinds ?? new Set<string>()
-    const wanted = (rule: { id: string; detector: { kind: string } }) =>
-      !skip.has(rule.detector.kind) && (options.onlyRules?.has(rule.id) ?? true)
+    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
+    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
+    const wanted = (rule: { id: string; scope: string; detector: { kind: string } }) =>
+      !skip.has(rule.detector.kind) &&
+      (options.onlyRules?.has(rule.id) ?? true) &&
+      (event.kind === "verify" || rule.scope !== "removed")
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
     // `rulecast run --session`: a rule the session disabled that would have run here did not, which
     // makes the run incomplete. It is named under `disabled` below, once; one that would not have
@@ -524,20 +550,31 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
       }
     }
-    const output = await runDetectionFrom(
+    const lines = sourceLines(read)
+    const detected = await runDetectionFrom(
       {
         detection,
         event: event.kind,
         selections,
         changes,
         read,
+        lines,
         timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
       },
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )
 
+    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
+    const removed = await removedFindings(selections, detected, baselineChanges, containers, read)
+    const output = removed.output
     // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    const ids = findingIds([...output.findings, ...output.ignored], volatileCaptures)
+    // From the lines suppression read through `read`, the content detection judged: staged in a
+    // staged run, not the working tree. No file is read again.
+    const ids = await findingIds(
+      [...output.findings, ...output.ignored, ...removed.findings],
+      (kind) => registry.get(kind),
+      lines,
+    )
     // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
     const committed =
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
@@ -549,10 +586,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         : baselineHas(committed, rule.id, match.file, id)
           ? "preexisting"
           : "new"
-    findings = output.findings.map(({ rule, match }, index) => {
-      const id = ids[index]!
-      return { id, rule, match, status: statusOf(rule, match, id) }
-    })
+    const removedFrom = output.findings.length + output.ignored.length
+    findings = [
+      ...output.findings.map(({ rule, match }, index) => {
+        const id = ids[index]!
+        return { id, rule, match, status: statusOf(rule, match, id) }
+      }),
+      // The drop is the change's by construction: always new.
+      ...removed.findings.map(({ rule, match }, index) => ({
+        id: ids[removedFrom + index]!,
+        rule,
+        match,
+        status: "new" as const,
+      })),
+    ]
     const classifiedIgnores = output.ignored.map((item, index) => {
       const id = ids[output.findings.length + index]!
       return { ...item, id, status: statusOf(item.rule, item.match, id) }
@@ -731,6 +778,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
+    Object.assign(decision.delivery, withAgentNotices())
     return decision.delivery
   }
 

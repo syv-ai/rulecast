@@ -277,8 +277,11 @@ describe("which runs use the committed baseline", () => {
     await git(root, "add", "-A")
     await git(root, "commit", "-q", "-m", "baseline")
     await git(root, "checkout", "-q", "-b", "feature")
-    // The same text, so the same id: only the line was touched.
-    await writeFile(path.join(root, USERS), LEGACY.replace("(404)", "(404)  # touched"))
+    // An ignore of another rule: the line is touched, but an id leaves a trailing ignore out, so it is the same.
+    await writeFile(
+      path.join(root, USERS),
+      LEGACY.replace("(404)", "(404)  # rulecast-ignore: other/rule not this one"),
+    )
     const result = await report(root, "--from-ref", "main")
     expect(result.code).toBe(1)
     expect(result.findings.map((finding) => [finding.line, finding.status])).toEqual([[2, "new"]])

@@ -51,9 +51,9 @@ const covers = (record: FindingsRecord, rule: string, file: string) =>
  * Replays the log, oldest first, and returns every life that began at or after `since`. Records
  * from before it are still replayed: a finding first seen then and fixed later is not counted.
  *
- * Two known imprecisions, both from what an id is: editing the offending text without fixing it
- * reads as a fix and a new finding, and a finding the context budget kept out of a delivery still
- * counts as delivered.
+ * Two known imprecisions. An id hashes the finding's source line (D51), so any edit to that line,
+ * fixing it or not, reads as one fixed finding and one new one. And a finding the context budget
+ * kept out of a delivery still counts as delivered.
  */
 export function derive(records: readonly FindingsRecord[], since: Date | null = null): FindingLife[] {
   // Stable: records written in the same millisecond keep their order in the file.
@@ -77,8 +77,9 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
     const stopsOf = (agent: string) => stops.get(`${record.s}\u0000${agent}`) ?? 0
     const found = new Map(record.found.map((finding) => [finding.id, finding]))
     const ignored = new Set(record.ign.map((match) => match.id))
-    // An inline `rulecast-ignore` can change the id it silences, when the match is the whole line
-    // (llm, or an excerpt): the same rule ignored on the line it was last reported on is it.
+    // A trailing `rulecast-ignore` is left out of the line an id hashes, but an id that hashes the
+    // match's text instead (a redacted or whole-file match) can change with one: the same rule
+    // ignored on the line it was last reported on is it.
     const ignoredAt = new Set(record.ign.map((match) => `${match.r}\u0000${match.f}\u0000${match.l}`))
     const tried = new Set((record.tried ?? []).map((match) => match.id))
     const seen = (life: Open, finding: { id: string; o: string; l: number }) => {
@@ -158,13 +159,17 @@ export interface RuleStats {
   fixed: number
   ignored: number
   suppressed: number
-  /** Findings the agent wrote a `rulecast-ignore` for that silenced nothing, as in unattended mode. */
+  /**
+   * Findings the agent wrote a `rulecast-ignore` for that silenced nothing, as in unattended mode.
+   * Apart from `suppressed`, but counted with it in `suppressionRate` (D55).
+   */
   suppressAttempted: number
   prevented: number
   open: number
   repeated: number
   medianTurnsToFix: number | null
   repeatRate: number
+  /** Findings suppressed or with an attempt to suppress them, over `fired`: the agent wanted each one silenced. */
   suppressionRate: number
   noisy: ("repeats" | "suppressed")[]
 }
@@ -193,7 +198,12 @@ export function ruleStats(lives: readonly FindingLife[]): RuleStats[] {
     const repeated = count(isRepeated)
     const suppressed = count((life) => life.state === "suppressed")
     const repeatRate = rate(repeated, fired)
-    const suppressionRate = rate(suppressed, fired)
+    // An unattended ignore that silenced nothing still says the agent wanted the finding gone
+    // unfixed: as much a sign of a wrong or too broad rule as one that worked. Counted once.
+    const suppressionRate = rate(
+      count((life) => life.state === "suppressed" || life.suppressAttempts > 0),
+      fired,
+    )
     const noisy: RuleStats["noisy"] = []
     if (fired >= NOISY_MIN_FIRED && repeatRate >= NOISY_REPEAT_RATE) noisy.push("repeats")
     if (fired >= NOISY_MIN_FIRED && suppressionRate >= NOISY_SUPPRESSION_RATE) noisy.push("suppressed")
