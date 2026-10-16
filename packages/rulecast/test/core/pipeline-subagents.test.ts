@@ -136,11 +136,29 @@ describe("agents sharing a working tree", () => {
   const told = (delivery: { agentNotices?: string[] }) =>
     (delivery.agentNotices ?? []).filter((text) => text.includes("worktree"))
 
-  test("overlapping shell calls of two agents: each is told once that attribution may be wrong", async () => {
-    const { send, shell } = await scenario()
+  test("overlapping shell calls that changed no files: no notice, and none used up", async () => {
+    // Claude Code keys hooks on the session's project directory: an agent's command that ran in
+    // another directory still records states for this tree. Nothing changed here, nothing to misattribute.
+    const { send, root } = await scenario()
     await send({ kind: "start", files: [] })
     await send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
     await send({ kind: "shell-before", files: [], toolUseId: "b", agentId: "sub2" })
+    expect(told(await send({ kind: "shell-after", files: [], toolUseId: "b", agentId: "sub2" }))).toEqual([])
+    expect(told(await send({ kind: "shell-after", files: [], toolUseId: "a", agentId: "sub1" }))).toEqual([])
+
+    // The once-per-session notice is still there for a call whose files could be another agent's.
+    await send({ kind: "shell-before", files: [], toolUseId: "c", agentId: "sub1" })
+    await send({ kind: "shell-before", files: [], toolUseId: "d", agentId: "sub2" })
+    await writeFile(path.join(root, USERS), violation(USERS))
+    expect(told(await send({ kind: "shell-after", files: [], toolUseId: "d", agentId: "sub2" }))).toHaveLength(1)
+  })
+
+  test("overlapping shell calls of two agents that changed files: each is told once that attribution may be wrong", async () => {
+    const { send, shell, root } = await scenario()
+    await send({ kind: "start", files: [] })
+    await send({ kind: "shell-before", files: [], toolUseId: "a", agentId: "sub1" })
+    await send({ kind: "shell-before", files: [], toolUseId: "b", agentId: "sub2" })
+    await writeFile(path.join(root, USERS), violation(USERS))
     const second = await send({ kind: "shell-after", files: [], toolUseId: "b", agentId: "sub2" })
     expect(told(second)).toHaveLength(1)
     expect(told(second)[0]).toContain("isolation: worktree")
@@ -148,10 +166,11 @@ describe("agents sharing a working tree", () => {
     const first = await send({ kind: "shell-after", files: [], toolUseId: "a", agentId: "sub1" })
     expect(told(first)).toHaveLength(1)
 
-    // Once per session: overlapping again says nothing new.
+    // Once per session: overlapping again, with files changed, says nothing new.
     await send({ kind: "shell-before", files: [], toolUseId: "c", agentId: "sub1" })
     const again = await send({ kind: "shell-before", files: [], toolUseId: "d", agentId: "sub2" })
     expect(told(again)).toEqual([])
+    await writeFile(path.join(root, ORDERS), violation(ORDERS))
     expect(told(await send({ kind: "shell-after", files: [], toolUseId: "d", agentId: "sub2" }))).toEqual([])
     expect(told(await send({ kind: "shell-after", files: [], toolUseId: "c", agentId: "sub1" }))).toEqual([])
     expect(told(await shell(async () => {}, "sub1"))).toEqual([])
@@ -186,7 +205,7 @@ describe("agents sharing a working tree", () => {
   })
 
   test("without tool use ids, an agent's calls are matched in order", async () => {
-    const { send } = await scenario()
+    const { send, root } = await scenario()
     await send({ kind: "start", files: [] })
     await send({ kind: "shell-before", files: [], agentId: "sub1" })
     await send({ kind: "shell-after", files: [], agentId: "sub1" })
@@ -194,6 +213,7 @@ describe("agents sharing a working tree", () => {
     expect(told(await send({ kind: "shell-after", files: [], agentId: "sub2" }))).toEqual([])
     await send({ kind: "shell-before", files: [], agentId: "sub1" })
     await send({ kind: "shell-before", files: [], agentId: "sub2" })
+    await writeFile(path.join(root, USERS), violation(USERS))
     expect(told(await send({ kind: "shell-after", files: [], agentId: "sub2" }))).toHaveLength(1)
   })
 

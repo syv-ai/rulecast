@@ -303,18 +303,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    // Another agent's shell call ran during this one, in the same tree: each takes the other's
-    // writes for its own (README, Agents). Told once per agent, on the hook that can reach it.
+    const call = reference === null ? null : treeChanges(reference, now)
+    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    // Another agent's shell call ran during this one, and this one is held to files: those may be the
+    // other's writes (README, Agents). Hooks key on the session's directory, so an overlap alone may be
+    // a command that ran elsewhere; with no files there is nothing to misattribute. Told once per agent.
     const sharedKey = `shared-tree:${open.agent}`
-    const shared = sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    const shared =
+      files.length > 0 && sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
     if (shared) agentNotices.push(SHARED_TREE)
     await appendWork(open.dir, [
       { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
       ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
     ])
-    const call = reference === null ? null : treeChanges(reference, now)
-    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
-    if (files.length === 0) return { delivery: { ...emptyDelivery(), ...withAgentNotices() }, failed, deadlineMissed }
+    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
     // From here it is the edit event for those files, exactly as an Edit tool's would be.
     via = "shell"
     event = { ...event, kind: "edit", files }

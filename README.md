@@ -248,7 +248,7 @@ main agent's stop, and at a subagent's only when that subagent's own shell calls
 
 When agents run in parallel in one working tree and one of them changes files with the shell, it
 can be blamed for what the others wrote while its command ran, with any tool. rulecast tells an agent
-once when its shell call overlapped another agent's. For parallel agents, give each its own worktree
+once when its shell call overlapped another agent's and files changed while it ran. For parallel agents, give each its own worktree
 (in Claude Code, a subagent with `isolation: worktree`).
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
