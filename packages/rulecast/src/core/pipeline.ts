@@ -37,6 +37,7 @@ import {
   type WorkRecord,
 } from "./session/state"
 import { isGone, treeChanges, treeState } from "./session/tree"
+import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
 
@@ -357,6 +358,24 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       log,
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
       recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
+      ...(open && event.session
+        ? {
+            recordFindings: (refusing) =>
+              appendFindingsLog(
+                stateDir,
+                findingsRecord({
+                  session: event.session!.id,
+                  agent: open.agent,
+                  ev: "guard",
+                  at: new Date(),
+                  findings: refusing.map((finding) => ({ ...finding, outcome: "refused" as const })),
+                  ignored: [],
+                  ran: new Map(),
+                }),
+                log,
+              ),
+          }
+        : {}),
     })
     return { delivery, failed, deadlineMissed }
   }
@@ -682,13 +701,54 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     return decision.delivery
   }
 
+  /**
+   * The findings log (core/stats/log.ts), for an agent's own checks only: an edit, or its stop. A
+   * CLI run has no session, and `run --session` replays a stop that was already logged. After the
+   * decision, so a stop knows whether it blocked, and outside the session lock.
+   */
+  async function logFindings(agent: string, stop: Delivery["stop"]): Promise<void> {
+    const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && options.stopGate === true ? "stop" : null
+    if (ev === null || ran === undefined || event.session === undefined) return
+    // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
+    const theirs = new Set(swept)
+    const protectedKeys = new Set(refused.map(({ rule, file }) => `${rule} ${file}`))
+    const outcome = ({ rule, match }: ClassifiedFinding): WriteOutcome => {
+      const reverting = protectedKeys.has(`${rule.id} ${match.file}`)
+      // The gate's own test (session/decide.ts). Once #24's unattended mode lands, its `report`
+      // stop is a block that ends the loop, and counts as blocked too.
+      if (ev === "stop") return stop === "block" && (rule.severity === "error" || reverting) ? "blocked" : "delivered"
+      return reverting ? "refused" : "delivered"
+    }
+    const checked = new Map<string, string[]>()
+    for (const [rule, files] of ran) {
+      const own = files.filter((file) => !theirs.has(file))
+      if (own.length > 0) checked.set(rule, own)
+    }
+    await appendFindingsLog(
+      stateDir,
+      findingsRecord({
+        session: event.session.id,
+        agent,
+        ev,
+        ...(via === undefined ? {} : { via }),
+        at: new Date(),
+        findings: findings
+          .filter(({ status, match }) => status === "new" && !theirs.has(match.file))
+          .map((finding) => ({ ...finding, outcome: outcome(finding) })),
+        ignored: ignored.filter(({ match }) => !theirs.has(match.file)),
+        ran: checked,
+      }),
+      log,
+    )
+  }
+
   const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
   if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
 
   await appendWork(session.dir, workRecords)
+  let decision: Decision
   try {
-    const decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
+    decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
   } catch (error) {
     // §14's two "run without session state" rows: a lock nobody released, and a store nobody can
     // read. The commit reads the stores inside the lock, so both surface here as well.
@@ -698,7 +758,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     } else if (error instanceof LockTimeoutError) {
       warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
     } else throw error
-    const decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
-    return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
+    decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
   }
+  await logFindings(session.agent, decision.delivery.stop)
+  return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
 }

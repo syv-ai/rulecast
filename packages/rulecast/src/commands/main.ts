@@ -16,6 +16,7 @@ import { installCommand, uninstallCommand } from "./install"
 import { listCommand } from "./list"
 import { findRoot } from "./project"
 import { runCommand } from "./run"
+import { statsCommand } from "./stats"
 import { testCommand } from "./test"
 import { tryRepoCommand } from "./try-repo"
 import { UsageError } from "./usage"
@@ -82,6 +83,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await tryRepoCommand(root, args, registry, io)
       case "test":
         return await testCommand(root, args, registry, io)
+      case "stats":
+        return await statsCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
       case "clean":

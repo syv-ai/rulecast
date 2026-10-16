@@ -100,6 +100,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
+| `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
@@ -298,6 +299,7 @@ the shell: each is held to what the other wrote during its command. A file one o
 its Edit or Write tool stays that agent's. For parallel agents that use the shell, give each its
 own worktree (in Claude Code, a subagent with `isolation: worktree`).
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md).
+As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 

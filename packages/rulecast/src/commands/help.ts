@@ -124,6 +124,19 @@ export const COMMANDS: CommandHelp[] = [
     ],
   },
   {
+    name: "stats",
+    synopsis: "rulecast stats [--since 30d] [--format terminal|json]",
+    summary: "Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy",
+    flags: [
+      ["--since", "Only findings first reported in this window: 30d, 12h or a date"],
+      ["--format", "terminal or json"],
+    ],
+    notes: [
+      "Read from a local log of finding ids, rule ids, files and lines that agent hooks write; never any code.",
+      "The JSON is documented in agents/reference/output.md.",
+    ],
+  },
+  {
     name: "validate",
     synopsis: "rulecast validate [file...]",
     summary: "Check the config (and a rules manifest) and print diagnostics",
