@@ -39,7 +39,7 @@ import {
 import { isGone, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
 import type { IgnoredFinding } from "./suppress"
-import { type Delivery, type Event, emptyDelivery } from "./types"
+import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -525,16 +525,25 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
         ? options.committedBaseline
         : undefined
+    const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] =>
+      committed === undefined
+        ? classify(match, rule.scope, rule.id, baselineChanges, containers)
+        : baselineHas(committed, rule.id, match.file, id)
+          ? "preexisting"
+          : "new"
     findings = output.findings.map(({ rule, match }, index) => {
       const id = ids[index]!
-      const status: ClassifiedFinding["status"] =
-        committed === undefined
-          ? classify(match, rule.scope, rule.id, baselineChanges, containers)
-          : baselineHas(committed, rule.id, match.file, id)
-            ? "preexisting"
-            : "new"
-      return { id, rule, match, status }
+      return { id, rule, match, status: statusOf(rule, match, id) }
     })
+    const classifiedIgnores = output.ignored.map((item, index) => {
+      const id = ids[output.findings.length + index]!
+      return { ...item, id, status: statusOf(item.rule, item.match, id) }
+    })
+    // Unattended, an ignore on a line changed this session silences nothing: nobody is there to
+    // agree to it, so its finding takes the unattended path and is reported if it keeps blocking.
+    const unsilenced =
+      project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
+    for (const { id, rule, match, status } of unsilenced) findings.push({ id, rule, match, status })
     for (const error of output.errors) {
       failed = true
       log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
@@ -542,7 +551,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    ignored = output.ignored.map((item, index) => ({ ...item, id: ids[output.findings.length + index]! }))
+    const kept = new Set(unsilenced.map(({ match }) => match))
+    ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),
       ...output.timedOut.flatMap((timeout) => timeout.rules),
@@ -570,12 +580,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
         currentConfigHash: atStop ? await configHash(root) : null,
         ignored: atStop
-          ? ignored.map(({ rule, match, reason }) => ({
-              rule: rule.id,
-              match,
-              reason,
-              status: classify(match, rule.scope, rule.id, baselineChanges, containers),
-            }))
+          ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
           : [],
         told: view.work.noticed,
         refused,
