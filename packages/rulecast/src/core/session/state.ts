@@ -8,6 +8,8 @@ export type WorkRecord =
   | { t: "stopBlock"; agent: string; findings?: string[] }
   /** Unattended mode: the stop that told the agent to record what is left as unresolved, once per prompt. */
   | { t: "stopReport"; agent: string }
+  /** Unattended mode: the stop that told the agent some rules did not run, once per prompt (#29). */
+  | { t: "incompleteReport"; agent: string }
   | { t: "refused"; rule: string; file: string }
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
@@ -32,6 +34,8 @@ export interface WorkState {
   blockedFindings: Map<string, number>
   /** Agents told to record their unresolved findings since their last prompt. */
   stopReports: Set<string>
+  /** Agents told since their last prompt that configured rules did not run. */
+  incompleteReports: Set<string>
   /** How often each rule has refused a write to each file: the refuse gate's counter. */
   refusals: Map<string, number>
   disabled: Map<string, string>
@@ -60,6 +64,9 @@ export interface ContextState {
   warned: Set<string>
 }
 
+/** The agent a session's events belong to when the payload names no subagent. */
+export const MAIN_AGENT = "main"
+
 export function preexistingKey(rule: string, file: string): string {
   return `${rule} ${file}`
 }
@@ -78,6 +85,7 @@ export function emptyWork(): WorkState {
     stopBlocks: new Map(),
     blockedFindings: new Map(),
     stopReports: new Set(),
+    incompleteReports: new Set(),
     refusals: new Map(),
     disabled: new Map(),
     accessed: new Map(),
@@ -131,6 +139,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       case "stopReport":
         state.stopReports.add(record.agent)
         break
+      case "incompleteReport":
+        state.incompleteReports.add(record.agent)
+        break
       case "refused": {
         const key = refusalKey(record.rule, record.file)
         state.refusals.set(key, (state.refusals.get(key) ?? 0) + 1)
@@ -139,6 +150,7 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       case "prompt":
         state.stopBlocks.delete(record.agent)
         state.stopReports.delete(record.agent)
+        state.incompleteReports.delete(record.agent)
         break
       case "disabled":
         if (!state.disabled.has(record.rule)) state.disabled.set(record.rule, record.reason)

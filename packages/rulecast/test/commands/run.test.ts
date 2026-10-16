@@ -387,3 +387,51 @@ describe("rulecast run: metered rules in a staged run", () => {
     expect(result.stderr).toContain("--llm and --no-llm cannot be combined")
   })
 })
+
+/** #29: a run where configured rules could not run must never read as clean. */
+describe("rulecast run: rules that did not run", () => {
+  const MISSING_TOOL = {
+    id: "shell",
+    name: "Shell",
+    files: "\\.py$",
+    detect: { command: { run: ["definitely-not-a-real-binary-9x7", "{{files}}"] } },
+    message: "{{file}}:{{line}} bad.",
+  }
+
+  test("a detector whose tool is missing says incomplete, names the rule in json, and exits 2", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
+    const terminal = await run(root, "--all-files")
+    expect(terminal.code).toBe(2)
+    expect(terminal.stdout).toMatch(/did not run:\n {2}- 1 rule disabled: command detector: /)
+    expect(terminal.stdout).toContain("no findings · incomplete: 1 rule did not run (see above)")
+    const json = JSON.parse((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(json.disabled).toEqual([{ reason: expect.stringMatching(/^command detector: /), rules: ["shell"] }])
+  })
+
+  test("a rule repo that cannot be fetched counts the rules it held", async () => {
+    const missing = path.join(await createProject({}), "no-such-repo.git")
+    const root = await createRepo({
+      ".rulecast-config.yaml": `repos:\n  - repo: ${missing}\n    rev: v1.0.0\n    rules:\n      - id: a\n      - id: b\n`,
+      "a.py": "x = 1\n",
+    })
+    const result = await run(root, "--all-files", "--format", "json")
+    expect(result.code).toBe(2)
+    expect(JSON.parse(result.stdout).disabled).toEqual([
+      { reason: expect.stringContaining(`${missing}@v1.0.0: fetch failed`), rules: ["a", "b"] },
+    ])
+  })
+
+  test("--session names a rule the agent's session disabled, which it skips", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([MISSING_TOOL]), "a.py": "x = 1\n" })
+    await pipelineAt(root, { kind: "edit", files: ["a.py"], cwd: root, session: { id: "s1" } })
+    const result = await run(root, "--session", "s1", "--format", "json")
+    expect(JSON.parse(result.stdout).disabled).toEqual([
+      { reason: expect.stringMatching(/^command detector: /), rules: ["shell"] },
+    ])
+  })
+
+  test("a clean run has nothing disabled", async () => {
+    const root = await createFixture()
+    expect(JSON.parse((await run(root, "--all-files", "--format", "json")).stdout).disabled).toEqual([])
+  })
+})

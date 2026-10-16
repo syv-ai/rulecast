@@ -70,3 +70,34 @@ describe("gate, unattended", () => {
     expect(gate(fresh, after, "main", 1).stop).toBe("capReached")
   })
 })
+
+describe("gate, unattended, when configured rules did not run", () => {
+  const incomplete = (fresh: ReturnType<typeof finding>[], work: WorkRecord[], agent = "main", mode = "unattended") =>
+    gate(fresh, foldWork(work), agent, 10, new Set(), mode as "attended" | "unattended", true)
+
+  test("the main agent is held once per prompt to say so, then let through", () => {
+    const first = incomplete([], [])
+    expect(first).toEqual({ stop: "incomplete", work: [{ t: "incompleteReport", agent: "main" }] })
+    expect(incomplete([], first.work).stop).toBe("allow")
+    expect(incomplete([], [...first.work, { t: "prompt", agent: "main" }]).stop).toBe("incomplete")
+  })
+
+  test("a block comes first: the findings are what the agent can act on", () => {
+    expect(incomplete([finding("a/rule", "bad")], []).stop).toBe("block")
+  })
+
+  test("a capped stop that has had its report is held for what did not run", () => {
+    const work: WorkRecord[] = [{ t: "stopReport", agent: "main" }]
+    const same = finding("a/rule", "same")
+    const blocked: WorkRecord[] = [
+      { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+      { t: "stopBlock", agent: "main", findings: [findingKey(same)] },
+    ]
+    expect(incomplete([same], [...blocked, ...work]).stop).toBe("incomplete")
+  })
+
+  test("never a subagent, and never attended", () => {
+    expect(incomplete([], [], "agent-1").stop).toBe("allow")
+    expect(incomplete([], [], "main", "attended").stop).toBe("allow")
+  })
+})

@@ -21,6 +21,11 @@ const CI_VARIABLES = ["CI", "GITHUB_ACTIONS"] as const
 
 const isSet = (value: string | undefined) => value !== undefined && value !== "" && value !== "false" && value !== "0"
 
+/** The CI variable that is set, if any: what `doctor` reads to check as a CI job would (#29). */
+export function ciVariable(env: Env): (typeof CI_VARIABLES)[number] | undefined {
+  return CI_VARIABLES.find((name) => isSet(env[name]))
+}
+
 /**
  * RULECAST_MODE, then the config's `mode`, then CI detection, then attended.
  *
@@ -33,7 +38,7 @@ export function resolveMode(configured: Mode | null, env: Env): ActiveMode {
   const ignored = raw !== undefined && raw !== "" && fromEnv === undefined ? { ignored: raw } : {}
   if (fromEnv !== undefined) return { mode: fromEnv, source: "env", detail: `RULECAST_MODE=${raw}` }
   if (configured !== null) return { mode: configured, source: "config", detail: `mode: ${configured}`, ...ignored }
-  const ci = CI_VARIABLES.find((name) => isSet(env[name]))
+  const ci = ciVariable(env)
   if (ci !== undefined) return { mode: "unattended", source: "ci", detail: `${ci}=${env[ci]}`, ...ignored }
   return { mode: "attended", source: "default", detail: "", ...ignored }
 }

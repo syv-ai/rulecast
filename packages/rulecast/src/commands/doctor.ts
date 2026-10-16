@@ -1,9 +1,11 @@
+import { parseArgs } from "node:util"
+
 import { ADAPTERS } from "../adapters"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
-import type { ActiveMode } from "../core/config/mode"
+import { type ActiveMode, ciVariable } from "../core/config/mode"
 import { createReferenceResolver } from "../core/delivery/resolve"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
@@ -12,11 +14,11 @@ import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
-import { allFiles } from "../core/git"
+import { allFiles, isShallow, mergeBase } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
-import { fetchingRepos } from "../core/repos/provider"
+import { cachedRepos, fetchingRepos } from "../core/repos/provider"
 import { hookCommandResolves, hookState } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
@@ -63,10 +65,28 @@ function modeText(mode: ActiveMode, config: CompiledProject["config"]): string {
   return `${mode.mode} — ${source}; up to ${plural(blocks, "blocked stop")} per prompt`
 }
 
+function parseDoctorArgs(args: string[]): { ci: boolean; fromRef: string | null } {
+  try {
+    const { values } = parseArgs({
+      args,
+      options: { ci: { type: "boolean", default: false }, "from-ref": { type: "string" } },
+      strict: true,
+    })
+    return { ci: values.ci, fromRef: values["from-ref"] ?? null }
+  } catch (error) {
+    throw new UsageError(`doctor: ${errorMessage(error)}`)
+  }
+}
+
 /**
  * Compile, check the environment, report where things live, and dry-run every rule (spec §5).
  * Errors exit 2; warnings do not — an uninstalled adapter is worth saying and is not a broken
  * installation.
+ *
+ * `--ci`, and any run under CI (#29), checks what a fresh environment gets wrong, as the hooks and
+ * `rulecast run` will meet it: rule repos missing from the cache, hooks that cannot run, a shallow
+ * clone. Problems that are warnings at a desk are errors there, so the job fails before an agent
+ * runs degraded and believes it was checked.
  */
 export async function doctorCommand(
   root: string,
@@ -74,7 +94,8 @@ export async function doctorCommand(
   registry: DetectorRegistry,
   io: CliIo,
 ): Promise<number> {
-  if (args.length > 0) throw new UsageError(`doctor takes no arguments: ${args.join(" ")}`)
+  const flags = parseDoctorArgs(args)
+  const ci = flags.ci || flags.fromRef !== null || ciVariable(io.env) !== undefined
   const home = cacheHome(io.env)
   io.stdout("rulecast doctor\n\n")
 
@@ -94,6 +115,8 @@ export async function doctorCommand(
   const stateDir = ensureProjectState(home, root)
   io.stdout(`project    ${root}\n`)
 
+  // Before the compile below, which fetches whatever is missing: what the hooks would find now.
+  const uncached = ci ? await uncachedRepos(root, registry, home, io) : []
   // With doctor's own environment: the mode a hook would run in when started from this shell.
   const project = await compile({ root, registry, repos: fetchingRepos(home), env: io.env })
   const configErrors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error").length
@@ -142,7 +165,14 @@ export async function doctorCommand(
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0
     const missing = state?.missing ?? []
-    const level: Level = file === null || !resolves || stale || missing.length > 0 ? "warning" : "ok"
+    // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
+    // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
+    const level: Level =
+      file !== null && !resolves && ci
+        ? "error"
+        : file === null || !resolves || stale || missing.length > 0
+          ? "warning"
+          : "ok"
     count(level)
     const detail =
       file === null
@@ -167,6 +197,13 @@ export async function doctorCommand(
     // Not an error of its own: compile has already said so if it mattered.
     io.stdout(`  repos      ${label} — ${cached ? "cached" : "not fetched (run rulecast install)"}\n`)
   }
+  if (ci) {
+    io.stdout("\nci\n")
+    for (const check of await ciChecks(project, uncached, flags.fromRef)) {
+      count(check.level)
+      io.stdout(line(check.level, check.what, check.detail))
+    }
+  }
   io.stdout("\ndry run\n")
   const dry = await dryRun(project, detectionFor(project, registry, stateDir, createReferenceResolver(root)))
   if (dry.length === 0) io.stdout("  nothing to run\n")
@@ -181,6 +218,72 @@ export async function doctorCommand(
     `\n${errors + warnings === 0 ? "no problems found" : [plural(errors, "error"), plural(warnings, "warning")].join(", ")}\n`,
   )
   return errors > 0 ? 2 : 0
+}
+
+interface CheckLine {
+  level: Level
+  what: string
+  detail: string
+}
+
+/** The pinned repos missing from the cache, compiled as a hook would, with the rules each keeps from running. */
+async function uncachedRepos(
+  root: string,
+  registry: DetectorRegistry,
+  home: string,
+  io: CliIo,
+): Promise<{ source: string; rules: number }[]> {
+  const asHooks = await compile({ root, registry, repos: cachedRepos(home), env: io.env })
+  return asHooks.diagnostics
+    .filter((diagnostic) => diagnostic.hint === "rulecast install")
+    .map((diagnostic) => ({ source: diagnostic.source, rules: diagnostic.rules?.length ?? 0 }))
+}
+
+/**
+ * What a fresh environment gets wrong (#29). Each is checked as the thing that will meet it: the
+ * repos as the hooks see them — doctor's own compile fetches any that are missing, so its passing
+ * proves nothing about them — and the history as `rulecast run --from-ref` will need it.
+ */
+async function ciChecks(
+  project: CompiledProject,
+  uncached: readonly { source: string; rules: number }[],
+  fromRef: string | null,
+): Promise<CheckLine[]> {
+  const checks: CheckLine[] = []
+  for (const { source, rules } of uncached) {
+    checks.push({
+      level: "error",
+      what: `${source} not in the cache`,
+      detail: `hooks never fetch, so ${plural(rules, "rule")} would not run; run rulecast install before the agent starts`,
+    })
+  }
+  if (uncached.length === 0 && project.config.repos.some((entry) => entry.repo !== "local")) {
+    checks.push({ level: "ok", what: "rule repos cached", detail: "" })
+  }
+  checks.push(
+    project.mode.mode === "attended"
+      ? {
+          level: "warning",
+          what: "mode",
+          detail: `${modeText(project.mode, project.config)}. An agent run here is gated as if someone were watching`,
+        }
+      : { level: "ok", what: "mode", detail: modeText(project.mode, project.config) },
+  )
+  if (fromRef !== null) {
+    try {
+      await mergeBase(project.root, fromRef)
+      checks.push({ level: "ok", what: `merge base with ${fromRef}`, detail: "rulecast run --from-ref can run" })
+    } catch (error) {
+      checks.push({ level: "error", what: `rulecast run --from-ref ${fromRef}`, detail: errorMessage(error) })
+    }
+  } else if (await isShallow(project.root)) {
+    checks.push({
+      level: "warning",
+      what: "shallow clone",
+      detail: "rulecast run --from-ref needs full history (actions/checkout: fetch-depth: 0)",
+    })
+  } else checks.push({ level: "ok", what: "full history", detail: "" })
+  return checks
 }
 
 interface DryRunLine {

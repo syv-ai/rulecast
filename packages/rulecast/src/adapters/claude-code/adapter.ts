@@ -1,4 +1,5 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
+import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
 import { parseClaudeCode } from "./parse"
 import { mergeHooks, removeHooks } from "./settings"
@@ -25,6 +26,19 @@ const REPORT_PREAMBLE =
   "(its stop limit is reached, or they have already blocked twice). Do not keep retrying them. " +
   "Record each one as unresolved in your final report, and in this run's decisions file if it keeps one, with why it is unresolved. Then finish."
 
+/**
+ * Unattended, once per prompt: nothing blocks, but rules did not run (#29). Reported, not repaired:
+ * `rulecast install` can rewrite hook settings, and an agent changing rulecast's own setup to get
+ * past it is the thing a loop must not learn. Fixing the environment is the pipeline's job.
+ */
+const INCOMPLETE_PREAMBLE =
+  "rulecast could not run some of this project's rules, so your work was not checked against them. " +
+  "Do not try to repair rulecast's setup. State in your final report, and in this run's decisions file if it keeps one, " +
+  "that these checks did not run and why. Then finish."
+
+/** Under a block's findings: what the agent's report must say was never checked. */
+const NOT_CHECKED = "Not checked (rulecast could not run these rules; say so in your report):"
+
 const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
 
 const SWEPT_PREAMBLE =
@@ -41,17 +55,37 @@ export const NOT_INSTALLED =
   "rulecast is configured in this project but not installed. Run npm install (or pnpm install), then rulecast doctor."
 
 /**
+ * What every stop says when rulecast is not installed and the run is unattended as the shell can
+ * see it (#29): nobody reads the SessionStart message in a loop, and "no findings" is not "checked".
+ */
+export const NOT_INSTALLED_UNATTENDED =
+  "rulecast is configured in this project but not installed: no rules ran this session. Run npm ci (or pnpm install) before starting the agent."
+
+/**
+ * Unattended as the shell sees it: RULECAST_MODE, else CI or GITHUB_ACTIONS set and not false or 0,
+ * as config/mode.ts resolves it. The config's `mode:` is out of its reach, and RULECAST_MODE is
+ * matched lowercase only.
+ */
+const SHELL_UNATTENDED =
+  'U=; case "$CI" in ""|false|0) ;; *) U=1;; esac; case "$GITHUB_ACTIONS" in ""|false|0) ;; *) U=1;; esac; ' +
+  'case "$RULECAST_MODE" in unattended) U=1;; attended|interactive) U=;; esac; '
+
+/**
  * The committed hook command, guarded. A bare path to `node_modules/.bin/rulecast` exits 127 in a
  * clone that has not installed yet, which Claude Code shows as a hook error on every Read and Edit
  * (recorded in test/payloads/claude-code/README.md). Guarded, it runs rulecast when it is there and
- * otherwise exits 0, after telling the user on `SessionStart` only. stdin is read only on that
- * branch; `exec` hands it to rulecast untouched. One string for every event, so the plugin API's
- * `command(local)` is unchanged, and it still contains "rulecast hook claude-code", which is how
- * settings.ts recognises its own hooks.
+ * otherwise exits 0, after telling the user on `SessionStart`, and — unattended — at every stop.
+ * Never a block: without session state it could not hold the agent only once per prompt. stdin is
+ * read only on that branch; `exec` hands it to rulecast untouched. One string for every event, so
+ * the plugin API's `command(local)` is unchanged, and it still contains "rulecast hook claude-code",
+ * which is how settings.ts recognises its own hooks.
  */
 export const LOCAL_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
-  `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; exit 0`
+  SHELL_UNATTENDED +
+  "P=$(cat); " +
+  `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
+  `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`
 
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
@@ -93,7 +127,15 @@ export const claudeCodeAdapter: Adapter = {
     // Oversight), and rule or detector problems, which only the human can fix (§11).
     const problems =
       delivery.warnings.length === 0 ? [] : ["rulecast problems:", ...delivery.warnings.map((w) => `  - ${w}`)]
-    const notices = [...(delivery.notices ?? []), ...problems].join("\n")
+    // Set only at an unattended stop, and said at every one of them, not once (#29).
+    const disabled = (delivery.disabled ?? []).map(disabledText)
+    const notRun =
+      disabled.length === 0 ? [] : ["rulecast: rules that did not run:", ...disabled.map((d) => `  - ${d}`)]
+    const notices = [...(delivery.notices ?? []), ...problems, ...notRun].join("\n")
+    if (event.kind === "verify" && delivery.stop === "incomplete") {
+      const reason = `${INCOMPLETE_PREAMBLE}\n\n${disabled.map((d) => `- ${d}`).join("\n")}`
+      return json({ decision: "block", reason, systemMessage: notices })
+    }
     const userOnly = event.kind === "guard" ? NONE : json({ systemMessage: notices })
     if (text === "") return notices === "" ? NONE : userOnly
     const withNotices = (value: Record<string, unknown>) =>
@@ -140,8 +182,14 @@ export const claudeCodeAdapter: Adapter = {
               : delivery.unattended === true
                 ? UNATTENDED_BLOCK_PREAMBLE
                 : BLOCK_PREAMBLE
+          // Before the findings, so the limit's cut, which takes the tail, never takes it.
+          const notChecked =
+            disabled.length === 0 ? "" : `${NOT_CHECKED}\n${disabled.map((d) => `- ${d}`).join("\n")}\n\n`
           return json(
-            withNotices({ decision: "block", reason: withinLimit(`${preamble}\n\n${text}`, delivery, event) }),
+            withNotices({
+              decision: "block",
+              reason: withinLimit(`${preamble}\n\n${notChecked}${text}`, delivery, event),
+            }),
           )
         }
         if (delivery.stop === "capReached") {

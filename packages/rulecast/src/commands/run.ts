@@ -187,6 +187,7 @@ export async function executeRun({ project, ruleId, run, registry, io }: RunInpu
     maxContextChars: null,
     skipDetectorKinds: skipMetered ? meteredKinds : undefined,
     onlyRules: ruleId === null ? undefined : new Set([ruleId]),
+    reportDisabled: true,
   })
   const text = formatDelivery(result.delivery, run.format, {
     maxMatchesPerRule: project.config.maxMatchesPerRule,

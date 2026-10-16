@@ -151,3 +151,93 @@ describe("hook claude-code: unattended stops", () => {
     expect(await write({ ...testEnv, RULECAST_MODE: "unattended" })).toBe("deny")
   })
 })
+
+/**
+ * #29: configured rules that cannot run. A fresh clone that never ran `rulecast install` (a pinned
+ * repo missing from the cache: hooks never fetch), and a detector whose tool is not installed.
+ */
+describe("hook claude-code: rules that did not run", () => {
+  const MISSING_TOOL = {
+    id: "shell",
+    name: "Shell",
+    files: "\\.py$",
+    detect: { command: { run: ["definitely-not-a-real-binary-9x7", "{{files}}"] } },
+    message: "{{file}}:{{line}} bad.",
+  }
+
+  async function fresh(config: string, env: Env) {
+    const root = await createRepo({ "a.py": "x = 1\n", ".rulecast-config.yaml": config })
+    const hook = async (name: string, file?: string) => {
+      const payload = JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" }))
+      const { stdout } = await runCli(root, ["hook", "claude-code"], payload, env)
+      return stdout === "" ? null : JSON.parse(stdout)
+    }
+    let stops = 0
+    const stop = () => hook(stops++ === 0 ? "stop" : "stop.after-block")
+    const edit = async () => {
+      await writeFile(path.join(root, "a.py"), "x = 2\n")
+      return hook("post-tool-use.edit", "a.py")
+    }
+    return { root, hook, stop, edit }
+  }
+
+  const uncachedRepo = async () => {
+    const url = path.join(await createRepo({}), "never-installed.git")
+    return {
+      url,
+      config: `repos:\n  - repo: ${url}\n    rev: v1.0.0\n    rules:\n      - id: py/a\n      - id: py/b\n`,
+    }
+  }
+  const UNATTENDED_ENV = { ...testEnv, RULECAST_MODE: "unattended" }
+
+  test("unattended, a repo never installed holds the main agent once per prompt, then says it at every stop", async () => {
+    const { url, config } = await uncachedRepo()
+    const { hook, stop, edit } = await fresh(config, UNATTENDED_ENV)
+    await edit()
+    const line = `2 rules disabled: ${url}@v1.0.0: not in the cache (run rulecast install)`
+    const first = await stop()
+    expect(first.decision).toBe("block")
+    expect(first.reason).toContain("State in your final report")
+    expect(first.reason).toContain(line)
+    for (let n = 0; n < 2; n++) {
+      const later = await stop()
+      expect(later.decision).toBeUndefined()
+      expect(later.systemMessage).toContain(line)
+    }
+    // A subagent is told, never held: its report goes to its parent, which is held.
+    const subagent = await hook("subagent-stop")
+    expect(subagent.decision).toBeUndefined()
+    expect(subagent.systemMessage).toContain(line)
+    // A new prompt is a new report: the agent is held once more.
+    await hook("user-prompt-submit")
+    expect((await stop()).decision).toBe("block")
+  })
+
+  test("unattended, a detector whose tool is missing is named at every stop, not only the first time", async () => {
+    const { stop, edit } = await fresh(localConfig([MISSING_TOOL]), UNATTENDED_ENV)
+    await edit()
+    const first = await stop()
+    expect(first.decision).toBe("block")
+    expect(first.reason).toMatch(/1 rule disabled: command detector: .*definitely-not-a-real-binary-9x7/)
+    for (let n = 0; n < 2; n++) {
+      expect((await stop()).systemMessage).toMatch(
+        /1 rule disabled: command detector: .*definitely-not-a-real-binary-9x7/,
+      )
+    }
+  })
+
+  test("CI implies it, as it implies unattended", async () => {
+    const { config } = await uncachedRepo()
+    const { stop, edit } = await fresh(config, { ...testEnv, CI: "true" })
+    await edit()
+    expect((await stop()).reason).toContain("2 rules disabled")
+  })
+
+  test("attended, unchanged: said once to the user, never a block, and later stops say nothing", async () => {
+    const { config } = await uncachedRepo()
+    const { stop, edit } = await fresh(config, testEnv)
+    const warned = await edit()
+    expect(warned.systemMessage).toContain("rulecast install")
+    for (let n = 0; n < 3; n++) expect(await stop()).toBeNull()
+  })
+})
