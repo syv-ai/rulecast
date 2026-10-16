@@ -137,9 +137,19 @@ describe("rulecast fix", () => {
     const result = await fix(root, "--all-files")
     expect(result.code).toBe(1)
     expect(result.stdout).toContain(
-      "the fix for py/logger fails its examples, so it was not applied (run rulecast test py/logger)",
+      "the fix for py/logger fails its examples (bad[0]), so it was not applied (run rulecast test py/logger)",
     )
     expect(await read(root, "app.py")).toBe(VIOLATIONS)
+  })
+
+  test("a failing baseline example says nothing about the fix, which is applied", async () => {
+    const baseline = { path: "a.py", before: 'print("hi")\n', after: 'x = 1\nprint("hi")\n', expect: { new: [2] } }
+    const root = await repo([{ ...LOGGER, examples: { ...LOGGER.examples, baseline: [baseline] } }])
+    expect((await runCli(root, ["test", "py/logger"])).code).toBe(1)
+    const result = await fix(root, "--all-files")
+    expect(result.stdout).not.toContain("fails its examples")
+    expect(result.code).toBe(0)
+    expect(await read(root, "app.py")).toBe('log.info("a")\nx = 1\nlog.info(b, c)\n')
   })
 
   test("RULE_ID fixes that rule only, and checks only it", async () => {

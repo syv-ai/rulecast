@@ -120,7 +120,8 @@ function notFixable(rule: string, warnings: readonly string[]): string {
  *
  * Every finding of a fixable rule in the selected files is fixed, pre-existing ones too: a verified
  * deterministic fix is how a backlog is burned down. `--from-ref` narrows it to the changed files.
- * A rule's fix is first run over its own `bad` examples, and a rule whose examples fail is skipped.
+ * A rule's fix is first run over its own `bad` examples, and a rule whose good or bad examples fail
+ * is skipped.
  *
  * The exit code is `run`'s, from a check after writing. Under `--dry-run` nothing is written, so the
  * code is an estimate: the check of the files as they are, less the findings the fixes would remove.
@@ -158,9 +159,16 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
     .filter((rule) => rule.enabled && rule.fixable && (ruleId === null || rule.id === ruleId))
   for (const rule of candidates) {
     const examples = await runExamples({ detection, rule, timeoutMs })
-    if (examples.outcomes.every((outcome) => outcome.passed)) usable.push(rule)
+    // The good and bad examples, and the fix check on each bad one: a `baseline` example tests the
+    // rule's sense of new against pre-existing, which says nothing about what the fix writes.
+    const failed = examples.outcomes
+      .filter((outcome) => outcome.kind !== "baseline" && !outcome.passed)
+      .map(({ kind, index }) => `${kind}[${index}]`)
+    if (failed.length === 0) usable.push(rule)
     else
-      warnings.push(`the fix for ${rule.id} fails its examples, so it was not applied (run rulecast test ${rule.id})`)
+      warnings.push(
+        `the fix for ${rule.id} fails its examples (${failed.join(", ")}), so it was not applied (run rulecast test ${rule.id})`,
+      )
   }
 
   // The rules `run` would check on these files: a fix applies to what the check after it reports.
