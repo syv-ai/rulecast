@@ -378,6 +378,11 @@ export interface Delivery {
    * not once per context, as warnings are — and on every `rulecast run`. Never priced into the budget.
    */
   disabled?: DisabledGroup[]
+  /**
+   * For the agent, each said once per session: what changes how it should read this delivery, such
+   * as another agent's shell call running alongside its own. Printed first, so a cut never drops it.
+   */
+  agentNotices?: string[]
 }
 
 export interface AdapterInput {

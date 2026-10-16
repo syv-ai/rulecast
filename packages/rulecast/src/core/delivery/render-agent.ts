@@ -302,8 +302,10 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
   const title = header(delivery)
   const notices = options.notices === false ? [] : (delivery.notices ?? [])
   const warnings = options.warnings === false ? [] : delivery.warnings
-  if (title === null && warnings.length === 0 && notices.length === 0) return ""
+  const agentNotices = delivery.agentNotices ?? []
+  if (title === null && warnings.length === 0 && notices.length === 0 && agentNotices.length === 0) return ""
   const out: string[] = []
+  if (agentNotices.length > 0) out.push(...agentNotices, "")
   if (title !== null) out.push(title, "")
 
   // Appended in place: rebuilding the array per finding is quadratic in one rule's matches, and a
