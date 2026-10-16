@@ -134,7 +134,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 - **Pre-commit:** `rulecast run` with no file flags checks the staged files, reads their content from the index (what is being committed, not the working tree), and judges it against `HEAD`. `llm` rules are skipped unless you pass `--llm`, and one line says so: a commit should not cost money.
 - **Pre-push and CI:** `rulecast run --from-ref A --to-ref B` checks the files changed between the merge base with `A` and `B`, reading them at `B`. Without `--to-ref` it reads the working tree.
 - `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
-- **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse.
+- **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse. Recipes for `/goal`, `/loop` and scheduled sweeps: [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md).
 
 rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks need it there anyway), and wire it into the one you use.
 
@@ -304,7 +304,9 @@ When agents run in parallel in one working tree and one of them changes files wi
 can be blamed for what the others wrote while its command ran, with any tool. rulecast tells an agent
 once when its shell call overlapped another agent's and files changed while it ran. For parallel agents, give each its own worktree
 (in Claude Code, a subagent with `isolation: worktree`).
-If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](https://github.com/syv-ai/rulecast/blob/main/packages/rules-loop-safety/loop-safety.md).
+
+If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](https://github.com/syv-ai/rulecast/blob/main/packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
+
 As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.

@@ -15,6 +15,7 @@ const DOCS = [
   "agents/reference/detectors.md",
   "agents/reference/tool-recipes.md",
   "agents/reference/output.md",
+  "agents/reference/loops.md",
 ]
 
 const FENCE = /^[ \t]*(`{3,}|~{3,})[\s\S]*?^[ \t]*\1[ \t]*$/gm

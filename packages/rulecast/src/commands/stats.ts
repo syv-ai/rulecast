@@ -99,7 +99,9 @@ function terminal(document: StatsDocument): string {
     out.push("noisy:")
     for (const rule of noisy) {
       const reasons = rule.noisy.map((reason) =>
-        reason === "repeats" ? `${percent(rule.repeatRate)} repeated` : `${percent(rule.suppressionRate)} suppressed`,
+        reason === "repeats"
+          ? `${percent(rule.repeatRate)} repeated`
+          : `${percent(rule.suppressionRate)} ${rule.suppressAttempted > 0 ? "suppressed or ignores tried" : "suppressed"}`,
       )
       out.push(`  ${rule.rule}: ${reasons.join(", ")}`)
     }

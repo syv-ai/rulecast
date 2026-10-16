@@ -33,6 +33,7 @@ describe("gate, unattended", () => {
     expect(gate(fresh, foldWork([]), "main", 3, new Set(), "unattended")).toEqual({
       stop: "block",
       work: [{ t: "stopBlock", agent: "main", findings: [findingKey(fresh[0]!)] }],
+      blocking: [findingKey(fresh[0]!)],
     })
   })
 
@@ -126,7 +127,11 @@ describe("gate, unattended", () => {
 
   test("attended, nothing of this applies: the record carries no findings and there is no report", () => {
     const fresh = [finding("a/rule", "bad")]
-    expect(gate(fresh, foldWork([]), "main", 1)).toEqual({ stop: "block", work: [{ t: "stopBlock", agent: "main" }] })
+    expect(gate(fresh, foldWork([]), "main", 1)).toEqual({
+      stop: "block",
+      work: [{ t: "stopBlock", agent: "main" }],
+      blocking: [findingKey(fresh[0]!)],
+    })
     const after = foldWork([{ t: "stopBlock", agent: "main" }])
     expect(gate(fresh, after, "main", 1).stop).toBe("capReached")
   })

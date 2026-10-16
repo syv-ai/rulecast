@@ -29,6 +29,8 @@ export interface FindingLife {
   blocks: number
   /** Writes refused, or shell writes the agent was told to revert, over it. */
   refusals: number
+  /** Events at which it was under one of the ignores the agent added or changed, which silenced nothing (unattended). */
+  suppressAttempts: number
   /** For a fixed one: the agent's stops between its first report and the fix; 0 is the same turn. */
   turnsToFix: number | null
 }
@@ -79,10 +81,12 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
     // match's text instead (a redacted or whole-file match) can change with one: the same rule
     // ignored on the line it was last reported on is it.
     const ignoredAt = new Set(record.ign.map((match) => `${match.r}\u0000${match.f}\u0000${match.l}`))
-    const seen = (life: Open, finding: { o: string; l: number }) => {
+    const tried = new Set((record.tried ?? []).map((match) => match.id))
+    const seen = (life: Open, finding: { id: string; o: string; l: number }) => {
       const outcome = finding.o
       life.line = finding.l
       life.deliveries++
+      if (tried.has(finding.id)) life.suppressAttempts++
       if (record.ev === "stop") life.stopsPresent++
       if (outcome === "blocked") life.blocks++
       if (outcome === "refused") life.refusals++
@@ -117,6 +121,7 @@ export function derive(records: readonly FindingsRecord[], since: Date | null = 
         stopsPresent: 0,
         blocks: 0,
         refusals: 0,
+        suppressAttempts: 0,
         turnsToFix: null,
         stopsAtOpen: stopsOf(record.a),
         line: finding.l,
@@ -154,11 +159,17 @@ export interface RuleStats {
   fixed: number
   ignored: number
   suppressed: number
+  /**
+   * Findings under ignores the agent added or changed that silenced nothing, as in unattended mode.
+   * Apart from `suppressed`, but counted with it in `suppressionRate` (D55).
+   */
+  suppressAttempted: number
   prevented: number
   open: number
   repeated: number
   medianTurnsToFix: number | null
   repeatRate: number
+  /** Findings suppressed or with an attempt to suppress them, over `fired`: the agent wanted each one silenced. */
   suppressionRate: number
   noisy: ("repeats" | "suppressed")[]
 }
@@ -187,7 +198,12 @@ export function ruleStats(lives: readonly FindingLife[]): RuleStats[] {
     const repeated = count(isRepeated)
     const suppressed = count((life) => life.state === "suppressed")
     const repeatRate = rate(repeated, fired)
-    const suppressionRate = rate(suppressed, fired)
+    // An unattended ignore that silenced nothing still says the agent wanted the finding gone
+    // unfixed: as much a sign of a wrong or too broad rule as one that worked. Counted once.
+    const suppressionRate = rate(
+      count((life) => life.state === "suppressed" || life.suppressAttempts > 0),
+      fired,
+    )
     const noisy: RuleStats["noisy"] = []
     if (fired >= NOISY_MIN_FIRED && repeatRate >= NOISY_REPEAT_RATE) noisy.push("repeats")
     if (fired >= NOISY_MIN_FIRED && suppressionRate >= NOISY_SUPPRESSION_RATE) noisy.push("suppressed")
@@ -199,6 +215,7 @@ export function ruleStats(lives: readonly FindingLife[]): RuleStats[] {
       fixed: count((life) => life.state === "fixed"),
       ignored: count((life) => life.state === "ignored"),
       suppressed,
+      suppressAttempted: count((life) => life.suppressAttempts > 0),
       prevented: count((life) => life.state === "prevented"),
       open: count((life) => life.state === "open"),
       repeated,

@@ -31,6 +31,8 @@ The run used 6 turns and cost $0.005. The agent ran no `rulecast` command and di
 
 `rulecast run --all-files` in the same repository (it fetches, and the fetch fails) ended with `no findings · incomplete: 2 rules did not run (see above)` and exit 2, and `--format json` gave `disabled: [{reason: "…: fetch failed: …", rules: ["python/no-bare-except", "python/no-mutable-default"]}]`. `CI=true rulecast doctor` printed the `ci` section with "error … not in the cache — hooks never fetch, so 2 rules would not run; run rulecast install before the agent starts", and exited 2.
 
+> **Note, added later:** the exit 2 above was recorded before #25's output contract was merged. Under it, a run where some rules did not run is incomplete and exits **3**; 2 now means rulecast could not run at all. The same setup re-run on the integration branch exited 3 (`docs/evidence/2026-10-16-loop-recipes.md`). The record above is left as it was.
+
 ## Run 2: rulecast not installed
 
 The same project with the hook command `rulecast install` writes when `node_modules/.bin/rulecast` exists (the guarded `LOCAL_COMMAND`), committed, and `node_modules` then removed. This is a clone where nobody ran `npm ci`. The task was "Create app.py that logs hello with the logging module. Reply in one sentence."

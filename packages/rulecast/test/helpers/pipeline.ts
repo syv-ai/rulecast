@@ -6,13 +6,26 @@ import type { Event } from "../../src/core/types"
 import { registry as fixtureRegistry } from "./fixture"
 import { stateDirFor, TEST_HOME } from "./home"
 
-/** Compiles the project at `root` and runs one event through the pipeline with the test cache home. */
+/**
+ * Compiles the project at `root` and runs one event through the pipeline with the test cache home.
+ * `env`: the hook's environment the mode is resolved from; without it the mode is attended.
+ */
 export async function pipelineAt(
   root: string,
   event: Event,
-  options: Partial<Omit<PipelineOptions, "project" | "stateDir" | "event">> = {},
+  {
+    env,
+    ...options
+  }: Partial<Omit<PipelineOptions, "project" | "stateDir" | "event">> & {
+    env?: Record<string, string | undefined>
+  } = {},
 ): Promise<PipelineResult> {
   const registry: DetectorRegistry = options.registry ?? fixtureRegistry
-  const project = await compile({ root, registry, repos: cachedRepos(TEST_HOME) })
+  const project = await compile({
+    root,
+    registry,
+    repos: cachedRepos(TEST_HOME),
+    ...(env === undefined ? {} : { env }),
+  })
   return runPipeline({ maxContextChars: null, ...options, registry, project, stateDir: stateDirFor(root), event })
 }

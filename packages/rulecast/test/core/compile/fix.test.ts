@@ -56,6 +56,14 @@ describe("compiling a rule with fix", () => {
     }
   })
 
+  test("fix on a scope: removed rule is refused: its matches are what the rule keeps", async () => {
+    const project = await compileRules(regexRule({ scope: "removed" }))
+    expect(project.rules).toEqual([])
+    expect(project.diagnostics.map((diagnostic) => [diagnostic.rule, diagnostic.message])).toEqual([
+      ["py/logger", "fix cannot be combined with scope: removed: its matches are what the rule keeps"],
+    ])
+  })
+
   test("a fix with no bad example is dropped with a warning, and the rule still runs", async () => {
     for (const examples of [undefined, { good: [{ path: "a.py", code: "log.info(1)\n" }] }]) {
       const project = await compileRules(regexRule({ examples }))

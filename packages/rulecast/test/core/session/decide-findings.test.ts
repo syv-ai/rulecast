@@ -38,6 +38,23 @@ function input(overrides: Partial<DecideInput> = {}): DecideInput {
 }
 
 describe("decide: findings", () => {
+  test("a removed finding is never fixable, even of a rule that says it fixes", async () => {
+    const removed = rule({ id: "tests/keep", scope: "removed", fixable: true, message: "{{removed}} removed" })
+    const fixing = rule({ id: "py/logger", fixable: true })
+    const { delivery } = await decide(
+      input({
+        findings: [
+          { rule: removed, match: { ...at("t.py", 2, { removed: "1" }), text: "removed" }, id: "r1", status: "new" },
+          { rule: fixing, match: at("a.py", 1), id: "f1", status: "new" },
+        ],
+      }),
+    )
+    expect(delivery.findings.map(({ id, fixable }) => [id, fixable])).toEqual([
+      ["f1", true],
+      ["r1", undefined],
+    ])
+  })
+
   test("renders messages, merges identical findings and orders errors first", async () => {
     const { delivery } = await decide(
       input({

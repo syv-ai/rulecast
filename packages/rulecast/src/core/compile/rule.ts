@@ -176,6 +176,8 @@ export async function compileRule(
       if (data.refuse_write) {
         return "refuse_write cannot be combined with scope: removed: its matches are what the rule keeps"
       }
+      // A fix would rewrite the very matches the rule counts, and its removal would be the finding.
+      if (hasFix) return "fix cannot be combined with scope: removed: its matches are what the rule keeps"
     }
     const known = new Set<string>([
       ...CORE_VARIABLES,

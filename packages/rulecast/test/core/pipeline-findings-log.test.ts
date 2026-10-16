@@ -22,10 +22,11 @@ const VIOLATION = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
 
 type Send = Omit<Event, "cwd" | "session"> & { agentId?: string }
 
-function sessionAt(root: string, id = "s1") {
+function sessionAt(root: string, id = "s1", env?: Record<string, string>) {
   const send = async (event: Send) => {
     const { agentId, ...rest } = event
-    return (await pipelineAt(root, { ...rest, cwd: root, session: { id, agentId } }, { stopGate: true })).delivery
+    const options = { stopGate: true, ...(env === undefined ? {} : { env }) }
+    return (await pipelineAt(root, { ...rest, cwd: root, session: { id, agentId } }, options)).delivery
   }
   return {
     send,
@@ -151,6 +152,71 @@ describe("the findings log", () => {
     ])
     const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
     expect(document.rules[0]).toMatchObject({ fired: 1, refused: 1, fixed: 1, medianTurnsToFix: 0 })
+  })
+
+  test("unattended: a finding past the repeat limit is delivered at a block, and a report stop is a block", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    await session.write(USERS, VIOLATION)
+    await session.send({ kind: "edit", files: [USERS] })
+    const stops = []
+    for (let i = 0; i < 2; i++) stops.push((await session.send({ kind: "verify", files: [] })).stop)
+    // A second violation: the stop blocks on it, not on the first, which has blocked twice.
+    await session.write(USERS, `${VIOLATION}    raise HTTPException(501)\n`)
+    await session.send({ kind: "edit", files: [USERS] })
+    for (let i = 0; i < 3; i++) stops.push((await session.send({ kind: "verify", files: [] })).stop)
+    expect(stops).toEqual(["block", "block", "block", "block", "report"])
+
+    const outcomes = (await session.log())
+      .filter(({ ev }) => ev === "stop")
+      .map(({ found }) => Object.fromEntries(found.map(({ l, o }) => [l, o])))
+    expect(outcomes).toEqual([
+      { 3: "blocked" },
+      { 3: "blocked" },
+      { 3: "delivered", 4: "blocked" },
+      { 3: "delivered", 4: "blocked" },
+      { 3: "blocked", 4: "blocked" },
+    ])
+  })
+
+  test("unattended: an ignore on a changed line silences nothing, and stats counts the attempt", async () => {
+    const root = await createFixture()
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    const ignore = "  # rulecast-ignore: backend/no-httpexception the caller wants it"
+    await session.write(USERS, `${fixtureFiles[USERS]}    raise HTTPException(500)${ignore}\n`)
+    expect((await session.send({ kind: "edit", files: [USERS] })).findings).toHaveLength(1)
+    const [record] = await session.log()
+    expect(record!.ign).toEqual([])
+    expect(record!.tried).toEqual([expect.objectContaining({ r: "backend/no-httpexception", f: USERS, l: 3 })])
+
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.rules[0]).toMatchObject({ fired: 1, suppressed: 0, suppressAttempted: 1 })
+  })
+
+  test("unattended: code edited under an ignore already in the code is not silenced, and is no attempt", async () => {
+    // D49: the developer agreed to the comment for the code it covered, so the finding is the
+    // agent's. But the agent wrote no ignore, so stats must not count one against it.
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const root = await createRepo({ ...fixtureFiles, [USERS]: `def get():\n${above}    raise HTTPException(500)\n` })
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    await session.write(USERS, `def get():\n${above}    raise HTTPException(501)\n`)
+    expect((await session.send({ kind: "edit", files: [USERS] })).findings).toHaveLength(1)
+    const [record] = await session.log()
+    expect(record!.found).toEqual([expect.objectContaining({ r: "backend/no-httpexception", f: USERS, l: 3 })])
+    expect(record!.tried).toBeUndefined()
+
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.rules[0]).toMatchObject({ fired: 1, suppressed: 0, suppressAttempted: 0 })
+  })
+
+  test("unattended: an ignore the agent wrote on the line above code it changed is an attempt", async () => {
+    const above = "    # rulecast-ignore: backend/no-httpexception the caller expects it\n"
+    const root = await createRepo({ ...fixtureFiles, [USERS]: "def get():\n    raise HTTPException(500)\n" })
+    const session = sessionAt(root, "s1", { RULECAST_MODE: "unattended" })
+    await session.write(USERS, `def get():\n${above}    raise HTTPException(501)\n`)
+    expect((await session.send({ kind: "edit", files: [USERS] })).findings).toHaveLength(1)
+    const [record] = await session.log()
+    expect(record!.tried).toEqual([expect.objectContaining({ r: "backend/no-httpexception", f: USERS, l: 3 })])
   })
 
   test("an edit no rule checks, and a CLI run, write nothing", async () => {

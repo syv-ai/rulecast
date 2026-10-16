@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
+import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
 import { removedFindings } from "./baseline/removed"
@@ -22,7 +23,7 @@ import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
-import { type ClassifiedFinding, type DecideInput, type Decision, decide } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -421,6 +422,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let touches: CompiledRule[] = []
   let findings: ClassifiedFinding[] = []
   let ignored: IgnoredFinding[] = []
+  /**
+   * Unattended: ignores the agent added or changed, on findings they did not silence (D49). The
+   * findings log keeps them as the agent's attempts; an unchanged comment over changed code is none.
+   */
+  let tried: IgnoredFinding[] = []
   let ran: Map<string, string[]> | undefined
   let told: Notice[] = []
   let agentRead: string | null = null
@@ -521,16 +527,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       (options.onlyRules?.has(rule.id) ?? true) &&
       (event.kind === "verify" || rule.scope !== "removed")
     let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
-    if (options.reportDisabled === true && disabled.size > 0) {
-      for (const { rule } of selectDetectorRules(project.rules, event.kind, files, new Set())) {
-        if (!disabled.has(rule.id) || !wanted(rule)) continue
-        failed = true
-        warnings.push({
-          key: `disabled:${rule.id}`,
-          text: `${rule.id} did not run: its detector failed earlier in this session (${view.work.disabled.get(rule.id)}), which disabled it for the session.`,
-        })
-      }
-    }
+    // `rulecast run --session`: a rule the session disabled that would have run here did not, which
+    // makes the run incomplete. It is named under `disabled` below, once; one that would not have
+    // run here changes nothing about this run, and is not named.
+    const skippedHere = new Set(
+      options.reportDisabled === true && disabled.size > 0
+        ? selectDetectorRules(project.rules, event.kind, files, new Set())
+            .map(({ rule }) => rule)
+            .filter((rule) => disabled.has(rule.id) && wanted(rule))
+            .map((rule) => rule.id)
+        : [],
+    )
+    if (skippedHere.size > 0) failed = true
     // Spec §6: a detector that declares a file budget is given at most that many files per verify,
     // most recently edited first. work.edited is least recently edited first, so it is reversed.
     const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
@@ -628,6 +636,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Every one of them is in the debug log above, which is where the summary points.
     warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
     const kept = new Set(unsilenced.map(({ match }) => match))
+    // An attempt only when the comment's own line changed this session: the agent wrote or edited
+    // the ignore. Over code the agent changed under a comment it left alone, the finding is not
+    // silenced, but no ignore was tried.
+    const commentChanged = ({ match, ignoreLine }: IgnoredFinding) =>
+      isNew({ ...match, line: ignoreLine, endLine: ignoreLine }, changes)
+    tried = unsilenced.filter(commentChanged).map(({ status: _, ...item }) => item)
     ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
     const incomplete = new Set([
       ...output.errors.flatMap((error) => error.rules),
@@ -671,12 +685,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
     ) {
       const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
-      const earlier = [...view.work.disabled].map(([rule, message]) => ({
-        kind: kinds.get(rule) ?? "detector",
-        rules: [rule],
-        message,
-      }))
-      disabledGroups = disabledRules({ diagnostics: errors, detectorErrors: [...output.errors, ...earlier] })
+      // `rulecast run` names what kept this run from being complete, and so nothing it did not
+      // count: not another rule's compile error under RULE_ID, nor a disable that would not have run.
+      const scoped = options.reportDisabled === true
+      const earlier = [...view.work.disabled]
+        .filter(([rule]) => !scoped || skippedHere.has(rule))
+        .map(([rule, message]) => ({ kind: kinds.get(rule) ?? "detector", rules: [rule], message }))
+      disabledGroups = disabledRules({
+        diagnostics: scoped ? errors.filter(concernsRun) : errors,
+        detectorErrors: [...output.errors, ...earlier],
+      })
+      // `disabled` and `complete` agree: a run that lists a rule that did not run is incomplete.
+      if (scoped && disabledGroups.length > 0) failed = true
       // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
       // there the warning is the once-per-context word to the user, the list the agent's every stop.
       if (options.reportDisabled === true) {
@@ -790,18 +810,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
    * CLI run has no session, and `run --session` replays a stop that was already logged. After the
    * decision, so a stop knows whether it blocked, and outside the session lock.
    */
-  async function logFindings(agent: string, stop: Delivery["stop"]): Promise<void> {
+  async function logFindings(agent: string, decision: Decision): Promise<void> {
     const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && options.stopGate === true ? "stop" : null
     if (ev === null || ran === undefined || event.session === undefined) return
     // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
     const theirs = new Set(swept)
     const protectedKeys = new Set(refused.map(({ rule, file }) => `${rule} ${file}`))
-    const outcome = ({ rule, match }: ClassifiedFinding): WriteOutcome => {
-      const reverting = protectedKeys.has(`${rule.id} ${match.file}`)
-      // The gate's own test (session/decide.ts). Once #24's unattended mode lands, its `report`
-      // stop is a block that ends the loop, and counts as blocked too.
-      if (ev === "stop") return stop === "block" && (rule.severity === "error" || reverting) ? "blocked" : "delivered"
-      return reverting ? "refused" : "delivered"
+    const outcome = (finding: ClassifiedFinding): WriteOutcome => {
+      // The gate's own verdict (session/decide.ts): a block or an unattended report, and only the
+      // findings it rests on, so not one past the repeat limit that merely rides along.
+      if (ev === "stop") return decision.blocking?.has(findingKey(finding)) === true ? "blocked" : "delivered"
+      return protectedKeys.has(`${finding.rule.id} ${finding.match.file}`) ? "refused" : "delivered"
     }
     const checked = new Map<string, string[]>()
     for (const [rule, files] of ran) {
@@ -820,6 +839,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           .filter(({ status, match }) => status === "new" && !theirs.has(match.file))
           .map((finding) => ({ ...finding, outcome: outcome(finding) })),
         ignored: ignored.filter(({ match }) => !theirs.has(match.file)),
+        tried: tried.filter(({ match }) => !theirs.has(match.file)),
         ran: checked,
       }),
       log,
@@ -844,6 +864,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     } else throw error
     decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
   }
-  await logFindings(session.agent, decision.delivery.stop)
+  await logFindings(session.agent, decision)
   return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
 }
