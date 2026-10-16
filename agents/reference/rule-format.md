@@ -76,7 +76,7 @@ repos:
 | `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
-| `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures |
+| `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures; a removed rule also has `{{removed}}` and `{{baseline}}` (below) |
 | `context` | for touch rules | References delivered with the rule (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
 | `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos. Read before the rest of the rule, so an older rulecast says to upgrade rather than rejecting a key it does not know |
@@ -135,12 +135,15 @@ baseline:
     ast-grep:
       language: python
       rule: { kind: assert_statement }
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back, or, if you combined them on purpose, keep that and say so in your report."
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Put them back, or, if you combined them on purpose, keep that and say so in your report."
 ```
 
 There is one finding per file, always new. It sits on the first line the change touched (the
-file's last line, for a deletion at its end), and `{{text}}` says how many went, for example
-`2 of 5 removed`. A match by itself is never a finding, and adding, moving or rewriting matches is
+file's last line, for a deletion at its end). The message says how many went with `{{removed}}`
+and how many the file had at its baseline with `{{baseline}}`, so the example above reads
+`2 of 5 removed`. Its `{{text}}` is always `removed`: deleting one more match is the same finding,
+not a new one, so an unattended run that keeps deleting is blocked at most twice for it, like any
+other finding (see [Unattended mode](#unattended-mode)). A match by itself is never a finding, and adding, moving or rewriting matches is
 nothing as long as the count does not drop. The count is compared when the agent stops and in
 `rulecast run`, not after each edit: an edit may cut an assertion that the next edit pastes
 somewhere else. Matches on a

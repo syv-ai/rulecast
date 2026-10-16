@@ -410,7 +410,7 @@ describe("rulecast run: a scope: removed rule", () => {
     files: "^tests/",
     scope: "removed",
     detect: { "ast-grep": { language: "python", rule: { kind: "assert_statement" } } },
-    message: "{{file}}:{{line}} removes assertions ({{text}}).",
+    message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed).",
   }
 
   test("--from-ref reports an assertion the branch removed; --all-files has no baseline and reports nothing", async () => {

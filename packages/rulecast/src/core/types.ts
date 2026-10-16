@@ -64,8 +64,18 @@ export interface Match {
   endLine: number
   column: number
   text: string
-  /** Exactly the names the detector declared for the rule. */
+  /**
+   * Exactly the names the detector declared for the rule, plus, on a `scope: removed` finding, its
+   * counts (REMOVED_VARIABLES).
+   */
   captures: Record<string, string>
+  /**
+   * Captures that are not part of what the finding *is*, only of what its message says: a removed
+   * finding's counts, which change with every further deletion while the finding stays the same.
+   * Whatever identifies a finding across runs (the stop gate's `findingKey`, a finding id) leaves
+   * them out, as it does a detector's own volatile captures.
+   */
+  volatileCaptures?: readonly string[]
 }
 
 export interface ChangeSet {

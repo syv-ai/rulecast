@@ -206,7 +206,7 @@
             has:
               field: function
               regex: '\.\s*assert(_\w*|[A-Z]\w*)?$|^pytest\s*\.\s*(raises|warns|deprecated_call|fail)$'
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@loop-safety.md#deleted-assertions"
     - "@loop-safety.md#when-a-test-is-wrong"
@@ -251,7 +251,7 @@
         has:
           field: function
           regex: '^(expect(\s*\.\s*(soft|poll))?|assert(\s*\.\s*\w+)?)$'
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@loop-safety.md#deleted-assertions"
     - "@loop-safety.md#when-a-test-is-wrong"
@@ -292,7 +292,7 @@
         has:
           field: function
           regex: '^(expect(\s*\.\s*(soft|poll))?|assert(\s*\.\s*\w+)?)$'
-  message: "{{file}}:{{line}} removes assertions ({{text}}). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
+  message: "{{file}}:{{line}} removes assertions ({{removed}} of {{baseline}} removed). Put them back and make the test pass by fixing the code. If you believe an assertion is wrong, leave it in place and report which one and why. If you combined assertions on purpose, such as several into one parametrized test or one comparison, keep it and say so in your report."
   context:
     - "@loop-safety.md#deleted-assertions"
     - "@loop-safety.md#when-a-test-is-wrong"

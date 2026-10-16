@@ -143,12 +143,17 @@ async function runOne(
   const failure = output.errors[0]?.message ?? (output.timedOut.length > 0 ? "timed out" : undefined)
   if (failure !== undefined) return { findings: [], error: failure }
 
+  // A removed rule's matches are what a file keeps: its message is rendered as deleting all of them
+  // would report it.
+  const total = String(output.findings.length)
+  const counts: Record<string, string> = input.rule.scope === "removed" ? { removed: total, baseline: total } : {}
   const findings = output.findings.map(({ match }) => ({
     line: match.line,
     column: match.column,
     text: match.text,
     message: renderTemplate(input.rule.message, {
       ...match.captures,
+      ...counts,
       file: example.path,
       line: String(match.line),
       column: String(match.column),
