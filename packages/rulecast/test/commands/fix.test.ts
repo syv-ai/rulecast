@@ -211,6 +211,36 @@ describe("rulecast fix", () => {
     expect(written.diff).toBeUndefined()
   })
 
+  test("--dry-run leaves out a finding fixed in a later pass, after another rule's fix changed its line", async () => {
+    // "a" lies inside print(...): its edit overlaps the logger's, so it waits for pass 2, by when
+    // its line reads log.info("a"). Ids hash the line, so its id there is not the one on disk.
+    const quotes = {
+      id: "py/single-quotes",
+      name: "Single quotes",
+      files: "\\.py$",
+      detect: { regex: { pattern: '"(?<s>a)"', fix: "'{{s}}'" } },
+      message: "{{file}}:{{line}} uses double quotes",
+      examples: { bad: [{ path: "a.py", code: 'x = "a"\n', fixed: "x = 'a'\n" }] },
+    }
+    // Twice, so which of two identical violations a later finding was is told by its line.
+    const root = await repo([LOGGER, quotes], { "app.py": 'print("a")\nprint("a")\n' })
+    const before = JSON.parse((await runCli(root, ["run", "--all-files", "--format", "json"])).stdout)
+    expect(before.findings.map((finding: { rule: string }) => finding.rule).sort()).toEqual([
+      "py/logger",
+      "py/logger",
+      "py/single-quotes",
+      "py/single-quotes",
+    ])
+    const dry = JSON.parse((await fix(root, "--all-files", "--dry-run", "--format", "json")).stdout)
+    expect(dry.diff).toContain("+log.info('a')")
+    expect(dry.findings).toEqual([])
+    // Each fixed finding's id is the one `run` reported on the file as it was.
+    expect(dry.fixed.map(({ id }: { id: string }) => id).sort()).toEqual(
+      before.findings.map(({ id }: { id: string }) => id).sort(),
+    )
+    expect(await read(root, "app.py")).toBe('print("a")\nprint("a")\n')
+  })
+
   test("run's JSON marks a finding fixable only when rulecast fix can apply its rule's fix", async () => {
     const dropped = { ...LOGGER, id: "py/logger-unproven", examples: undefined }
     const root = await repo([LOGGER, NO_EVAL, dropped], { "app.py": 'print("a")\neval("x")\n' })
