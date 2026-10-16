@@ -35,13 +35,33 @@ export const EXIT = {
   incomplete: 3,
 } as const
 
-/** The table `run --help` prints, and the README's exit-code table is tested against. */
-export const EXIT_CODES: [code: number, meaning: string][] = [
+const RAN: [code: number, meaning: string][] = [
   [EXIT.clean, "Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed)"],
   [EXIT.violations, "Every rule ran; at least one new error-severity finding"],
+]
+
+/** The table `run --help` prints, and the README's exit-code table is tested against. */
+export const EXIT_CODES: [code: number, meaning: string][] = [
+  ...RAN,
   [EXIT.failed, "rulecast could not run: usage, a config file that does not load, git, or an internal error"],
   [
     EXIT.incomplete,
     "Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1",
+  ],
+]
+
+/**
+ * The table `try-repo --help` prints. The repo it tries is fetched before anything runs, so a repo
+ * that cannot be fetched, or has no manifest, is a 2: nothing ran, and nothing is on stdout.
+ */
+export const TRY_REPO_EXIT_CODES: [code: number, meaning: string][] = [
+  ...RAN,
+  [
+    EXIT.failed,
+    "rulecast could not run: usage, the rule repo cannot be fetched or has no manifest, a config file that does not load, git, or an internal error",
+  ],
+  [
+    EXIT.incomplete,
+    "Incomplete: a rule failed to compile, a detector failed or timed out. Findings that were produced are still reported. Wins over 1",
   ],
 ]

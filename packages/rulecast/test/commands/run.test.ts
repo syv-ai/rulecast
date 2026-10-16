@@ -3,11 +3,12 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { NOTHING_STAGED } from "../../src/adapters/cli/format"
+import { appendWork, sessionDir } from "../../src/core/session/session"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { backendConventions, createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
-import { testEnv } from "../helpers/home"
+import { stateDirFor, testEnv } from "../helpers/home"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -132,6 +133,25 @@ describe("rulecast run: file selection", () => {
       { stopGate: true },
     )
     expect(stop.delivery.stop).toBe("block")
+  })
+})
+
+describe("rulecast run --session: rules the session disabled", () => {
+  test("a rule a detector failure disabled earlier makes the run incomplete, and says so", async () => {
+    const root = await createFixture()
+    await writeFile(path.join(root, USERS), VIOLATION)
+    await pipelineAt(root, { kind: "edit", files: [USERS], cwd: root, session: { id: "s1" } })
+    await appendWork(sessionDir(stateDirFor(root), "s1"), [
+      { t: "disabled", rule: "backend/no-httpexception", reason: "regex crashed" },
+    ])
+
+    const result = await run(root, "--session", "s1", "--format", "json")
+    expect(result.code).toBe(3)
+    const json = JSON.parse(result.stdout)
+    expect(json.complete).toBe(false)
+    expect(json.findings).toEqual([])
+    expect(json.warnings.join("\n")).toContain("backend/no-httpexception")
+    expect(json.warnings.join("\n")).toContain("regex crashed")
   })
 })
 

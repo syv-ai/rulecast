@@ -16,9 +16,13 @@ rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 | `0` | Every rule ran, and no new finding has severity `error`. Warnings and pre-existing findings are allowed. | the report |
 | `1` | Every rule ran, and at least one new finding has severity `error`. | the report |
 | `2` | rulecast could not run: a usage error, a config file that does not load (YAML, schema, `minimum_rulecast_version`), git, or an internal error. | empty; the message is on stderr |
-| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. The findings of the rules that did run are still reported. | the report, with `complete: false` |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. With `--session`, also a rule whose detector failed earlier in that session, which disabled it. The findings of the rules that did run are still reported. | the report, with `complete: false` |
 
 `3` wins over `1`: a `1` promises that every rule ran. A loop can stop on `0`, fix and retry on `1`, and needs a person on `2` or `3`.
+
+`rulecast run RULE_ID` is incomplete only over that rule: its own compile error, or a rule repo that failed and configures it. Another repo that could not be fetched is still a warning, but not a `3`.
+
+`try-repo` fetches the repo it tries before anything runs, so a repo that cannot be fetched, or has no manifest, exits `2`.
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
@@ -144,6 +148,8 @@ The line number is **not** part of it, so a finding keeps its id when lines are 
 - A tool message that contains a number that moves, such as a line count. The message is part of what the tool reports.
 
 A `rulecast-ignore` comment does not renumber the other matches: ignored matches are counted when occurrences are numbered.
+
+A merged finding (`count` above 1) carries its earliest match's id, so fixing that one match gives the merged finding a new id while the rest are still there. A loop that compares merged findings should compare `rule` and `file` as well as `id`.
 
 The id scheme has its own version: SARIF publishes it under `rulecastFindingId/v1`. If what the id hashes ever changes, that key changes with it, and `schemaVersion` is bumped.
 

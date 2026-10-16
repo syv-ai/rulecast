@@ -30,6 +30,7 @@ export interface Diagnostic {
   /**
    * The rules this error keeps from running when it is not one rule's own: a `repos` entry that
    * could not be checked out or read. By id, or alias when set. Absent with `rule: null`: the config.
+   * `rulecast run RULE_ID` counts such an entry only when it names that rule.
    */
   rules?: string[]
 }
