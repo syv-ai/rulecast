@@ -376,8 +376,10 @@ export interface Delivery {
    * Findings of `refuse_write` rules in files the agent changed with its shell (spec §9, Shell
    * edits): the write could not be refused before it happened, so the agent is told to revert it.
    * `dirtyAtStart`: the file had the user's uncommitted changes, so reverting the whole file is wrong.
+   * `shared`: another agent's shell call ran at the same time, so part of the change may be theirs
+   * and reverting the whole file is wrong too.
    */
-  refused?: { file: string; rule: string; dirtyAtStart: boolean }[]
+  refused?: { file: string; rule: string; dirtyAtStart: boolean; shared?: true }[]
   /**
    * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.

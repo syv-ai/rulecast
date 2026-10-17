@@ -44,9 +44,11 @@ const SWEPT_HEADING =
 export const SWEPT_BLOCK = "\0swept:"
 const PROTECTED = "This file is protected; revert your change."
 const DIRTY_ADVICE = "It had uncommitted changes before this session: undo only your change, not the whole file."
+const SHARED_ADVICE =
+  "Another agent was changing files in this working tree at the same time: undo only your change, not the whole file."
 const refusedLines = (refused: NonNullable<Delivery["refused"]>[number]) => [
   `${refused.file} (${refused.rule}): ${PROTECTED}`,
-  `  ${refused.dirtyAtStart ? DIRTY_ADVICE : `git checkout -- ${refused.file}`}`,
+  `  ${refused.dirtyAtStart ? DIRTY_ADVICE : refused.shared === true ? SHARED_ADVICE : `git checkout -- ${refused.file}`}`,
 ]
 /** Said in the title of a delivery for files the agent's shell command changed, not its edit tools. */
 const SHELL_TRIGGER = "changed by your Bash command"

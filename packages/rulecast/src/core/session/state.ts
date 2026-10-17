@@ -10,9 +10,10 @@ export const ANY_AGENT = "*"
 export type WorkRecord =
   /**
    * `via: "shell"`: changed during the agent's shell call, not by an edit tool. `agent`: who edited;
-   * absent in stores written before it was recorded.
+   * absent in stores written before it was recorded. `shared`: another agent's shell call ran in this
+   * working tree at the same time, so the change may be partly theirs.
    */
-  | { t: "edited"; file: string; via?: "shell"; agent?: string }
+  | { t: "edited"; file: string; via?: "shell"; agent?: string; shared?: true }
   | { t: "accessed"; agent: string; file: string }
   /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
   | { t: "stopBlock"; agent: string; findings?: string[] }
@@ -62,6 +63,8 @@ export interface WorkState {
   noticed: Set<string>
   /** How each edited file was last changed: through an edit tool, or during a shell call. */
   editedVia: Map<string, "tool" | "shell">
+  /** Files changed during a shell call that another agent's shell call overlapped: possibly partly theirs. */
+  sharedEdits: Set<string>
   /** Unique, least recently swept first; a file the agent edits leaves it. */
   swept: string[]
   /** The agents whose comparisons swept each file in `swept`. */
@@ -116,6 +119,7 @@ export function emptyWork(): WorkState {
     accessed: new Map(),
     noticed: new Set(),
     editedVia: new Map(),
+    sharedEdits: new Set(),
     swept: [],
     sweptBy: new Map(),
     latestTree: new Map(),
@@ -138,6 +142,7 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
       case "edited": {
         state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
         state.editedVia.set(record.file, record.via ?? "tool")
+        if (record.shared === true) state.sharedEdits.add(record.file)
         state.swept = state.swept.filter((file) => file !== record.file)
         state.sweptBy.delete(record.file)
         const agent = record.agent ?? ANY_AGENT

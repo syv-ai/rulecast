@@ -370,9 +370,9 @@ describe("a shell call alongside another agent", () => {
   const violation = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
   const guard = { kind: "guard" as const, files: [USERS], intent: { content: violation } }
 
-  // The documented limitation: a tree diff has no writer, so a sibling's Edit during the call is
-  // held against the call too. Worktrees keep parallel agents apart.
-  test("a sibling's Edit during the call: held against the call as well as the sibling", async () => {
+  // A tree diff has no writer; the project's activity log is how the call knows the sibling's Edit
+  // was the sibling's (session/activity.ts).
+  test("a sibling's Edit during the call is the sibling's, not the call's", async () => {
     const root = await createFixture()
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
@@ -384,9 +384,43 @@ describe("a shell call alongside another agent", () => {
       },
       { agentId: "sub1" },
     )
-    expect(lines(call)).toEqual([`${USERS}:3`])
+    expect(lines(call)).toEqual([])
     expect((await session.send({ kind: "verify", files: [], agentId: "sub2" })).stop).toBe("block")
-    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("block")
+    expect((await session.send({ kind: "verify", files: [], agentId: "sub1" })).stop).toBe("allow")
+  })
+
+  test("another session's Edit during the call is that session's (abide #26)", async () => {
+    // A reviewer session told to edit nothing runs a command while another session edits.
+    const root = await createFixture()
+    const reviewer = sessionAt(root, "reviewer")
+    const writer = sessionAt(root, "writer")
+    await reviewer.send({ kind: "start", files: [] })
+    await writer.send({ kind: "start", files: [] })
+    const call = await reviewer.shell(async () => {
+      await writer.send(guard)
+      await writer.write(USERS, violation)
+      await writer.send({ kind: "edit", files: [USERS] })
+    })
+    expect(lines(call)).toEqual([])
+    expect((await reviewer.send({ kind: "verify", files: [] })).stop).toBe("allow")
+    expect((await writer.send({ kind: "verify", files: [] })).stop).toBe("block")
+  })
+
+  test("another session's shell call alongside: the file is held against both, and both are told", async () => {
+    const root = await createFixture()
+    const one = sessionAt(root, "one")
+    const two = sessionAt(root, "two")
+    await one.send({ kind: "start", files: [] })
+    await two.send({ kind: "start", files: [] })
+    await one.send({ kind: "shell-before", files: [], toolUseId: "a" })
+    await two.send({ kind: "shell-before", files: [], toolUseId: "b" })
+    await one.write(USERS, violation)
+    const first = await one.send({ kind: "shell-after", files: [], toolUseId: "a" })
+    const second = await two.send({ kind: "shell-after", files: [], toolUseId: "b" })
+    expect(lines(first)).toEqual([`${USERS}:3`])
+    expect(lines(second)).toEqual([`${USERS}:3`])
+    expect(first.agentNotices?.some((text) => text.includes("worktree"))).toBe(true)
+    expect(second.agentNotices?.some((text) => text.includes("worktree"))).toBe(true)
   })
 
   // A sibling's Edit fails (old_string not found): its PreToolUse fired, its PostToolUse never does.
@@ -495,6 +529,22 @@ describe("refuse_write under Bash", () => {
     const text = renderAgentText(call, { maxMatchesPerRule: 10 })
     expect(text).toContain("It had uncommitted changes before this session: undo only your change, not the whole file.")
     expect(text).not.toContain("git checkout")
+  })
+
+  test("a protected file changed while another session's command ran: undo only the agent's change", async () => {
+    // `git checkout -- <file>` would throw away whatever the other session wrote to it.
+    const root = await createProtected()
+    const one = sessionAt(root, "one")
+    const two = sessionAt(root, "two")
+    await one.send({ kind: "start", files: [] })
+    await two.send({ kind: "start", files: [] })
+    await two.send({ kind: "shell-before", files: [], toolUseId: "b" })
+    const call = await one.shell(() => one.write(API, "export const api = 2\n"))
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false, shared: true }])
+    const text = renderAgentText(call, { maxMatchesPerRule: 10 })
+    expect(text).toContain("Another agent was changing files in this working tree at the same time")
+    expect(text).not.toContain("git checkout")
+    expect((await one.send({ kind: "verify", files: [] })).refused).toEqual(call.refused)
   })
 
   test("the same file changed by Edit takes the existing guard path, unchanged", async () => {

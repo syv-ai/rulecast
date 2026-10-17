@@ -23,6 +23,7 @@ import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
+import { appendActivity, duringCall, readActivity } from "./session/activity"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
@@ -262,6 +263,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   }
 
+  /** A record for the project-wide activity log (session/activity.ts), stamped now. */
+  const activityOf = (agent: string) => ({ at: Date.now(), s: event.session?.id ?? "", a: agent })
   const restoredFiles = options.restoredFiles ?? 0
   if (event.kind === "prompt") {
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
@@ -301,6 +304,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
+        await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-before", tu: event.toolUseId })
       }
     }
     return { delivery: emptyDelivery(), failed, deadlineMissed }
@@ -345,6 +349,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const detection = detectionFor(project, registry, stateDir, resolver)
   const workRecords: WorkRecord[] = []
   let via: "shell" | undefined
+  /** This shell call ran alongside another agent's, so what it changed may be partly theirs. */
+  let sharedCall = false
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   let swept: string[] = []
   const refused: NonNullable<Delivery["refused"]> = []
@@ -362,13 +368,23 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
     const call = reference === null ? null : treeChanges(reference, now)
-    const files = call === null || call.gitOperation ? [] : relevant(call.files.filter((file) => !isGone(now, file)))
+    // What other agents did meanwhile, in this session or another in this working tree: a file their
+    // Edit/Write changed is theirs, not this command's (abide #26).
+    const others = duringCall(await readActivity(stateDir), {
+      session: activityOf(open.agent).s,
+      agent: open.agent,
+      toolUseId: event.toolUseId,
+    })
+    await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-after", tu: event.toolUseId })
+    const files =
+      call === null || call.gitOperation
+        ? []
+        : relevant(call.files.filter((file) => !isGone(now, file) && !others.edits.has(file)))
     // Another agent's shell call ran during this one, and this one is held to files: those may be the
-    // other's writes (README, Agents). Hooks key on the session's directory, so an overlap alone may be
-    // a command that ran elsewhere; with no files there is nothing to misattribute. Told once per agent.
+    // other's writes (README, Agents). With no files there is nothing to misattribute. Told once per agent.
+    sharedCall = files.length > 0 && (others.sharedShell || sharedShell(view.work, open.agent, event.toolUseId))
     const sharedKey = `shared-tree:${open.agent}`
-    const shared =
-      files.length > 0 && sharedShell(view.work, open.agent, event.toolUseId) && !view.work.noticed.has(sharedKey)
+    const shared = sharedCall && !view.work.noticed.has(sharedKey)
     if (shared) agentNotices.push(SHARED_TREE)
     await appendWork(open.dir, [
       { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
@@ -492,8 +508,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       const agent = session.agent
       await appendWork(
         session.dir,
-        requested.map((file) => ({ t: "edited" as const, file, agent, ...(via === undefined ? {} : { via }) })),
+        requested.map((file) => ({
+          t: "edited" as const,
+          file,
+          agent,
+          ...(via === undefined ? {} : { via }),
+          ...(sharedCall ? { shared: true as const } : {}),
+        })),
       )
+      if (via === undefined && requested.length > 0) {
+        await appendActivity(stateDir, { ...activityOf(agent), ev: "edit", f: requested })
+      }
     }
     if (event.kind === "verify" && event.files.length === 0 && session) {
       // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
@@ -665,7 +690,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       if (status !== "new" || !rule.refuseWrite || !shellEdited(match.file)) continue
       if (seen.has(`${rule.id} ${match.file}`)) continue
       seen.add(`${rule.id} ${match.file}`)
-      refused.push({ file: match.file, rule: rule.id, dirtyAtStart: dirtyAtStart(view.work, match.file) })
+      const shared = sharedCall || view.work.sharedEdits.has(match.file)
+      refused.push({
+        file: match.file,
+        rule: rule.id,
+        dirtyAtStart: dirtyAtStart(view.work, match.file),
+        ...(shared ? { shared: true as const } : {}),
+      })
     }
     const atStop = options.stopGate === true && event.kind === "verify" && session !== null
     if (session !== null && (atStop || refused.length > 0)) {
