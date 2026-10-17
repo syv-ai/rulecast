@@ -313,7 +313,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
   "findings": [
     { "commit": "9f1c…", "subject": "add the export route", "file": "app/api/export.py", "line": 14, "message": "app/api/export.py:14 does work that belongs in a service.", "label": "real" }
   ],
-  "labels": { "real": 2, "false": 1, "unlabelled": 0, "precision": 0.67, "file": ".rulecast/history/python__thin-routes.json" }
+  "labels": { "real": 2, "false": 1, "unlabelled": 0, "precision": 0.67, "file": ".rulecast/history/api__thin-handlers.json" }
 }
 ```
 

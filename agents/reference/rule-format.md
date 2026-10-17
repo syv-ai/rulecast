@@ -10,8 +10,7 @@ repos:
   - repo: https://github.com/syv-ai/rulecast
     rev: v0.2.0
     rules:
-      - id: python/no-httpexception-in-services
-        files: ^app/services/
+      - id: python/no-silent-except
         context: ["@AGENTS.md#errors"]
   - repo: local
     rules:
@@ -183,8 +182,9 @@ removed rule: its matches are what a file keeps, not violations.
 - **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax:
 
   ```python
-  # rulecast-ignore: python/no-httpexception-in-services legacy endpoint, removed in #412
-  raise HTTPException(404)
+  except Exception:
+      # rulecast-ignore: python/no-silent-except best-effort cache cleanup
+      pass
   ```
 
   The id is the one the finding shows. **The reason is required**: an ignore without one suppresses nothing and is reported. Ignores are counted under `rulecast run --all-files --summary` and listed by `--format json`, and one added during an agent session is reported to the developer when the agent stops. An agent adds one only when the developer agrees the finding is wrong.

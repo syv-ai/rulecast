@@ -28,7 +28,7 @@ A file the agent rewrites with `sed -i` or a script is checked like one it chang
 npx @syv-ai/rulecast init
 ```
 
-`init` reads your project — languages, docs, which agents you use — offers a catalog of ready-made rules that apply to your files, installs the hooks for your agent, and validates what it wrote. It shows you every file it will create or change before writing anything.
+`init` reads your project — languages, docs, which agents you use — offers a small catalog of language- and tool-level rules, installs the hooks for your agent, and validates what it wrote. It shows you every file it will create or change before writing anything.
 
 Then, in your agent, ask it to draft rules for the conventions in your own docs. `init` prints the prompt to paste.
 
@@ -211,8 +211,9 @@ A new git worktree on the same machine needs none of this beyond step 1. Rule re
 - **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax. The reason is required; an ignore without one suppresses nothing.
 
   ```python
-  # rulecast-ignore: python/no-httpexception-in-services legacy endpoint, removed in #412
-  raise HTTPException(404)
+  except Exception:
+      # rulecast-ignore: python/no-silent-except best-effort cache cleanup
+      pass
   ```
 
 `rulecast run --all-files --summary` counts the ignores, and an ignore or a config change made during an agent session is reported to you when the agent stops: the agent cannot quietly edit its way past a rule.

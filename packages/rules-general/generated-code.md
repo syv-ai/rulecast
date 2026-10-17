@@ -13,9 +13,4 @@ If the generator itself produces wrong output, fix its configuration or report i
 
 ## Which files are generated
 
-This rule matches `*.gen.ts`-style files and `__generated__/` directories by default. A project whose generator writes elsewhere overrides the rule's `files` in `.rulecast-config.yaml`:
-
-```yaml
-- id: generated-code
-  files: ^frontend/src/client/
-```
+This rule matches `*.gen.ts`-style files and `__generated__/` directories by default. Where a project's generator writes elsewhere is the project's to say. Decide with the developer how to cover it: `files` on the rule's entry in `.rulecast-config.yaml`, or a local rule of its own.

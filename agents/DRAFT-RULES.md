@@ -38,21 +38,15 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
    - repo: https://github.com/syv-ai/rulecast
      rev: v0.3.0   # unchanged: keep the entry as init wrote it
      rules:
-       - id: python/no-httpexception-in-services
+       - id: python/no-silent-except
          context:
            - "@AGENTS.md#errors"
    ```
 
-2. **Does what it checks fit this project?** Compare its `files` match count and its `detects` line with the doc, and read the section it cites with `rulecast list <rule-id>`. Judge what the rule does, not its name:
+2. **Does the project want this check?** The catalog holds only language- and tool-level checks ([SETUP.md](SETUP.md), step 2). Read the section the rule cites with `rulecast list <rule-id>`, and compare what it checks (its `detects` line) with the doc and with the files it matches:
    - **It fits:** nothing more to do. A convention it already enforces needs no local rule.
-   - **The doc covers files the rule misses**: the doc says "outside `app/api/`" and the rule's `files` is `services/`, or the doc's route module is `app/api/routes.py` and the rule's `files` is `routes/`. Draft a local rule of the same kind for the files it misses (a detector rule for a detector rule, a touch rule for a touch rule):
-     - Its `files` is what the doc covers. A doc that says "never" without naming a place covers every file of that language: `\.py$`.
-     - Its `exclude` is the catalog rule's `files`, copied as `rulecast list` prints it, so no site is reported twice. If your rule already has an `exclude`, join the two with `|`.
-     - Its `description` names the catalog rule it extends.
-     - Check the files `rulecast list <rule-id>` names: a count of 2 may be one real module and an `__init__.py`.
-
-     A local rule, not a `files` override on the catalog rule: an override freezes the catalog rule's scope, so a later tag that fixes its `files` would never reach this project. After `rulecast autoupdate`, compare the catalog rule's `files` with your rule's `exclude` again.
-   - **It contradicts the doc, or matches no file at all**: it assumes a layer, a library or a layout the project doesn't have, or its cited section says the opposite of the doc. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree.
+   - **It looks in the wrong place**: it misses files the convention covers, or matches files the project treats differently, such as generated code kept where `generated-code` does not look. Tell the developer what it misses or wrongly matches, and propose a way to cover it: `files` or `exclude` on its entry, or a local rule. The developer decides.
+   - **It contradicts the doc**: its cited section says the opposite of the doc, or the developer does not want it. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree.
    - **You can't tell**: treat it as a contradiction and propose. Proposing costs nothing, because the developer decides; staying silent hides the question.
 
 For checkable conventions, use `path` when the file itself is the break. Otherwise use the first of these that can see the break:
@@ -179,7 +173,7 @@ Then summarise:
 - the rules kept: id, one line each, and the `--against` or `--history` counts, with the precision where findings were marked (touch rules have no count);
 - where the doc could be read two ways, and the reading you chose;
 - the rules dropped;
-- the catalog rules you pointed at the project's doc, extended with a local rule, or propose to switch off, and why;
+- the catalog rules you pointed at the project's doc, propose to cover differently, or propose to switch off, and why;
 - the examples you invented;
 - the conventions you skipped, with the reason, and the `Not checked by rulecast` lines you proposed.
 
@@ -187,7 +181,7 @@ When revising rules a project already has, read `rulecast stats --format json` f
 
 ## Never
 
-- Never change rules or overrides under other `repos` entries, except to add a `context` override to a catalog rule, or `enabled: false` when the developer agrees (step 2). Everything else goes in the `repo: local` entry.
+- Never change rules or overrides under other `repos` entries, except to add a `context` override to a catalog rule, or `files`, `exclude` or `enabled: false` when the developer agrees (step 2). Everything else goes in the `repo: local` entry.
 - Never add a `rulecast-ignore` comment or `enabled: false` unless the developer agrees the finding or the rule is wrong.
 - Never change code to make a rule pass. Report findings; the developer decides.
 - Never take a decision these steps give to the developer, or a default in their place.

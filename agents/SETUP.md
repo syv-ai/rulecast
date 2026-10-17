@@ -13,7 +13,9 @@ Relative links in this file resolve against this file's own URL.
    npx @syv-ai/rulecast init --agent claude-code
    ```
 
-   `init` detects the project, selects the catalog rules that apply to its files, and prints a review: every file it would create or change. Without a terminal it writes nothing and exits 2. `--agent` installs your hooks and only yours; without it, `init` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet.
+   `init` detects the project, selects the catalog rules whose files it finds in the project, and prints a review: every file it would create or change. Without a terminal it writes nothing and exits 2. `--agent` installs your hooks and only yours; without it, `init` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet.
+
+   The catalog only holds checks about a language or a tool, such as a swallowed exception or a skipped test. rulecast assumes nothing about the project's architecture: which layers it has, where they live, or what may call what. Those conventions come from step 6, decided with the developer.
 3. If it fails with `unknown agent`, rulecast has no adapter for you yet (the message lists the ones it has). Run it again without `--agent`, and tell the developer that rulecast cannot deliver rules to you yet. If it fails for any other reason than exit 2 with a review, show the developer its output and stop.
 4. Show the developer the review. Name the selected rules and say that any of them can be removed from the config afterwards. Ask whether to write it, and wait for the answer. If yes, run the same command with `--yes`: it writes the files, validates them, and prints a drafting prompt. If it exits non-zero, show the developer its output and stop.
 5. If this project runs agents in CI or in cloud sessions, tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step: the hooks never fetch rule repos, and `doctor --ci` fails the job when rulecast would run degraded. Do not edit CI workflows yourself.
