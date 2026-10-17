@@ -95,7 +95,7 @@ function terminal(result: ReplayResult): string {
   }
   if (result.skippedRules.length > 0) {
     out.push(
-      `not run (their tool needs the files on disk, or they are scope: removed): ${result.skippedRules.join(", ")}`,
+      `not run (their tool needs the files on disk, or their scope is removed or container): ${result.skippedRules.join(", ")}`,
       "",
     )
   }

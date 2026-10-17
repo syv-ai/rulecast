@@ -1,5 +1,6 @@
+import path from "node:path"
+
 import { git } from "../git"
-import { fnv1a } from "./hash"
 
 /**
  * A git operation the session saw move `HEAD` (a pull, merge, rebase, checkout or commit), with when
@@ -12,30 +13,53 @@ export interface HeadMove {
   since: number
 }
 
+/** Every git call here is on a hook's path and bounded by this; past it, nothing is excused. */
+const GIT_TIMEOUT_MS = 2000
+
 /**
- * Lines that commits from elsewhere brought into `file` (abide #5). A file's baseline stays what it
- * was at the session's start, so after `git pull` every line the pull added to a file the agent had
- * edited read as the agent's. A commit is from elsewhere when it was committed before the git
- * operation began: the agent's own `git commit`, and the commits `pull --rebase` rewrites, carry a
- * later committer time and stay the agent's.
- *
- * Returned as the hashes of the added lines, trimmed, as snapshots hash them (baseline/hash.ts).
+ * The commits the session's git operations brought in from elsewhere (abide #5): those in a move's
+ * range committed before the operation began. The agent's own `git commit`, and the commits
+ * `pull --rebase` rewrites, carry a later committer time and are not among them. Committer time has
+ * whole seconds, so a commit in the same second as `since` counts as the agent's.
  */
-export async function foreignLines(root: string, moves: readonly HeadMove[], file: string): Promise<Set<number>> {
-  const hashes = new Set<number>()
-  for (const move of moves) {
-    const listed = await git(root, ["log", "--no-merges", "--format=%H %ct", `${move.from}..${move.to}`, "--", file])
-    if (!listed.ok) continue
-    for (const line of listed.stdout.split("\n")) {
+export async function foreignCommits(root: string, moves: readonly HeadMove[]): Promise<Set<string>> {
+  const commits = new Set<string>()
+  const listed = await Promise.all(
+    moves.map((move) =>
+      git(root, ["log", "--no-merges", "--format=%H %ct", `${move.from}..${move.to}`], undefined, {
+        timeoutMs: GIT_TIMEOUT_MS,
+      }).then((result) => ({ move, result })),
+    ),
+  )
+  for (const { move, result } of listed) {
+    if (!result.ok) continue
+    for (const line of result.stdout.split("\n")) {
       const [commit, seconds] = line.split(" ")
-      // Committer time has whole seconds: a commit in the same second as `since` counts as the agent's.
-      if (commit === undefined || seconds === undefined || (Number(seconds) + 1) * 1000 > move.since) continue
-      const diff = await git(root, ["show", "--format=", "--unified=0", "--no-color", commit, "--", file])
-      if (!diff.ok) continue
-      for (const added of diff.stdout.split("\n")) {
-        if (added.startsWith("+") && !added.startsWith("+++")) hashes.add(fnv1a(added.slice(1).trim()))
+      if (commit !== undefined && seconds !== undefined && (Number(seconds) + 1) * 1000 <= move.since) {
+        commits.add(commit)
       }
     }
   }
-  return hashes
+  return commits
+}
+
+/**
+ * The lines of `file`, as it is in the working tree, that `git blame` attributes to one of `commits`:
+ * by position, so a line the agent wrote is never excused because a pull added the same text
+ * elsewhere in the file. One git call per file; empty when blame fails or is too slow.
+ */
+export async function linesFromCommits(root: string, file: string, commits: ReadonlySet<string>): Promise<Set<number>> {
+  const lines = new Set<number>()
+  if (commits.size === 0) return lines
+  const blamed = await git(root, ["blame", "--porcelain", "--contents", path.join(root, file), "--", file], undefined, {
+    timeoutMs: GIT_TIMEOUT_MS,
+  })
+  if (!blamed.ok) return lines
+  for (const header of blamed.stdout.matchAll(/^([0-9a-f]{40}) \d+ (\d+)(?: (\d+))?$/gm)) {
+    if (!commits.has(header[1]!)) continue
+    const start = Number(header[2])
+    const count = header[3] === undefined ? 1 : Number(header[3])
+    for (let line = start; line < start + count; line++) lines.add(line)
+  }
+  return lines
 }

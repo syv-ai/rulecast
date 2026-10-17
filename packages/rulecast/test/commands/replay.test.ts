@@ -125,3 +125,17 @@ describe("rulecast replay claude-code", () => {
     }
   })
 })
+
+test("a container rule is named, not run: it judges against ranges measured before the session", async () => {
+  const container = {
+    id: "local/container",
+    name: "Container",
+    files: "^app/services/",
+    scope: "container",
+    detect: { "ast-grep": { language: "python", rule: { kind: "function_definition" } } },
+    message: "{{file}}:{{line}} container",
+  }
+  const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig([...fixtureRules, container]) })
+  const document = JSON.parse((await replay(root, "--format", "json")).stdout)
+  expect(document.skippedRules).toEqual(["local/container"])
+})

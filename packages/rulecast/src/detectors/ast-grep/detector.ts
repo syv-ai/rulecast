@@ -1,4 +1,4 @@
-import { pastDeadline } from "../../core/detection/per-rule"
+import { isBinary, pastDeadline } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import { fixEdit } from "./fix"
@@ -84,7 +84,7 @@ export const astGrepDetector: Detector<AstGrepConfig> = {
           let source: string | null
           try {
             source = await input.read(file)
-            if (source === null) continue
+            if (source === null || isBinary(source)) continue
             root = parser.parse(source).root() as unknown as Node
           } catch (error) {
             if (pastDeadline(error, input)) throw error

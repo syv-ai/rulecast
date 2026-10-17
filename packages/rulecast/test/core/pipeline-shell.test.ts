@@ -212,7 +212,8 @@ describe("a shell call's changes go through the edit event", () => {
 
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
-    await session.write(USERS, base.replace("    return 1\n", "    raise HTTPException(500)\n"))
+    // The same text as the merged line: only its position says it is the agent's.
+    await session.write(USERS, base.replace("    return 1\n", "    raise HTTPException(409)\n"))
     await session.send({ kind: "edit", files: [USERS] })
     await session.shell(() => git(root, "commit", "-q", "-am", "ours"))
     await session.shell(() => git(root, "merge", "-q", "--no-edit", "upstream"))

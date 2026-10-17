@@ -358,7 +358,7 @@ rulecast replay claude-code --sessions 20 --format json   # --rule ID (repeatabl
 | `unknownEdits` | Edits whose file before them the transcript never showed: about one Edit in three records no `originalFile`, and then replay uses what the same transcript last wrote or fully read. These are not judged. |
 | `rules[]` | Per rule that ran: `edits` and `turns` it was run on, those it found something new in, and `wouldBlock`, the turns whose stop an `error` finding would have blocked. |
 | `findings[]` | Every new finding. `turn` counts from 0, from the agent's first prompt. `stage` is `edit` (the edit hook would have told the agent) or `turn` (the stop would have). `agent` is `main` or a subagent's id. |
-| `skippedRules` | Rules that would have run but cannot from a transcript: their tool needs the files on disk (a `command` script, a whole-project tool), or they are `scope: removed`. |
+| `skippedRules` | Rules that would have run but cannot from a transcript: their tool needs the files on disk (a `command` script, a whole-project tool), or their `scope` is `removed` or `container`, which judge against measurements of the file before the session that a replay does not take. |
 | `errors` | Rules whose detector failed or timed out, with the first message. They stop being run. |
 
 `llm` rules are left out unless `--llm` is given. With `--llm` alone, the document is `{ "estimate": { "calls": N } }`: one model call per file per event judged, and nothing is run. `--llm --yes` runs them. Edits made through Bash are not in a transcript and are not judged. The command exits 0 whatever it finds, and 2 on a usage error or a config that does not load.

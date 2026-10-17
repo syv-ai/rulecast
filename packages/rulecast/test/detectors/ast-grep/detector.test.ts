@@ -29,6 +29,16 @@ const PY =
 const TSX = 'const a = <div style={{ padding: 8, color: "r" }} id="x"/>\n'
 
 describe("ast-grep detector", () => {
+  test("a binary file is not parsed, and has no matches", async () => {
+    const cwd = await createProject({ "app/services/blob.py": "raise HTTPException(1)\u0000\u0001" })
+    const result = await run(cwd, [
+      await ruleFor("no-httpexception", { language: "python", rule: { pattern: "raise HTTPException($$$ARGS)" } }, [
+        "app/services/blob.py",
+      ]),
+    ])
+    expect(result).toEqual({ findings: [], errors: [] })
+  })
+
   test("declares events and captures", async () => {
     const config = await astGrepDetector.schema.parseAsync({
       language: "python",

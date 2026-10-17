@@ -20,7 +20,7 @@ import type { DetectorEvent } from "./types"
  * Content comes from the transcript, not the disk, so only rules whose detector reads content can
  * run (`regex`, `path`, `ast-grep`, `llm`, linters that take stdin). A rule whose tool needs the
  * files on disk, a `command` script or a whole-project tool, is skipped and named, and so is a
- * `scope: removed` rule.
+ * `scope: removed` or `container` rule.
  */
 export interface ReplayFinding {
   session: string
@@ -56,8 +56,8 @@ export interface ReplayResult {
   rules: ReplayRuleStats[]
   findings: ReplayFinding[]
   /**
-   * Rules that would have run but cannot from a transcript: their tool needs files on disk, or they
-   * are `scope: removed`, which counts what a file keeps against a baseline a replay does not take.
+   * Rules that would have run but cannot from a transcript: their tool needs files on disk, or their
+   * scope is `removed` or `container`, which judge against baseline measurements a replay does not take.
    */
   skippedRules: string[]
   /** Rules whose detector failed, with the first message. */
@@ -159,8 +159,9 @@ export async function replay(input: ReplayInput): Promise<ReplayResult> {
         !input.skipKinds.has(rule.detector.kind) && (input.onlyRules?.has(rule.id) ?? true) && !errors.has(rule.id),
     )
     const runnable = selections.filter(({ rule }) => {
-      // A removed rule counts what a file keeps against its baseline count, which a replay does not take.
-      if (readsContent(rule) && rule.scope !== "removed") return true
+      // A removed rule counts what a file keeps against its baseline count, and a container rule
+      // judges against the ranges it matched in the baseline: a replay measures neither.
+      if (readsContent(rule) && rule.scope === "instance") return true
       skipped.add(rule.id)
       return false
     })

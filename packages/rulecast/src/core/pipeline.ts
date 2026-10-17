@@ -4,8 +4,7 @@ import path from "node:path"
 import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
-import { foreignLines, type HeadMove } from "./baseline/foreign"
-import { fnv1a } from "./baseline/hash"
+import { foreignCommits, type HeadMove, linesFromCommits } from "./baseline/foreign"
 import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
@@ -45,7 +44,7 @@ import {
 } from "./session/state"
 import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
-import { type IgnoredFinding, type SourceLines, sourceLines } from "./suppress"
+import { type IgnoredFinding, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
@@ -120,6 +119,10 @@ const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
 
 /** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
+/** Logged, not warned: a missed snapshot is a shell call left unjudged, like a missed edit deadline. */
+const TREE_GAVE_UP =
+  "working tree state unavailable: git failed or took longer than its timeout; this shell call is not judged"
+
 const SHARED_TREE =
   "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
   "command to every file that changed while it ran, so findings here and at your stop may be another " +
@@ -223,26 +226,25 @@ function detectorWarnings(
 
 /**
  * Whether a match lies wholly on lines that commits from elsewhere brought in during the session (a
- * pull, a merge): those are not the agent's, though the file's baseline predates them.
+ * pull, a merge): those are not the agent's, though the file's baseline predates them. Only asked
+ * when there is a git operation and a new finding; each git call in it is bounded.
  */
 async function pulledInLines(
   root: string,
   moves: readonly HeadMove[],
   findings: readonly { match: Match }[],
-  lines: SourceLines,
 ): Promise<(match: Match) => boolean> {
-  if (moves.length === 0) return () => false
-  const byFile = new Map<string, { foreign: Set<number>; text: string[] | null }>()
-  for (const file of new Set(findings.map(({ match }) => match.file))) {
-    byFile.set(file, { foreign: await foreignLines(root, moves, file), text: await lines(file) })
-  }
+  if (moves.length === 0 || findings.length === 0) return () => false
+  const commits = await foreignCommits(root, moves)
+  if (commits.size === 0) return () => false
+  const files = [...new Set(findings.map(({ match }) => match.file))]
+  const byFile = new Map(
+    await Promise.all(files.map(async (file) => [file, await linesFromCommits(root, file, commits)] as const)),
+  )
   return (match) => {
-    const entry = byFile.get(match.file)
-    if (entry === undefined || entry.foreign.size === 0 || entry.text === null) return false
-    for (let line = match.line; line <= match.endLine; line++) {
-      const text = entry.text[line - 1]
-      if (text === undefined || !entry.foreign.has(fnv1a(text.trim()))) return false
-    }
+    const lines = byFile.get(match.file)
+    if (lines === undefined || lines.size === 0) return false
+    for (let line = match.line; line <= match.endLine; line++) if (!lines.has(line)) return false
     return true
   }
 }
@@ -331,6 +333,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // findings are reported at Stop, and this hook runs before every shell command.
     const open = session
     const now = open ? await treeState(root) : null
+    if (open && now === null) log(TREE_GAVE_UP)
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
       const gap = between(work, open.agent, now)
@@ -402,6 +405,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Either way the new state is recorded, so the next call has something to compare with.
     const open = session
     const now = open ? await treeState(root) : null
+    if (open && now === null) log(TREE_GAVE_UP)
     if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
     const reference = referenceState(view.work, open.agent, event.toolUseId)
     const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
@@ -672,7 +676,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           ? "preexisting"
           : "new"
     const removedFrom = output.findings.length + output.ignored.length
-    const pulledIn = await pulledInLines(root, [...view.work.headMoves, ...movedNow], output.findings, lines)
+    const pulledIn = await pulledInLines(root, [...view.work.headMoves, ...movedNow], output.findings)
     const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] => {
       const status = classifiedStatus(rule, match, id)
       return status === "new" && pulledIn(match) ? "preexisting" : status

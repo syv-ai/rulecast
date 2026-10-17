@@ -56,7 +56,7 @@ rules matched no file these sessions edited.
   edits.
 - **Edits made through Bash.** A transcript has the command, not what it changed.
 - **Rules that need files on disk**, such as a `command` script or a whole-project tool, and
-  `scope: removed` rules. These are named in the output, not run.
+  `scope: removed` and `scope: container` rules. These are named in the output, not run.
 - **Line attribution.** It is the hook's own: a deletion marks the line after it as changed
   (`core/baseline/changes.ts`), so a pre-existing violation right below a deleted line is reported
   as new. Replay reproduces this, as it should, and the hooks do it too.
