@@ -10,6 +10,7 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url))
 
 const DOCS = [
   "agents/SETUP.md",
+  "agents/CONVENTIONS.md",
   "agents/DRAFT-RULES.md",
   "agents/reference/rule-format.md",
   "agents/reference/detectors.md",

@@ -37,8 +37,8 @@ const PYTHON = [
   "python/no-silent-except",
 ]
 const PROMPT =
-  "Read https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/DRAFT-RULES.md\n" +
-  "and follow it to draft rulecast rules for this project from AGENTS.md."
+  "Read https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/CONVENTIONS.md\n" +
+  "and follow it with me to work out this project's conventions, starting from AGENTS.md, then draft rulecast rules for them."
 
 const read = (root: string, file: string) => readFile(path.join(root, file), "utf8")
 const catalogEntry = (text: string) =>
@@ -184,7 +184,7 @@ describe("rulecast init --yes", () => {
     expect(existsSync(path.join(root, ".claude/settings.local.json"))).toBe(true)
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)
     expect(result.stdout).toContain("Commit .rulecast-config.yaml.")
-    expect(result.stdout).toContain("from the project's docs.")
+    expect(result.stdout).toContain("starting from the project's docs,")
   })
 
   test("--no-rules writes only the local repo; with no agent detected, every adapter's hooks are installed", async () => {
@@ -236,7 +236,7 @@ describe("rulecast init --yes", () => {
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("Catalog unavailable")
     expect(parse(await read(root, CONFIG_FILE))).toEqual({ repos: [{ repo: "local", rules: [] }] })
-    expect(result.stdout).toContain(`rulecast/v${VERSION}/agents/DRAFT-RULES.md`)
+    expect(result.stdout).toContain(`rulecast/v${VERSION}/agents/CONVENTIONS.md`)
   })
 
   test("unknown rules, agents and scopes are usage errors that write nothing", async () => {

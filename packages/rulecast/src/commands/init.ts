@@ -458,13 +458,13 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   const toCommit = changes.filter((change) => change.commit).map((change) => change.file)
   const closing = toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`
   if (ui.prompter !== null) {
-    ui.say(prompt, "Draft rules for your own conventions. Paste this into your coding agent:")
+    ui.say(prompt, "Work out your conventions with your coding agent, then draft rules for them. Paste this into it:")
     if (await ui.prompter.confirm({ message: "Copy to clipboard?", initialValue: true })) {
       ui.say((await io.copyToClipboard(prompt)) ? "Copied." : "No clipboard command found: copy it from above.")
     }
     ui.prompter.outro(closing)
   } else {
-    ui.say(prompt, "Draft rules for your own conventions. Paste this into your coding agent:")
+    ui.say(prompt, "Work out your conventions with your coding agent, then draft rules for them. Paste this into it:")
     io.stdout(`${closing}\n`)
   }
   return errors > 0 ? 2 : 0

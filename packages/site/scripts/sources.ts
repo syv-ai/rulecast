@@ -171,6 +171,14 @@ export const PAGES: Page[] = [
     intro: forAgents("agents/SETUP.md"),
   },
   {
+    route: "agents/conventions",
+    title: "CONVENTIONS.md",
+    description: "The instructions an agent follows to work out your conventions with you.",
+    group: "For agents",
+    source: { file: "agents/CONVENTIONS.md" },
+    intro: forAgents("agents/CONVENTIONS.md"),
+  },
+  {
     route: "agents/draft-rules",
     title: "DRAFT-RULES.md",
     description: "The instructions an agent follows to draft rules from your docs.",

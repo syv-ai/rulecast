@@ -286,10 +286,11 @@ If your agent cannot fetch a URL, this is the whole of it: run
 `.rulecast-config.yaml` and the other files it listed. Never edit hook settings by hand —
 `rulecast install` and `rulecast uninstall` own them.
 
-Once it is set up, ask the same agent to draft rules for your own conventions; `init` prints the
-prompt to paste.
+Once it is set up, ask the same agent to work out your project's conventions with you, then draft
+rules for them; `init` prints the prompt to paste.
 
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
+- [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for conventions that aren't written down yet. It reads the code, then interviews you one question at a time about what matters in this kind of project, recommending from named design principles and practice. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
 With subagents, each one's stop checks only the files it edited, so it is never asked to fix

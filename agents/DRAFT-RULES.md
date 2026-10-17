@@ -13,7 +13,7 @@ The steps ask the developer to decide several things, and the developer is there
 
 ## 1. Read
 
-1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer.
+1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer. If the doc has no conventions, only commands and architecture, stop: work them out with the developer first, through [CONVENTIONS.md](CONVENTIONS.md).
 2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
@@ -177,4 +177,5 @@ When revising rules a project already has, read `rulecast stats --format json` f
 - Never add a `rulecast-ignore` comment or `enabled: false` unless the developer agrees the finding or the rule is wrong.
 - Never change code to make a rule pass. Report findings; the developer decides.
 - Never take a decision these steps give to the developer, or a default in their place.
+- Never draft a rule for a convention the doc does not state.
 - Never commit.

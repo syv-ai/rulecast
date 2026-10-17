@@ -60,7 +60,7 @@ test("built CLI runs init --yes and keeps @clack/prompts out of its entry", asyn
   expect(result.status).toBe(0)
   expect(existsSync(path.join(root, ".rulecast-config.yaml"))).toBe(true)
   expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(true)
-  expect(result.stdout).toContain("from CLAUDE.md.")
+  expect(result.stdout).toContain("starting from CLAUDE.md,")
   // The prompter is a separate chunk (Decision 2): hooks never load it. The entry only reaches it
   // through the dynamic import, so @clack/prompts is imported from that chunk and never from cli.js.
   // Static `from "x"` and dynamic `import("x")`.
