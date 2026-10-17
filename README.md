@@ -306,6 +306,12 @@ held to it, each is told once, and neither is told to `git checkout` a protected
 have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with
 `isolation: worktree`).
 
+A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull
+or merge brings lines into a file the agent edited, those lines are not counted as the agent's,
+as long as their commits were made before the operation. The agent's own commits stay its own. One
+gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only
+as a git operation, so files it alone changed are not checked.
+
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
 
 As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.

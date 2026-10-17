@@ -4,6 +4,8 @@ import path from "node:path"
 import { isNew } from "./baseline/baseline"
 import { classify } from "./baseline/classify"
 import { baselineHas, type CommittedBaseline } from "./baseline/committed"
+import { foreignLines, type HeadMove } from "./baseline/foreign"
+import { fnv1a } from "./baseline/hash"
 import { removedFindings } from "./baseline/removed"
 import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
@@ -43,7 +45,7 @@ import {
 } from "./session/state"
 import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
-import { type IgnoredFinding, sourceLines } from "./suppress"
+import { type IgnoredFinding, type SourceLines, sourceLines } from "./suppress"
 import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
 
 export interface PipelineOptions {
@@ -219,6 +221,32 @@ function detectorWarnings(
   return summarised
 }
 
+/**
+ * Whether a match lies wholly on lines that commits from elsewhere brought in during the session (a
+ * pull, a merge): those are not the agent's, though the file's baseline predates them.
+ */
+async function pulledInLines(
+  root: string,
+  moves: readonly HeadMove[],
+  findings: readonly { match: Match }[],
+  lines: SourceLines,
+): Promise<(match: Match) => boolean> {
+  if (moves.length === 0) return () => false
+  const byFile = new Map<string, { foreign: Set<number>; text: string[] | null }>()
+  for (const file of new Set(findings.map(({ match }) => match.file))) {
+    byFile.set(file, { foreign: await foreignLines(root, moves, file), text: await lines(file) })
+  }
+  return (match) => {
+    const entry = byFile.get(match.file)
+    if (entry === undefined || entry.foreign.size === 0 || entry.text === null) return false
+    for (let line = match.line; line <= match.endLine; line++) {
+      const text = entry.text[line - 1]
+      if (text === undefined || !entry.foreign.has(fnv1a(text.trim()))) return false
+    }
+    return true
+  }
+}
+
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
   const { project, stateDir, registry } = options
   // Reassigned once: a shell call that changed files continues as the edit event for them.
@@ -274,18 +302,26 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const relevant = (files: readonly string[]) =>
     files.filter((file) => project.rules.some((rule) => rule.matches(file)))
 
+  /** Git operations seen by this invocation, not yet in the store it read (baseline/foreign.ts). */
+  const movedNow: HeadMove[] = []
+  const headRecords = (move: HeadMove | null): WorkRecord[] => {
+    if (move === null) return []
+    movedNow.push(move)
+    return [{ t: "head", ...move }]
+  }
   /**
    * What changed since the agent's latest recorded state that no tool call explains: not a file any
    * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
    * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
    */
-  function between(work: WorkState, agent: string, now: TreeState): string[] {
-    if (!hasOwnTree(work, agent)) return []
+  function between(work: WorkState, agent: string, now: TreeState): { files: string[]; moved: WorkRecord[] } {
+    if (!hasOwnTree(work, agent)) return { files: [], moved: [] }
     const reference = referenceState(work, agent)
     const gap = reference === null ? null : treeChanges(reference, now)
-    if (gap === null || gap.gitOperation) return []
+    if (gap === null) return { files: [], moved: [] }
+    if (gap.gitOperation) return { files: [], moved: headRecords(gap.move) }
     const edited = new Set(work.edited)
-    return relevant(gap.files.filter((file) => !edited.has(file)))
+    return { files: relevant(gap.files.filter((file) => !edited.has(file))), moved: [] }
   }
 
   if (event.kind === "shell-before") {
@@ -297,11 +333,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const now = open ? await treeState(root) : null
     if (open && now !== null) {
       const { work } = await readingStore(() => openSession(open.dir, open.agent), empty())
-      const swept = between(work, open.agent, now).filter((file) => !isGone(now, file))
+      const gap = between(work, open.agent, now)
+      const swept = gap.files.filter((file) => !isGone(now, file))
       const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
       if (session !== null) {
         await appendWork(open.dir, [
           ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
+          ...gap.moved,
           { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
         ])
         await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-before", tu: event.toolUseId })
@@ -387,6 +425,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const shared = sharedCall && !view.work.noticed.has(sharedKey)
     if (shared) agentNotices.push(SHARED_TREE)
     await appendWork(open.dir, [
+      ...(call?.gitOperation === true ? headRecords(call.move) : []),
       { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
       ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
     ])
@@ -626,13 +665,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
         ? options.committedBaseline
         : undefined
-    const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] =>
+    const classifiedStatus = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] =>
       committed === undefined
         ? classify(match, rule.scope, rule.id, baselineChanges, containers)
         : baselineHas(committed, rule.id, match.file, id)
           ? "preexisting"
           : "new"
     const removedFrom = output.findings.length + output.ignored.length
+    const pulledIn = await pulledInLines(root, [...view.work.headMoves, ...movedNow], output.findings, lines)
+    const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] => {
+      const status = classifiedStatus(rule, match, id)
+      return status === "new" && pulledIn(match) ? "preexisting" : status
+    }
     findings = [
       ...output.findings.map(({ rule, match }, index) => {
         const id = ids[index]!
@@ -782,9 +826,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const work = view.work
     let found: string[] = []
     if (now !== null && hasOwnTree(work, open.agent)) {
-      found = between(work, open.agent, now)
+      const gap = between(work, open.agent, now)
+      found = gap.files
       await appendWork(open.dir, [
         ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
+        ...gap.moved,
         { t: "tree", phase: "stop", agent: open.agent, state: now },
       ])
     }

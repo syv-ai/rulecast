@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 
 import { readBaseline } from "../../src/core/baseline/store"
 import { renderAgentText } from "../../src/core/delivery/render-agent"
@@ -193,6 +193,32 @@ describe("a shell call's changes go through the edit event", () => {
     })
     expect(delivery.findings).toEqual([])
     expect((await session.work()).edited).toEqual([])
+  })
+
+  test("lines a merge brings into a file the agent edited are not the agent's (abide #5)", async () => {
+    // The agent edits users.py and commits it, then merges a branch someone pushed earlier that adds
+    // its own violation to the same file. The file's baseline is the session's start commit, so the
+    // merged line used to read as the agent's and block its stop.
+    const root = await createFixture()
+    const base = "def get():\n    return 1\n\n\n\n\ndef other():\n    return 2\n"
+    await writeFile(path.join(root, USERS), base)
+    await git(root, "commit", "-q", "-am", "base")
+    await git(root, "checkout", "-q", "-b", "upstream")
+    await writeFile(path.join(root, USERS), base.replace("    return 2\n", "    raise HTTPException(409)\n"))
+    vi.stubEnv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+    await git(root, "commit", "-q", "-am", "theirs")
+    vi.unstubAllEnvs()
+    await git(root, "checkout", "-q", "-")
+
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.write(USERS, base.replace("    return 1\n", "    raise HTTPException(500)\n"))
+    await session.send({ kind: "edit", files: [USERS] })
+    await session.shell(() => git(root, "commit", "-q", "-am", "ours"))
+    await session.shell(() => git(root, "merge", "-q", "--no-edit", "upstream"))
+
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(lines(stop)).toEqual([`${USERS}:2`])
   })
 
   test("a codemod across 40 files: every file is the agent's, and Stop verifies them all", async () => {

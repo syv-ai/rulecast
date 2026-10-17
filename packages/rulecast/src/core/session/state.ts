@@ -1,3 +1,4 @@
+import type { HeadMove } from "../baseline/foreign"
 import type { ActiveMode } from "../config/mode"
 import type { TreeState } from "./tree"
 
@@ -25,6 +26,8 @@ export type WorkRecord =
   | { t: "prompt"; agent: string }
   | { t: "disabled"; rule: string; reason: string }
   | { t: "noticed"; key: string }
+  /** `HEAD` moved between two tree states: a git operation, whose commits from elsewhere are not the agent's (baseline/foreign.ts). */
+  | ({ t: "head" } & HeadMove)
   /** The working tree at session start, before and after a shell call, and at a stop (session/tree.ts). */
   | { t: "tree"; phase: "start" | "before" | "after" | "stop"; agent: string; toolUseId?: string; state: TreeState }
   /**
@@ -65,6 +68,8 @@ export interface WorkState {
   editedVia: Map<string, "tool" | "shell">
   /** Files changed during a shell call that another agent's shell call overlapped: possibly partly theirs. */
   sharedEdits: Set<string>
+  /** Git operations seen this session, oldest first. */
+  headMoves: HeadMove[]
   /** Unique, least recently swept first; a file the agent edits leaves it. */
   swept: string[]
   /** The agents whose comparisons swept each file in `swept`. */
@@ -120,6 +125,7 @@ export function emptyWork(): WorkState {
     noticed: new Set(),
     editedVia: new Map(),
     sharedEdits: new Set(),
+    headMoves: [],
     swept: [],
     sweptBy: new Map(),
     latestTree: new Map(),
@@ -199,6 +205,9 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       case "noticed":
         state.noticed.add(record.key)
+        break
+      case "head":
+        state.headMoves.push({ from: record.from, to: record.to, since: record.since })
         break
       case "mode":
         state.mode = { mode: record.mode, source: record.source, detail: record.detail }

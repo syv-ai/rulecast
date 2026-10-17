@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { lstat, readFile } from "node:fs/promises"
 import path from "node:path"
 
+import type { HeadMove } from "../baseline/foreign"
 import { isNotFound } from "../errors"
 import { git } from "../git"
 
@@ -15,6 +16,8 @@ import { git } from "../git"
  */
 export interface TreeState {
   head: string | null
+  /** Epoch ms when it was taken; absent in stores written before it was recorded. */
+  at?: number
   /**
    * Project-relative path → [mtimeMs, size, content hash]; absent from the map means clean (or
    * ignored). The hash is absent for a file over HASHED_MAX_BYTES, which is compared by mtime and size.
@@ -78,6 +81,7 @@ export async function treeState(root: string): Promise<TreeState | null> {
   // is most of the cost on a large repository (vscode: 110 of 135 ms), and in parallel the wall time
   // is the slower of the two rather than their sum. Limited to the project (`-- .`): a project below
   // the repository's top owns only its own files. `ls-files` already answers relative to `root`.
+  const at = Date.now()
   const bounded = { timeoutMs: TREE_GIT_TIMEOUT_MS }
   const [status, untracked, prefix] = await Promise.all([
     git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no", "--", "."], undefined, bounded),
@@ -106,7 +110,7 @@ export async function treeState(root: string): Promise<TreeState | null> {
       }
     }),
   )
-  return { head, entries }
+  return { head, at, entries }
 }
 
 async function contentHash(file: string): Promise<string> {
@@ -133,8 +137,14 @@ function same(
 export function treeChanges(
   before: TreeState,
   after: TreeState,
-): { gitOperation: true } | { gitOperation: false; files: string[] } {
-  if (before.head !== after.head) return { gitOperation: true }
+): { gitOperation: true; move: HeadMove | null } | { gitOperation: false; files: string[] } {
+  if (before.head !== after.head) {
+    const move =
+      before.head !== null && after.head !== null && before.at !== undefined
+        ? { from: before.head, to: after.head, since: before.at }
+        : null
+    return { gitOperation: true, move }
+  }
   const files = new Set<string>()
   for (const [file, entry] of Object.entries(after.entries)) {
     const was = before.entries[file]

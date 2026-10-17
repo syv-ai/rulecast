@@ -109,15 +109,21 @@ describe("treeChanges", () => {
     })
   })
 
-  test("a commit moves HEAD: a git operation", async () => {
+  test("a commit moves HEAD: a git operation, with where HEAD went and since when", async () => {
     const root = await createRepo(files)
     await writeFile(path.join(root, "src/a.ts"), "export const a = 2\n")
-    expect(
-      await changedBy(root, async () => {
-        await git(root, "add", "src/a.ts")
-        await git(root, "commit", "-q", "-m", "change")
-      }),
-    ).toEqual({ gitOperation: true })
+    const from = await git(root, "rev-parse", "HEAD")
+    const began = Date.now()
+    const changes = await changedBy(root, async () => {
+      await git(root, "add", "src/a.ts")
+      await git(root, "commit", "-q", "-m", "change")
+    })
+    expect(changes).toEqual({
+      gitOperation: true,
+      move: { from, to: await git(root, "rev-parse", "HEAD"), since: expect.any(Number) },
+    })
+    const since = (changes as { move: { since: number } }).move.since
+    expect(since).toBeGreaterThanOrEqual(began)
   })
 
   test("an ignored file is never listed", async () => {
