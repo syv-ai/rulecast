@@ -57,6 +57,8 @@ jobs:
       # Several tests run dist/cli.js; building once up front keeps the first of them from paying
       # the whole 60 s build inside its own timeout.
       - run: pnpm build
+      # The catalog's ruff rules run the real ruff, and skip without it (test/catalog.test.ts).
+      - run: pipx install ruff
       - run: pnpm test
 
   site:

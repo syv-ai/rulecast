@@ -24,7 +24,12 @@ export function catalogFiles(): Record<string, string> {
   return files
 }
 
-/** A bare "rulecast repository" holding this repository's catalog, tagged v0.2.0. */
-export function createCatalogRepo(): Promise<string> {
-  return createRuleRepo([{ tag: "v0.2.0", files: catalogFiles() }])
+/**
+ * A bare "rulecast repository" holding this repository's catalog, tagged v0.2.0. `extraRules` is
+ * manifest YAML appended to it, for a kind of rule the real catalog does not have.
+ */
+export function createCatalogRepo(extraRules = ""): Promise<string> {
+  const files = catalogFiles()
+  files[".rulecast-rules.yaml"] += extraRules
+  return createRuleRepo([{ tag: "v0.2.0", files }])
 }

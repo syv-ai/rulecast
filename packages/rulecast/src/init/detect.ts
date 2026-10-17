@@ -200,7 +200,7 @@ const words = (text: string) =>
  * (`@AGENTS.md#errors`), or null when nothing shares a word with it.
  *
  * `init` preselects it so that accepting the defaults gives the agent the project's own words: a
- * catalog rule citing `errors.md#services-raise-domain-exceptions` is mapped to an `Errors` heading.
+ * catalog rule citing `errors.md#swallowed-exceptions` is mapped to an `Errors` heading.
  * Words come from the package doc's file name and section anchor, and are compared with the
  * heading's own text, not its parents'. Ties go to the shallower heading, then the first.
  */

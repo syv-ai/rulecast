@@ -8,7 +8,7 @@ const ID = RULE_ID.source.slice(1, -1)
 /**
  * An inline ignore, anywhere in a line and in any comment syntax:
  *
- *     raise HTTPException(404)  # rulecast-ignore: python/no-httpexception-in-services legacy endpoint
+ *     except Exception: pass  # rulecast-ignore: python/no-silent-except best-effort cache cleanup
  *     // rulecast-ignore: frontend/no-fetch the SDK has no hook for this yet
  *     <!-- rulecast-ignore: docs/no-todo tracked in #412 -->
  *

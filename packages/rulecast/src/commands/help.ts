@@ -33,7 +33,7 @@ export const COMMANDS: CommandHelp[] = [
     flags: [
       [
         "--rules id,id",
-        "Install these catalog rules, or groups such as loop-safety, instead of the ones that apply to your files",
+        "Install these catalog rules, or groups such as loop-safety, instead of the ones that match your files",
       ],
       ["--no-rules", "Install no catalog rules"],
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable"],

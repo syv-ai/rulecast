@@ -1,7 +1,7 @@
 # Rules without an id prefix. "@" paths in context are relative to this directory.
 - id: generated-code
   name: Generated code is never edited by hand
-  description: Flags edits to generated files. Override files to match your generator's output directory.
+  description: "Flags edits to generated files: *.gen.* files and __generated__/ directories."
   files: '\.gen\.[cm]?[jt]sx?$|(^|/)__generated__/'
   severity: error
   detect:

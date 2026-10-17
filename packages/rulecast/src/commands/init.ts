@@ -221,7 +221,7 @@ async function chooseRules(
   if (ui.prompter === null) {
     // An empty config otherwise reads as a dead one: say the catalog was consulted and why it gave nothing.
     if (available.length > 0 && preselected.length === 0) {
-      ui.say(`Nothing in ${catalog.label} applies to this project's files. Draft rules from your own docs.`, "Rules")
+      ui.say(`Nothing in ${catalog.label} matches this project's files. Draft rules from your own docs.`, "Rules")
     }
     for (const [group, pack] of packs) {
       if (preselected.some((id) => groupOf(id) === group)) continue

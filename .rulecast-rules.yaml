@@ -2,7 +2,7 @@
 
 - id: generated-code
   name: Generated code is never edited by hand
-  description: Flags edits to generated files. Override files to match your generator's output directory.
+  description: "Flags edits to generated files: *.gen.* files and __generated__/ directories."
   files: \.gen\.[cm]?[jt]sx?$|(^|/)__generated__/
   severity: error
   detect:
@@ -553,170 +553,40 @@
       - path: .claude/settings.json
         code: |
           { "hooks": {} }
-- id: python/no-httpexception-in-services
-  name: Services raise domain exceptions, not HTTPException
-  description: Flags HTTPException raised in the service layer, which must stay independent of HTTP.
-  files: (^|/)services/.*\.py$
-  severity: error
-  detect:
-    regex:
-      pattern: raise\s+HTTPException\b
-  message: "{{file}}:{{line}} raises HTTPException in the service layer. Raise a domain exception; the API layer maps it to an HTTP response."
-  context:
-    - "@packages/rules-python/errors.md#services-raise-domain-exceptions"
-  examples:
-    good:
-      - path: app/services/users.py
-        code: |
-          def get_user(session, user_id):
-              user = crud.get_user(session, user_id)
-              if user is None:
-                  raise UserNotFound(user_id)
-              return user
-    bad:
-      - path: app/services/users.py
-        code: |
-          def get_user(session, user_id):
-              user = crud.get_user(session, user_id)
-              if user is None:
-                  raise HTTPException(status_code=404)
-              return user
-- id: python/no-queries-in-services
-  name: Services reach the database through CRUD functions
-  description: Flags database queries written directly in the service layer.
-  files: (^|/)services/.*\.py$
-  severity: error
-  detect:
-    regex:
-      pattern: \b(session|db)\.(exec|execute|query|scalars?)\(
-  message: "{{file}}:{{line}} queries the database from the service layer. Move the query into a CRUD function."
-  context:
-    - "@packages/rules-python/layering.md#data-access-goes-through-crud"
-  examples:
-    good:
-      - path: app/services/users.py
-        code: |
-          def list_users(session):
-              return crud.list_users(session)
-    bad:
-      - path: app/services/users.py
-        code: |
-          def list_users(session):
-              return session.exec(select(User)).all()
-- id: python/layering
-  name: Route, service and CRUD layering
-  description: Delivers the layering conventions the first time an agent works on a route, service or CRUD module.
-  files: (^|/)(api|routers?|routes|services|crud)(/.*)?\.py$
-  exclude: (^|/)tests?/
-  stages:
-    - touch
-  context:
-    - "@packages/rules-python/layering.md"
 - id: python/no-silent-except
   name: No silently swallowed exceptions
-  description: Flags an except clause whose only statement is pass, which hides the failure.
+  description: "Flags try-except-pass (ruff S110): a broad except whose only statement is pass hides the failure."
   files: \.py$
   severity: error
   detect:
-    ast-grep:
-      language: python
-      rule:
-        kind: except_clause
-        has:
-          kind: block
-          has:
-            kind: pass_statement
-  message: "{{file}}:{{line}} swallows an exception with a bare pass. Handle it, log it, or let it propagate."
+    linter:
+      tool: ruff
+      rules:
+        - S110
+  message: "{{file}}:{{line}} swallows an exception with pass. Handle it, log it, or let it propagate."
   context:
     - "@packages/rules-python/errors.md#swallowed-exceptions"
   examples:
     good:
-      - path: app/services/users.py
+      - path: app/users.py
         code: |
           def get():
               try:
                   fetch()
-              except ValueError:
-                  log.warning("missing")
-    bad:
-      - path: app/services/users.py
+              except Exception:
+                  log.exception("fetch failed")
+      - path: app/users.py
         code: |
           def get():
               try:
                   fetch()
-              except ValueError:
+              except KeyError:
                   pass
-- id: python/thin-routes
-  name: Route handlers stay thin
-  description: A model judges whether a route does more than parse input, call a service and return. Sends file contents to your configured LLM provider.
-  files: ^app/(api|routers)/.*\.py$
-  severity: warning
-  detect:
-    llm:
-      model: haiku
-      question: |
-        Does this route handler do more than parse input, call a service and return the result — business logic, database access, or error translation written inline? Report each offending line.
-  message: "{{file}}:{{line}} does work that belongs in a service. {{reason}}"
-  context:
-    - "@packages/rules-python/layering.md#business-logic-goes-in-services"
-- id: react/no-fetch-in-components
-  name: Components get server data through query hooks
-  description: Flags network calls (fetch, axios) made directly in components.
-  files: (^|/)components/.*\.[jt]sx$
-  severity: warning
-  detect:
-    regex:
-      pattern: \bfetch\(|\baxios\.(get|post|put|patch|delete|request)\(
-  message: "{{file}}:{{line}} calls the network from a component. Fetch server data through a query or mutation hook."
-  context:
-    - "@packages/rules-react/data-fetching.md"
-  examples:
-    good:
-      - path: src/components/UserList.tsx
-        code: |
-          export function UserList() {
-            const { data } = useUsers()
-            return <List items={data} />
-          }
     bad:
-      - path: src/components/UserList.tsx
+      - path: app/users.py
         code: |
-          export function UserList() {
-            const [users, setUsers] = useState([])
-            useEffect(() => {
-              fetch("/api/users").then((r) => r.json()).then(setUsers)
-            }, [])
-            return <List items={users} />
-          }
-- id: react/data-fetching
-  name: Server state lives in the query layer
-  description: Delivers the data-fetching conventions the first time an agent works on a component, route or hook.
-  files: (^|/)(components|routes|hooks)/.*\.[jt]sx?$
-  stages:
-    - touch
-  context:
-    - "@packages/rules-react/data-fetching.md"
-- id: react/no-inline-style
-  name: No inline style props
-  description: Flags style={{ ... }} on JSX elements, which bypasses the design system.
-  files: (^|/)(components|routes)/.*\.[jt]sx$
-  severity: warning
-  detect:
-    ast-grep:
-      language: tsx
-      rule:
-        pattern:
-          context: <div style={{ $$$PROPS }}/>
-          selector: jsx_attribute
-  message: "{{file}}:{{line}} styles inline with {{text}}. Use the design system's classes so the value stays themeable."
-  context:
-    - "@packages/rules-react/styling.md#inline-styles"
-  examples:
-    good:
-      - path: src/components/Card.tsx
-        code: |
-          export const Card = () => <div className="p-2">x</div>
-    bad:
-      - path: src/components/Card.tsx
-        code: |
-          export const Card = () => <div style={{ padding: 8 }}>x</div>
+          def get():
+              try:
+                  fetch()
+              except Exception:
+                  pass

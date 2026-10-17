@@ -1,7 +1,8 @@
+import { spawnSync } from "node:child_process"
 import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest"
+import { beforeAll, describe, expect, test } from "vitest"
 
 import { generateManifest } from "../scripts/manifest"
 import { compileManifest } from "../src/core/compile/project"
@@ -15,10 +16,22 @@ import { defaultDetectorSettings } from "../src/core/types"
 import { registry } from "./helpers/fixture"
 import { createRepo, git } from "./helpers/git"
 import { stateDirFor } from "./helpers/home"
-import { stubAgentCli } from "./helpers/llm"
 import { createProject } from "./helpers/project"
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url))
+
+/**
+ * Catalog rules on ruff run the real one from PATH: it is not an npm package, so it cannot be a
+ * workspace devDependency (plan 5b). CI installs it. Without it, those rules are skipped by name
+ * rather than passing on a tool that never ran.
+ */
+const RUFF_INSTALLED = spawnSync("ruff", ["--version"]).status === 0
+function skippedForRuff(rule: CompiledRule | undefined): boolean {
+  if (RUFF_INSTALLED || rule?.detector?.kind !== "linter") return false
+  if ((rule.detector.config as { tool?: string }).tool !== "ruff") return false
+  console.log(`skipping ${rule.id}: ruff not installed`)
+  return true
+}
 
 const CATALOG = [
   "generated-code",
@@ -33,14 +46,7 @@ const CATALOG = [
   "loop-safety/no-config-suppressions-js",
   "loop-safety/no-lowered-thresholds",
   "loop-safety/protected-loop-config",
-  "python/no-httpexception-in-services",
-  "python/no-queries-in-services",
-  "python/layering",
   "python/no-silent-except",
-  "python/thin-routes",
-  "react/no-fetch-in-components",
-  "react/data-fetching",
-  "react/no-inline-style",
 ]
 
 interface Case {
@@ -65,9 +71,6 @@ const TSX_EXPECTS =
 const MYPY = '[project]\nname = "shop"\n\n[tool.mypy]\nstrict = true\n'
 const RUFF = '[tool.ruff.lint]\nselect = ["E", "F"]\nignore = ["E501"]\n'
 const TSCONFIG = '{\n  "compilerOptions": {\n    "strict": true,\n    "target": "es2022"\n  }\n}\n'
-
-const SERVICE_OK = "def get_user(session, user_id):\n    return crud.get_user(session, user_id)\n"
-const COMPONENT_OK = "export function UserList() {\n  const { data } = useUsers()\n  return <List items={data} />\n}\n"
 
 const cases: Case[] = [
   {
@@ -187,103 +190,24 @@ const cases: Case[] = [
   { rule: "generated-code", kind: "verify", file: "src/__generated__/schema.ts", content: "export {}\n", fires: true },
   { rule: "generated-code", kind: "verify", file: "frontend/src/client.ts", content: "export {}\n", fires: false },
   {
-    rule: "python/no-httpexception-in-services",
-    kind: "verify",
-    file: "app/services/users.py",
-    content: "def get_user(session, user_id):\n    raise HTTPException(status_code=404)\n",
-    fires: true,
-  },
-  {
-    rule: "python/no-httpexception-in-services",
-    kind: "verify",
-    file: "app/services/users.py",
-    content: "def get_user(session, user_id):\n    raise UserNotFound(user_id)\n",
-    fires: false,
-  },
-  {
-    rule: "python/no-httpexception-in-services",
-    kind: "verify",
-    file: "app/api/routes/users.py",
-    content: "def read_user(user_id):\n    raise HTTPException(status_code=404)\n",
-    fires: false,
-  },
-  {
-    rule: "python/no-queries-in-services",
-    kind: "verify",
-    file: "app/services/users.py",
-    content: "def list_users(session):\n    return session.exec(select(User)).all()\n",
-    fires: true,
-  },
-  {
-    rule: "python/no-queries-in-services",
-    kind: "verify",
-    file: "app/services/users.py",
-    content: SERVICE_OK,
-    fires: false,
-  },
-  { rule: "python/layering", kind: "touch", file: "app/services/users.py", content: SERVICE_OK, fires: true },
-  { rule: "python/layering", kind: "touch", file: "app/models/user.py", content: "class User: ...\n", fires: false },
-  // A route layer is not always a routes/ directory: the second drafting trial's app/api/routes.py
-  // never got the layering section. thin-routes already names app/api and app/routers.
-  { rule: "python/layering", kind: "touch", file: "app/api/routes.py", content: "x = 1\n", fires: true },
-  { rule: "python/layering", kind: "touch", file: "app/routers/users.py", content: "x = 1\n", fires: true },
-  { rule: "python/layering", kind: "touch", file: "app/crud.py", content: "x = 1\n", fires: true },
-  { rule: "python/layering", kind: "touch", file: "tests/api/test_users.py", content: "x = 1\n", fires: false },
-  {
-    rule: "react/no-fetch-in-components",
-    kind: "verify",
-    file: "src/components/UserList.tsx",
-    content: 'export async function load() {\n  return fetch("/api/users")\n}\n',
-    fires: true,
-  },
-  {
-    rule: "react/no-fetch-in-components",
-    kind: "verify",
-    file: "src/components/UserList.tsx",
-    content: COMPONENT_OK,
-    fires: false,
-  },
-  {
-    rule: "react/no-fetch-in-components",
-    kind: "verify",
-    file: "src/hooks/useUsers.ts",
-    content: 'export const listUsers = () => fetch("/api/users")\n',
-    fires: false,
-  },
-  {
-    rule: "react/data-fetching",
-    kind: "touch",
-    file: "src/components/UserList.tsx",
-    content: COMPONENT_OK,
-    fires: true,
-  },
-  { rule: "react/data-fetching", kind: "touch", file: "src/utils/format.ts", content: "export {}\n", fires: false },
-  {
     rule: "python/no-silent-except",
     kind: "verify",
     file: "app/services/users.py",
-    content: "def get():\n    try:\n        fetch()\n    except ValueError:\n        pass\n",
+    content: "def get():\n    try:\n        fetch()\n    except Exception:\n        pass\n",
     fires: true,
   },
   {
     rule: "python/no-silent-except",
     kind: "verify",
     file: "app/services/users.py",
-    content: "def get():\n    try:\n        fetch()\n    except ValueError:\n        log.warning('missing')\n",
+    content: "def get():\n    try:\n        fetch()\n    except Exception:\n        log.exception('fetch failed')\n",
     fires: false,
   },
   {
-    rule: "react/no-inline-style",
+    rule: "python/no-silent-except",
     kind: "verify",
-    file: "src/components/Card.tsx",
-    content: "export const Card = () => <div style={{ padding: 8 }}>x</div>\n",
-    fires: true,
-  },
-  {
-    rule: "react/no-inline-style",
-    kind: "verify",
-    file: "src/components/Card.tsx",
-    content: 'export const Card = () => <div className="p-2">x</div>\n',
+    file: "app/services/users.py",
+    content: "def get():\n    try:\n        fetch()\n    except KeyError:\n        pass\n",
     fires: false,
   },
   {
@@ -679,23 +603,6 @@ const cases: Case[] = [
     content: "# CI\n",
     fires: false,
   },
-  // An llm rule's judgement belongs to the model, so what the catalog can check is that it is
-  // wired up: the right files reach it, and a finding renders through {{reason}}. The stub answers
-  // for whatever rule the prompt names, so the quiet case is a file the rule does not select.
-  {
-    rule: "python/thin-routes",
-    kind: "verify",
-    file: "app/api/users.py",
-    content: "@router.get('/users')\ndef list_users(session):\n    return session.exec(select(User)).all()\n",
-    fires: true,
-  },
-  {
-    rule: "python/thin-routes",
-    kind: "verify",
-    file: "app/services/users.py",
-    content: SERVICE_OK,
-    fires: false,
-  },
 ]
 
 describe("the rulecast repository's rule manifest", () => {
@@ -717,10 +624,9 @@ describe("catalog rule examples", () => {
     rules = (await compileManifest(repoRoot, registry)).rules
   })
 
-  test("every rule with a detector carries examples, except the llm one", () => {
+  test("every rule with a detector carries examples", () => {
     for (const rule of rules.filter(isDetectorRule)) {
-      const expected = rule.detector.kind !== "llm"
-      expect(rule.examples !== null && rule.examples.bad.length > 0, `${rule.id} has bad examples`).toBe(expected)
+      expect(rule.examples !== null && rule.examples.bad.length > 0, `${rule.id} has bad examples`).toBe(true)
     }
   })
 
@@ -728,9 +634,10 @@ describe("catalog rule examples", () => {
     // A published rule's examples are the executable half of its documentation: a consumer who
     // overrides `files` or the pattern needs them to check the override, and this is what stops a
     // pattern tightened later from silently ceasing to match.
-    CATALOG.filter((id) => id !== "python/thin-routes"),
+    CATALOG,
   )("%s passes its own examples", async (id) => {
     const rule = rules.find((one) => one.id === id)
+    if (skippedForRuff(rule)) return
     expect(rule, id).toBeDefined()
     if (rule === undefined) return
     if (!isDetectorRule(rule)) {
@@ -763,10 +670,6 @@ describe("catalog rules", () => {
   beforeAll(async () => {
     rules = (await compileManifest(repoRoot, registry)).rules
   })
-  // No case may reach a real model: the stub below is found by absolute path in each fixture's
-  // node_modules/.bin, and a PATH without claude on it closes the fallback.
-  beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"))
-  afterEach(() => vi.unstubAllEnvs())
 
   test("every rule has a case where it fires and one where it does not", () => {
     for (const id of CATALOG) {
@@ -782,6 +685,7 @@ describe("catalog rules", () => {
   })
 
   test.each(cases)("$rule on $file ($kind) fires: $fires", async ({ rule, kind, file, content, fires, before }) => {
+    if (skippedForRuff(rules.find((one) => one.id === rule))) return
     let root: string
     let baseCommit: string | undefined
     if (before === undefined) root = await createProject({ [file]: content })
@@ -790,7 +694,6 @@ describe("catalog rules", () => {
       baseCommit = await git(root, "rev-parse", "HEAD")
       await writeFile(path.join(root, file), content)
     }
-    await stubAgentCli(root, "claude")
     const { delivery } = await runPipeline({
       project: { root, config: defaultConfig(), rules, diagnostics: [], mode: ATTENDED },
       stateDir: stateDirFor(root),

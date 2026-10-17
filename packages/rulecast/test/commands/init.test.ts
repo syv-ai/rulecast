@@ -17,26 +17,33 @@ import { ACCEPT, CANCEL, scriptedPrompter } from "../helpers/prompter"
 let catalog: string
 let env: Env
 
+/** The catalog has no llm rule, so the consent tests add one. */
+const LLM_RULE = `- id: fixture/thin-handlers
+  name: Handlers stay thin
+  description: A model judges whether a handler does more than parse input, call a service and return.
+  files: (^|/)api/.*\\.py$
+  severity: warning
+  detect:
+    llm:
+      model: haiku
+      question: Does this handler do more than parse input, call a service and return the result?
+  message: "{{file}}:{{line}} {{reason}}"
+`
+
 beforeAll(async () => {
-  catalog = await createCatalogRepo()
+  catalog = await createCatalogRepo(LLM_RULE)
   env = { ...testEnv, RULECAST_CATALOG: catalog }
 }, 30_000)
 
 /** A Python project whose CLAUDE.md imports AGENTS.md (so Claude Code is detected). */
 const PROJECT: Record<string, string> = {
-  "app/services/users.py": "def get():\n    return None\n",
-  // Matches python/thin-routes, the catalog's one llm rule — so every assertion on PYTHON below
-  // is also an assertion that an llm rule is never ticked for someone (spec §6, Consent).
+  // Matches fixture/thin-handlers, an llm rule — so every assertion on PYTHON below is also an
+  // assertion that an llm rule is never ticked for someone (spec §6, Consent).
   "app/api/users.py": "@router.get('/users')\ndef list_users():\n    return svc.list()\n",
   "AGENTS.md": "# Agents\n\n## Errors\n\nServices raise domain exceptions.\n",
   "CLAUDE.md": "@AGENTS.md\n",
 }
-const PYTHON = [
-  "python/layering",
-  "python/no-httpexception-in-services",
-  "python/no-queries-in-services",
-  "python/no-silent-except",
-]
+const PYTHON = ["python/no-silent-except"]
 const PROMPT =
   "Read https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/CONVENTIONS.md\n" +
   "and follow it with me to work out this project's conventions, starting from AGENTS.md, then draft rulecast rules for them."
@@ -50,7 +57,7 @@ const ids = (text: string) =>
     .sort()
 
 describe("rulecast init --yes", () => {
-  test("configures the catalog rules that apply to the project and shared hooks", async () => {
+  test("configures the catalog rules that match the project and shared hooks", async () => {
     const root = await createRepo(PROJECT)
     const result = await runCli(root, ["init", "--yes"], "", env)
     expect(result.stderr).toBe("")
@@ -61,7 +68,7 @@ describe("rulecast init --yes", () => {
     const settings = JSON.parse(await read(root, ".claude/settings.json"))
     expect(settings.hooks.Stop[0].hooks[0].command).toBe("rulecast hook claude-code")
     expect(result.stdout).toContain("python · AGENTS.md (imported by CLAUDE.md) · Claude Code (CLAUDE.md)")
-    expect(result.stdout).toContain("rulecast validate: 4 rules valid")
+    expect(result.stdout).toContain("rulecast validate: 1 rule valid")
     expect(result.stdout).toContain(PROMPT)
     expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")
     expect(result.copied).toEqual([])
@@ -85,25 +92,25 @@ describe("rulecast init --yes", () => {
     expect(await read(outer, CONFIG_FILE)).toBe("repos: []\n")
   })
 
-  test("says so when nothing in the catalog applies, rather than only 'no rules yet'", async () => {
+  test("says so when nothing in the catalog matches, rather than only 'no rules yet'", async () => {
     const root = await createRepo({ "src/index.ts": "export const x = 1\n", "AGENTS.md": "# Agents\n" })
     const result = await runCli(root, ["init", "--yes"], "", env)
     expect(result.code).toBe(0)
-    expect(result.stdout).toMatch(/Nothing in \S+@v0\.2\.0 applies to this project's files\./)
+    expect(result.stdout).toMatch(/Nothing in \S+@v0\.2\.0 matches this project's files\./)
     expect(result.stdout).toContain("new, no rules yet")
   })
 
   test("--yes never installs an llm rule, however well it matches", async () => {
     const root = await createRepo(PROJECT)
     await runCli(root, ["init", "--yes"], "", env)
-    expect(ids(await read(root, CONFIG_FILE))).not.toContain("python/thin-routes")
+    expect(ids(await read(root, CONFIG_FILE))).not.toContain("fixture/thin-handlers")
   })
 
   test("--rules installs an llm rule, because naming it is the consent", async () => {
     const root = await createRepo(PROJECT)
-    const result = await runCli(root, ["init", "--rules", "python/thin-routes", "--yes"], "", env)
+    const result = await runCli(root, ["init", "--rules", "fixture/thin-handlers", "--yes"], "", env)
     expect(result.code).toBe(0)
-    expect(ids(await read(root, CONFIG_FILE))).toEqual(["python/thin-routes"])
+    expect(ids(await read(root, CONFIG_FILE))).toEqual(["fixture/thin-handlers"])
   })
 
   test("--yes never installs the loop-safety pack, and says how to add it", async () => {
@@ -175,15 +182,13 @@ describe("rulecast init --yes", () => {
     await runCli(root, ["init", "--yes"], "", env)
     const before = `# our team's rulecast config\n${await read(root, CONFIG_FILE)}`
     await writeFile(path.join(root, CONFIG_FILE), before)
-    await mkdir(path.join(root, "src/components"), { recursive: true })
-    await writeFile(path.join(root, "src/components/Card.tsx"), "export const Card = () => fetch('/api')\n")
+    await mkdir(path.join(root, "src/client"), { recursive: true })
+    await writeFile(path.join(root, "src/client/sdk.gen.ts"), "export {}\n")
 
     const result = await runCli(root, ["init", "--yes"], "", env)
     expect(result.code).toBe(0)
     const after = await read(root, CONFIG_FILE)
-    expect(ids(after)).toEqual(
-      [...PYTHON, "react/data-fetching", "react/no-fetch-in-components", "react/no-inline-style"].sort(),
-    )
+    expect(ids(after)).toEqual(["generated-code", ...PYTHON].sort())
     const local = before.indexOf("  - repo: local")
     expect(after.startsWith(before.slice(0, local))).toBe(true)
     expect(after.endsWith(before.slice(local))).toBe(true)
@@ -279,7 +284,7 @@ describe("rulecast init without a terminal", () => {
     const root = await createRepo(PROJECT)
     const result = await runCli(root, ["init"], "", env)
     expect(result.code).toBe(2)
-    expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 4 rules from .+@v0\.2\.0\n/)
+    expect(result.stdout).toMatch(/\.rulecast-config\.yaml {2}new, 1 rule from .+@v0\.2\.0\n/)
     expect(result.stdout).toContain(".claude/settings.json  +11 hooks (Claude Code)")
     expect(result.stdout).toContain("Rerun with --yes")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
@@ -290,14 +295,7 @@ describe("rulecast init without a terminal", () => {
 describe("rulecast init in a terminal", () => {
   test("scripted answers: one rule pointed at the project's doc, personal hooks, prompt copied", async () => {
     const root = await createRepo(PROJECT)
-    const script = scriptedPrompter([
-      ["python/no-httpexception-in-services"],
-      "@AGENTS.md#errors",
-      ACCEPT,
-      "personal",
-      true,
-      true,
-    ])
+    const script = scriptedPrompter([["python/no-silent-except"], "@AGENTS.md#errors", ACCEPT, "personal", true, true])
     const result = await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
     expect(result.code).toBe(0)
     expect(script.asked.map((prompt) => prompt.kind)).toEqual([
@@ -310,10 +308,10 @@ describe("rulecast init in a terminal", () => {
     ])
     const [rules, conventions] = script.asked
     expect([...(rules!.initial as string[])].sort()).toEqual(PYTHON)
-    expect(rules!.values).toHaveLength(20)
+    expect(rules!.values).toHaveLength(14)
     expect(conventions!.values).toEqual(["", "@AGENTS.md", "@AGENTS.md#agents", "@AGENTS.md#errors"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
-      { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
+      { id: "python/no-silent-except", context: ["@AGENTS.md#errors"] },
     ])
     expect(existsSync(path.join(root, ".claude/settings.local.json"))).toBe(true)
     expect(result.copied).toEqual([PROMPT])
@@ -326,10 +324,10 @@ describe("rulecast init in a terminal", () => {
     await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
 
     const rules = script.asked[0]!
-    expect(rules.values).toContain("python/thin-routes")
+    expect(rules.values).toContain("fixture/thin-handlers")
     // It matches app/api/users.py, so only the consent rule keeps it out of the ticked set.
-    expect(rules.initial as string[]).not.toContain("python/thin-routes")
-    const hint = (rules.hints as Record<string, string>)["python/thin-routes"]!
+    expect(rules.initial as string[]).not.toContain("fixture/thin-handlers")
+    const hint = (rules.hints as Record<string, string>)["fixture/thin-handlers"]!
     expect(hint).toContain("llm")
     expect(hint).toContain("haiku")
     expect(hint).toContain("sends")
@@ -359,8 +357,8 @@ describe("rulecast init in a terminal", () => {
 
   test("declining the review writes nothing", async () => {
     const root = await createRepo(PROJECT)
-    // Rules, four conventions (one per preselected rule), agents, scope, then "Write?".
-    const script = scriptedPrompter([ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, false])
+    // Rules, one convention (one per preselected rule), agents, scope, then "Write?".
+    const script = scriptedPrompter([ACCEPT, ACCEPT, ACCEPT, ACCEPT, false])
     const result = await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
     expect(result.code).toBe(0)
     expect(script.shown.at(-1)).toBe("Nothing written.")
@@ -372,14 +370,14 @@ describe("rulecast init defaults (plan 10, A1 and G6)", () => {
   test("with no agent marker, accepting every default installs hooks and maps the rule to the project's heading", async () => {
     const { "CLAUDE.md": _claude, ...noMarker } = PROJECT
     const root = await createRepo(noMarker)
-    const script = scriptedPrompter([["python/no-httpexception-in-services"], ACCEPT, ACCEPT, ACCEPT, true, true])
+    const script = scriptedPrompter([["python/no-silent-except"], ACCEPT, ACCEPT, ACCEPT, true, true])
     const result = await runCli(root, ["init"], "", env, { interactive: true, prompter: script.prompter })
     expect(result.code).toBe(0)
     const [, conventions, agents] = script.asked
     expect(conventions!.initial).toBe("@AGENTS.md#errors")
     expect(agents!.initial).toEqual(["claude-code"])
     expect(catalogEntry(await read(root, CONFIG_FILE)).rules).toEqual([
-      { id: "python/no-httpexception-in-services", context: ["@AGENTS.md#errors"] },
+      { id: "python/no-silent-except", context: ["@AGENTS.md#errors"] },
     ])
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(true)
   })
