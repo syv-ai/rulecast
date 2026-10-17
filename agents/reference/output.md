@@ -195,11 +195,12 @@ Because it is keyed by id, the rules above apply: a finding whose text was edite
 
 ## rulecast test
 
-`rulecast test` runs each rule's examples ([rule-format.md](rule-format.md#examples)); with `--against` it fires each rule over real files instead. It is the gate for a rule an agent drafted: the examples pass, and the rule does not flag most of the files it matches.
+`rulecast test` runs each rule's examples ([rule-format.md](rule-format.md#examples)); with `--against` it fires each rule over real files instead, and with `--history` it judges one rule on recent commits. It is the gate for a rule an agent drafted: the examples pass, and the rule does not flag most of the files it matches.
 
 ```sh
 rulecast test <rule-id> --format json
 rulecast test <rule-id> --against . --max-rate 0.5 --format json
+rulecast test <rule-id> --history --max-rate 0.5 --format json   # --commits N; --yes for an llm rule; --label
 ```
 
 | Code | Meaning | stdout |
@@ -254,6 +255,8 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money; or, under `--against`, a `scope: removed` rule, whose matches are what a file keeps and which has no baseline there to count a drop against); `touch` (a named touch rule: nothing to test). |
 | `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
 | `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
+| `rules[].history` | Only with `--history`: what the rule found in recent commits (below), or `null` when it was not run. |
+| `rules[].estimate` | Only with `--history`, for a rule that costs money per file (`llm`) run without `--yes`: `{ "commits", "calls" }`, one model call per file per commit. Nothing was run, and `status` is `not-run`. |
 
 ### An outcome
 
@@ -294,6 +297,35 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `exceeded` | `rate` is over `maxRate`, and `smallSample` is `false`. This is what fails the rule. |
 | `smallSample` | Under 25 matching files. `--max-rate` is not applied: a share of a handful of files says nothing about the rule. |
 | `files` | Every violating file with its count, worst first. |
+
+### `history`
+
+`--against` counts what a rule finds in files as they are; `--history` judges it the way a session does: against what a commit changed, at that commit's content, so only what the commit added counts. It takes the newest non-merge commits on `HEAD` that change a file the rule matches (`--commits`, default 20, or 10 for an `llm` rule), and judges each as `rulecast run --from-ref C^ --to-ref C` would. For a rule about a change rather than a whole file, and for an `llm` rule, it is the closer measure.
+
+```json
+{
+  "commits": 20,
+  "commitsFired": 3,
+  "rate": 0.15,
+  "maxRate": 0.5,
+  "exceeded": false,
+  "smallSample": false,
+  "findings": [
+    { "commit": "9f1c…", "subject": "add the export route", "file": "app/api/export.py", "line": 14, "message": "app/api/export.py:14 does work that belongs in a service.", "label": "real" }
+  ],
+  "labels": { "real": 2, "false": 1, "unlabelled": 0, "precision": 0.67, "file": ".rulecast/history/python__thin-routes.json" }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `commits` | Commits judged. |
+| `commitsFired` | Of those, the commits the rule found something new in. |
+| `rate` | `commitsFired / commits`; `null` when there was no commit to judge. |
+| `maxRate`, `exceeded` | As under `against`. Not applied when `smallSample` is `true`. |
+| `smallSample` | Under 10 commits. |
+| `findings` | Every new finding, newest commit first, with the commit's subject and the rule's message. `label` is the developer's mark, when the label file has one. |
+| `labels` | From `.rulecast/history/<rule id, / as __>.json`, or `null` when there is no such file. `--label` writes the findings there with `"label": null`, keeping any mark already in it. The developer, or an agent with them, sets each to `"real"` or `"false"`. `precision` is `real / (real + false)` over this run's findings, or `null` when none is marked. |
 
 ## rulecast stats
 

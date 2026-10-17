@@ -130,8 +130,9 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "test",
-    synopsis: "rulecast test [RULE_ID] [--against PATH... [--max-rate N]] [--format terminal|json]",
-    summary: "Run each rule's good/bad examples; --against says how much it would flag",
+    synopsis:
+      "rulecast test [RULE_ID] [--against PATH... | --history [--commits N] [--yes] [--label]] [--max-rate N] [--format terminal|json]",
+    summary: "Run each rule's good/bad examples; --against and --history say how much it would flag",
     flags: [
       ["RULE_ID", "Only this rule. Needed for llm rules, which cost money per example"],
       [
@@ -139,8 +140,21 @@ export const COMMANDS: CommandHelp[] = [
         "Fire the rule over real files and count what it finds; without RULE_ID, every rule, one line each",
       ],
       [
+        "--history",
+        "Judge RULE_ID on recent commits that change its files, on what each commit added, as a session judges an edit",
+      ],
+      ["--commits N", "With --history: how many commits (default 20, or 10 for an llm rule)"],
+      [
+        "--yes",
+        "With --history: run an llm rule, which costs one model call per file per commit. Without it, the cost is printed",
+      ],
+      [
+        "--label",
+        "With --history: write the findings to .rulecast/history/ to mark real or false; marks give a precision",
+      ],
+      [
         "--max-rate N",
-        "With --against: exit 1 when a rule flags more than this share (0 to 1) of the files it matches. Not applied under 25 matching files",
+        "With --against: exit 1 when a rule flags more than this share (0 to 1) of the files it matches (not applied under 25). With --history: of the commits (not applied under 10)",
       ],
       ["--format", "terminal or json"],
     ],

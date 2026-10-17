@@ -17,14 +17,32 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { fetchingRepos } from "../core/repos/provider"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
+import {
+  applyLabels,
+  DEFAULT_HISTORY,
+  DEFAULT_METERED_HISTORY,
+  estimate,
+  estimateText,
+  type HistoryEstimate,
+  type HistoryReport,
+  historyCommits,
+  historyText,
+  measureHistory,
+} from "./test-history"
 import { UsageError } from "./usage"
 
 interface TestArgs {
   ruleId: string | null
   /** Paths to fire the rule over for real; empty when --against was not given. */
   against: string[]
-  /** With --against: the share of matching files a rule may violate in; null when not given. */
+  /** With --against or --history: the share of files, or commits, a rule may fire in; null when not given. */
   maxRate: number | null
+  /** --history [--commits N]: how many recent commits to judge the rule on; null without --history, "default" without --commits. */
+  history: number | "default" | null
+  /** --yes: go ahead with a history that costs money per file. */
+  yes: boolean
+  /** --label: write the history's findings to the label file for the developer to mark. */
+  label: boolean
   format: "terminal" | "json"
 }
 
@@ -34,25 +52,49 @@ export function parseTestArgs(args: string[]): TestArgs {
     allowPositionals: true,
     options: {
       against: { type: "string", multiple: true },
+      history: { type: "boolean", default: false },
+      commits: { type: "string" },
       "max-rate": { type: "string" },
+      yes: { type: "boolean", default: false },
+      label: { type: "boolean", default: false },
       format: { type: "string", default: "terminal" },
     },
   })
+  if (values.commits !== undefined && !values.history) throw new UsageError("--commits needs --history")
+  const historyValue = !values.history ? null : values.commits === undefined ? "default" : commitCount(values.commits)
   if (positionals.length > 1) throw new UsageError(`unexpected arguments: ${positionals.slice(1).join(" ")}`)
   if (values.format !== "terminal" && values.format !== "json") {
     throw new UsageError(`unknown format "${values.format}" (use terminal or json)`)
   }
   const against = values.against ?? []
+  if (historyValue !== null && against.length > 0)
+    throw new UsageError("--history and --against measure apart: use one")
+  if (historyValue === null && (values.yes || values.label)) throw new UsageError("--yes and --label need --history")
   let maxRate: number | null = null
   if (values["max-rate"] !== undefined) {
-    if (against.length === 0) throw new UsageError("--max-rate needs --against")
+    if (against.length === 0 && historyValue === null) throw new UsageError("--max-rate needs --against or --history")
     maxRate = values["max-rate"].trim() === "" ? Number.NaN : Number(values["max-rate"])
     if (!Number.isFinite(maxRate) || maxRate < 0 || maxRate > 1) {
       throw new UsageError("--max-rate takes a share of files between 0 and 1, such as 0.2")
     }
   }
   const ruleId = positionals[0] ?? null
-  return { ruleId, against, maxRate, format: values.format }
+  if (historyValue !== null && ruleId === null) throw new UsageError("--history judges one rule: name it")
+  return {
+    ruleId,
+    against,
+    maxRate,
+    history: historyValue,
+    yes: values.yes,
+    label: values.label,
+    format: values.format,
+  }
+}
+
+function commitCount(text: string): number {
+  const value = /^\d+$/.test(text.trim()) ? Number(text) : Number.NaN
+  if (!Number.isInteger(value) || value < 1) throw new UsageError(`--commits takes a number of commits, not "${text}"`)
+  return value
 }
 
 /** Under this many violations a rule is one "nobody breaks" (8 of 15 measured conventions were). */
@@ -377,6 +419,10 @@ interface RuleReport {
   examples: Pick<ExampleResult, "outcomes" | "precision" | "recall"> | null
   /** Null unless `--against` was given and the rule ran. */
   against: AgainstReport | null
+  /** Under `--history` only: what the rule found in recent commits; null when it was not run. */
+  history?: HistoryReport | null
+  /** Under `--history`, for a rule that costs money per file, run without `--yes`: what it would take. */
+  estimate?: HistoryEstimate
 }
 
 interface TestReport {
@@ -483,7 +529,7 @@ export async function testCommand(
   registry: DetectorRegistry,
   io: CliIo,
 ): Promise<number> {
-  const { ruleId, against, maxRate, format } = parseTestArgs(args)
+  const { ruleId, against, maxRate, history, yes, label, format } = parseTestArgs(args)
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
   // A config that does not load compiled no rule at all: "passed" over nothing would be a lie.
@@ -521,6 +567,28 @@ export async function testCommand(
   const timeoutMs = project.config.timeouts.verifyMs
   // Spec §6: a metered rule runs only when asked for by id — never as part of "test them all".
   const notAsked = (rule: DetectorRule) => ruleId === null && registry.get(rule.detector.kind)?.metered === true
+
+  if (history !== null) {
+    const rule = rules[0]!
+    const base = { rule: rule.id, detector: rule.detector.kind, scope: rule.scope, examples: null, against: null }
+    if (rule.scope === "removed") {
+      return print(
+        [{ ...base, status: "not-run", history: null }],
+        () => `${removedRule(rule.id).replace("--against", "--history")}\n`,
+      )
+    }
+    const metered = registry.get(rule.detector.kind)?.metered === true
+    const limit = history === "default" ? (metered ? DEFAULT_METERED_HISTORY : DEFAULT_HISTORY) : history
+    const commits = await historyCommits(root, rule, limit)
+    if (metered && !yes && commits.length > 0) {
+      const cost = estimate(commits)
+      return print([{ ...base, status: "not-run", history: null, estimate: cost }], () => estimateText(rule, cost))
+    }
+    const measured = await measureHistory({ root, project, registry, stateDir, rule, commits, maxRate })
+    const report = await applyLabels(root, rule.id, measured, label)
+    const status = report.exceeded ? "failed" : "passed"
+    return print([{ ...base, status, history: report }], () => historyText(rule, report))
+  }
 
   if (against.length > 0) {
     const under = againstPrefixes(root, against, io)

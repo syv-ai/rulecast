@@ -102,7 +102,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
 | `rulecast fix` | Apply regex and ast-grep rules' fixes; `--dry-run` prints the diff |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
-| `rulecast test` | Run each rule's good/bad examples; `--against` says how much it would flag |
+| `rulecast test` | Run each rule's good/bad examples; `--against` and `--history` say how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |

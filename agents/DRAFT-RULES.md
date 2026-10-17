@@ -143,6 +143,8 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
    - **Exit 1, `against.exceeded: true`**: the rule flags more than half the files it matches. Do not propose it as written. Tell the developer it may describe the code as it is rather than a convention, and propose a narrower `files`, or a touch rule instead.
    - **`against.smallSample: true`**: under 25 matching files, the rate is not applied, because a share of a handful of files says nothing. Report the counts and judge the rule by its doc.
    - Either way, report both numbers to the developer — `violations`, and `violatingFiles` of `matchingFiles` — before asking them to keep it. Passing the gate is necessary, not sufficient: neither the numbers nor the gate decide it. The developer does.
+   - **An `llm` rule, or a rule about a change rather than a whole file**, is measured on history instead: `rulecast test <id> --history --max-rate 0.5 --format json`. It judges the rule on recent commits the way a session judges an edit, so only what each commit added counts. An `llm` rule costs one model call per file per commit: the first run prints `estimate` and runs nothing. Tell the developer the number of calls, and run it again with `--yes` only if they agree. Add `--label`, and go through `history.findings` with the developer, marking each `real` or `false` in the label file it names. Run it again for the precision. Offer the findings marked `real` as `examples.bad`, and add none the developer did not agree to.
+   - An `llm` rule starts as `severity: warning`, which never blocks a stop. Propose `error` only when the developer has seen its measured precision and accepts it: a rule that is sometimes wrong gets one more chance to block with every file the agent changed.
 7. Ask the developer to keep, edit or drop the rule. After an edit, repeat steps 4 to 6. Remove dropped rules from the config.
 
 For each guidance convention, add a touch rule. It delivers the section the first time an agent reads or edits a matching file, and has no detector or message:
@@ -162,7 +164,7 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 Run `rulecast validate` and `rulecast test --format json` a last time; `validate` must be clean and the document must say `passed: true`. Bare `rulecast test` does not run `llm` rules, because each example costs money, and gives them `status: not-run`: run `rulecast test <id> --format json` for each of those. Then summarise:
 
-- the rules kept: id, one line each, and the `--against` count (touch rules have no count);
+- the rules kept: id, one line each, and the `--against` or `--history` counts, with the precision where findings were marked (touch rules have no count);
 - where the doc could be read two ways, and the reading you chose;
 - the rules dropped;
 - the catalog rules you pointed at the project's doc, extended with a local rule, or propose to switch off, and why;
