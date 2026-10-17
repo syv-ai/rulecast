@@ -168,4 +168,16 @@ detect:
 
   Each `base_url` follows its own ecosystem's SDK convention, so a URL copied from your provider's docs works as written. **Azure OpenAI is not supported in 0.1**: it needs a per-deployment path with an `api-version` query string and an `api-key` header, which no `base_url` can express.
 
+### Writing the question
+
+The model is asked to report each line that breaks a rule, so a question works when it names something a line can be. Most of this comes from [abide](https://github.com/coldteadotai/abide)'s rules for compiling questions, where a vague one scored the same on every diff and never fired.
+
+- **One idea per rule.** A convention with two parts is two rules, each with its own question and message.
+- **Name the thing to report, not a quality.** "A comment that restates the line below it, with no reason, constraint or gotcha" gets lines back. "Are comments sparing?" gets an essay, or nothing.
+- **Leave scope out of the question.** `files` and `exclude` say where the rule applies; "for a file under `app/api`" in the question only costs tokens.
+- **A rule about amount** ("comment sparingly", "keep functions short") has two parts. The `llm` rule takes the concrete offence. The amount goes to a `command` rule if it can be counted, such as lines in a file or a function, and otherwise to a touch rule that delivers the section.
+- **A question about the whole change** has no answer one edit in: a helper with one caller, duplicated logic, work nobody asked for. Keep such a rule on `verify`, the default, so it judges the turn. Where a tool answers it, prefer the tool (`jscpd` for duplication, `knip` for unused code, as a [`command`](#command) rule).
+- **Ground it.** Cite the doc section with `context` and keep `grounding` on: the section carries the project's own examples, and the model judges against them instead of its own taste.
+- **Measure it before keeping it.** `rulecast test <id> --history` judges it on recent commits ([output.md](output.md#history)), and `rulecast replay claude-code --rule <id> --llm` on recent agent sessions ([output.md](output.md#rulecast-replay)). Start it as `severity: warning`, which never blocks a stop, until the developer has seen its precision and accepts it. Each file the agent changed is one more chance for a rule that is sometimes wrong to block.
+
 **An llm rule sends the file's contents and the rule's grounding to the configured provider, and costs money for every file that is not already cached.** So `rulecast run` with no file flags, the pre-commit check, skips llm rules unless given `--llm`, and says so in one line. `--all-files`, `--from-ref` and the agent's stop run them; `--no-llm` skips them anywhere. It is the right answer only when no pattern can express the convention. Reach for `path`, `regex` and `ast-grep` first: they are free, instant and exact. If you cannot write the check mechanically but the convention still matters, a `stages: [touch]` rule that delivers the section is usually better than asking a model — it puts the convention in front of the agent before the code is written, instead of judging it afterwards.
