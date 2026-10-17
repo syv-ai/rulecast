@@ -48,6 +48,7 @@
     "bench": "tsx scripts/bench.ts",
     "binary": "tsx scripts/build-binary.ts",
     "build": "tsup src/index.ts src/internal.ts src/cli.ts --format esm --dts --clean",
+    "lenses": "tsx scripts/lenses.ts",
     "manifest": "tsx scripts/generate-manifest.ts",
     "perf": "tsx scripts/perf.ts",
     "readme": "tsx scripts/readme.ts",

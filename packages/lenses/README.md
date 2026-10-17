@@ -1,6 +1,6 @@
 # Lens catalog (work in progress)
 
-Not released and not yet read by rulecast. The developer is still reviewing it, and its format may change.
+Not released yet. The developer is still reviewing it, and its format may change. `pnpm lenses` validates it and generates the pages agents read, in `agents/lenses/`.
 
 The design knowledge a coding agent brings to working out a project's conventions with the developer:
 

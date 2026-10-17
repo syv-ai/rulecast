@@ -9,6 +9,7 @@
     "changeset": "changeset",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
+    "lenses": "pnpm --filter @syv-ai/rulecast lenses",
     "manifest": "pnpm --filter @syv-ai/rulecast manifest",
     "perf": "pnpm --filter @syv-ai/rulecast perf",
     "prepare": "lefthook install",

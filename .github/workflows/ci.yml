@@ -27,6 +27,7 @@ jobs:
       - run: pnpm lint
       # Generated files are checked, never regenerated: a CI that commits can push mid-review.
       - run: pnpm manifest --check
+      - run: pnpm lenses --check
       - run: pnpm readme --check
       - run: pnpm sync-version --check
       # rulecast on rulecast: what this pull request changed, judged against its merge base.

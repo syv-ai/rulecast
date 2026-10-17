@@ -23,6 +23,7 @@ pnpm --filter @syv-ai/rulecast-site dev     # or build / preview / test / typech
 CI checks each of these with `--check`:
 
 - `pnpm manifest` → `.rulecast-rules.yaml`, the catalog manifest built from `packages/rules-*/rules.yaml`.
+- `pnpm lenses` → `agents/lenses/`, the pages agents read from the lens catalog in `packages/lenses/` (it validates the catalog first).
 - `pnpm readme` → `packages/rulecast/README.md` and `LICENSE`, mirrored from the root ones. Edit the root `README.md`, then run this.
 - `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`.
 
