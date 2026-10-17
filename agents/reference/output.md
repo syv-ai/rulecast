@@ -327,6 +327,42 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `findings` | Every new finding, newest commit first, with the commit's subject and the rule's message. `label` is the developer's mark, when the label file has one. |
 | `labels` | From `.rulecast/history/<rule id, / as __>.json`, or `null` when there is no such file. `--label` writes the findings there with `"label": null`, keeping any mark already in it. The developer, or an agent with them, sets each to `"real"` or `"false"`. `precision` is `real / (real + false)` over this run's findings, or `null` when none is marked. |
 
+## rulecast replay
+
+`rulecast replay claude-code --format json` says what the configured rules would have told the agent in this project's recent Claude Code sessions. It reads the session transcripts under `~/.claude/projects` (or `CLAUDE_CONFIG_DIR`) and judges each Edit and Write on what it changed, as the edit hook does, and each turn on what it changed from its first edit of a file to its last, as the stop does. Content comes from the transcript alone. Nothing is written to the findings log, so `stats` never counts a replay.
+
+```sh
+rulecast replay claude-code --sessions 20 --format json   # --rule ID (repeatable); --llm, then --llm --yes
+```
+
+```json
+{
+  "sessions": 19,
+  "edits": 426,
+  "turns": 71,
+  "unknownEdits": 76,
+  "rules": [
+    { "rule": "loop-safety/protected-loop-config", "severity": "warning", "edits": 1, "editsFired": 1, "turns": 1, "turnsFired": 1, "wouldBlock": 0 }
+  ],
+  "findings": [
+    { "session": "77882c8a-…", "agent": "main", "turn": 1, "stage": "edit", "rule": "loop-safety/protected-loop-config", "file": ".rulecast-config.yaml", "line": 1, "message": ".rulecast-config.yaml configures the checks that judge this run. …" }
+  ],
+  "skippedRules": ["loop-safety/no-deleted-assertions-ts"],
+  "errors": []
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `sessions`, `edits`, `turns` | Sessions read, newest first (`--sessions`, default 20), and the edits and turns judged in them, subagents' included. |
+| `unknownEdits` | Edits whose file before them the transcript never showed: about one Edit in three records no `originalFile`, and then replay uses what the same transcript last wrote or fully read. These are not judged. |
+| `rules[]` | Per rule that ran: `edits` and `turns` it was run on, those it found something new in, and `wouldBlock`, the turns whose stop an `error` finding would have blocked. |
+| `findings[]` | Every new finding. `turn` counts from 0, from the agent's first prompt. `stage` is `edit` (the edit hook would have told the agent) or `turn` (the stop would have). `agent` is `main` or a subagent's id. |
+| `skippedRules` | Rules that would have run but cannot from a transcript: their tool needs the files on disk (a `command` script, a whole-project tool), or they are `scope: removed`. |
+| `errors` | Rules whose detector failed or timed out, with the first message. They stop being run. |
+
+`llm` rules are left out unless `--llm` is given. With `--llm` alone, the document is `{ "estimate": { "calls": N } }`: one model call per file per event judged, and nothing is run. `--llm --yes` runs them. Edits made through Bash are not in a transcript and are not judged. The command exits 0 whatever it finds, and 2 on a usage error or a config that does not load.
+
 ## rulecast stats
 
 `rulecast stats --format json` says, per rule, what became of the findings agent hooks reported: whether the agent fixed them, kept being blocked on them, or silenced them. A loop that improves rules reads it to find rules that are noisy and rules that never fire.

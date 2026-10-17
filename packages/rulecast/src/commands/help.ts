@@ -173,6 +173,22 @@ export const COMMANDS: CommandHelp[] = [
     ],
   },
   {
+    name: "replay",
+    synopsis: "rulecast replay claude-code [--sessions N] [--rule ID]... [--llm [--yes]] [--format terminal|json]",
+    summary: "What your rules would have told the agent in its recent sessions, from their transcripts",
+    flags: [
+      ["--sessions N", "The newest N sessions in this project (default 20)"],
+      ["--rule ID", "Only this rule; repeatable"],
+      ["--llm", "Include llm rules: prints the model calls it would take. Add --yes to make them"],
+      ["--format", "terminal or json"],
+    ],
+    notes: [
+      "Reads Claude Code's transcripts under ~/.claude/projects (or CLAUDE_CONFIG_DIR) and judges each Edit and Write, and each turn, from them alone.",
+      "Rules whose tool needs files on disk, and edits made through Bash, are not judged. Nothing is written to the findings log.",
+      "The JSON is documented in agents/reference/output.md.",
+    ],
+  },
+  {
     name: "validate",
     synopsis: "rulecast validate [file...]",
     summary: "Check the config (and a rules manifest) and print diagnostics",

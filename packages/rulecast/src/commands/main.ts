@@ -16,6 +16,7 @@ import { initCommand } from "./init"
 import { installCommand, uninstallCommand } from "./install"
 import { listCommand } from "./list"
 import { findRoot } from "./project"
+import { replayCommand } from "./replay"
 import { runCommand } from "./run"
 import { statsCommand } from "./stats"
 import { testCommand } from "./test"
@@ -88,6 +89,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await testCommand(root, args, registry, io)
       case "stats":
         return await statsCommand(root, args, registry, io)
+      case "replay":
+        return await replayCommand(root, args, registry, io)
       case "validate":
         return await validateCommand(root, args, registry, io)
       case "clean":
