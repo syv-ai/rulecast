@@ -19,6 +19,11 @@
     and the ceiling is much less gloomy. The page also stretches it to teams and decision-making; that is an
     analogy, not the law, and the maths doesn't carry over cleanly. For I/O-bound work, latency and contention
     usually matter more than the serial fraction.
+  axes:
+    bears_on:
+      - runtime
+    why: The serial part of the work (a global lock, a single reducer, one shared database) caps the speedup you
+      get from adding workers or machines.
   in: {}
   related:
     - gustafsons-law
@@ -85,6 +90,12 @@
     aggressive policing is widely criticised. In software the evidence is mostly anecdotal. Chasing every tiny
     blemish can also turn into perfectionism that blocks delivery. Some old code is ugly but stable and rarely
     touched, and leaving it alone is the right call.
+  axes:
+    bears_on:
+      - change_cost
+      - reliability
+    why: Unfixed hacks, suppressions and ignored or disabled checks signal that quality doesn't matter, so the
+      mess grows and failing tests stop catching bugs.
   in: {}
   related:
     - boy-scout-rule
@@ -144,6 +155,11 @@
     Brewer's own 2012 follow-up softened it. PACELC (Daniel Abadi) adds the latency versus consistency
     trade-off that matters when there is no partition. Labelling whole databases CP or AP, as the page does
     with MongoDB and Cassandra, oversimplifies: both behave differently depending on configuration.
+  axes:
+    bears_on:
+      - reliability
+    why: During a partition a replicated store must either refuse requests or serve stale or conflicting data, and
+      code that doesn't choose gets whichever happens.
   in: {}
   related:
     - fallacies-of-distributed-computing
@@ -197,6 +213,13 @@
     Not every call needs the full resilience kit. A script or internal tool can accept a crash on network
     failure, and piling on retries without idempotency or backoff can cause duplicate writes and retry storms.
     Pick the defences that match what failure actually costs.
+  axes:
+    bears_on:
+      - reliability
+      - security
+      - runtime
+    why: Code that assumes the network is reliable, fast and secure hangs or duplicates writes on failures, pays
+      latency per call, and trusts traffic it shouldn't.
   in:
     python: |
       requests and urllib3 have no default timeout, so a call without one can hang forever.
@@ -260,6 +283,12 @@
     shapes can be very costly to change later, so some upfront design pays off. The "monolith first" advice it
     is often tied to (Fowler) has critics too, such as Stefan Tilkov, who argues that splitting a grown
     monolith is harder than starting with clear service boundaries.
+  axes:
+    bears_on:
+      - delivery
+      - reliability
+    why: A complex system designed whole rarely works, so big-bang designs ship late and broken, while one grown
+      from a working simple version keeps working at each step.
   in: {}
   related:
     - kiss
@@ -292,6 +321,11 @@
     It only helps when you actually want to process more, not when you need the same job done faster, such as
     lowering latency for a single request; there Amdahl's limit still holds. Communication and coordination
     costs often grow with the cluster, so near-linear scaled speedup is an ideal.
+  axes:
+    bears_on:
+      - runtime
+    why: When the workload grows with the hardware, partitioned work gains throughput almost linearly as machines
+      are added.
   in: {}
   related:
     - amdahls-law
@@ -341,6 +375,12 @@
     Freezing every quirk makes a system impossible to evolve. Large projects like Go deliberately randomise
     map iteration order, or break undocumented behaviour on purpose, to keep users honest. For internal code
     with a few callers you can just change both sides.
+  axes:
+    bears_on:
+      - change_cost
+      - reliability
+    why: Every observable behaviour becomes a contract, so changes, even to undocumented quirks, break someone and
+      get costlier as users grow.
   in: {}
   related:
     - law-of-leaky-abstractions
@@ -406,6 +446,12 @@
     "Twice as hard" is a quip, not a measured ratio. Some idioms that look clever to a newcomer are ordinary
     and clear to people fluent in the language, and hot paths sometimes need tricky code that is worth it when
     it's tested and explained.
+  axes:
+    bears_on:
+      - change_cost
+      - reliability
+    why: Code written at the limit of the author's cleverness is harder to debug than to write, so its bugs last
+      longer and every change to it is riskier.
   in: {}
   related:
     - kiss
@@ -458,6 +504,13 @@
     It isn't an argument against abstractions; most of the time they work and the leak never matters. Treating
     every abstraction with suspicion and dropping to the lowest level produces more code and more bugs. Know
     where yours leaks; don't avoid them.
+  axes:
+    bears_on:
+      - runtime
+      - reliability
+      - change_cost
+    why: The layer underneath shows through as N+1 queries, untranslated errors and escape hatches, so people who
+      don't know it write slow or failing code.
   in: {}
   related:
     - fallacies-of-distributed-computing
@@ -518,6 +571,12 @@
     It explains surprises after the fact but tells you little about which ones to expect, so it can turn into
     a general excuse for not changing anything. In small, well-tested, loosely coupled code the surprises are
     rare, and treating every edit as dangerous just slows the team down.
+  axes:
+    bears_on:
+      - reliability
+      - change_cost
+    why: Changes to a complex system cause effects nobody planned, so regressions show up far from the change and
+      every change carries hidden risk.
   in: {}
   related:
     - hyrums-law
@@ -555,6 +614,11 @@
     A small tool with a fixed spec, a one-off script or a library that is deliberately finished does not have
     to keep evolving. The later laws (self-regulation, conservation of familiarity) rest on thin and dated
     data, and some researchers found open-source systems that grew faster than the laws predict.
+  axes:
+    bears_on:
+      - change_cost
+    why: A system in real use must keep changing, and each change adds complexity unless it is paid down, so later
+      changes get steadily more expensive.
   in: {}
   related:
     - technical-debt
@@ -590,6 +654,12 @@
     sometimes are better (memory-safe languages, modern build tools). Applied rigidly it blocks any adoption.
     The source page's figure that most financial transactions run on COBOL is a widely repeated estimate with
     weak sourcing.
+  axes:
+    bears_on:
+      - change_cost
+      - reliability
+    why: Long-lived tools tend to stay maintained, while young dependencies churn, get abandoned, force migrations
+      and have immature failure modes.
   in: {}
   related:
     - occams-razor
@@ -624,6 +694,11 @@
     Taken too far it produces defensive clutter: null checks on values that cannot be null and catch blocks
     that hide real bugs. Fail-fast advocates (and Erlang's "let it crash") prefer to guard the boundaries and
     let internal invariant violations crash loudly rather than defend against everything everywhere.
+  axes:
+    bears_on:
+      - reliability
+    why: Failure cases that are assumed away happen eventually, so unhandled errors, missing timeouts and untested
+      edge cases turn into incidents.
   in: {}
   related:
     - law-of-unintended-consequences
@@ -683,6 +758,12 @@
     The ratio is not a law of nature and is often quoted without data. Some work cannot be triaged by
     frequency: security, accessibility and correctness on rare paths matter even when they touch few users or
     little runtime.
+  axes:
+    bears_on:
+      - runtime
+      - reliability
+    why: A few hot paths and a few buggy files cause most of the slowness and the crashes, so effort spent
+      elsewhere does little.
   in: {}
   related:
     - premature-optimization
@@ -716,6 +797,11 @@
   counter: >
     A stable regression suite is still doing its job when it stays green: it guards behaviour that already
     works. The paradox is about finding new defects, not a reason to churn existing tests for its own sake.
+  axes:
+    bears_on:
+      - reliability
+    why: A suite that never changes stops finding new bugs, so defects in new code and on unexplored inputs slip
+      past a green build.
   in: {}
   related:
     - testing-pyramid
@@ -771,6 +857,12 @@
     Some rewrites succeed when the first system's constraints are truly gone and scope is held firm. Brooks
     himself said the third system tends to be better, and a team that has already been burned once can avoid
     the trap.
+  axes:
+    bears_on:
+      - delivery
+      - change_cost
+    why: A rewrite piles in the features and abstractions held back the first time, so it ships late and leaves
+      more machinery to maintain.
   in: {}
   related:
     - zawinskis-law
@@ -806,6 +898,12 @@
     Not all complexity is irreducible; much is accidental and can simply be deleted. Hiding complexity can
     also go too far: magic defaults and opaque behaviour make the system hard to debug, and expert users may
     want the knobs.
+  axes:
+    bears_on:
+      - change_cost
+      - operability
+    why: Irreducible complexity only moves; pushed onto callers it is repeated at every call site, and hidden
+      behind magic it makes the system hard to configure and debug.
   in: {}
   related:
     - occams-razor
@@ -860,6 +958,11 @@
   counter: >
     Jamie Zawinski's point was partly that platforms win: users want one place to work, and apps that refuse
     to grow can lose to ones that do. Some expansion is the product strategy, not bloat.
+  axes:
+    bears_on:
+      - change_cost
+    why: Programs keep growing features outside their scope, and every one of them makes the rest of the code
+      costlier to change.
   in: {}
   related:
     - second-system-effect
@@ -907,6 +1010,12 @@
     service time itself, so you still need measurements. Near full utilisation queueing delay grows sharply
     (Kingman's formula, queueing theory generally), so a pool sized exactly to λW has no headroom; leave
     margin. The bottleneck can also be downstream, where more concurrency just moves the queue.
+  axes:
+    bears_on:
+      - runtime
+      - reliability
+    why: In-flight work equals throughput times latency, so mis-sized pools and queues either cap throughput or
+      grow without bound and time out under load.
   in: {}
   related:
     - amdahls-law

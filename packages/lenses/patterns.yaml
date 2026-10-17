@@ -38,6 +38,18 @@
     right early, so many practitioners start with a modular monolith and split once the boundaries have proved
     stable. Applying the tactical patterns without this strategic step is what Vernon calls DDD-Lite, the most
     common criticism of how DDD is practised.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Each context owns its model and data, so one department's change no longer ripples through a
+        shared Customer class or schema.
+      delivery: Boundaries, separate models and translation between contexts have to be designed before features
+        ship, and they are hard to get right early.
+    flips: In a small one-team app with one vocabulary the boundaries add translation for nothing. Mapping each
+      context to a microservice, or splitting into many tiny contexts, gives a distributed monolith that turns
+      change_cost and operability "-".
   in:
     python: >
       One top-level package per context; import-linter contracts can forbid imports between contexts except
@@ -158,6 +170,17 @@
     domain terms untranslated in code and keeping code in one language; both are defensible if chosen
     deliberately. Drifting Terminology is the anti-pattern this practice prevents, and coding agents produce
     it readily, so a checked-in glossary is a cheap convention that pays off.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A feature request in the business's words maps straight onto the code, with no translation step
+        where meaning gets lost.
+      delivery: Names have to be agreed with domain experts and code renamed whenever the business changes how it
+        talks.
+    flips: Forced as one company-wide glossary across contexts, or onto purely technical code with no business
+      names, it becomes wording arguments and renames that cost without helping.
   in: {}
   related:
     - drifting-terminology
@@ -236,6 +259,16 @@
     integrations and how each is wrapped is enough. Like any architecture diagram it rots unless something
     checks it, so encode the important edges as dependency rules instead of trusting the picture. Evans's
     advice is to map the existing terrain first and change it later; a map drawn as the target state misleads.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Who is upstream, who translates and who owns each concept is written down, so a change on one
+        side stops surprising the other.
+      delivery: Mapping integrations and keeping the map true is work that ships nothing.
+    flips: For one team and one codebase a list of integrations is enough and a detailed map is upkeep only; a map
+      drawn as the hoped-for target state misleads and makes changes riskier.
   in: {}
   related:
     - bounded-context
@@ -309,6 +342,17 @@
     developer tools and libraries the core is usually the technical problem itself, and the business framing
     fits less well. Teams tend to overrate how much of their system is core; asking "would we lose customers
     if a competitor had this?" helps.
+  axes:
+    signs:
+      delivery: ++
+      change_cost: +
+    why:
+      delivery: Supporting and generic areas stay plain CRUD or are bought, so admin screens stop taking as long as
+        the hard parts.
+      change_cost: Design rigour, tests and review go to the core module, where the logic is complex and keeps changing.
+    flips: Labelling everything core brings back heavy patterns everywhere and loses the delivery gain. Neglecting
+      supporting code, or keeping an old classification after a supporting area becomes core, turns
+      change_cost "-" there.
   in: {}
   related:
     - bounded-context
@@ -391,6 +435,19 @@
     and adding a new product type means touching every factory, so it is rigid along that axis. With one
     variant, plain constructors or a single function are clearer. Dependency injection containers and passing
     callables often cover the same need with less ceremony.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: The variant check lives in one place that picks a kit, so a new platform is one new factory, not
+        edits at every construction site.
+      reliability: Every part comes from the same family, so mismatched parts (an S3 bucket with a Pub/Sub topic)
+        can't be combined by mistake.
+      delivery: An interface per product plus a class per variant must be written before anything is built.
+    flips: With one variant it is indirection around constructors, and adding a new product type means editing
+      every factory, turning change_cost "-".
   in:
     python: >
       Classes are first-class values, so a "factory" is often just a module, a dict that maps a variant to
@@ -553,6 +610,19 @@
     with named arguments says the same thing. A builder also adds a mutable intermediate object, which can be
     left half-configured. Keep it for genuinely staged or validated construction, or for fluent APIs where
     users compose queries and requests.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Named construction steps replace telescoping constructors, so call sites read clearly and new
+        options don't break existing callers.
+      reliability: Validation in the steps and at build means a half-built or contradictory object never reaches the
+        rest of the code.
+      delivery: A separate builder class has to be written and kept in step with the object.
+    flips: In languages with keyword and default arguments, or for small classes, it is ceremony; a builder that
+      only mirrors setters adds a mutable half-configured object without any validation.
   in:
     python: >
       Keyword arguments with defaults, dataclasses and attrs usually replace a builder outright. Builders
@@ -711,6 +781,16 @@
     Passing the class or a factory function as a parameter, or injecting the dependency, usually gives the
     same flexibility with less coupling. Not to be confused with a simple factory function or a named
     alternative constructor, which are useful but are not this pattern.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Subclasses or framework users swap in their own product class without editing the code that
+        creates and uses it.
+      delivery: A creator hierarchy and an overridable creation hook have to be designed up front.
+    flips: With one product, or where passing a class or factory function would do, the inheritance only adds
+      coupling and change_cost turns "-".
   in:
     python: >
       Because classes and functions are first-class, callers can pass the class or a callable to use, and no
@@ -863,6 +943,19 @@
     such as open files or connections all need deliberate handling. Immutable objects mostly remove the need,
     since they can be shared instead of copied. In Java, Cloneable is widely regarded as broken (Joshua Bloch,
     Effective Java), and copy constructors or factories are preferred.
+  axes:
+    signs:
+      change_cost: ++
+      runtime: +
+      reliability: "-"
+    why:
+      change_cost: Code that only knows an interface can copy any object, including types added later, and preset
+        instances replace subclasses that differed only in setup.
+      runtime: Copying a configured instance skips expensive setup when many near-identical objects are needed.
+      reliability: Shallow versus deep copies, shared mutable state and copied resource handles are easy to get
+        wrong and cause bugs far from the copy.
+    flips: Immutable objects can just be shared, so cloning them adds risk for nothing; hand-written clones on
+      classes nothing copies polymorphically are pure upkeep.
   in:
     python: >
       The standard copy module (copy and deepcopy, customizable with __copy__ and __deepcopy__) is the
@@ -1015,6 +1108,21 @@
     hides dependencies, couples callers to one concrete class, makes unit tests share state, and needs locking
     under concurrency. The usual alternative is to create one instance at the composition root and pass it in
     (dependency injection). Even GoF co-author Erich Gamma has said he would drop it from the book.
+  axes:
+    signs:
+      reliability: ++
+      runtime: +
+      change_cost: "-"
+    why:
+      reliability: A genuinely single resource (a device, a process-wide registry) can't be opened twice and fought
+        over by two instances.
+      runtime: Expensive initialisation happens lazily and only once.
+      change_cost: Callers reach it through a global accessor, which hides the dependency on one concrete class and
+        makes tests share state.
+    flips: Used as a respectable global for config, database handles or loggers it is the global-state
+      anti-pattern, quick to reach for (delivery "+") but sharply raising change_cost; without locking under
+      concurrency, lazy creation itself turns reliability "-". Creating one instance at the composition root
+      and passing it in keeps the benefit without the costs.
   in:
     python: >
       A module is already a singleton: it is imported once and cached, so a module-level instance or plain
@@ -1183,6 +1291,16 @@
     Speculative adapters around stable libraries add indirection and tend to leak the wrapped API anyway.
     Still, isolating a volatile external dependency behind a thin boundary is broadly recommended (ports and
     adapters).
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A vendor's call shape and units are translated in one wrapper, so business code and a vendor swap
+        touch only it.
+      delivery: Another layer to write and keep in sync with both interfaces.
+    flips: Around code you own, or wrapping a stable library "in case we switch", it is indirection that
+      translates nothing and leaks the wrapped API anyway.
   in:
     python: >
       With duck typing there's no interface to formally implement; the adapter only has to provide the methods
@@ -1331,6 +1449,16 @@
     the code harder to follow. It is one instance of the general advice to favour composition over
     inheritance; in practice many codebases just call it injecting a strategy or a backend, and the name
     matters less than the shape.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Two dimensions vary independently, so a new backend or a new kind is one class, not one per
+        combination.
+      delivery: Two hierarchies and the delegation between them must be designed up front.
+    flips: When only one dimension really varies it is an extra layer of delegation that makes the code harder to
+      follow.
   in:
     python: >
       Passing the implementation object (or a callable) into the constructor is the whole pattern; no abstract
@@ -1482,6 +1610,17 @@
     vague, and putting add or remove methods on leaves trades type safety for uniformity (the GoF book itself
     discusses this transparency versus safety trade-off). Plain nested data with a recursive function is often
     simpler.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Callers treat one item and a whole tree the same way, so the is-it-a-group checks disappear and
+        recursion lives in one place.
+      delivery: A shared interface with leaf and container classes is more to write than nested data and one
+        recursive function.
+    flips: Forced onto flat or fixed-depth data it adds a hierarchy for nothing, and child-management methods on
+      leaves trade compile-time safety for runtime errors.
   in:
     python: >
       Often nested lists or dicts plus one recursive function do the job without classes. When classes are
@@ -1634,6 +1773,17 @@
     Stacks become hard to reason about: order dependencies, identity checks failing on the wrapper, and
     difficulty removing one layer from the middle. When the combinations are few and fixed, plain composition
     or a configuration flag is clearer. A decorator that changes the interface is really an adapter.
+  axes:
+    signs:
+      change_cost: ++
+      operability: "-"
+    why:
+      change_cost: Optional behaviours and cross-cutting concerns stack as wrappers without a subclass per
+        combination or edits to the wrapped class.
+      operability: Behaviour is spread over wrappers assembled elsewhere, so debugging means walking the stack, and
+        identity checks fail on the wrapper.
+    flips: Deep stacks whose order matters but isn't obvious turn change_cost "-" as well; with few fixed
+      combinations a flag or plain composition is clearer.
   in:
     python: >
       Python's @decorator syntax is a related but different thing: it wraps functions or classes at definition
@@ -1781,6 +1931,16 @@
     A facade simplifies the common case but can't hide everything; callers with unusual needs will go around
     it, and that is fine. Left unchecked it accumulates responsibilities and becomes a god object. It also
     adds a layer to maintain, so it earns its place only when the subsystem really is hard to use directly.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Setup order and wiring of a subsystem live in one entry point, so upgrading or replacing the
+        dependency changes one module instead of every caller.
+      delivery: Another layer to write and maintain in front of the subsystem.
+    flips: Over a subsystem that is already simple it is a pass-through, and left to cover every feature it grows
+      into a god object coupled to everything.
   in:
     python: >
       Often just a module with a handful of functions, or a package's __init__ that re-exports a small public
@@ -1921,6 +2081,15 @@
     It's a memory optimisation with costs: more complex code, possible extra CPU work to recompute or pass
     extrinsic state, and bugs if shared state is ever mutated. Profile first. If the app isn't short on RAM,
     skip it.
+  axes:
+    signs:
+      runtime: ++
+      change_cost: "-"
+    why:
+      runtime: Heavy shared data is stored once instead of in every one of many similar objects, cutting memory.
+      change_cost: State is split into shared and per-use parts passed around, so the code is harder to read and change.
+    flips: Without a measured memory problem it is cost only; if the shared state is ever mutated, one user's
+      change leaks to all others, turning reliability "-".
   in:
     python: >
       Python already does this for small ints and interned strings. Idiomatic tools include
@@ -2072,6 +2241,18 @@
     semantics, which is the core of the critique of transparent remote objects (Waldo et al., A Note on
     Distributed Computing). It also adds a layer and can delay responses. Use it when the control it adds is
     real and uniform.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: "-"
+    why:
+      change_cost: Lazy creation, access checks, caching or logging are added in one stand-in without changing the
+        service or its callers.
+      reliability: A stand-in that looks local hides latency, partial failure and changed semantics, so callers
+        treat remote or lazy calls as cheap and safe.
+    flips: The other effects depend on the variant - a caching or lazy proxy helps runtime, a protection proxy
+      helps security, a remote one adds a hop. A proxy that forwards everything adds a layer and delay with no
+      control gained.
   in:
     python: >
       Rare in everyday code. When used, it's often a class that forwards unknown attributes with __getattr__,
@@ -2230,6 +2411,19 @@
     fall off the end unhandled without anyone noticing. When the steps are few and fixed, call them in order
     in one place. Make the end-of-chain case explicit (a default handler or an error) rather than silently
     dropping the request.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: "-"
+      operability: "-"
+    why:
+      change_cost: Independent request steps live in separate handlers that can be reordered, reconfigured and
+        reused in front of other endpoints.
+      reliability: Order bugs are easy to make and hard to see, and a request can fall off the end of the chain unhandled.
+      operability: To know what happened to a request you must know the assembled chain, which often lives far from
+        the handlers.
+    flips: With one or two fixed steps a plain sequence of calls reads better and the chain is only indirection;
+      an explicit end-of-chain handler removes the silent-drop risk.
   in:
     python: >
       Usually a list of callables walked in a loop, or nested wrappers like WSGI and Django or Starlette
@@ -2383,6 +2577,18 @@
     inverse operation is hard to get right, and undo by stored state can eat memory; pick deliberately.
     Command-bus architectures in CQRS-style apps are often criticised as ceremony when the app is a simple
     CRUD service.
+  axes:
+    signs:
+      change_cost: ++
+      operability: +
+      delivery: "-"
+    why:
+      change_cost: One action object serves the button, menu, shortcut and API, and undo, queueing or retry can be
+        added around it.
+      operability: Requests exist as data, so what ran can be logged, inspected and replayed.
+      delivery: A class per action plus an invoker is more to write than calling a function.
+    flips: Without undo, queueing, replay or logging it is a layer where a function or callback would do, and a
+      command bus over a simple CRUD app is ceremony.
   in:
     python: >
       Functions are first-class, so a callable or functools.partial covers most uses; Norvig counted Command
@@ -2541,6 +2747,19 @@
     for the language's protocol or a generator. For simple collections it is pure overhead, and for some
     specialised structures direct indexed access is faster. Iterators that hold position over a collection
     that is being modified are a classic source of bugs.
+  axes:
+    signs:
+      change_cost: ++
+      runtime: +
+      reliability: "-"
+    why:
+      change_cost: Callers loop without knowing how the structure stores or pages its data, so the storage can
+        change freely.
+      runtime: Items are produced lazily, so big or paged data needn't be loaded at once.
+      reliability: An iterator holding a position over a collection that is modified during the walk is a classic
+        source of bugs.
+    flips: A hand-written iterator over a list the language already iterates is pure overhead, and some structures
+      are faster with direct indexed access.
   in:
     python: >
       Built into the language: __iter__ and __next__, and generators make most custom iterator classes
@@ -2701,6 +2920,18 @@
     gone away, it has moved into one place. Flow through a mediator is harder to follow than a direct call.
     Mediator libraries used as a universal in-process dispatcher are often criticised as indirection without
     benefit. Keep it when there are genuinely many-to-many interactions; otherwise prefer direct calls.
+  axes:
+    signs:
+      change_cost: ++
+      operability: "-"
+    why:
+      change_cost: Components reference only the coordinator, so they can be changed and reused without touching
+        their neighbours.
+      operability: Following what happens means tracing through the coordinator or dispatcher rather than a direct
+        call, which IDE navigation and stack reading don't follow.
+    flips: For two or three objects, or as an in-process dispatcher with one sender and one handler per request,
+      it is a hop with no decoupling; a mediator that absorbs component logic becomes a god object and turns
+      change_cost "-".
   in:
     python: >
       Often a plain function or controller object that wires callbacks, or a simple event bus. The source
@@ -2873,6 +3104,18 @@
     object has no external links and is easy to copy, cloning it (Prototype) is simpler. In dynamic languages
     the snapshot can't really be kept opaque, so the encapsulation benefit is a convention rather than a
     guarantee.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      runtime: "-"
+    why:
+      change_cost: The object snapshots its own state, so a new field can't be missed by outside copy code and
+        privates stay private.
+      reliability: State can be rolled back to a known-good checkpoint after a failed operation.
+      runtime: Every stored snapshot costs memory, and old ones need pruning.
+    flips: Snapshotting a large object on every small change wastes memory where an inverse operation would do;
+      with immutable state, keeping the old value already is the memento.
   in:
     python: >
       Usually copy.deepcopy, a frozen dataclass, dataclasses.replace, or pickle rather than a dedicated
@@ -3008,6 +3251,19 @@
     lapsed listener problem). Exceptions in one subscriber can stop the rest. Reactive-programming advocates
     argue raw callbacks compose poorly and prefer streams or signals. When there is one known dependent, call
     it.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: "-"
+      operability: "-"
+    why:
+      change_cost: New dependents subscribe without the publisher being edited for each one.
+      reliability: Subscribers run in no guaranteed order, updates can cascade, forgotten subscriptions leak, and
+        one subscriber's exception can stop the rest.
+      operability: From the publisher you can't see what will happen when it fires, so diagnosing behaviour means
+        finding every subscriber.
+    flips: Between two objects, or for steps that must happen in order, events hide the real flow and change_cost
+      turns "-"; with one known dependent a direct call is better.
   in:
     python: >
       Usually a list of callables rather than observer classes; Django signals, blinker and framework hooks
@@ -3161,6 +3417,18 @@
     the machine; many practitioners prefer an explicit transition table or a state-machine library so the
     whole graph is visible in one place and can be checked. State objects that know about each other couple
     the states together. Persisted state also has to map back to an object on load.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: A new state is a new class, not another branch in every method that switches on the status field.
+      reliability: Each state accepts only the operations and transitions valid for it, so illegal transitions stop
+        slipping through.
+      delivery: A class per state and a context to hold them is more code than an enum and a conditional.
+    flips: For a handful of stable states an enum and one conditional are clearer, and transitions spread across
+      classes can hide the machine a single transition table would show.
   in:
     python: >
       Often an Enum plus a dict mapping (state, event) to the next state, or a library like transitions,
@@ -3318,6 +3586,16 @@
     to understand the differences to choose. In languages with first-class functions a function argument
     usually replaces the whole pattern; Norvig made this point for dynamic languages and the source concedes
     it. Don't introduce the interface until there is a second variant.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Each algorithm variant sits behind one interface, so a new one is added without growing a
+        conditional in the class that uses it.
+      delivery: An interface and a class per variant must be written.
+    flips: With one implementation, or two stable ones, the extra types are complexity for nothing; in languages
+      with first-class functions a function parameter gives the benefit without the classes.
   in:
     python: >
       Usually just pass a function: sorted(key=...), a callable parameter, or a dict of named functions. A
@@ -3470,6 +3748,15 @@
     fixed skeleton limits some callers, a subclass that suppresses a default step can break Liskov
     substitution, and many steps make it hard to maintain. Strategy or passing functions for the varying steps
     is often the cleaner alternative.
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: The algorithm's order and shared steps live once in the base class, so a fix lands once instead
+        of in every near-duplicate copy.
+    flips: It ties variation to inheritance, so the fragile base class problem and long skeletons with many hooks
+      turn change_cost "-"; with one subclass, or when the steps could be passed as functions, it is coupling
+      for nothing.
   in:
     python: >
       Usually an abc.ABC with abstractmethod steps and no-op hook methods. Passing the varying steps as
@@ -3626,6 +3913,16 @@
     Visitors can't reach the elements' private state. In languages with sum types and pattern matching (Rust,
     Scala, modern Java, Python match) a function with a match usually replaces it. The source itself says it
     is rarely used because it is complex and fits narrow cases.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A new operation over a stable set of node types is one new visitor, with the node classes untouched.
+      delivery: Accept methods on every element and a visit method per type are more to write than a function with a
+        match.
+    flips: When element types change often, every new type means editing every visitor, turning change_cost "-";
+      with sum types and pattern matching a single match does the job.
   in:
     python: >
       Often a method lookup by type name (getattr for visit_ + class name), as in the standard library's
@@ -3793,6 +4090,17 @@
     applications a thin query object or direct ORM use in the application layer is simpler. The pattern pays
     off when there is a real domain model to protect, heavy query reuse, or a need to test domain logic
     without a database. For a CRUD app it is usually ceremony.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Query logic is written once behind intention-revealing methods, and domain code can be tested
+        against an in-memory implementation.
+      delivery: A repository interface and implementation are another layer to write per aggregate.
+    flips: Labelled for the domain-collection repository over a real domain model. Wrapping an ORM that already is
+      a repository, especially in a CRUD app, adds a layer that hides projections, eager loading and streaming
+      (runtime "-"), and multiplying finders turn it into a query dump.
   in:
     java: >
       Spring Data generates repository implementations from interfaces (JpaRepository, derived query methods),
@@ -3898,6 +4206,21 @@
     and the handler can be the use case. Fowler's own warning is that service layers tend to soak up domain
     logic; in DDD the application service should stay thin and delegate rules to the domain model. Watch for
     pass-through services, which are Middle Man at layer scale.
+  axes:
+    signs:
+      change_cost: ++
+      security: +
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Each use case is defined once and called by HTTP, CLI and workers, so a change to it is made in
+        one place.
+      security: Authorisation is checked in the use case, so no entry point can skip it.
+      reliability: Transaction boundaries are opened in one place per use case, so an operation commits or rolls
+        back as a whole whichever entry point called it.
+      delivery: One more hop and class to write between handlers and the work.
+    flips: With a single entry point and simple logic it is a pass-through layer, and services that soak up domain
+      rules leave an anaemic domain model that raises change_cost.
   in:
     java: The @Service class in Spring is the default home, with @Transactional on its methods. Small Spring MVC
       apps often skip it and call repositories from controllers, which is reasonable while the rules are few
@@ -4000,6 +4323,15 @@
     increases and rules that belong to one concept scatter, at which point a domain model is cheaper. The
     switch point is when the same invariants show up in several scripts. Until then, this is the right
     default, and it is not an anti-pattern.
+  axes:
+    signs:
+      delivery: ++
+      change_cost: +
+    why:
+      delivery: One procedure per operation, read, check, write, with no object model or mapping layer to design first.
+      change_cost: While rules are short and independent, a newcomer can follow each operation in one read.
+    flips: As rules grow and interact, the same checks are copied into many scripts that drift apart, turning
+      change_cost "-" and making a domain model cheaper.
   in:
     python: >
       The default shape in FastAPI and Flask apps: a route or crud function doing the whole operation over
@@ -4081,6 +4413,19 @@
     same benefit with immutable types and pure functions over them instead of mutable objects with methods, so
     "data and behaviour together" is one way to keep rules in one place, not the only one. Many web apps are
     mostly CRUD and are better served by a transaction script.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Invariants live with the state they protect, so a rule changes in one place instead of in every
+        procedure that copied it.
+      reliability: State changes go through methods that enforce the rules, so invalid states can't be produced from
+        any caller.
+      delivery: The model and the mapping layer to the database cost more to build up front.
+    flips: For CRUD screens or generic subdomains with no rules to enforce it is ceremony, and a transaction
+      script is cheaper on both axes.
   in:
     java: >
       JPA entities can be rich, but JPA's need for a no-argument constructor and mutable fields pushes toward
@@ -4180,6 +4525,17 @@
     Martin among them) say it mixes persistence and domain concerns. Its defenders, notably the Rails
     community, answer that for most web apps the coupling is the point, because it removes a whole mapping
     layer. Pick by how far the domain will drift from the tables.
+  axes:
+    signs:
+      delivery: ++
+      change_cost: "-"
+    why:
+      delivery: One class is both row and object, with no mapping layer to write, and it is what Rails, Django and
+        Laravel are built around.
+      change_cost: Domain objects are bound to the schema, so the class follows every table change and its unit
+        tests need a database.
+    flips: Where the domain mirrors the tables the coupling costs little; once logic grows complex or the model
+      drifts from the tables, callbacks and fat models make change expensive, which is when Data Mapper wins.
   in:
     python: >
       Django models are Active Records; fat models with manager methods are the Django idiom. SQLAlchemy's ORM
@@ -4274,6 +4630,16 @@
     mirrors the tables, Active Record or plain queries into structs is simpler. Full ORMs that implement this
     pattern are also where Ted Neward's "Vietnam of computer science" critique of object-relational mapping
     lands: the mismatch never fully goes away, so expect to drop to SQL for reports and bulk work.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Domain objects know nothing about tables, so schema and model change separately and the domain is
+        tested without a database.
+      delivery: A mapping layer has to be written and kept in step with both sides.
+    flips: When objects are identical to their rows, hand-written mappers double every change for nothing, turning
+      change_cost "-".
   in:
     java: >
       JPA and Hibernate are Data Mappers, but annotations on entity classes put mapping metadata on the domain
@@ -4364,6 +4730,19 @@
     and makes it easy to persist something by accident. Without an ORM, a plain database transaction around
     the operation gives the same all-or-nothing behaviour more visibly. Writing your own unit of work is
     rarely worth it when the ORM has one.
+  axes:
+    signs:
+      reliability: ++
+      runtime: +
+      change_cost: "-"
+    why:
+      reliability: All changes in an operation commit together or not at all, so a failure halfway leaves no partial
+        writes.
+      runtime: Writes are batched at commit instead of a round trip per object.
+      change_cost: Implicit change tracking writes whatever was mutated, which surprises readers and makes
+        accidental persistence easy.
+    flips: Units spanning user think-time or long jobs hold locks and stale state, turning reliability "-";
+      re-wrapping an ORM session that already is one is pure ceremony.
   in:
     python: >
       SQLAlchemy's Session is the unit of work; Cosmic Python wraps it in an explicit UoW context manager to
@@ -4454,6 +4833,15 @@
     rule or end up joining in application code. With a real domain model, a repository that returns domain
     objects fits better. For simple services, though, a gateway over hand-written SQL is often clearer than an
     ORM.
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: All SQL for a table sits behind one object with named methods, so queries aren't scattered
+        through handlers and change in one place.
+    flips: Forced into a domain whose operations span many tables, joins move into application code and risk N+1
+      queries (runtime "-"), and a repository returning domain objects fits better; adding business rules
+      turns it into a muddled Active Record.
   in:
     go: >
       The common Go shape: a store struct over *sql.DB with one method per query, or code generated by sqlc
@@ -4546,6 +4934,16 @@
     concurrency control; you still need optimistic locking across requests. Long sessions make the map grow
     and serve stale data. Code without an ORM, working with immutable values passed explicitly, usually has no
     need for it.
+  axes:
+    signs:
+      reliability: ++
+      runtime: +
+    why:
+      reliability: Loading the same record twice in one operation returns one object, so two copies can't be changed
+        separately with the last write silently winning.
+      runtime: A record already loaded in the operation isn't fetched again.
+    flips: Made long-lived or global it grows and serves stale data across requests, turning reliability and
+      runtime "-"; it is not a cache or a substitute for optimistic locking.
   in:
     python: >
       SQLAlchemy's Session keeps an identity map (session.get checks it first). Django has none, so two
@@ -4622,6 +5020,19 @@
     for no remote call saved. He allows them where the presentation's shape differs a lot from the domain. Use
     them at real boundaries, the public API, messages and other services, and pass domain objects within the
     process. Coupling the API to entities is the opposite failure, so the question is where the boundary is.
+  axes:
+    signs:
+      change_cost: ++
+      security: +
+      runtime: +
+      delivery: "-"
+    why:
+      change_cost: The API keeps its own shape, so the domain and schema behind it can change without breaking clients.
+      security: Internal fields and lazy-loaded relations aren't exposed by serialising entities straight to JSON.
+      runtime: One call carries everything the client needs instead of several remote round trips.
+      delivery: Separate types and mapping code to write, and a new field is edited in more than one place.
+    flips: Between layers inside one process DTOs add mapping cost with no remote call saved, turning change_cost
+      "-".
   in:
     python: >
       Pydantic models are the standard DTOs in FastAPI (separate Create, Update and Public schemas is the
@@ -4725,6 +5136,16 @@
     later argued the opposite, calling Service Locator an anti-pattern because it hides dependencies. Long
     constructor lists are a sign the class does too much, not a reason to switch to setter injection. Small
     programs can pass arguments without any of the vocabulary.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Collaborators arrive as parameters, so tests pass fakes without patching globals and environments
+        swap implementations.
+      delivery: Every collaborator has to be threaded through constructors and wired in the composition root.
+    flips: Auto-wiring containers bring hidden wiring, runtime wiring errors and lifetime bugs (reliability "-"),
+      and injecting things that never vary, or an interface per class, is ceremony.
   in:
     java: >
       Spring is container-first; constructor injection (with final fields and no @Autowired on fields) is the
@@ -4830,6 +5251,19 @@
     in it. Keep middleware to concerns that really apply to all or most routes; route-specific rules belong
     with the route (a dependency, a guard or a per-route filter). Order-dependent pipelines are a common
     source of bugs, such as auth running after a handler that already read the body.
+  axes:
+    signs:
+      change_cost: ++
+      security: +
+      operability: +
+    why:
+      change_cost: Cross-cutting behaviour such as a new header or tracing system changes in one place instead of in
+        every handler.
+      security: Authentication runs in front of every route, so no handler can forget it.
+      operability: Request ids, logging and error mapping are applied uniformly to every request.
+    flips: Business logic or per-route special cases in middleware, and long pipelines whose order nobody wrote
+      down, cause order bugs such as auth running after the body was read, turning security and reliability
+      "-".
   in:
     java: >
       Spring's DispatcherServlet is the front controller; servlet filters and HandlerInterceptors carry the
@@ -4932,6 +5366,16 @@
     mutation. Equality by id is debated in ORM-heavy code, because a new object has no id until it is saved.
     Using the entity pattern without the strategic side of DDD is what Vaughn Vernon calls DDD-Lite: the
     building blocks without the bounded contexts that make them pay.
+  axes:
+    signs:
+      reliability: ++
+      delivery: "-"
+    why:
+      reliability: Equality, lookups and merges go by a lasting id, so two different things with the same data are
+        never confused or merged.
+      delivery: Identity rules, id-based equality and lifecycle methods take more design than a row with a primary key.
+    flips: In CRUD code an ORM row with a key is enough, and giving ids to mere descriptions (addresses, amounts)
+      or writing getter-setter entities adds vocabulary without design.
   in:
     python: >
       A plain @dataclass compares every field, so two snapshots of the same entity compare unequal. Use
@@ -5040,6 +5484,19 @@
     numbers and a documented unit. Mapping them to a database can be awkward with some ORMs. Not every string
     needs a type; wrap the ones that have rules, units or a format, and leave free text alone. This is the
     usual cure for Primitive Obsession, so overdoing it is the overcorrection of that smell.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: Validation in the constructor means an invalid value can't exist, and units or currencies can't
+        be mixed by accident.
+      change_cost: Validation and formatting for a kind of value live in one type instead of being repeated.
+      delivery: Each value kind needs its own type, constructor and ORM mapping, which some ORMs make awkward.
+    flips: In hot loops or bulk numeric work, millions of small objects cost allocation and memory in languages
+      without real value types (runtime "-"); wrapping every primitive, including ones with no rules, turns
+      simple code into chains of conversions and raises change_cost.
   in:
     python: >
       A @dataclass(frozen=True) gives immutability and value equality and hashing; validate in __post_init__.
@@ -5159,6 +5616,19 @@
     transactional. Eventual consistency adds messaging, retries and states the business has to accept, so keep
     two things in one aggregate when the business truly needs them consistent at once. Aggregates also fight
     ORMs that encourage navigating the whole object graph."
+  axes:
+    signs:
+      reliability: ++
+      runtime: +
+      delivery: "-"
+    why:
+      reliability: Rules spanning several objects are enforced by the root after every change, and a version on the
+        root stops two concurrent requests both taking the last seat.
+      runtime: A clear boundary limits how much of the graph is loaded, saved and locked per operation.
+      delivery: Roots, per-root repositories and messaging between aggregates are ceremony to build.
+    flips: In CRUD screens with no invariants it costs more than it saves; one giant aggregate locks and loads
+      everything (runtime "-"), and forcing eventual consistency where the business needs it immediate turns
+      reliability "-".
   in:
     python: >
       Python can't enforce private children, so the root returns copies or tuples of its children and
@@ -5277,6 +5747,14 @@
     that isn't object-oriented, such as Go or functional TypeScript, a plain function in the domain package is
     the same thing and needs no class or interface. In CRUD apps the distinction from application services is
     usually not worth drawing.
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: Logic involving several aggregates gets a named home in the domain instead of one entity reaching
+        into another's internals.
+    flips: Moving all behaviour into services leaves an anaemic domain model of procedural code with extra layers,
+      turning change_cost "-"; in CRUD apps the distinction isn't worth drawing.
   in:
     go: >
       A package-level function in the domain package is usually enough; no struct or interface unless it has
@@ -5379,6 +5857,20 @@
     a context, and translate them into separate integration events, a published language, for other contexts,
     so internal refactoring doesn't break consumers. Domain events are not event sourcing; you can use one
     without the other.
+  axes:
+    signs:
+      change_cost: ++
+      operability: "-"
+      delivery: "-"
+    why:
+      change_cost: Side effects and other contexts react to an event, so the changing method doesn't grow a call for
+        each new reaction.
+      operability: The overall flow is spread across handlers, which makes it hard to see and debug.
+      delivery: Event types, handlers, dispatch after commit and usually an outbox are more to build than a direct
+        call.
+    flips: Dispatched before commit, or after commit without an outbox, events react to rollbacks or get lost
+      (reliability "-"); for a single side effect a direct call is clearer, and publishing internal events to
+      other services makes their shape a public contract that raises change_cost.
   in:
     python: >
       No standard mechanism; a list of pending events on the aggregate, drained by the unit of work after
@@ -5487,6 +5979,17 @@
     teams prefer named query methods on the repository or plain query objects. In languages with first-class
     functions a named predicate function gives most of the benefit with no class hierarchy. Reach for it when
     one rule must serve validation and selection, or when rules are combined at run time."
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A business rule has one name and definition shared by validation, selection and building,
+        combined with and, or and not, so copies can't drift.
+      delivery: A class per rule plus combinators, and a query form to run it against the database, is more to build
+        than a predicate.
+    flips: For a one-off condition it is ceremony; as a generic query builder it hides the database without domain
+      meaning, and a parallel query version of each rule drifts.
   in:
     csharp: Ardalis.Specification is widely used and builds EF Core queries from specification objects.
       Expression<Func<T,bool>> lets one rule run both in memory and as SQL, which is the C# answer to the
@@ -5588,6 +6091,19 @@
     module-level functions, a static create method or a NewX function is the idiomatic factory, and a Factory
     class is ceremony. It also overlaps Builder for complex value objects; Evans himself suggests a builder
     can assemble the parts.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: An aggregate is created complete and valid in one step, so a half-built one with a skipped
+        invariant can't exist.
+      change_cost: Callers don't know the aggregate's internal classes or assembly steps, so those can change behind
+        the factory.
+      delivery: A separate creation path, plus a reconstitution path for loading from storage, is extra code.
+    flips: For objects with few fields and no invariants a constructor already is the factory, and a factory class
+      is ceremony.
   in:
     python: |
       A classmethod (Workspace.create(...)) is the usual form; a standalone factory class is rarely needed.
@@ -5685,6 +6201,16 @@
     team. When many clients integrate with you, an open host service with a published language is better than
     each client building its own layer. Use the layer where the other model would distort yours, typically
     legacy systems and broad vendor APIs.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Legacy codes and vendor quirks stay in one translator, so the model reads in the business's terms
+        and replacing the other system touches one module.
+      delivery: Translation code per type and field has to be written and kept current.
+    flips: In front of a good, stable upstream whose model you could adopt, conforming is cheaper, and a
+      field-for-field copy of the external model duplicates every type for nothing.
   in:
     python: >
       A package per external system whose public functions return your own dataclasses; import-linter can
@@ -5805,6 +6331,16 @@
     dependencies are cheap to run in tests (SQLite, testcontainers). Ports should be shaped by what the core
     needs, not by the technology behind them; a port that leaks SQL or HTTP concepts gives the cost without
     the benefit.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: The core names what it needs in its own terms, so it is testable with in-memory adapters and a
+        database, queue or vendor is swapped at the edge.
+      delivery: Ports, adapters and mapping code at every boundary.
+    flips: In a thin CRUD service with no real rules every field change edits several layers and change_cost turns
+      "-"; ports that mirror the vendor's API give the cost without the benefit.
   in:
     python: >
       Ports are usually typing.Protocol classes or abstract base classes in the core package; adapters are
@@ -5922,6 +6458,18 @@
     layer depend on persistence, which the dependency rule inverts. Richards and Ford rate it low on
     deployability and scalability and suggest it mainly for small, simple or budget-bound applications, or as
     a starting point.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: UI, rules and data access stop being tangled in the same functions, in a structure every
+        developer recognises.
+      delivery: Each feature is written across a controller, a service and a repository, often with pass-through
+        methods.
+    flips: The familiar shape makes a new project quick to start, so for the first features delivery can be "+".
+      In a large system organised only by layer every feature change touches every folder and pass-through
+      services pile up, turning change_cost "-"; for a small tool the mandatory layers are pure overhead.
   in:
     java: >
       The default shape of Spring Boot apps (@Controller, @Service, @Repository stereotypes). ArchUnit has
@@ -6021,6 +6569,22 @@
     and messaging brings duplicates and retries. If the only need is heavy reporting, a reporting database or
     read replica may be enough. The light form, separate query objects that select straight into DTOs over the
     same database, gets much of the benefit at little cost and is often what people actually need.
+  axes:
+    signs:
+      change_cost: ++
+      runtime: +
+      reliability: "-"
+      delivery: "-"
+    why:
+      change_cost: The write model enforces rules without display getters and joins, and read models are shaped for
+        screens independently.
+      runtime: Read models are stored and indexed for the queries they serve and can scale apart from writes.
+      reliability: Separate stores are eventually consistent, so users can act on stale data and projections must
+        cope with duplicates and retries.
+      delivery: Two models, projections and usually a bus are a large step up from CRUD.
+    flips: Labelled for separate read and write stores, which is what the entry's "stored and scaled" describes.
+      For most CRUD systems it makes the project harder; the light form, query objects selecting into DTOs
+      over the same database, keeps most of the change_cost benefit without the reliability and delivery cost.
   in:
     csharp: Very common in .NET via MediatR with IRequest handlers. From 13.0, MediatR is dual-licensed (RPL-1.5
       or a paid commercial licence, with a free tier for small companies); 12.x stays Apache 2.0. The mediator
@@ -6120,6 +6684,19 @@
     external systems, and an immutable log fights with deletion rights such as GDPR's right to be forgotten
     (handled by keeping personal data outside events or by crypto-shredding). Teams new to event-driven
     systems often struggle with it. An audit table next to normal state often meets the real need.
+  axes:
+    signs:
+      operability: ++
+      change_cost: "-"
+      delivery: "-"
+    why:
+      operability: The full history is kept, so you can see what the state was at any time and why it changed.
+      change_cost: Event schemas can never be dropped, so evolving them with upcasters is permanent work, and the
+        approach is costly to leave.
+      delivery: An event store, projections, snapshots and replay rules to build before the first feature.
+    flips: Across a whole system, for reference data nobody replays, or with events that record state rather than
+      intent, it is all cost and an audit table next to normal state often meets the need; where audit and
+      history are core requirements and new read models must be built from history, the costs pay back.
   in:
     csharp: >
       Mature libraries exist (Marten on PostgreSQL, EventStoreDB's client, Eventuous). Records make immutable
@@ -6223,6 +6800,21 @@
     schema between filters keeps them reorderable but can push every filter to carry fields it doesn't use.
     Error handling is the weak point: decide early whether a failing filter stops the pipeline, skips the item
     or sends it to a dead-letter queue.
+  axes:
+    signs:
+      change_cost: ++
+      runtime: +
+      reliability: "-"
+    why:
+      change_cost: Each step is a separate filter, tested alone, and steps are reordered, added or removed per
+        source instead of copied.
+      runtime: Data streams through, so later steps start before earlier ones finish and expensive stages can be
+        scaled or run in parallel.
+      reliability: Error handling is the weak point - a failing filter needs a deliberate stop, skip or dead-letter
+        policy, or items are lost or half-processed.
+    flips: For a few fixed steps, or work that must share context, run in one transaction or answer synchronously,
+      it is needless structure; distributing each filter as a service brings duplicates and partial failures,
+      turning reliability and operability further "-".
   in:
     python: >
       Generator functions chained together give lazy, streaming pipelines in a few lines; a list of callables
@@ -6325,6 +6917,20 @@
     are simpler and easier to follow than discovery and dynamic loading. Dynamic loading also brings security
     (running untrusted code), isolation and dependency conflicts between plugins. Plugins that need to talk to
     each other push the design toward a bus and away from a small core.
+  axes:
+    signs:
+      change_cost: ++
+      security: "-"
+      delivery: "-"
+    why:
+      change_cost: Features ship as plugins through a stable contract, so the core stays unchanged as formats and
+        providers are added.
+      security: Discovering and loading plugins means running code the core didn't write, possibly untrusted, inside
+        the host.
+      delivery: A versioned plugin contract, discovery and lifecycle hooks must be designed before the first plugin.
+    flips: With one in-house plugin released together with the core, a plain interface and a compile-time list are
+      simpler; a broad contract falls to Hyrum's law and every core change breaks plugins, turning change_cost
+      "-".
   in:
     python: >
       Discovery usually goes through packaging entry points (importlib.metadata.entry_points), as pytest and
@@ -6434,6 +7040,17 @@
     and part of a payload sent to plugins or other versions, rejecting unknown fields on the type makes every
     reader strict, so an old plugin fails on a field it doesn't need. Check strictly in the loader for the
     user's file, and let the type and its other readers stay tolerant.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+    why:
+      change_cost: The consumer depends only on the fields it uses, so providers and consumers evolve on their own
+        schedules without coordinated releases.
+      reliability: Old consumers keep working on newer payloads and on messages that outlive the code that wrote them.
+    flips: Tolerating malformed or missing required data lets bad input flow on and, without contract tests, hides
+      a provider's real breaking change until production (reliability "-"); ignoring unknown fields in
+      security-sensitive input or your own config is the wrong default (security "-").
   in:
     python: >
       Pydantic models ignore extra fields by default (extra="ignore"); extra="forbid" is the strict opposite.
@@ -6534,6 +7151,20 @@
     after the code has moved. Microsoft's guidance notes it fits poorly when requests can't be intercepted,
     when you can't change the legacy code, or when the old system must be gone quickly. Fowler adds that
     without organisational change, Conway's law will rebuild the old structure in the new system.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      operability: "-"
+    why:
+      change_cost: A legacy system is replaced in small, reversible steps instead of a risky big-bang rewrite, and
+        it stops being in the way piece by piece.
+      reliability: One capability moves at a time behind a router, so there is no big-bang cutover to fail and
+        traffic can be shifted back.
+      operability: Old and new systems, the routing layer and data sync jobs all have to be run and monitored during
+        coexistence.
+    flips: Without a plan to finish, it leaves two systems and a facade running indefinitely, turning change_cost
+      "-"; for a small system a one-go replacement is cheaper.
   in: {}
   related:
     - big-ball-of-mud
@@ -6615,6 +7246,19 @@
     retries with backoff and a dead-letter queue often do the job without a breaker, and Microsoft's guidance
     says to skip it where the platform already isolates failures. It complements retry rather than replacing
     it, and retry logic must stop when the breaker says the fault isn't transient.
+  axes:
+    signs:
+      reliability: ++
+      runtime: +
+      operability: +
+      delivery: "-"
+    why:
+      reliability: A dead or slow dependency stops dragging its callers and unrelated requests down with it.
+      runtime: Calls fail immediately instead of tying up threads and connections waiting on timeouts.
+      operability: Breaker state shows which dependency is failing.
+      delivery: Thresholds, timeouts and fallbacks to design and tune.
+    flips: Badly tuned it flaps and causes outages of its own, turning reliability "-"; around local calls, or
+      where the mesh already isolates failures, it is overhead only.
   in:
     java: |
       resilience4j is the standard (Hystrix is in maintenance mode); Spring Cloud Circuit Breaker wraps it.
@@ -6715,6 +7359,18 @@
     only preserved per outbox and per partition key. If the event store is the source of truth (event
     sourcing), it already plays this role. Its value is that each service keeps its own database instead of
     sharing one, so it is part of the cost of avoiding a shared database.
+  axes:
+    signs:
+      reliability: ++
+      operability: "-"
+      runtime: "-"
+    why:
+      reliability: The message is stored in the same transaction as the change, so a crash can neither lose the
+        event nor announce a rolled-back change.
+      operability: A relay worker or CDC connector to run, monitor and scale.
+      runtime: Polling the outbox adds latency between the change and its message.
+    flips: For fire-and-forget notifications or a single process with no broker it is a moving part for nothing;
+      with non-idempotent consumers its at-least-once duplicates cause harm.
   in:
     java: >
       Debezium's outbox event router is the common CDC-based relay; Spring Modulith and Axon also ship outbox
@@ -6810,6 +7466,19 @@
     grows. Often the better fix is to redraw service boundaries so the transaction is local, or to keep the
     operation in a modular monolith. Choose orchestration once the flow has more than a few steps;
     choreography hides the process.
+  axes:
+    signs:
+      reliability: ++
+      delivery: "-"
+      operability: "-"
+    why:
+      reliability: A failure partway undoes the completed steps with compensations instead of leaving services
+        inconsistent.
+      delivery: Every step needs a designed, tested compensation, idempotent handling and saga state.
+      operability: Following one business transaction across many services is hard to debug, especially with choreography.
+    flips: Sagas give up isolation, so without countermeasures other transactions see intermediate states, and
+      compensations that can't really undo turn reliability "-"; a saga stitching back what could be one local
+      transaction signals a wrong service boundary.
   in:
     java: >
       Axon, Eventuate Tram Sagas and Camunda are common; Temporal's Java SDK runs sagas as durable workflow
@@ -6917,6 +7586,14 @@
     interface design. Both are defensible. Libraries blur the lines: a Mockito or unittest.mock object is a
     stub, spy and mock at once depending on how it's used, so the names describe roles in a test rather than
     classes.
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: Picking the weakest double that does the job keeps tests from pinning call order and arguments
+        that don't matter, so refactors break fewer tests.
+    flips: Doubling cheap, deterministic collaborators (mock everything) pins the implementation and turns
+      change_cost "-"; policing the vocabulary in review when a test is already clear costs time for nothing.
   in:
     python: >
       unittest.mock's Mock and MagicMock serve as stub, spy or mock depending on use; create_autospec or spec=
@@ -7031,6 +7708,18 @@
     tree under heavy development, snapshots become the Fragile Test smell. Justin Searls has argued that
     snapshot tests mostly get updated without being read, and Kent C. Dodds that snapshots beyond a few dozen
     lines become a maintenance burden and should be small and focused."
+  axes:
+    signs:
+      change_cost: ++
+      delivery: +
+      reliability: "-"
+    why:
+      change_cost: Any change to output that users consume shows up as a reviewed diff, so refactoring renderers,
+        compilers or legacy code is safer.
+      delivery: One capture-and-compare call covers a whole output instead of many hand-written asserts.
+      reliability: Updating is one command, so snapshots get approved without reading and pin bugs as the expected output.
+    flips: Where the output is not the contract, or carries timestamps and random ids, snapshots break on every
+      refactor and get updated blindly, turning change_cost "-".
   in:
     python: >
       syrupy and pytest-snapshot for pytest, and approvaltests for Python. A hand-rolled golden file with an
@@ -7127,6 +7816,15 @@
     builder class. Languages with named and default arguments get most of the benefit from a plain function
     with keyword overrides, without the builder ceremony. Some argue the need for elaborate builders is itself
     a sign the domain objects have too many required fields.
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: A new required field is added in one builder instead of breaking dozens of tests, and each test
+        shows only the values that matter.
+    flips: Defaults the assertion silently depends on make tests obscure and random defaults make them erratic,
+      turning change_cost "-"; for small types, or with named and default arguments, a constructor or plain
+      function is clearer.
   in:
     python: >
       Usually a function with keyword overrides (make_order(status="paid")) or dataclasses.replace on a
@@ -7226,6 +7924,16 @@
     chain that returns the same object can surprise callers who keep a reference. In languages with named and
     default arguments, a single call with keyword arguments often reads just as well. Keep fluent interfaces
     for libraries used widely enough to repay the design effort.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Call sites read as one statement in the domain's own terms, which matters because they are read
+        far more than the library source.
+      delivery: Fluency takes more effort to design and build than plain setters and constructors.
+    flips: For objects with a few settings named arguments are clearer; mutating chains on shared objects surprise
+      callers, and long chains hide intermediate state from debuggers.
   in:
     python: >
       Less common, since keyword arguments cover most configuration; seen in query builders (SQLAlchemy's
@@ -7337,6 +8045,22 @@
     the view on every message can be costly without memoisation or diffing. Games often use an
     entity-component system or a fixed-step loop instead. The long switch on the message in update is the
     idiom here, not the switch-statements smell.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      operability: +
+      delivery: "-"
+    why:
+      change_cost: State changes only in a pure update function and effects are commands, so UI logic is tested by
+        feeding messages and checking the model.
+      reliability: Async results and user input arrive as messages handled one at a time, so they don't race on
+        shared state.
+      operability: The message stream can be logged and replayed to reproduce how the UI reached a state.
+      delivery: Every interaction needs a message, a branch in update and often a command.
+    flips: For a small form or one-screen tool, or with deep trees of nested models, the boilerplate outweighs the
+      gain; re-rendering on every message is costly without memoisation (runtime "-"), and doing I/O inside
+      update loses the guarantees.
   in:
     python: >
       No mainstream Python UI framework is MVU; Textual uses widget-local reactive attributes and message

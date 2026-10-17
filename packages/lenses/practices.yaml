@@ -57,6 +57,21 @@
     and its critics argue that liberal acceptance entrenches broken input; a strict boundary with clear errors
     is the safer default for application input. Parse, don't validate goes further and argues the check should
     produce a type, not a boolean, so the evidence can't be lost.
+  axes:
+    signs:
+      security: ++
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      security: Untrusted input from requests, files, queues and partner APIs is checked against an allow-list
+        before any business code touches it.
+      reliability: Bad but honest data is rejected where it enters, with a clear error, instead of reaching storage
+        or failing deep inside.
+      change_cost: Inner code can rely on what it receives and doesn't repeat defensive format checks.
+      delivery: Every entry point needs a schema with limits written and kept up to date.
+    flips: Over-strict rules reject real input, such as names with apostrophes or non-Latin scripts. Treating
+      validation as the defence against injection or XSS leaves security "-" at the sink.
   in:
     python: >
       FastAPI validates Pydantic request models before the handler runs; Django forms and DRF serializers do
@@ -169,6 +184,23 @@
     types), and that argument is not worth having inside one codebase; follow the language's mainstream. What
     matters is consistency and a clear line between expected failures, which callers handle, and bugs, which
     should stop the program.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      operability: +
+      delivery: "-"
+    why:
+      reliability: Expected failures are handled at a stated layer and bugs stop the program, instead of errors
+        being swallowed or a library panicking on caller input.
+      change_cost: Callers and new contributors know how every module fails, so they don't have to guess between
+        null, error codes and exceptions.
+      operability: Each failure is logged once at a known layer and reaches users as one consistent shape of
+        message, status or exit code.
+      delivery: The policy has to be decided, written down and applied, with conversions at its boundaries.
+    flips: In a short script or prototype it is overhead, and crashing with a stack trace is fine. Forcing a
+      mechanism against the language's mainstream, or creating an error type per function, turns change_cost
+      "-".
   in:
     go: >
       Errors are values returned last. Wrap with fmt.Errorf and %w, and test with errors.Is and errors.As
@@ -289,6 +321,20 @@
     but lets the edit through when the hook itself crashes (open). Failing open is only honest if the failure
     is still reported somewhere visible; silent fail-open is swallowing. For small internal scripts the
     distinction rarely matters.
+  axes:
+    signs:
+      security: ++
+      reliability: ++
+      delivery: "-"
+    why:
+      security: Security checks are decided to fail closed, so an exception in a policy lookup can't fall through to
+        "allowed".
+      reliability: Optional dependencies and tooling inside someone else's workflow are decided to fail open, so
+        their own crash doesn't take the host or product down.
+      delivery: Every check or dependency that can fail needs a deliberate choice and an error path written to match.
+    flips: Failing open on everything for availability turns security "-". Failing closed on everything turns
+      reliability "-" when a flaky optional dependency is down. Failing open without reporting it is
+      swallowing errors.
   in:
     go: >
       The zero value of a bool is false, so `allowed, _ := check()` fails closed by accident and `denied, _ :=
@@ -390,6 +436,19 @@
     projects use calendar versioning (CalVer) because their releases are time-based. Applications and internal
     services usually don't need it. Staying on 0.y.z is legitimate while the API is unsettled, but the spec
     treats it as "anything may change", which surprises users.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Users can tell from the number which upgrades need work, so taking new releases is cheaper and
+        less risky.
+      reliability: Automatic version ranges don't pull a break into users' builds without their choice.
+      delivery: The public API has to be declared, changes classified, and breaks held back for a major release or
+        checked in CI.
+    flips: For an application or service whose only consumer is its own deploy pipeline, it is ceremony. Agonising
+      over whether every fix is breaking (Hyrum's law) freezes fixes.
   in:
     rust: >
       Cargo treats 0.y as the major for compatibility (^0.3 does not take 0.4), and the Cargo book lists what
@@ -470,6 +529,17 @@
     Security fixes sometimes have to break immediately. Pre-1.0 projects are allowed to break, but even there
     a one-release warning is cheap kindness. Some argue (Hickey's Spec-ulation) that you should never remove
     at all and add new names instead, which trades a clean codebase for stability.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Public things can be renamed or redesigned without stranding users, who migrate on their own
+        schedule with warnings naming the replacement.
+      delivery: The old path, its mapping to the new one and its warnings must be kept working for the whole window
+        before removal.
+    flips: For internal code where every caller can be changed in one commit, a deprecation cycle is waste.
+      Keeping deprecated paths forever turns change_cost "-".
   in:
     python: >
       DeprecationWarning is hidden by default except in __main__ and under test runners, so users of a library
@@ -579,6 +649,20 @@
     projects break unpromised behaviour on purpose to keep users off it, like Go randomizing map order. For
     code with only internal callers you can change both sides at once, and this principle mostly doesn't
     apply.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Knowing which surfaces are promised and hiding the rest leaves everything else free to change,
+        with promised surfaces checked in CI.
+      reliability: Scripts, agents and integrations that read CLI output, config or wire formats aren't broken by a
+        "small fix".
+      delivery: Separate wire types, a stable machine-readable output mode, version fields and compatibility tests
+        have to be built.
+    flips: Treating every log line and human-readable message as frozen makes the system unchangeable, so
+      change_cost turns "-". For code with only internal callers it mostly doesn't apply.
   in:
     typescript: >
       Exported types are surface: widening a parameter is safe, narrowing it or widening a return type can
@@ -687,6 +771,17 @@
     a major release when a variant is added. Inside one codebase, exhaustive matching is what you want. The
     trade-off is who learns about a new case, and when: the compiler at upgrade time, or a wildcard arm at run
     time.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: "-"
+    why:
+      change_cost: A variant, field or method can be added in a minor release without breaking downstream matches or
+        literals.
+      reliability: Users lose the compiler's help, so a new case lands silently in a wildcard arm at run time
+        instead of failing their build.
+    flips: On closed sets, or types used only inside one codebase, it just throws away exhaustiveness checking.
+      Many libraries are better off exhaustive, with a major release per new variant.
   in:
     rust: >
       #[non_exhaustive] on an enum forces downstream matches to have a wildcard arm; on a struct it stops
@@ -805,6 +900,18 @@
     breaking-change checks) and let consumers adapt. A shipped suite only covers what its authors thought to
     test, so passing it is necessary, not sufficient, and it becomes part of your public API that plugin
     authors depend on (Hyrum's law applies to the suite too).
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: Every plugin, adapter, backend or fake is proven to behave as callers expect, so they really are
+        interchangeable and fakes don't drift.
+      change_cost: Separately deployed parties can change independently without slow, flaky end-to-end suites.
+      delivery: The suite, and any broker or shared artefact, has to be written and kept up on both sides.
+    flips: For one implementation, or a few services owned by one team, a handful of integration tests is cheaper.
+      Contracts that pin exact data or wording break on harmless changes and turn change_cost "-".
   in:
     python: >
       Usually a base test class or a parametrised pytest fixture over implementations; a library can ship it
@@ -918,6 +1025,16 @@
     be hard to reproduce unless the library records it. Most practitioners, Hughes included, mix the two:
     examples for the cases that explain the code, properties for the rules. Generated input is only as good as
     its generators, so a property can pass on millions of cases that all avoid the bug.
+  axes:
+    signs:
+      reliability: ++
+      delivery: "-"
+    why:
+      reliability: Generated and shrunk inputs find edge cases (empty, unicode, overflow, duplicates) nobody would
+        write as examples.
+      delivery: Finding good properties and writing generators takes more thought than writing examples.
+    flips: For glue, I/O or business rules full of special cases, properties are weak or restate the
+      implementation, and examples are clearer. High iteration counts on every commit slow the suite.
   in:
     python: >
       Hypothesis is the standard, with strong shrinking and a local database of failing examples; it plugs
@@ -1013,6 +1130,18 @@
     implementation, ideally maintained by whoever owns the real one, as Google recommends. Where the
     interaction is the behaviour (an email sent, an event published, a charge made) a spy or mock states it
     more directly than inspecting a fake. And for a database, a real instance in a container often beats both.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Tests check resulting state rather than call order, so they don't all break when the
+        collaborator's interface or the call sequence changes.
+      delivery: The fake is real code that has to be written, maintained and ideally run through the same contract
+        suite as the real implementation.
+    flips: A fake of a third-party service you don't understand encodes guesses, and one never checked against the
+      real thing drifts, so reliability turns "-". Where the interaction is the behaviour (an email sent), a
+      spy says it more directly.
   in:
     python: >
       A small class with a dict inside, implementing the same Protocol as the real repository; Protocols keep
@@ -1129,6 +1258,21 @@
     Many small wrapper types add friction, so introduce them for values that are passed around and misused,
     not for everything. Collecting every error for a form is a different job from failing on the first one,
     and some parsing libraries make that harder.
+  axes:
+    signs:
+      reliability: ++
+      security: +
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: Inner code receives types that can only hold valid values, so checks aren't skipped deeper in,
+        and processing doesn't fail halfway through input.
+      security: Untrusted input is turned into constrained types at the edge, before it reaches anything that acts
+        on it.
+      change_cost: Repeated defensive checks disappear, and narrow types say what a value means.
+      delivery: Wrapper types, constructors and conversions have to be written at each boundary.
+    flips: Wrapping every string in its own type fills simple code with ceremony and turns change_cost "-".
+      Without an enforced type checker the guarantee is only a convention.
   in:
     python: >
       Pydantic models (as used by FastAPI) and attrs or dataclass constructors are the usual parsers at the
@@ -1238,6 +1382,18 @@
     that can be harder to follow than the direct code. For small scripts and thin CRUD handlers there is
     little core to extract. Teams used to object-oriented layering may find a ports-and-adapters split, with
     doubles at the ports, a more familiar way to get similar testability.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Decisions live in pure functions tested with plain values and no doubles, and are easier to
+        reason about and reuse in another setting.
+      delivery: Code that interleaves reading, deciding and writing has to be restructured, often to return
+        descriptions of effects for the shell to carry out.
+    flips: When the logic is mostly I/O orchestration, or the next query depends on the last answer, the split
+      adds indirection without a real core. Effect systems that make the shell pure as well turn change_cost
+      "-", and loading everything up front for purity can cost runtime.
   in:
     python: >
       Pure functions over frozen dataclasses in the core, with the FastAPI route or CLI command as the shell;
@@ -1352,6 +1508,18 @@
     adds friction. In languages where immutability is shallow or by convention, it gives less safety than it
     seems: a readonly field can still hold a mutable list. Mutating a local variable that nobody else can see
     is harmless; the principle is about shared state.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      runtime: "-"
+    why:
+      reliability: Shared data can't be changed behind a reader's back, which removes aliasing bugs and races
+        between threads, caches and async tasks.
+      change_cost: Mutation is rare and visible, so code is easier to reason about locally.
+      runtime: Making modified copies instead of editing in place costs memory and time.
+    flips: In hot loops, game state updated every frame or numeric code, copying is a measurable runtime cost.
+      Against an ORM that expects mutable entities it adds friction, and change_cost turns "-".
   in:
     python: >
       frozen dataclasses (and slots), NamedTuple, tuple and frozenset; dataclasses.replace makes modified
@@ -1474,6 +1642,16 @@
     must be inside the same transaction or a conditional write. Systems that must act first and settle later
     (offline-first apps, eventual consistency) compensate instead of checking up front, which is a deliberate
     trade with the Saga pattern's costs.
+  axes:
+    signs:
+      security: ++
+      reliability: +
+    why:
+      security: An unauthorised caller can't cause any file write, email, payment or outbound call, even one the
+        late check would have refused.
+      reliability: A refusal never leaves half the work done across several steps.
+    flips: Checking state that can change between check and act needs the check inside the transaction, or
+      ordering gives false confidence. Systems that must act first and settle later compensate instead.
   in:
     python: FastAPI dependencies run before the handler body, so a permission dependency that loads the target and
       checks it is the natural first step; a check left in a service the handler calls after writing a file
@@ -1585,6 +1763,17 @@
     scheme, so they send 401 without WWW-Authenticate or redirect to login, which breaks the letter of the RFC
     and is widely tolerated. In a published API the existing codes are part of the contract (Hyrum's law), so
     a fix goes through versioning or deprecation, not a quiet change.
+  axes:
+    signs:
+      reliability: ++
+      operability: +
+    why:
+      reliability: Clients refresh the token on 401 and show "no access" on 403, instead of logging users out over a
+        missing role or retrying forever.
+      operability: Access problems can be diagnosed from the status, which says whether it is a sign-in issue or a
+        permission issue.
+    flips: For private resources whose existence is sensitive, a 403 reveals that the id is real, so a 404 is the
+      safer answer. In a published API, changing established codes breaks clients.
   in:
     python: FastAPI's built-in security classes answer 401 with WWW-Authenticate for missing or invalid
       credentials since 0.122.0; earlier releases answered 403 from HTTPBearer, the API-key classes and others
@@ -1702,6 +1891,19 @@
     application or a binary that nothing depends on, flags aren't unified with anyone else's and the risk
     mostly goes away. In C and C++, macros that change a struct's layout are an ABI break between translation
     units, which is worse than an API break; there the rule is stricter, not looser.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: Adding or upgrading a dependency can't break a dependent's build by switching on a flag that
+        removes or changes an API.
+      reliability: A library's behaviour doesn't silently change because some other package in the graph enabled a flag.
+      delivery: Public types have to keep one shape under every flag, and feature combinations must be tested in CI.
+    flips: Refusing all conditional compilation makes every user pay for every optional dependency. For a binary
+      nothing depends on, or for per-platform selection, flags aren't unified and the rule mostly doesn't
+      apply.
   in:
     rust: Cargo builds one copy of a crate with the union of features requested anywhere in the graph. A
       cfg(feature) field on a struct with public fields, or a cfg(feature) variant on an exhaustive enum,
@@ -1831,6 +2033,21 @@
     that never breaks its contract can get by with its release number. Version numbers are also coarse:
     capability negotiation, as in LSP, lets each side use what the other supports without a lockstep bump, at
     the cost of more branches. Every supported protocol version is code the host has to keep and test.
+  axes:
+    signs:
+      change_cost: ++
+      operability: +
+      reliability: +
+      delivery: "-"
+    why:
+      change_cost: The host ships releases freely, and plugin authors only see a break when the protocol version
+        really changes.
+      operability: An incompatible host and plugin pair fails at load time with an error naming both versions.
+      reliability: Mismatched sides are refused up front instead of misbehaving mid-run on a message the other
+        doesn't understand.
+      delivery: A handshake, version negotiation and adapters for older protocol versions have to be built and tested.
+    flips: For plugins that ship with the host in one repository, it is overhead. Supporting every old version
+      forever turns change_cost "-".
   in:
     rust: >
       Rust has no stable ABI, so in-process plugins as dynamic libraries need the same compiler and crate
@@ -1955,6 +2172,20 @@
     background task. Multithreaded UI toolkits have been tried; Graham Hamilton's essay on them
     ("Multithreaded toolkits: A failed dream?") is the usual explanation of why the field settled on one
     thread.
+  axes:
+    signs:
+      reliability: ++
+      runtime: ++
+      delivery: "-"
+    why:
+      reliability: Widgets and UI state are never touched from two threads, which removes rare races, rendering
+        glitches and crashes.
+      runtime: Slow network, disk or computation runs off the UI thread, so the interface stays responsive instead
+        of freezing.
+      delivery: Background work needs a handoff back to the UI thread, plus cancellation and handling of stale results.
+    flips: Moving trivial work off the thread, or spawning work without cancellation, brings ordering and
+      stale-result bugs, so reliability turns "-". For short scripts and one-shot CLIs a blocking call is the
+      clearest code.
   in:
     python: >
       tkinter, Qt and most GUI toolkits require widget calls from the main thread; use a queue polled with
@@ -2069,6 +2300,16 @@
     on busy files. Many teams want tidy-ups in a separate commit or PR (Kent Beck's "tidy first" and Fowler's
     preparatory refactoring both keep structure changes apart from behaviour changes). It is also no excuse to
     wander off and polish code unrelated to the task, and it doesn't replace planned work on large debt.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Code that is touched often keeps getting clearer, with dead code dropped, confusing names fixed
+        and missing tests added.
+      delivery: Each change carries a small extra cleanup.
+    flips: Cleanups mixed into a feature diff make review and bisecting harder and cause merge conflicts, so
+      change_cost turns "-". Wandering off to polish unrelated code is waste.
   in: {}
   related:
     - broken-windows-theory
@@ -2103,6 +2344,16 @@
     he meant shipping code that reflects your current, incomplete understanding and refactoring as you learn,
     not writing messy code. Used as a catch-all the term loses its use for deciding anything. Debt in code
     that never changes costs no interest and may never need paying.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Recording debt and paying it down where code changes most removes the interest charged on every
+        later change.
+      delivery: Refactoring and adding missing tests as part of regular work takes time from features now.
+    flips: Taking on debt on purpose to ship flips the signs, delivery "+" and change_cost "-". Debt in code that
+      never changes costs no interest, so paying it down there is pure cost.
   in: {}
   related:
     - lehmans-laws
@@ -2141,6 +2392,15 @@
     at the centre, arguing that heavily mocked unit tests pin implementation details and miss the bugs that
     matter. For thin services and UI-heavy apps the right mix often has more integration tests than the
     pyramid suggests.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: +
+    why:
+      change_cost: A mostly-unit suite is fast and rarely flaky, so every change gets quick, trustworthy feedback.
+      delivery: Short CI runs and fewer flaky reruns get changes merged sooner.
+    flips: For thin services and UI-heavy apps, heavily mocked unit tests pin implementation details and miss
+      integration bugs, so reliability and change_cost turn "-" and a trophy or honeycomb shape fits better.
   in: {}
   related:
     - pesticide-paradox

@@ -33,6 +33,16 @@
     clearly. Some data really is too big to inline (a sample PDF, a recorded payload), so a named fixture file
     is the right call; the smell is when its name says nothing about what's in it. Golden-file or snapshot
     tests trade readability of the test for coverage of the whole output on purpose.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: A reader can't see what behaviour the test pins, so a failure or a needed update means digging
+        through fixtures and helpers.
+      delivery: Writing everything inline or copying a neighbour's big setup is the quickest way to get the test green.
+    flips: Golden-file and snapshot tests, and named fixtures for data too big to inline, give up per-test
+      readability on purpose to cover the whole output.
   in: {}
   related:
     - assertion-roulette
@@ -91,6 +101,16 @@
     as long as each case reports itself on failure. Go's table-driven style puts a for loop in nearly every
     test and is idiomatic there. Waiting loops in integration tests against an async system are sometimes
     unavoidable; put them in a named helper with a timeout.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+    why:
+      reliability: An if around the assertions, or an expected value computed with the production formula, lets the
+        test pass while checking nothing.
+      change_cost: You have to trace which branch ran before you can trust or edit the test.
+    flips: Table-driven and property-based tests loop over cases on purpose (idiomatic in Go) and are right when
+      each case reports itself on failure.
   in:
     go: >
       Table-driven tests with a for loop over cases and t.Run per case are the norm and don't count. Ifs that
@@ -156,6 +176,17 @@
     "Make it testable" can drive design damage when it means seams nobody needs; DHH's "test-induced design
     damage" argument is the known critique. Some code is thin glue that is better covered by an integration
     test than reshaped for unit tests. Testability is a good design pressure, but it isn't the only one.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Logic that can't be run without half the system has no fast tests, so every change to it is slow
+        to check and risky.
+      reliability: Logic tangled with I/O, threads or UI stays untested, so its edge cases are found in production.
+      delivery: Creating the database client or clock in place is the smallest change that works today.
+    flips: Thin glue is often better covered by an integration test than reshaped with seams nobody else needs.
   in: {}
   related:
     - singleton
@@ -225,6 +256,15 @@
     Many practitioners prefer DAMP (descriptive and meaningful phrases) over DRY in tests: some repetition
     keeps each test readable on its own, and Google's testing guidance says as much. Duplication that makes a
     test clearer is worth keeping; duplication that has to be updated in lockstep is the real problem.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Changing one constructor or field means editing the same setup and assertions in dozens of tests.
+      delivery: Copying the last test is the fastest way to write the next one.
+    flips: Repetition that keeps each test readable on its own (DAMP over DRY) is the better trade as long as the
+      copies don't have to change in lockstep.
   in: {}
   related:
     - duplicate-code
@@ -293,6 +333,16 @@
     package-private or internal-visible member, a health or debug endpoint behind auth. Rust's cfg(test) and
     Go's export_test.go keep test-only code out of the release build by design. The danger is behaviour that
     differs at runtime between test and production, not code that merely makes testing possible.
+  axes:
+    signs:
+      reliability: "-"
+      security: "-"
+      delivery: +
+    why:
+      reliability: Code that behaves differently under test means the tests verify a path production never runs, and
+        a test flag left on changes live behaviour.
+      security: A test hook or test-mode switch shipped in production can be tripped to bypass normal checks.
+      delivery: Putting a hard-coded value behind a test flag is quicker than adding a seam.
   in:
     rust: |
       Code under cfg(test) is compiled out of release builds, so test-only helpers there don't count.
@@ -358,6 +408,12 @@
     Modern runners report the failing line and diff the values, so much of the original pain is gone. Several
     assertions that check one logical outcome are fine and widely accepted; Roy Osherove and others argue for
     "one concept per test", not one assert. Soft-assertion features also report every failure at once.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: When the test fails you can't tell which of the bare assertions broke, so each red build starts
+        with a hunt for the failing check.
   in: {}
   related:
     - obscure-test
@@ -420,6 +476,17 @@
     Record the seed so a failure can be replayed. At large scale some flakiness in end-to-end tests is
     accepted and managed with quarantine and statistics (Google has written about this), rather than driven to
     zero.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: "-"
+    why:
+      reliability: Once failures are routinely rerun, real races and order dependencies get dismissed as flakes.
+      change_cost: A suite that fails at random can't be trusted, so every change needs reruns and second-guessing.
+      delivery: Random red builds block merges and burn CI reruns this week.
+    flips: Fuzzing, property-based and chaos tests are nondeterministic on purpose; record the seed so failures
+      replay.
   in: {}
   related:
     - slow-tests
@@ -484,6 +551,16 @@
     and snapshot tests are deliberately sensitive to output and are right when the output is the contract (a
     renderer, a CLI's text, a serialiser), as long as updating them is a reviewed step. Public APIs used by
     unknown clients sometimes need tests that pin the interface exactly.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Refactorings that don't change behaviour still break many tests, so every internal change carries
+        a test-repair tax and refactoring is discouraged.
+      delivery: Testing through whatever interface was easiest, with mocks verifying every call, is quick to write.
+    flips: Snapshot and golden-file tests are right when the output is the contract (a renderer, CLI text, a
+      serialiser), as long as updating them is a reviewed step.
   in: {}
   related:
     - mock-everything
@@ -540,6 +617,13 @@
     Some debugging is normal, especially for concurrency and integration problems no unit test would catch.
     The smell is when it's the usual way to understand a red test. Teams that favour broad integration tests
     (Kent C. Dodds' testing trophy, for example) accept a bit more debugging in return for less coupling.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: A red test doesn't point to its cause, so each failure after a change means a debugging session.
+    flips: Teams that favour broad integration tests accept more debugging in return for tests less coupled to the
+      implementation.
   in: {}
   related:
     - assertion-roulette
@@ -583,6 +667,14 @@
     Exploratory testing, usability testing and some hardware-in-the-loop checks are manual by nature and
     valuable. Visual review of UI changes is often a person looking at a diff, helped by screenshot tooling.
     The smell is in the automated suite, not in manual testing as a practice.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+    why:
+      change_cost: Every run needs a person to set things up or check the output by eye, so tests run rarely and
+        changes go unverified longer.
+      reliability: Results checked by eye and runs that get skipped let regressions through.
   in: {}
   related:
     - assertion-free-test
@@ -640,6 +732,16 @@
     Some slow tests are worth their cost: integration tests against a real database container catch what fakes
     hide, and many teams (the test pyramid's critics among them) prefer those over heavy faking. The fix is
     usually to run them at a different cadence, not to delete or fake them away.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: "-"
+    why:
+      change_cost: People stop running the suite on every change, so regressions are found late and further from
+        their cause.
+      delivery: Every change waits on a long local or CI run before it can merge.
+    flips: Integration tests against a real database catch what fakes hide and are worth their time; the fix is to
+      run them at a different cadence, not to remove them.
   in: {}
   related:
     - erratic-test
@@ -706,6 +808,16 @@
     interface would cost more than the duplication. Two classes that look similar but answer to different
     requirements may be coincidental duplication, and unifying them couples things that should drift apart
     (Sandi Metz's point that the wrong abstraction costs more than duplication).
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Two names for one job means fixes and features go into one copy, and callers can't swap one for
+        the other.
+      delivery: Writing your own client is quicker than finding, or changing, the one that already exists.
+    flips: Classes from different vendors, or ones that only look alike and answer to different requirements, are
+      better left apart than forced under one interface.
   in: {}
   related:
     - duplicate-code
@@ -783,6 +895,14 @@
     document a hard algorithm are valuable. John Ousterhout (A Philosophy of Software Design) argues the "good
     code is self-documenting" line is overstated and that interface comments carry abstractions names can't.
     Public library APIs need documentation regardless.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Comments that restate what the code does cover for unclear code and drift out of date, so readers
+        must still decode the code and may be misled.
+      delivery: Under a deadline, annotating hard code is quicker than extracting and renaming it.
   in: {}
   related:
     - long-method
@@ -850,6 +970,16 @@
     records passed through a pipeline. Functional and data-oriented styles deliberately separate data from
     functions, and Fowler himself says immutable records from a split phase are fine. It is the anemic domain
     model, where core business entities are mere bags, that the smell is aimed at.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Logic about the data is spread over the classes that use it and repeated there, so one rule
+        change means finding every client.
+      delivery: A plain bag of fields is the natural first shape and what ORMs and serialisers produce.
+    flips: At boundaries (API payloads, events, config, rows) and in immutable pipeline records, plain data is the
+      right shape.
   in:
     python: >
       A dataclass or NamedTuple is not a smell on its own. Look at whether functions elsewhere keep reaching
@@ -928,6 +1058,19 @@
     Fowler's test is to delete one value: if the rest still make sense on their own, it isn't a clump. Passing
     a whole object instead of its parts can couple a low-level function to a high-level type, so at module
     boundaries plain values are sometimes the better choice.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Adding or changing a member of the group means editing every signature and field list it travels
+        through.
+      reliability: The group's rules (start before end, all set or none) are re-checked at each site, and the site
+        that forgets them lets bad combinations through.
+      delivery: Adding one more parameter is always the smallest change.
+    flips: At module boundaries plain values can beat a shared object that would couple a low-level function to a
+      high-level type.
   in: {}
   related:
     - long-parameter-list
@@ -1000,6 +1143,14 @@
     "No callers here" isn't the same as dead in a library, a plugin host, or code entered through reflection,
     routing tables, serialization or cron. Check before deleting. A deprecation period is the right move for
     public APIs. Otherwise there is little argument for keeping it.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Readers and agents have to read, search past and keep compiling code that never runs, and may
+        change or call it by mistake.
+      delivery: Adding the new path beside the old one and putting off the cleanup ships sooner.
   in: {}
   related:
     - speculative-generality
@@ -1072,6 +1223,13 @@
     history, not by imagined future changes, and don't split a small, stable class because its methods could
     in principle change for different reasons. It sits in tension with Shotgun Surgery: the goal is one place
     per kind of change, not the smallest possible classes.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Unrelated concerns share one class, so each edit risks breaking another concern and changes collide.
+      delivery: Adding a method to the existing class needs no design decision.
   in: {}
   related:
     - shotgun-surgery
@@ -1147,6 +1305,17 @@
     Roberts, via Fowler)) before extracting. Copies that belong to different bounded contexts or services are
     often meant to evolve separately. In tests, repetition that keeps each test readable is usually the better
     trade.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Every fix or change has to be made in each copy.
+      reliability: Copies drift, so a bug fixed in one place lives on in another.
+      delivery: Copying working code is faster and feels safer than changing a shared function.
+    flips: Copies in different bounded contexts or services are meant to evolve apart, and there the wrong shared
+      abstraction costs more than the duplication.
   in: {}
   related:
     - dry
@@ -1230,6 +1399,16 @@
     the data classes. Functional and data-oriented designs do the same by choice. Code that formats or
     persists an object often reads only that object's fields and still belongs outside it, so the object
     doesn't learn about every output format.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Behaviour lives away from the data it uses, so changing that data means finding methods in other
+        classes.
+      delivery: Writing the method where the caller already is takes no decision about ownership.
+    flips: Strategy, Visitor and formatting or persistence code keep behaviour outside the data on purpose, so the
+      data class doesn't learn every output format.
   in: {}
   related:
     - data-class
@@ -1305,6 +1484,17 @@
     module under test, or nested types in one file. Languages give this explicit forms (friend, internal,
     package-private) for that reason. The smell is unplanned intimacy across a boundary that is supposed to
     hold.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Two classes that reach into each other's internals can't change independently.
+      reliability: Writing another object's private state skips the invariants that object maintains.
+      delivery: Reaching into a field is quicker than adding a method to the other class.
+    flips: Pairs designed to be close (a class and its builder, an iterator and its collection, nested types)
+      share internals deliberately through friend, internal or package-private access.
   in:
     python: >
       Privacy is only a naming convention, so reaching for another object's underscore names is the visible
@@ -1382,6 +1572,15 @@
     extension methods or traits (C#, Kotlin, Rust, Swift) make the smell mostly disappear, since you can add
     the method without a wrapper. Fowler dropped it from the 2nd edition's list, along with the two
     refactorings that treated it.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Missing behaviour is copied across callers or monkey-patched in, and both break or need redoing
+        when the library changes.
+      delivery: Patching the class at runtime or writing a local helper is quicker than wrapping it or contributing
+        upstream.
   in:
     csharp: |
       Extension methods are the idiomatic Introduce Foreign Method.
@@ -1469,6 +1668,14 @@
     client, or a thin composition root that wires many parts together can be large and fine. Ousterhout argues
     for deep modules, a lot of functionality behind a small interface, which a mechanical split can make
     worse. Judge by how many reasons it has to change.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Every feature touches the same file, so changes collide and readers must understand far more than
+        they need.
+      delivery: Adding a method to the class that already holds the data is the least effort.
   in: {}
   related:
     - god-object
@@ -1544,6 +1751,11 @@
     place, and it is the cure for Primitive Obsession. A thin adapter at a system boundary keeps the rest of
     the code independent of the outside. The page itself allows a small class that marks intended future work,
     though YAGNI pulls the other way.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: A class that does almost nothing is still one more name and file to find, read and keep in step.
   in: {}
   related:
     - speculative-generality
@@ -1609,6 +1821,16 @@
     inlining long sequential code so the order of effects stays visible. A long function that does one linear
     thing, like a state machine, a parser case table or a test, can be clearer whole. Split by meaning, not
     length.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: You have to read the whole function to change any part, and locals shared across phases make
+        edits risky.
+      delivery: Adding a few lines to an existing function is always the smallest change.
+    flips: A long function that does one linear thing, such as a state machine or a parser case table, can be
+      clearer whole than split into shallow helpers.
   in: {}
   related:
     - comments
@@ -1694,6 +1916,17 @@
     big context object. Pure functions and constructors used for dependency injection often have many
     parameters on purpose. Languages with keyword arguments make long lists much less error-prone. Don't
     remove a parameter if it means creating a dependency the function didn't have.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Calls are hard to read, and each new case adds another parameter or flag to every call site.
+      reliability: Positional arguments of the same type are easily passed in the wrong order with no error.
+      delivery: Adding one more parameter is the smallest change that makes the new case work.
+    flips: Pure functions and dependency-injected constructors take many explicit parameters on purpose, which
+      beats hidden globals; keyword arguments remove most of the risk.
   in:
     python: >
       Keyword-only parameters (after a bare star) take most of the readability cost away, but a long list of
@@ -1771,6 +2004,15 @@
     Chains over the same type, such as builders, stream or query APIs, and string operations, are not this
     smell. Navigating plain data structures (a parsed JSON document, a config tree) is often fine because the
     structure is the published contract. Hiding every delegate trades this smell for Middle Man.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: The caller depends on every object along the path, so restructuring any of them breaks callers
+        far away.
+      delivery: Navigating through getters is the obvious way to reach the data now, with no decision about who owns
+        the question.
   in: {}
   related:
     - law-of-demeter
@@ -1832,6 +2074,13 @@
     Keep it when it reduces dependencies, for example by keeping the rest of the code from importing a vendor
     SDK, or when it's a Proxy, Decorator or Adapter by design. Ousterhout's shallow module critique covers the
     bad case: if a caller has to understand as much as the wrapper does for them, the wrapper is noise.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Every change to the delegate has to be mirrored in a forwarding method that adds nothing.
+    flips: A deliberate Proxy, Decorator, Adapter or Facade, such as one that keeps a vendor SDK out of the rest
+      of the code, earns its forwarding.
   in: {}
   related:
     - message-chains
@@ -1901,6 +2150,14 @@
     worse. The page itself says to revert if merging makes the code messier. Visitor and Bridge accept a
     related kind of pairing on purpose. In languages with sum types and pattern matching, one function per
     concern that matches on the variants often removes the second tree without merging concerns.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Every new subclass needs a matching twin in another tree, so adding a case means edits in two
+        places, and the twin is easy to forget.
+    flips: The second tree can be the price of keeping a concern (UI, persistence) out of the domain model, and
+      merging them would be worse.
   in: {}
   related:
     - shotgun-surgery
@@ -1975,6 +2232,22 @@
     scripts. Wrapper types have a cost in languages where they allocate or need serialization code. The modern
     form of the advice is "parse, don't validate" (Alexis King): convert at the boundary into a type that
     can't hold invalid values, rather than wrapping everything everywhere.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      security: "-"
+      delivery: +
+    why:
+      change_cost: A concept's rules are repeated wherever its raw value is used, so changing a rule means finding
+        every copy.
+      reliability: Bare strings and numbers can hold invalid values, mix units or currencies, or be passed in the
+        wrong order, and nothing catches it.
+      security: Untyped input is re-checked at each entry point instead of parsed once at the boundary, and the
+        entry point that forgets the check lets malformed input through.
+      delivery: Adding a str or int field is quicker than creating a type.
+    flips: In throwaway scripts, small scopes and for values with no rules, primitives are fine; wrappers cost
+      allocation or serialisation code in some languages.
   in:
     python: |
       NewType, small frozen dataclasses and Enum cover most cases cheaply.
@@ -2064,6 +2337,19 @@
     strong when the subclass refuses the interface, because then it breaks the Liskov Substitution Principle
     and callers can't trust the parent type. Some standard libraries accept optional operations on purpose
     (Java's unmodifiable collections throwing on add), and that is a known, debated trade-off.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: Overrides that throw "not supported" break callers holding the parent type, and the failure only
+        shows at runtime.
+      change_cost: Callers must check the concrete type, and changes to the parent drag along subclasses that don't
+        want them.
+      delivery: Inheriting was the fastest way to reuse a few methods.
+    flips: Some libraries accept optional operations on purpose, such as Java's unmodifiable collections throwing
+      on add, as a known trade-off.
   in:
     java: >
       UnsupportedOperationException in an override is the classic sign, used deliberately in the collections
@@ -2150,6 +2436,15 @@
     duplication between them is the cost of independence. The cure for this smell and the cure for Divergent
     Change pull in opposite directions; aim for one place per kind of change, not the fewest or the smallest
     classes.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+    why:
+      change_cost: One small change means many edits across files, and finding all of them.
+      reliability: When one copy of a scattered rule is missed, the system behaves inconsistently.
+    flips: Spread that is inherent, such as a field that crosses storage, API and UI, or modules separate teams
+      own on purpose, is the right cost.
   in: {}
   related:
     - divergent-change
@@ -2243,6 +2538,15 @@
     interface with one production implementation can be justified by a test fake, or by a second
     implementation already in progress. Ask before flagging. Check whether tests depend on the hooks before
     deleting them.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: "-"
+    why:
+      change_cost: Unused hooks, parameters and abstract layers have to be read, traced and kept working on every change.
+      delivery: Time goes into building and testing flexibility nobody needs yet.
+    flips: Libraries and frameworks need generality their users rely on, and an interface with one production
+      implementation can be justified by a test fake.
   in: {}
   related:
     - yagni
@@ -2322,6 +2626,17 @@
     makes new operations cheap. In languages with sum types and exhaustive matching, the compiler finds every
     switch that misses a new case, which removes most of the risk the smell is about. Data-oriented and
     functional programmers often prefer the switch.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Adding a case means finding and editing every switch on the same type code.
+      reliability: A switch missed when adding a case silently falls through to the wrong branch or the default.
+      delivery: Adding another branch is the smallest change that handles the new case.
+    flips: With sum types and exhaustive matching the compiler finds every switch that misses a case, and when
+      operations grow faster than variants the switch is the cheaper design.
   in:
     rust: Exhaustive match on an enum is idiomatic, and within the crate that defines the enum the compiler flags
       every match when a variant is added. That guarantee stops at `#[non_exhaustive]` enums from other
@@ -2404,6 +2719,16 @@
     they are clearly named. Objects with a real lifecycle (a connection that is open or closed) may hold
     fields that are only set in some states; that's better modelled with the State pattern or separate types,
     but it is a different problem.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Readers can't tell when a field is meaningful, so the class is harder to understand and change safely.
+      reliability: Fields that are empty outside one algorithm cause null errors when read at the wrong time, and
+        break when the method runs re-entrantly or concurrently.
+      delivery: Stashing intermediate values on the object avoids passing them through a long parameter list.
   in: {}
   related:
     - long-parameter-list
@@ -2491,6 +2816,15 @@
     the complexity, so measure before rewriting. Sometimes N small indexed queries beat one large join that
     multiplies rows. Batch jobs that stream records one at a time may do per-item queries on purpose to bound
     memory.
+  axes:
+    signs:
+      runtime: "-"
+      delivery: +
+    why:
+      runtime: One round trip per row makes latency and database load grow with page size.
+      delivery: Lazy loading makes the per-item query the obvious code, and it is fast against tiny dev datasets.
+    flips: With a few items, a fast local database or a cache, it costs nothing worth fixing; batch jobs may query
+      per item on purpose to bound memory, and N indexed queries can beat a join that multiplies rows.
   in:
     python: >
       Django: select_related for foreign keys, prefetch_related for many-to-many and reverse relations;
@@ -2599,6 +2933,21 @@
     database-dependent checks), so sharing covers the simple rules and the rest still needs server-side
     handling. For a small app with a handful of fields, two short copies may cost less than a code-generation
     step, as long as the server's copy is complete.
+  axes:
+    signs:
+      reliability: "-"
+      security: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: The form accepts what the API rejects, or the reverse, so users hit generic errors and bad data
+        gets in on whichever side is looser.
+      security: A rule enforced only in the client isn't enforced at all, because an attacker can call the API
+        directly.
+      change_cost: Every rule change has to be made on both sides, often in two languages, and kept in step.
+      delivery: Copying a regex is quicker than setting up schema generation.
+    flips: For a small app with a few fields, two short copies can cost less than a code-generation step, as long
+      as the server's copy is complete and authoritative.
   in:
     python: >
       FastAPI publishes an OpenAPI document from Pydantic models, including length and pattern constraints;
@@ -2711,6 +3060,19 @@
     or being retired isn't worth holding to parity. With two variants that rarely change, a shared suite may
     cost more than the occasional drift it catches. Where most of the code turns out to be the same, Shotgun
     Surgery's remedy (give the shared part one home) comes before any test suite.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: A fix applied to one variant leaves the bug in the others, and a missing operation fails only
+        when that variant runs.
+      change_cost: Each change has to be repeated and verified in every variant, with nothing pointing out which one
+        was missed.
+      delivery: Copying the first variant to make the second ships fastest.
+    flips: Variants meant to diverge (a paid edition, a platform following its own conventions, a retiring
+      backend) need parity only on the shared contract.
   in:
     python: >
       A typing.Protocol checked by a type checker, or an abstract base class that fails at instantiation,

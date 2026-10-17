@@ -45,6 +45,17 @@
     entities as domain objects to avoid a mapping layer. Martin's own descriptions of the rings are schematic;
     the rule is the inward direction, not a fixed count of layers, and treating the four circles as mandatory
     projects is a common misreading.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A framework, ORM or vendor change stays out of business-rule files, and the core is unit tested
+        without booting infrastructure.
+      delivery: Interfaces in the core, adapters outside and mapping to plain data at each boundary all have to be
+        written first.
+    flips: In small apps, scripts and code whose whole point is the framework, the rings are indirection with no
+      stable core behind them, so change_cost turns "-".
   in:
     python: >
       Nothing stops a circular or outward import until runtime. import-linter "layers" and "forbidden"
@@ -162,6 +173,19 @@
     and tighten at the first real user data or the first external code; that's a reasonable order if the
     deadline is real. Least privilege that is too painful to live with decays into wildcards, so the design
     has to make the narrow grant the easy one.
+  axes:
+    signs:
+      security: ++
+      delivery: "-"
+      operability: "-"
+    why:
+      security: A leaked token or a compromised plugin or service can only do what its narrow grant allows.
+      delivery: Every new job or component needs its grants defined and reviewed, and a denial at the wrong moment
+        stalls the work.
+      operability: Grants have to be maintained and permission denials debugged, which is ongoing work for whoever
+        runs the system.
+    flips: When grants are so fine-grained they hurt, people hand out wildcards to get unstuck and security ends
+      up worse. For a script only its author runs it is cost without benefit.
   in:
     rust: >
       Wasm plugin hosts (wasmtime with WASI) grant capabilities explicitly: a guest gets no files, sockets or
@@ -254,6 +278,18 @@
     old one (Hyrum's law), so it needs a deprecation path rather than a silent flip. Some argue that developer
     tools running on the user's own machine with the user's own permissions gain little from sandboxing
     defaults; that weakens once the tool runs third-party hooks, plugins or agent-written code.
+  axes:
+    signs:
+      security: ++
+      delivery: "-"
+    why:
+      security: Most deployments keep the defaults, so the safe default decides how safe most of them are, and
+        anything dangerous shows up as a named opt-in.
+      delivery: Users and the team have to configure network, CORS or debug access explicitly before using them, so
+        the first run takes longer.
+    flips: If the defaults are so strict that the first run fails, tutorials tell everyone to turn the protection
+      off and the opt-out becomes the real default. Flipping an existing default to the safe value breaks
+      everyone who relied on it.
   in:
     python: >
       Django's startproject writes DEBUG = True, and FastAPI serves /docs and /openapi.json unless disabled,
@@ -372,6 +408,21 @@
     look like depth. For low-value data or an internal tool, one well-tested control is often the better
     trade. The layers also need an owner each: a second check nobody tests tends to rot unnoticed until the
     day it's needed. Depth is not a substitute for getting the primary control right.
+  axes:
+    signs:
+      security: ++
+      delivery: "-"
+      runtime: "-"
+      change_cost: "-"
+    why:
+      security: One missed check, framework default or misconfiguration doesn't expose the asset on its own, because
+        an independent layer still holds.
+      delivery: Every extra layer (row-level security, network segmentation, CSP) is more to build.
+      runtime: Each layer adds work to the request path, such as a policy check in the database on every query.
+      change_cost: Each layer needs its own owner and tests, or it rots unnoticed, and changing a rule can mean
+        touching several layers.
+    flips: Layers that share a failure mode only add complexity. Copying the same validation into every layer
+      turns change_cost into shotgun surgery. For low-value data, one well-tested control is the better trade.
   in: {}
   related:
     - least-privilege
@@ -453,6 +504,17 @@
     host carry on (see fail-open vs fail-closed). Erlang pairs "let it crash" with supervisors that restart
     the failed part, and without that structure crashing is just downtime. Embedded and safety-critical
     systems often can't stop, and must move to a safe state instead.
+  axes:
+    signs:
+      reliability: ++
+      operability: +
+    why:
+      reliability: A bad state is stopped where it appears, before corrupt data is written or a later step fails
+        somewhere unrelated.
+      operability: A bad deploy refuses to start and names the missing or malformed setting, instead of failing
+        hours later with a misleading stack trace.
+    flips: When a long-running service crashes on one bad request, or a batch fails on one bad record, without a
+      supervisor or a request boundary, reliability turns "-" and you get downtime.
   in:
     python: |
       assert is stripped under -O, so don't use it for checks that must hold in production; raise explicitly.
@@ -560,6 +622,21 @@
     shape (the expression problem). At boundaries the data arrives untyped anyway, so the principle works
     together with parsing at the edge (parse-dont-validate). Storage and wire formats usually flatten the
     union back into nullable columns or optional fields, so the mapping code has to be written and tested.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: Impossible combinations, such as a finished upload with no url, can't be built, so the code can't
+        act on them.
+      change_cost: Adding a state turns every place that must handle it into a compile error, instead of a hunt for
+        every if on the status field.
+      delivery: Variant types, exhaustive matches and the mapping to flat storage and wire formats are extra code to
+        write and test.
+    flips: When rules that change often, or depend on other records or configuration, are forced into types, the
+      model goes rigid and change_cost turns "-". Closed unions at an extension point block others from adding
+      variants.
   in:
     python: >
       Model variants as separate frozen dataclasses joined with a Union (or the | operator), with a Literal
@@ -679,6 +756,17 @@
     data from behaviour on purpose and get testability and simplicity in return, so the principle fits
     rich-object domain models more than pipelines of plain records. Rules that span several objects belong in
     a service or policy, not in any one of them.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+    why:
+      change_cost: A rule about an object's state lives in one method, so callers don't copy it and don't break when
+        its fields change.
+      reliability: Callers can't change an object's state without going through the method that checks its rules,
+        such as bumping copies_out without checking holds.
+    flips: In read models, reports, serialisation and data-oriented or functional code, a plain query is simpler.
+      Forcing behaviour into entities there grows Large Classes, and change_cost turns "-".
   in:
     python: >
       Properties hide whether a value is stored or computed, which blurs asking and telling; a dataclass with
@@ -776,6 +864,16 @@
     act on it. Fluent interfaces deliberately return a value from modifiers. Internal caching that no caller
     can see doesn't break the principle, since it concerns observable state. Use it to make side effects
     visible, not as a law.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+    why:
+      change_cost: Queries can be called, repeated and reordered freely, so code and tests are easier to read and
+        restructure.
+      reliability: No hidden side effects, such as a health check that keeps idle sessions alive by calling a getter.
+    flips: Splitting atomic read-and-write operations (pop, compare-and-set, an insert that returns its id) in
+      concurrent code creates races, so reliability turns "-".
   in:
     python: >
       Properties should be queries; a property that writes state is a strong surprise. list.pop and
@@ -872,6 +970,17 @@
     without delegation support that boilerplate is real. The GoF themselves used inheritance throughout their
     patterns; the principle says favour, not forbid. Bloch's advice is to design and document classes for
     inheritance or prohibit it.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Variations combine and swap without a subclass per combination, and a parent class change can't
+        break subclasses that relied on its internals.
+      delivery: Collaborators have to be wired in and methods forwarded, which is real boilerplate in languages
+        without delegation support.
+    flips: For a real is-a relation with a stable parent, or a framework that expects you to subclass, composition
+      is forwarding code and indirection only.
   in:
     python: >
       Mixins and multiple inheritance are common in frameworks (Django class-based views), and the method
@@ -961,6 +1070,17 @@
     CUPID and others argue for simpler, property-based goals, and much of SOLID targets class-heavy
     object-oriented code: in functional or procedural code some of the five map loosely or not at all. A
     project that says it follows SOLID usually means one or two of them; ask which.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Taken together, the five principles keep changes local, keep new cases out of working code and
+        keep implementations swappable and testable.
+      delivery: More interfaces, smaller classes and wiring to set up before the feature works.
+    flips: Over-applied as a set, you get an interface for every class and a factory for every interface, so each
+      change touches four files and change_cost turns "-". In functional or procedural code several of the
+      five barely apply.
   in:
     python: >
       Duck typing and protocols cover much of interface segregation and dependency inversion without declared
@@ -996,8 +1116,8 @@
     that changes for different reasons, at different times, belongs in different modules.
   names: >
     Robert C. Martin's restatement of David Parnas's and Larry Constantine's ideas on decomposition and
-    cohesion (1972 to 1979); Martin later rephrased it as "a module should be responsible to one, and only one,
-    actor". The S in SOLID.
+    cohesion (1972 to 1979); Martin later rephrased it as "a module should be responsible to one, and only
+    one, actor". The S in SOLID.
   applies_to:
     kinds: []
     languages: []
@@ -1023,6 +1143,16 @@
     well as a property to aim at rather than a rule. Splitting has a cost too: more names, more indirection,
     and changes that now touch several files. Cohesion is the older and plainer test: things that change
     together stay together.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Code that changes for different reasons sits in different modules, so a billing change can't
+        break reporting, and fewer changes conflict when merged.
+      delivery: Splitting a module along its reasons to change takes design work, new names and wiring now.
+    flips: Splitting along every verb scatters one feature across many one-method classes, so each change touches
+      several files and change_cost turns "-".
   in:
     python: >
       Modules are the natural unit; a module of functions with one concern is often better than a class with
@@ -1062,7 +1192,7 @@
       class InvoiceStore:
           fn save(invoice: Invoice): ...
       fn send_invoice(invoice: Invoice, to: Address): ...
-    note: >
+    note: |
       Each part now changes for one group's reasons, and pricing can be tested without a database or SMTP.
   sources:
     - cite: Robert C. Martin, The Single Responsibility Principle (2014)
@@ -1087,8 +1217,8 @@
     payment method, a file format, an output) should mean adding code at an extension point, not editing the
     code that already works.
   names: >
-    Bertrand Meyer, Object-Oriented Software Construction (1988), where extension meant inheritance; Robert
-    C. Martin recast it in 1996 around abstractions and polymorphism. The O in SOLID.
+    Bertrand Meyer, Object-Oriented Software Construction (1988), where extension meant inheritance; Robert C.
+    Martin recast it in 1996 around abstractions and polymorphism. The O in SOLID.
   applies_to:
     kinds: []
     languages: []
@@ -1111,6 +1241,17 @@
     arrives, not before. In code you own end to end, editing a switch in one place is often simpler and safer
     than an abstraction; and with closed sum types and exhaustive matching, adding a case is meant to touch
     every match, which the compiler then checks.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A new plugin, format or provider is added at an extension point without editing, and risking,
+        code that already works.
+      delivery: Extension points, registries or strategy interfaces have to be designed before the second case arrives.
+    flips: When the predicted variation never comes, or the wrong axis was guessed, the abstraction resists the
+      change that does come (speculative generality) and change_cost turns "-". In code you own end to end,
+      one switch is often simpler.
   in:
     python: >
       Registries of functions keyed by name, entry points for plugins, and functools.singledispatch are the
@@ -1121,7 +1262,7 @@
     java: >
       Interfaces with ServiceLoader or dependency-injection lookup are the usual extension points; sealed
       interfaces are the deliberate opposite.
-    rust: >
+    rust: |
       Traits are the extension point for others; enums with exhaustive match are for closed sets you own.
     go: >
       Small interfaces plus registration functions (as database/sql drivers do) give extension without editing
@@ -1152,7 +1293,7 @@
       fn to_csv(report): ...
 
       fn export(report, format): return EXPORTERS[format](report)
-    note: >
+    note: |
       A new format is a new function in its own module; export and the existing formats stay untouched.
   sources:
     - cite: Bertrand Meyer, Object-Oriented Software Construction (1988)
@@ -1205,6 +1346,19 @@
     declared subtype, but the behavioural contract still applies. Martin's SOLID phrasing is about classes;
     the principle matters as much for interface implementations and for plugins, where a contract suite is the
     practical check.
+  axes:
+    signs:
+      reliability: ++
+      change_cost: +
+      delivery: "-"
+    why:
+      reliability: Any implementation behaves as callers expect, so there are no bugs that appear only with one
+        driver, adapter or plugin.
+      change_cost: A new implementation drops in without callers adding type checks or special cases.
+      delivery: Each implementation must honour the whole contract, which often means a different hierarchy and a
+        shared test run against each one.
+    flips: Treating every type check as a violation, including matches on a closed union, or splitting interfaces
+      so nothing ever refuses an operation, scatters the contract and turns change_cost "-".
   in:
     python: >
       Overrides raising NotImplementedError in a concrete subclass are the usual sign; abstract base classes
@@ -1298,8 +1452,8 @@
     - Implementations that can't support every capability (read-only stores, partial backends).
     - Mocks and fakes that are tedious to write.
   overuse:
-    - One single-method interface per call site, so the contract is scattered across dozens of types nobody can
-      find.
+    - One single-method interface per call site, so the contract is scattered across dozens of types nobody
+      can find.
     - Interfaces for types that have exactly one implementation and one caller.
   remedy: null
   counter: >
@@ -1307,6 +1461,16 @@
     declaring it, so the principle costs nothing and needs no ceremony. In nominal languages, splitting
     interfaces adds names and wiring; a wide interface that every caller really uses whole is fine. The
     principle is about callers' needs, not interface size.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: A change to one capability doesn't ripple into callers that never used it, and test doubles only
+        implement what the code under test calls.
+      delivery: In nominal languages, splitting interfaces means more names to declare and wire up.
+    flips: One single-method interface per call site, or interfaces for types with one implementation and one
+      caller, scatters the contract so nobody can find it, and change_cost turns "-".
   in:
     python: >
       typing.Protocol lets the consumer declare just the methods it calls; prefer that to a wide abstract base
@@ -1317,7 +1481,7 @@
     java: >
       Role interfaces implemented together by one class are the usual answer; default methods can hide a wide
       interface's cost but not its coupling.
-    csharp: >
+    csharp: |
       As in Java; IReadOnlyList and IReadOnlyDictionary are the standard library's own read-only slices.
     go: >
       Define the interface where it is used, with the one or two methods needed (io.Reader, io.Writer); the
@@ -1347,8 +1511,8 @@
       fn render_page(store: Reader, key):
           return template(store.read(key))
     note: >
-      render_page can now be given a read-only cache or a two-line fake, and changes to write or delete
-      never reach it.
+      render_page can now be given a read-only cache or a two-line fake, and changes to write or delete never
+      reach it.
   sources:
     - cite: Robert C. Martin, The Interface Segregation Principle, C++ Report (1996)
       url: https://web.archive.org/web/20060822033314/http://www.objectmentor.com/resources/articles/isp.pdf
@@ -1393,6 +1557,17 @@
     available that cost often buys nothing. Many projects never swap their database, and modern test tooling
     can run real infrastructure cheaply. Apply it at the boundaries that matter (the domain against storage,
     messaging and vendors), not between every pair of classes.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: "-"
+    why:
+      change_cost: Business rules are tested without a database or network, and storage or vendors can change
+        without touching the policy code.
+      delivery: Each inverted dependency adds an interface owned by the policy side and a place to wire the
+        implementation.
+    flips: An interface in front of every class, with one implementation and no test that needs a double, buys
+      nothing, and change_cost turns "-" from the indirection.
   in:
     python: >
       A Protocol owned by the domain module, implemented in an adapters module, is enough; a DI framework is
@@ -1407,8 +1582,8 @@
       As in Java with the built-in container; an interface in the Infrastructure project used by Domain is the
       inversion done backwards.
     go: >
-      Consumer-defined interfaces give this by default: the package that needs a store declares the
-      interface, and the database package never knows.
+      Consumer-defined interfaces give this by default: the package that needs a store declares the interface,
+      and the database package never knows.
   related:
     - solid
     - dependency-rule
@@ -1510,6 +1685,17 @@
     and the cloud guides push enforcement down into the data layer (row-level security, global filters) rather
     than trusting each query. Isolation also has a performance side (noisy neighbours, per-tenant quotas) that
     security-led scoping alone doesn't cover.
+  axes:
+    signs:
+      security: ++
+      delivery: "-"
+    why:
+      security: One forgotten filter can't leak another customer's data, because every query, cache key, path and
+        job carries the tenant taken from the verified identity.
+      delivery: Tenant context has to be threaded through queries, caches, storage, queue messages and background
+        jobs, with cross-tenant denial tests for each resource.
+    flips: In a single-tenant deployment there is no boundary to defend, and it is cost only. A database or
+      deployment per tenant for many small tenants multiplies migrations and turns operability "-".
   in:
     python: >
       SQLAlchemy's do_orm_execute event with with_loader_criteria adds a tenant filter to every ORM select,
@@ -1635,6 +1821,22 @@
     audit rows may still differ per request. The idempotency-key draft expired in 2026 without becoming an
     RFC, so its status codes (400 for a missing key, 409 for a request still in flight, 422 for a key reused
     with another body) are a widely copied convention, not a standard."
+  axes:
+    signs:
+      reliability: ++
+      operability: +
+      runtime: "-"
+      delivery: "-"
+    why:
+      reliability: Retries after timeouts, at-least-once delivery and platform reruns don't double a charge, an
+        order or a message.
+      operability: Operators can safely rerun a failed job or replay messages, because a rerun replaces the output
+        instead of doubling it.
+      runtime: Each guarded request does an extra key lookup and write in the dedupe store.
+      delivery: Needs a key store, a retention window, handling of in-flight duplicates and a check that a reused
+        key has the same body.
+    flips: On operations that are already naturally idempotent, or where duplicates are harmless, the machinery is
+      cost only. Keeping keys forever makes the store grow without bound.
   in:
     python: >
       Celery with acks_late and retries can run a task more than once, so tasks should be written to be
@@ -1720,6 +1922,16 @@
     duplication is far cheaper than the wrong abstraction, and the rule of three, push back on early
     extraction. Tests often read better with some repetition, and sharing code across services creates
     coupling that can cost more than the copy.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+    why:
+      change_cost: A business rule, constant or config value changes in one place instead of every copy.
+      reliability: Copies can't drift apart and leave one path with a bug that was fixed in the others.
+    flips: Merging code that only looks alike, and changes for different reasons, couples it into the wrong
+      abstraction and turns change_cost "-". Sharing code across services adds coupling that can cost more
+      than the copy.
   in: {}
   related:
     - kiss
@@ -1784,6 +1996,15 @@
     out of the code can just move it to callers or operations. Rich Hickey's distinction between simple (not
     tangled) and easy (familiar) is useful here. Some problems are genuinely complex and need a design that
     matches.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: +
+    why:
+      change_cost: Less indirection and generality to read and work around in every later change.
+      delivery: The simplest design that meets the requirement is the least to build now.
+    flips: For a problem with real essential complexity, a too-simple design pushes the complexity onto callers or
+      operations, so change_cost and operability turn "-".
   in: {}
   related:
     - yagni
@@ -1839,6 +2060,13 @@
     Counting dots is a poor test: fluent builders, query chains and plain data structures chain calls without
     coupling to anyone's internals. Martin Fowler has said he'd prefer it be called \"the Occasionally Useful
     Suggestion of Demeter\". It targets objects with behaviour, not records or DTOs."
+  axes:
+    signs:
+      change_cost: ++
+    why:
+      change_cost: Callers don't walk the object graph, so restructuring an intermediate class doesn't break them.
+    flips: Applied mechanically by counting dots, it bloats classes with pass-through methods (Middle Man),
+      turning change_cost "-". It doesn't apply to fluent builders, query chains or plain data records.
   in: {}
   related:
     - law-of-leaky-abstractions
@@ -1889,6 +2117,18 @@
     Simpler is not always right: some problems carry essential complexity (Brooks), and the simplest-looking
     design can just push it elsewhere (Tesler). "Simplest" is also in the eye of the beholder, so the razor
     settles fewer arguments than people hope.
+  axes:
+    signs:
+      change_cost: ++
+      operability: +
+      delivery: +
+    why:
+      change_cost: Fewer moving parts and assumptions mean less to understand and fewer places for a change to go wrong.
+      operability: One process and one store where they carry the load are less to deploy and monitor, and checking
+        simple causes first shortens debugging.
+      delivery: Fewer services, queues and layers to build now.
+    flips: Where the complexity is essential, such as load one store can't carry, the simplest-looking design just
+      pushes it elsewhere, and reliability or runtime turn "-".
   in: {}
   related:
     - kiss
@@ -1947,6 +2187,19 @@
     Allman's "The Robustness Principle Reconsidered" and RFC 9413 by Martin Thomson and David Schinazi argue
     for strict, well-specified handling instead. For a new protocol or an internal API, rejecting bad input
     clearly is usually the better default.
+  axes:
+    signs:
+      reliability: ++
+      security: "-"
+      change_cost: "-"
+    why:
+      reliability: Imperfect but honest peers keep working with you instead of being rejected over minor deviations.
+      security: Lenient parsing opens parser differentials and request smuggling, where two components read the same
+        input differently.
+      change_cost: Accepted quirks become de facto protocol, so producers never fix them and every consumer has to
+        copy them.
+    flips: For a new protocol or an internal API, strict rejection with clear errors is better. Over time liberal
+      acceptance entrenches broken input and hides which producer is wrong, and even reliability turns "-".
   in: {}
   related:
     - murphys-law
@@ -2017,6 +2270,15 @@
     "premature" to think about. Randall Hyde's "The Fallacy of Premature Optimization" makes this case.
     Performance budgets in latency-sensitive work (games, embedded, hot request paths) are design, not
     premature tuning.
+  axes:
+    signs:
+      change_cost: ++
+      delivery: +
+    why:
+      change_cost: Code stays clear instead of filling with hand-rolled caches and tricks in paths that rarely run.
+      delivery: No time spent tuning code before a measurement shows it matters.
+    flips: When it is used as an excuse to ignore algorithm, data-layout or architecture choices, or performance
+      budgets in games, embedded or hot paths, runtime turns "-" and the fix later is expensive.
   in: {}
   related:
     - pareto-principle
@@ -2077,6 +2339,17 @@
     Surprise is relative to who is reading, so conventions from one ecosystem can astonish people from
     another. Matching a bad existing convention just to avoid surprise can lock in a mistake; sometimes a
     deliberate, documented break is the right call.
+  axes:
+    signs:
+      change_cost: ++
+      reliability: +
+    why:
+      change_cost: Readers and callers guess correctly what a function, flag or API does from its name and its
+        neighbours, so changes and new uses need less checking.
+      reliability: Callers don't trip over hidden side effects or odd defaults, such as a query-named function that
+        writes state.
+    flips: Matching a bad existing convention just to avoid surprise locks in the mistake, and what surprises
+      depends on the reader's ecosystem.
   in: {}
   related:
     - postels-law
@@ -2133,6 +2406,16 @@
     are costly to reverse, such as public APIs, data formats and schemas, security and internationalisation,
     deserve forethought. Fowler notes YAGNI covers presumptive features, not the work of keeping code easy to
     change.
+  axes:
+    signs:
+      delivery: ++
+      change_cost: +
+    why:
+      delivery: No time spent building features, options or abstractions that nothing needs yet.
+      change_cost: Less speculative code and fewer unused flags to read, keep working and work around.
+    flips: For decisions that are expensive to reverse (public APIs, data formats, schemas, security), deferring
+      forethought turns change_cost "-". Without tests and room to refactor, adding the thing later costs
+      more.
   in: {}
   related:
     - occams-razor

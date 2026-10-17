@@ -33,6 +33,15 @@
     long as it only wires and holds no rules. A small program or script with one class doing one job is not a
     God object just because it is the only class. Size alone isn't the test: a long class with one reason to
     change is a long class.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Every change goes through one class, so unrelated edits collide, it can't be tested in parts, and
+        a change to one cluster risks the others.
+      delivery: Adding one more method to the class that already holds the data is the quickest way to ship the next
+        feature.
   in: {}
   related:
     - solid
@@ -116,6 +125,12 @@
     in tests, where the concrete value is the point, and values whose meaning the surrounding name already
     gives (timeout_seconds = 30). A constant named after its value instead of its meaning (THIRTY) is no
     better than the literal. Lint rules for it are known for noise, so most teams configure an allowlist.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: A reader can't tell what the literal means, and changing the value means finding every
+        unexplained copy of it.
   in: {}
   related:
     - primitive-obsession
@@ -187,6 +202,12 @@
     A thin class earns its place when it is a real boundary: it adapts a vendor API, carries a request across
     a queue, or is the Command pattern with undo or retry. Framework entry points (an HTTP handler, a CLI
     command) are thin by design and should stay thin. The test is whether removing it would lose anything.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: A throwaway class that only forwards adds a hop every reader must trace through, and a file to
+        keep in step, for no gain.
   in: {}
   related:
     - middle-man
@@ -252,6 +273,14 @@
     interface they need themselves, which makes the wide one less harmful. Splitting too far scatters one
     concept across many tiny types. Some domains really are wide, and a facade can be wide on purpose: what
     matters is whether each client depends only on what it uses."
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Every implementer and test double must fill in methods it doesn't use, and a change to any method
+        touches clients that never call it.
+      delivery: Adding a method to the existing interface is the smallest change when a new caller needs something.
   in:
     go: Go's convention is small interfaces (io.Reader has one method), declared in the package that uses them
       rather than the one that implements them; a large interface exported next to its only implementation is
@@ -339,6 +368,16 @@
     Consistency has its own value: a rule that is slightly wrong in one place but applied everywhere can beat
     a case-by-case call in a large team. Some rules, like security and data-handling rules, should be followed
     even when the reason isn't obvious locally. The fix is to know the reason, not to drop the rule.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: "-"
+    why:
+      change_cost: Ceremony kept only because a rule demands it (an interface for a type that never varies) is more
+        code to read and keep in step.
+      delivery: Each feature pays for structure the rule demands but the problem doesn't need.
+    flips: In a large team, a slightly wrong rule applied everywhere can beat case-by-case judgement, and security
+      or data-handling rules should be followed even where their reason isn't visible locally.
   in: {}
   related:
     - cargo-cult-programming
@@ -399,6 +438,16 @@
     In a functional or data-oriented style, rules as functions over plain data are the design, not a mistake;
     the problem there is only when they sit in a grab-bag module instead of one named after the domain. Truly
     generic helpers are fine. The test is whether a domain expert would recognise the rule.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Domain rules scattered across grab-bag helper modules are hard to find, so they get duplicated
+        and changed in one place but not the other.
+      delivery: A helper file is the quickest place for a function when nobody wants to decide which class owns it.
+    flips: In a functional or data-oriented codebase, rules as functions over plain data are the design, provided
+      they sit in a module named for the domain.
   in: {}
   related:
     - feature-envy
@@ -471,6 +520,14 @@
     Different meanings in different bounded contexts are expected in DDD, as long as the boundary is explicit
     and translation happens at it. Public API and database names can be costly to change, so a documented
     alias at the edge is sometimes the right trade.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Searching for a concept misses code that names it differently, one word meaning two things
+        invites misreadings, and mapping code exists only to rename.
+    flips: At a public API or database edge where renaming breaks clients, a documented alias can be cheaper than
+      aligning the name.
   in: {}
   related:
     - business-logic-in-helpers
@@ -531,6 +588,17 @@
     lack of comment is the problem, not its existence. The name is still the standard one at code scale
     (Jargon File, Wikipedia), though some, like INNOQ at architecture scale, avoid "cargo cult" for its
     colonial overtones.
+  axes:
+    signs:
+      change_cost: "-"
+      operability: "-"
+      delivery: +
+    why:
+      change_cost: Code nobody understands can't be safely changed or removed, so it piles up and every reader has
+        to work around it.
+      operability: Config flags nobody can explain and log-and-rethrow wrappers on every function make production
+        behaviour hard to reason about and logs noisy.
+      delivery: Copying from a working example is faster than understanding it.
   in: {}
   related:
     - dogma-over-pragma
@@ -599,6 +667,12 @@
   counter: >
     Code that only looks dead may be used through reflection, dynamic dispatch, a public API or a rarely run
     job; a library cannot know its callers. In those cases, deprecate and measure before deleting.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Dead and half-finished code has to be read, searched past and kept compiling in every refactor,
+        and nobody can tell which version is live.
   in: {}
   related:
     - dead-code
@@ -665,6 +739,15 @@
     argues that each new technology spends a limited budget. A familiar tool used slightly outside its sweet
     spot usually beats an unfamiliar one used well. It is a golden hammer only when the misfit costs more than
     the switch.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Workarounds against the grain of a badly fitting tool pile up and make each later change harder.
+      delivery: The team already knows the tool, so there is nothing new to learn or set up.
+    flips: Where the misfit is small, the familiar tool is the right call ("choose boring technology"); it is only
+      an anti-pattern when the misfit costs more than the switch.
   in: {}
   related:
     - reinventing-the-wheel
@@ -724,6 +807,16 @@
     A long, flat function that reads top to bottom is not spaghetti. Complexity metrics flag it too often to
     be a judgement on their own. Hot loops and state machines sometimes need explicit flow that looks dense; a
     clear comment can be enough.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Tangled flags and jumps can only be followed by tracing by hand, so every edit risks breaking
+        another path.
+      delivery: Adding one more condition where the bug showed up is the fastest fix each time.
+    flips: In hot loops and state machines, dense explicit flow can be the right trade for performance, as long as
+      it is commented.
   in: {}
   related:
     - long-method
@@ -793,6 +886,17 @@
     Duplication is cheaper than the wrong abstraction (Sandi Metz). The rule of three (Don Roberts, via
     Fowler) says wait for a third copy before extracting. Copies that will diverge, such as tests or code in
     separate services that must deploy independently, are often better left apart.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Every change to the shared logic has to be made in each copy.
+      reliability: A fix applied to one copy misses the others, so the bug lives on elsewhere.
+      delivery: Copying working code and tweaking it is the fastest way to get the next case working.
+    flips: Copies that are meant to diverge, such as tests or code in independently deployed services, are often
+      better left apart than merged into a wrong abstraction.
   in: {}
   related:
     - dry
@@ -863,6 +967,18 @@
   counter: >
     Something kept on purpose for a dated, near-term plan is not a boat anchor if the plan is written down.
     Some dependencies are used only at build time or through plugins and look unused to naive checks.
+  axes:
+    signs:
+      security: "-"
+      change_cost: "-"
+      operability: "-"
+    why:
+      security: An unused dependency or idle client still brings its vulnerabilities and credentials into the
+        system, for no benefit.
+      change_cost: An unused dependency still has to be upgraded and kept compiling, and readers have to work out
+        that it does nothing.
+      operability: Config, deployment entries and startup connections for a component nobody uses must still be
+        maintained, and can fail a deploy.
   in: {}
   related:
     - lava-flow
@@ -923,6 +1039,19 @@
     own what is core to your business, and the Go community's "a little copying is better than a little
     dependency" (Rob Pike) favours a few lines of your own over a package. Learning by rebuilding is fine
     outside production. Crypto is the case where people agree you should never roll your own.
+  axes:
+    signs:
+      security: "-"
+      reliability: "-"
+      change_cost: "-"
+    why:
+      security: Home-grown crypto, parsing and argument handling miss the attacks a mature library has already been
+        hardened against.
+      reliability: Hand-written versions handle fewer edge cases (quoted CSV fields, time zones, URL encoding) than
+        the library they replace.
+      change_cost: The team owns, tests and maintains code a library would have maintained for them.
+    flips: When the dependency is large for a small need, unmaintained or itself a supply-chain risk, a few lines
+      of your own can be safer and cheaper to keep; crypto is the exception.
   in: {}
   related:
     - golden-hammer
@@ -980,6 +1109,14 @@
     it is clearer than objects. The anti-pattern is the mismatch: classes used as namespaces for single
     functions in a codebase that claims to be object-oriented. Single-method classes are also fine when they
     are Commands or Strategies that get passed around.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Rules sit in verb-named classes away from the data they act on, so changing one concept means
+        visiting several routines that pass bare records around.
+    flips: In a functional or data-oriented style, plain functions over plain data are the intended design and can
+      read better than objects.
   in: {}
   related:
     - business-logic-in-helpers
@@ -1048,6 +1185,14 @@
     Waiting too long has costs too: copies of a real business rule drift and cause bugs. When the duplicated
     code encodes one piece of knowledge, DRY is right even at two copies. The disagreement between DRY
     advocates and the rule-of-three and AHA ("avoid hasty abstractions", Kent C. Dodds) camp is real.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: The shared code grows a parameter and a branch per caller, so each change risks every caller and
+        is harder than changing duplicates would be.
+      delivery: Adding one more parameter to the existing shared code looks cheaper now than writing a separate path.
   in: {}
   related:
     - dry
@@ -1117,6 +1262,17 @@
     Immutable constants and read-only configuration loaded once at startup are harmless. Loggers and metrics
     are commonly global by convention and rarely cause trouble. Small scripts don't need injection. The cost
     is in mutable shared state, which hurts testability and concurrency.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: Any code can change the value, so behaviour depends on what ran earlier and concurrent access races.
+      change_cost: Tests must set up and reset shared state, and no function can be understood from its arguments alone.
+      delivery: A global is one line, where passing the value through layers is tedious.
+    flips: In a small script, or for immutable config and conventional loggers and metrics, a global is harmless
+      and simpler than injection.
   in:
     python: >
       A module is already a singleton; module-level mutable variables and the global keyword are the usual
@@ -1199,6 +1355,13 @@
     the import format at the edge is fine as long as it is translated into domain types once, in one place.
     The fix is mostly a change of mindset; the code fallout it leaves behind (generic models, overbuilt
     infrastructure) usually needs significant refactoring, so it's cheaper caught early.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Generic models switching on code values, and rules kept in people's heads, make every business
+        change slow and new developers take months.
+    flips: A thin CRUD or reporting app whose domain really is just the data needs no rich modelling.
   in: {}
   related:
     - misapplied-genericity
@@ -1277,6 +1440,24 @@
     most of this. The point is not to front-load every infrastructure decision but to find out early which
     constraints are hard. INNOQ's page is marked as still in progress and has no case study yet; the fallacies
     of distributed computing cover much of the network side.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+      delivery: +
+    why:
+      reliability: Code designed as if the network were free and reliable fails under real latency, partitions and
+        hardware limits.
+      change_cost: Environment constraints found late (residency, deletion, target hardware) force expensive rework
+        of designs already built on.
+      runtime: Chatty service calls and unmeasured platform layers add latency the design never accounted for.
+      operability: No deployment config or real-target test until late means the first real deploy is where the
+        surprises surface.
+      delivery: Ignoring the target environment lets the team launch now and fix the rest later.
+    flips: A throwaway prototype or an internal tool on a well-understood standard platform can reasonably ignore
+      most of this.
   in: {}
   related:
     - fallacies-of-distributed-computing
@@ -1334,6 +1515,21 @@
     spreadsheet. There the configurability is the product. The test is whether the variation is real and
     already observed, and whether configuring a new case is genuinely cheaper than coding it. Generic designs
     often don't remove change but move it across boundaries, which can multiply the work.
+  axes:
+    signs:
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+      delivery: "-"
+    why:
+      change_cost: Each new case still needs changes in every layer plus metadata, so change is moved across
+        boundaries and multiplied instead of removed.
+      runtime: Behaviour interpreted from rule tables and configuration at runtime is slower than direct code.
+      operability: Hundreds of mostly undocumented options and toggles make it hard to know how a running system is
+        configured or why it behaves as it does.
+      delivery: Building for a whole class of problems takes longer and serves the case in front of you badly.
+    flips: Where the domain really is generic (a CMS, a tariff rules engine) and the variation is already
+      observed, the configurability is the product.
   in: {}
   related:
     - over-engineering
@@ -1417,6 +1613,19 @@
     them isn't over-engineering. Some decisions are expensive to reverse, so a bit of foresight on those is
     cheap insurance. The judgement is about requirements you have or can see coming, not ones you imagine.
     Sometimes the real fix is a business process change, not software at all.
+  axes:
+    signs:
+      change_cost: "-"
+      operability: "-"
+      delivery: "-"
+    why:
+      change_cost: Simple features are spread over many files and framework boilerplate, so each change touches more
+        than it should.
+      operability: Brokers, orchestrators and caches the load doesn't need are extra moving parts to deploy, monitor
+        and debug.
+      delivery: Infrastructure absorbs the effort, so business logic arrives late.
+    flips: Genuinely demanding requirements (regulated data, high availability, real scale), or decisions that are
+      expensive to reverse, justify the extra structure.
   in: {}
   related:
     - yagni
@@ -1476,6 +1685,21 @@
     different teams own them. Fine-grained functions can be cheap and simple for spiky, independent workloads.
     The test is whether the boundaries match how the system actually changes. A related code-scale form,
     splitting classes until each does almost nothing, overlaps the shallow module smell.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+      delivery: "-"
+    why:
+      reliability: Long synchronous chains and a central orchestrator mean one failing module fails the whole request.
+      change_cost: Modules that always change together force every change across several boundaries and contracts.
+      runtime: Calls that could be in-process cross the network in long synchronous chains.
+      operability: Many tiny deployables are more to deploy, version, monitor and trace through.
+      delivery: Even a small feature needs coordinated changes and releases in several services or packages.
+    flips: Separate deployables are right when parts genuinely need to scale, release or fail independently, or
+      are owned by different teams.
   in: {}
   related:
     - under-modularization
@@ -1530,6 +1754,14 @@
     and the cost of boundaries is pure overhead. A monolith with good internal boundaries is not
     under-modularized. Splitting only pays when there's a reason to, and a boundary drawn in the wrong place
     is worse than none.
+  axes:
+    signs:
+      change_cost: "-"
+    why:
+      change_cost: Without boundaries anything depends on anything, so modules are too big to understand and a
+        change in one area breaks another.
+    flips: A single module is the right start for a small or new system whose seams aren't known yet; boundaries
+      there are pure overhead.
   in: {}
   related:
     - over-modularization
@@ -1585,6 +1817,20 @@
     ownership. One database instance with separate schemas per service, or a read-only reporting replica, is
     fine. A modular monolith sharing a database is not this problem. Database per service brings its own
     costs: eventual consistency, sagas and harder reporting.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      operability: +
+      delivery: +
+    why:
+      reliability: One service's long transaction or lock blocks another, and rules about valid states duplicated
+        across services let one write data another considers invalid.
+      change_cost: A schema change in one service breaks others, so migrations need coordinated releases.
+      operability: One database is simpler to run, back up and pay for than one per service.
+      delivery: A cross-service query is one SQL statement away, with no waiting on another team's API.
+    flips: As a deliberate choice (one instance with a private schema per service, a read-only reporting replica,
+      or a modular monolith) it buys local ACID transactions and simpler operation and is fine.
   in: {}
   related:
     - distributed-monolith
@@ -1674,6 +1920,18 @@
     best anyone could do at the time. A throwaway prototype, a spike or a short-lived script can be mud with
     no harm done. The trouble starts when the mess gets so opaque it can no longer adapt. Rewriting from
     scratch carries the second-system risk."
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Anything reaches anything, so no change has a predictable scope and nobody can say where code belongs.
+      reliability: The same rule implemented slightly differently in several places, plus shared mutable data
+        written from everywhere, gives inconsistent behaviour.
+      delivery: Expedient fixes ship fastest, which is why mud persists.
+    flips: A spike, throwaway prototype or short-lived script can be mud with no harm, and an early version of a
+      poorly understood problem may be the best possible.
   in: {}
   related:
     - under-modularization
@@ -1742,6 +2000,19 @@
     others advise starting there and splitting only when independent deployment is needed. Some coordinated
     releases are normal during a migration or a breaking API change. The anti-pattern is when lockstep
     deployment and shared failure are the steady state.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+      delivery: "-"
+    why:
+      reliability: Services fail together; one slow or down service in a synchronous chain fails the whole request.
+      change_cost: Shared models must be upgraded in lockstep across services, so every change spans repos.
+      runtime: Calls that would be in-process in a monolith become network hops.
+      operability: Releases need services deployed in a fixed order, and testing any one needs all of them running.
+      delivery: A feature routinely needs pull requests in several repos and deploys in a fixed order.
   in: {}
   related:
     - over-modularization
@@ -1811,6 +2082,15 @@
     awkward. Khorikov argues for mocking only unmanaged out-of-process dependencies, whose calls are
     observable from outside. Both schools agree a test that only replays the implementation's calls back to it
     proves nothing.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: Tests check only that the code calls its mocks as written, so real defects pass the suite.
+      change_cost: Tests pinned to implementation calls break on every refactor even when behaviour is unchanged.
+      delivery: Mocking whatever gets in the way is the quickest route to a passing test and a coverage target.
   in:
     python: >
       Watch for patch decorators or context managers stacked on every import of the module under test, and
@@ -1896,6 +2176,17 @@
     and meant as one, and many frameworks let you assert "does not raise" explicitly. Fuzz tests often have no
     assertion beyond not crashing, and that's the point. Benchmarks and type-level tests may also have no
     runtime assertion.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      delivery: +
+    why:
+      reliability: A test that can't fail lets regressions through while reporting green.
+      change_cost: The suite looks like a safety net but isn't, so changes are riskier than coverage suggests.
+      delivery: Running the code without working out the expected answer is quick and still counts toward coverage.
+    flips: A deliberate smoke test, fuzz test, benchmark or type-level test, named as such, has no assertion by
+      design.
   in: {}
   related:
     - mock-everything
@@ -1971,6 +2262,18 @@
     cohesion through modules and types instead; that is not this anti-pattern when the rules for one concept
     live in one place. Plain data is also right at boundaries (DTOs, events, read models in CQRS). The problem
     is specifically rules about one concept scattered across services while the classes pretend to be a model.
+  axes:
+    signs:
+      change_cost: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      change_cost: Rules about one concept are scattered across services and validation is copied, so a rule change
+        means finding every copy.
+      reliability: Public setters let any service put an entity into an invalid state, and copied validations drift apart.
+      delivery: Scaffolded data classes with logic in services is the path frameworks and tutorials already lay out.
+    flips: For CRUD and generic subdomains a transaction script over plain records is the right choice, and
+      functional styles separate data and functions on purpose when one concept's rules live in one place.
   in:
     java: Common in Spring with JPA entities generated with Lombok getters and setters and logic in @Service
       classes. Where there is no service layer and the rules sit in controllers, the problem is
@@ -2085,6 +2388,15 @@
     and querying from handlers is fine at that size. The smell is business rules that will be needed
     elsewhere, or handlers too long to read, not the mere presence of a database call. Moving logic into the
     model can also overshoot into fat models; the aim is logic with a home that isn't tied to HTTP.
+  axes:
+    signs:
+      change_cost: "-"
+      delivery: +
+    why:
+      change_cost: Business rules tied to HTTP can only be tested through a test client and get copied to reuse them
+        from a CLI or job.
+      delivery: The handler is the fastest place to add one more check under a deadline.
+    flips: For CRUD endpoints and small apps, a handler that reads, writes and returns is the simplest correct code.
   in:
     python: >
       In FastAPI, path operation functions that use the session directly are the template style; move rules
@@ -2187,6 +2499,16 @@
     it worth it. A generic base under specific repository interfaces is also reasonable, since it only shares
     implementation. The anti-pattern is the generic interface used as the whole abstraction, over an ORM that
     already is a repository and unit of work.
+  axes:
+    signs:
+      change_cost: "-"
+      runtime: "-"
+    why:
+      change_cost: A layer that adds no meaning must still be maintained, and each new query shape means another
+        method on the base or a leaky query builder.
+      runtime: Callers fetch everything with get_all and filter in memory instead of in the query.
+    flips: Contested. Paired with specifications, or as a shared base under specific repository interfaces, teams
+      that value keeping the ORM out of the domain find it worth it.
   in:
     csharp: >
       The main battleground. DbSet is already a repository and DbContext a unit of work; Microsoft's guidance
@@ -2287,6 +2609,19 @@
     languages are legitimate when the users are domain experts and the language is kept small. The
     anti-pattern is drifting into a general-purpose platform by accident, without the tooling (debugging,
     versioning, tests) the real platform already has.
+  axes:
+    signs:
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+    why:
+      change_cost: Logic moved into rows, JSON and homemade languages loses the host language's types, tests,
+        versioning and refactoring tools.
+      runtime: Entity-attribute-value tables and rules interpreted at runtime are much slower than the platform they
+        imitate.
+      operability: Behaviour stored as data has no debugger or history, so production problems are hard to trace.
+    flips: Products whose value is configurability (CRMs with custom objects, low-code tools, form builders),
+      designed and tested as such, or a small DSL for domain experts, are platforms on purpose.
   in: {}
   related:
     - over-engineering
@@ -2388,6 +2723,13 @@
     assumption should be written down. Unguessable ids lower the risk but OWASP is clear they are a second
     layer, not the check. The fix is a design choice about where the rule lives, not a check pasted into each
     handler.
+  axes:
+    signs:
+      security: "-"
+    why:
+      security: Any logged-in user can read or change another user's records by changing an id in the request.
+    flips: An internal tool with a single role behind a trusted network may reasonably skip per-object checks, if
+      the trust assumption is written down.
   in:
     python: >
       Django: get_object_or_404(Invoice, pk=pk, owner=request.user), or override get_queryset in DRF views so
@@ -2507,6 +2849,18 @@
     fine when clearly fake. Default credentials for a local throwaway database in a docker-compose file meant
     only for development are common and acceptable if the same values can never reach production. The real
     line is whether the value grants access to something that matters.
+  axes:
+    signs:
+      security: "-"
+      operability: "-"
+      delivery: +
+    why:
+      security: Anyone with the repository, image, bundle or git history can read and use the credential.
+      operability: Rotating a leaked or expiring secret needs a code change and redeploy, and environments can't get
+        different values.
+      delivery: An inline key makes the example and local setup work immediately, without setting up a secret manager.
+    flips: Publishable keys, clearly fake test fixtures and throwaway local dev database credentials that can
+      never reach production are fine in code.
   in:
     typescript: >
       Anything in a NEXT_PUBLIC_ or VITE_ variable is inlined into the client bundle and is public.
@@ -2625,6 +2979,18 @@
     migrations that never see outside input can format SQL freely, though habits travel. Query builders and
     ORMs are not a guarantee either: OWASP notes ORM search parameters and parameterized stored procedures
     that build dynamic SQL inside are both injectable.
+  axes:
+    signs:
+      security: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      security: Crafted input runs as SQL, shell or template code with the program's privileges.
+      reliability: Honest input with quotes or special characters, like the name O'Brien, breaks the query or command.
+      delivery: Pasting values into a string is the most direct way to write a dynamic query, and it works on every
+        test input.
+    flips: Admin-only scripts and migrations that never see outside input can format SQL safely, though the habit
+      travels.
   in:
     python: >
       DB-API placeholders (%s or ? depending on driver) passed as the second argument to execute; an f-string
@@ -2753,6 +3119,15 @@
     fields are the DTO, so spreading them into the model is safe; the flaw is binding to the type that also
     holds server-owned fields. Allow-lists still need maintaining; OWASP and CWE-915 both prefer them, but a
     stale allow-list fails the other way, silently dropping a new field.
+  axes:
+    signs:
+      security: "-"
+      delivery: +
+    why:
+      security: A client sets server-owned fields such as role, owner or price by adding them to the request.
+      delivery: One class for request, row and response is less code, and the framework binds it for free.
+    flips: In an internal admin tool where the only role that reaches the endpoint may edit every field, binding
+      the model is fine and simpler.
   in:
     python: >
       FastAPI with separate Pydantic models for create, update and read (and model_config extra="forbid")
@@ -2875,6 +3250,15 @@
     what, and must keep the user's identity; the rule is about secrets and data beyond what the purpose needs,
     not about never logging a user. Under GDPR and similar laws, what counts as sensitive depends on the data
     and the jurisdiction, so the exclusion list is a team decision rather than a fixed rule.
+  axes:
+    signs:
+      security: "-"
+      delivery: +
+    why:
+      security: Secrets and personal data copied into logs reach every person, vendor and backup that can read logs,
+        for far longer than intended.
+      delivery: Logging the whole request or object is the quickest way to see what went wrong.
+    flips: Verbose logs on a developer's own machine during local development are fine.
   in:
     python: >
       Logging request.headers or a Pydantic model logs everything; Pydantic's SecretStr prints as asterisks.
@@ -2983,6 +3367,14 @@
     already public. OWASP itself frames it as a trade-off with usability that depends on how critical the
     system is. Rate limiting and alerting cover much of the risk. It matters most where knowing someone has an
     account is itself sensitive (health, dating, finance) or feeds credential stuffing.
+  axes:
+    signs:
+      security: "-"
+    why:
+      security: Anyone can learn which emails have accounts, which feeds credential stuffing and leaks membership of
+        sensitive services.
+    flips: Contested. Where an account's existence is public or low-value, telling users is a fair trade for
+      clearer messages and lower support load, relying on rate limits.
   in:
     python: >
       Django's ModelBackend runs the password hasher once when the user doesn't exist to blunt timing
@@ -3083,6 +3475,16 @@
     A CLI or library has nothing to limit. For a small app, a platform-level limit (the CDN, the load
     balancer, the hosting provider) may be all that's needed, and per-endpoint tuning is premature until abuse
     shows up; authentication endpoints and paid side effects are the exceptions worth doing from day one.
+  axes:
+    signs:
+      security: "-"
+      reliability: "-"
+    why:
+      security: Attackers can guess codes, stuff credentials, scrape data or run up paid-API bills without limit.
+      reliability: One client, honest or not, with huge pages, bodies or request rates can exhaust the service for
+        everyone.
+    flips: Internal services behind a gateway that already limits, CLIs and libraries, and small apps covered by a
+      platform-level limit don't need their own.
   in:
     python: >
       No built-in in FastAPI or Django; slowapi and django-ratelimit are the common choices, with limits per
@@ -3192,6 +3594,14 @@
     CLI, a desktop app) fetching a URL the same user typed have no privilege boundary to cross. OWASP notes
     SSRF can't always be removed entirely where users must supply arbitrary URLs, so the defence is layered
     and network-level isolation does most of the work.
+  axes:
+    signs:
+      security: "-"
+      delivery: +
+    why:
+      security: A client can make the server reach internal services or the cloud metadata endpoint and read what
+        comes back.
+      delivery: Fetching the supplied URL is one line; resolving, filtering and isolating egress is real work.
   in:
     python: >
       requests follows redirects by default, httpx does not (follow_redirects=False). The ipaddress module's
@@ -3310,6 +3720,15 @@
     in-memory copy, a message between two parts of the same deployment that an attacker can't write. Signed
     and integrity-checked blobs are acceptable even across boundaries. The risk lives in who can write the
     bytes, not in the library itself.
+  axes:
+    signs:
+      security: "-"
+      delivery: +
+    why:
+      security: Crafted bytes can run code or build objects the program never meant to create when they are decoded.
+      delivery: Native serialization round-trips any object in one call with no schema to write.
+    flips: For data that never crosses a trust boundary, such as a process's own cache, native serialization is
+      fine.
   in:
     python: >
       pickle, shelve, joblib and dill execute code on load. PyYAML's safe_load is safe, load needs an explicit
@@ -3430,6 +3849,19 @@
     their own user, so client checks are enough there. Peer-to-peer and latency-sensitive games trade some
     server authority for responsiveness on purpose and detect cheating after the fact. The rule is about data
     that crosses to a system someone else relies on.
+  axes:
+    signs:
+      security: "-"
+      reliability: "-"
+      delivery: +
+    why:
+      security: Anyone who sends the request without the client can set prices, roles or limits the UI was meant to
+        enforce.
+      reliability: Bad input from older or buggy clients, integrations or scripts reaches storage because only the
+        UI checked it.
+      delivery: The check is written once, in the UI, where it already gives feedback and seems to work.
+    flips: Single-player games, offline tools and apps with no shared server state have nothing to protect from
+      their own user; latency-sensitive games trade server authority for responsiveness on purpose.
   in:
     typescript: >
       Next.js server actions and API routes are public HTTP endpoints, so the zod schema or role check must
@@ -3529,6 +3961,18 @@
     when it is narrow and visible in the code. A tool that must never block its host may catch broadly at the
     outermost boundary on purpose; that's a fail-open decision, not swallowing, as long as the error is still
     reported somewhere.
+  axes:
+    signs:
+      reliability: "-"
+      operability: "-"
+      delivery: +
+    why:
+      reliability: Failures carry on silently and turn up later as wrong data, far from their cause.
+      operability: Nothing is logged at the moment it went wrong, so incidents are investigated backwards from symptoms.
+      delivery: Catching an error where it surfaces is the quickest way to make it go away.
+    flips: Ignoring a narrow, expected error (a best-effort cache write, telemetry, a temp file already gone) is
+      right when it is visible in the code, as is a fail-open outer boundary in a tool that must never block
+      its host, provided the error is still reported.
   in:
     python: >
       Bare except also catches KeyboardInterrupt and SystemExit. Catch Exception at most, and prefer the
@@ -3646,6 +4090,18 @@
     interpreters use an exception on purpose to unwind a deep recursion, and that's a fair trade when it is
     local and documented. What counts as "exceptional" is a judgment call, which is why practitioners disagree
     on the line.
+  axes:
+    signs:
+      change_cost: "-"
+      runtime: "-"
+      delivery: +
+    why:
+      change_cost: Ordinary logic jumps invisibly across frames, so following a branch means finding where it is caught.
+      runtime: Building exceptions and capturing stack traces on a common path is costly in languages like Java and
+        C#.
+      delivery: Throwing is a handy way out of deep nesting without threading a return value through each call.
+    flips: In Python, EAFP and StopIteration make it idiomatic and cheap; a parser unwinding a deep recursion with
+      one local, documented exception is a fair trade.
   in:
     python: >
       EAFP (try first, handle the error) is the documented house style, and exceptions are comparatively
@@ -3759,6 +4215,20 @@
     Changing the shape of an existing API's errors is itself a breaking change for clients that parse them, so
     on a public API the fix may need a new version rather than an in-place cleanup. For a small internal API
     with one client, a lighter convention is enough.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      operability: "-"
+      delivery: +
+    why:
+      reliability: Clients misread failures, such as treating a 200 with an error body as success.
+      change_cost: Every client needs per-endpoint error parsing, and each new endpoint invents another shape.
+      operability: Status codes and error shapes mean different things per endpoint, so error-rate monitoring and
+        alerts miss failures reported differently.
+      delivery: Each endpoint builds its own error response under deadline without waiting for a shared handler.
+    flips: For a small internal API with one client a lighter convention is enough, and an API wrapping several
+      upstreams may have to pass their errors through as they come.
   in:
     python: >
       FastAPI's default validation error (422 with a "detail" list) differs from HTTPException's shape;
@@ -3868,6 +4338,18 @@
     A CLI that exits in milliseconds can let the OS reclaim handles, and that's fine. Some resources are meant
     to live as long as the process (a connection pool, a logger), and not closing them is the design.
     Finalizers and destructors are not a fix: they run late or never, and Java has deprecated finalize.
+  axes:
+    signs:
+      reliability: "-"
+      runtime: "-"
+      delivery: +
+    why:
+      reliability: The process slowly runs out of connections, handles or threads and then fails requests that did
+        nothing wrong.
+      runtime: Leaked memory, goroutines and threads grow steadily and degrade the process over time.
+      delivery: Writing the happy path and starting a task in one line is faster than designing cleanup and lifetime.
+    flips: A CLI that exits in milliseconds can leave cleanup to the OS, and process-lifetime resources like pools
+      are meant never to close.
   in:
     go: >
       defer x.Close() right after the error check. Always close http.Response.Body, even when you don't read
@@ -3982,6 +4464,21 @@
     I/O. In a small script, a module-level client is honest and simple. Framework conventions (a module-level
     FastAPI or Flask app) are fine as long as configuration and connections happen at startup hooks rather
     than at import.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+      runtime: "-"
+      operability: "-"
+      delivery: +
+    why:
+      reliability: An unrelated dependency being down breaks import, so even --help or an unrelated command fails.
+      change_cost: Tests need environment variables or network just to import a module, and import order starts to matter.
+      runtime: Work runs on every import whether used or not, slowing CLI startup and serverless cold starts.
+      operability: Configuration read before flags are parsed can't be overridden at launch.
+      delivery: One module-level client, ready wherever it is imported, is the shortest path.
+    flips: In a small script a module-level client is honest and simple; pure initialisation and registration-only
+      imports with no I/O are fine.
   in:
     go: >
       init functions run in dependency order before main and can't return errors, so they panic or log.Fatal
@@ -4112,6 +4609,13 @@
     2023 and some terminals remain exposed, so the risk is mostly deception (hidden or faked lines, misleading
     prompts) and clipboard writes, with echo-back as a tail risk. Deception is serious for tools that show
     content before a user approves an action.
+  axes:
+    signs:
+      security: "-"
+    why:
+      security: Untrusted text can hide or fake terminal output, retitle the window or write the clipboard,
+        deceiving the user before they approve an action.
+    flips: Tools whose job is reproducing bytes exactly (cat, raw modes) should pass input through.
   in:
     python: >
       print and logging pass control characters through; repr() or a str.translate table over the C0 and C1
@@ -4217,6 +4721,15 @@
     the same object. Some argue patching should be rare anyway (Freeman and Pryce's "only mock types you own";
     the classical school's preference for real objects and fakes), which makes the rule moot. For integration
     tests that should hit the real thing, the absence of a patch is the point.
+  axes:
+    signs:
+      reliability: "-"
+      change_cost: "-"
+    why:
+      reliability: The case the mock was meant to simulate is never exercised while the real dependency runs, so
+        bugs on that path ship behind a passing test.
+      change_cost: Tests silently depend on import style and real services, so they turn flaky or start making real
+        calls when unrelated imports change.
   in:
     python: >
       The canonical case. With "from a import X" in module b, patch b.X; with "import a" and a.X used at call
@@ -4341,6 +4854,18 @@
     controls security or money. Frameworks' own DEBUG flags are hard to avoid and are acceptable if production
     config is checked at startup. Twelve-Factor's dev/prod parity argues for fewer environment differences
     overall, which reduces the need for flags of any kind.
+  axes:
+    signs:
+      security: "-"
+      operability: "-"
+      delivery: +
+    why:
+      security: One leaked or mis-set flag turns on skipped auth, open CORS and verbose errors together.
+      operability: Staging can't get one convenience, such as verbose errors, without inheriting every risky
+        shortcut, and nobody can list what the flag controls.
+      delivery: Reusing the existing "am I local?" check for each new shortcut is quickest.
+    flips: For a small app, one development flag that only affects developer convenience (auto reload, a debug
+      toolbar, pretty logs) is fine and simpler than many settings.
   in:
     python: >
       Django's DEBUG controls detailed error pages, query logging and the ALLOWED_HOSTS fallback; adding
