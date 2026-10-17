@@ -21,7 +21,7 @@ The steps ask the developer to decide several things, and the developer is there
 
 - **Checkable**: a break is visible in one file's path or text. "Never edit `src/client/`", "services never raise `HTTPException`", "no `print(` in the backend".
 - **Guidance**: true and useful, but not visible as a pattern. "Keep services small", "test RBAC both ways".
-- **Not about code**: commands, deployment, process. Skip these.
+- **Not about code**: commands, deployment, process. No rule for these.
 
 Two kinds need splitting:
 
@@ -162,14 +162,26 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 ## 4. Finish
 
-Run `rulecast validate` and `rulecast test --format json` a last time; `validate` must be clean and the document must say `passed: true`. Bare `rulecast test` does not run `llm` rules, because each example costs money, and gives them `status: not-run`: run `rulecast test <id> --format json` for each of those. Then summarise:
+Run `rulecast validate` and `rulecast test --format json` a last time; `validate` must be clean and the document must say `passed: true`. Bare `rulecast test` does not run `llm` rules, because each example costs money, and gives them `status: not-run`: run `rulecast test <id> --format json` for each of those.
+
+Every convention you read ends in one of four places: a rule that checks it, a touch rule that delivers it, not about code, or skipped. For each one that no rule checks or delivers, propose a line under it in the doc that states it, in this form:
+
+```markdown
+Not checked by rulecast: <the reason, in a few words>.
+```
+
+For example, `Not checked by rulecast: about how to work, not about the code.` or `Not checked by rulecast: needs the whole repository, not one file.` It stays next to the convention, so a later session sees it was considered and why it has no rule, and does not ask again. Show the lines with the rest of the diff; the developer keeps or removes them. A convention the developer turned down belongs in `docs/conventions/declined.md` instead ([CONVENTIONS.md](CONVENTIONS.md)), not here.
+
+Then summarise:
+
+- how many conventions ended up in each of the four places, so a session with few rules is not read as one where every convention is checked;
 
 - the rules kept: id, one line each, and the `--against` or `--history` counts, with the precision where findings were marked (touch rules have no count);
 - where the doc could be read two ways, and the reading you chose;
 - the rules dropped;
 - the catalog rules you pointed at the project's doc, extended with a local rule, or propose to switch off, and why;
 - the examples you invented;
-- the conventions you skipped, with the reason.
+- the conventions you skipped, with the reason, and the `Not checked by rulecast` lines you proposed.
 
 When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/output.md](reference/output.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong.
 
