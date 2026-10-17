@@ -18,6 +18,26 @@ const finding = (overrides: Partial<Finding>): Finding => ({
 })
 
 describe("renderAgentText", () => {
+  test("a finding whose message does not name its file is prefixed with where it is", () => {
+    // A rule author who leaves {{file}} out of the message must not leave the agent guessing which
+    // of the files it changed broke the rule (abide #27).
+    const text = renderAgentText(
+      {
+        ...emptyDelivery(),
+        findings: [
+          finding({ rule: "py/thin", file: "app/a.py", line: 4, message: "does work that belongs in a service" }),
+          finding({ rule: "py/thin", file: "app/b.py", line: 7, message: "does work that belongs in a service" }),
+          finding({ rule: "py/named", file: "app/a.py", line: 2, message: "line 2 is too long" }),
+        ],
+        templates: { "py/thin": "does work that belongs in a service", "py/named": "line {{line}} is too long" },
+      },
+      { maxMatchesPerRule: 10 },
+    )
+    expect(text).toContain("  app/a.py:4 does work that belongs in a service")
+    expect(text).toContain("  app/b.py:7 does work that belongs in a service")
+    expect(text).toContain("  app/a.py line 2 is too long")
+  })
+
   test("an empty delivery renders nothing", () => {
     expect(renderAgentText(emptyDelivery(), { maxMatchesPerRule: 10 })).toBe("")
   })
@@ -51,7 +71,7 @@ describe("renderAgentText", () => {
         "  Use a query hook. (×2)",
         "",
         "warning style/x",
-        "  consider x",
+        "  src/Card.tsx:9 consider x",
         "",
         "backlog in files you touched (not from your edit; leave it unless asked):",
         "  backend/y ×4 in src/Card.tsx",
@@ -78,7 +98,14 @@ describe("renderAgentText", () => {
     )
     const text = renderAgentText({ ...emptyDelivery(), findings }, { maxMatchesPerRule: 2 })
     expect(text).toBe(
-      ["rulecast: 1 rule violated", "", "error api/no-client", "  m1", "  m2", "  …and 2 more in 1 file"].join("\n"),
+      [
+        "rulecast: 1 rule violated",
+        "",
+        "error api/no-client",
+        "  a.ts:1 m1",
+        "  a.ts:2 m2",
+        "  …and 2 more in 1 file",
+      ].join("\n"),
     )
   })
 

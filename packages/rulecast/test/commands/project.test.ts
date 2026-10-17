@@ -12,6 +12,12 @@ describe("project paths", () => {
     expect(findRoot(bare)).toBe(bare)
   })
 
+  test("a config in the home directory is not every repository's below it (abide #38)", async () => {
+    const home = await createProject({ ".rulecast-config.yaml": "repos: []\n", "code/repo/x.py": "" })
+    expect(findRoot(path.join(home, "code/repo"), home)).toBe(path.join(home, "code/repo"))
+    expect(findRoot(home, home)).toBe(home)
+  })
+
   test("hasProject is true only where .rulecast-config.yaml exists", async () => {
     expect(hasProject(await createProject({ ".rulecast-config.yaml": "repos: []\n" }))).toBe(true)
     expect(hasProject(await createProject({ ".rulecast/config.yml": "" }))).toBe(false)

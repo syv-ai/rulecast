@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -109,13 +109,23 @@ function parseFlags(args: string[]): Flags {
   }
 }
 
-/** The configured project, else the enclosing git repository, else the current directory. */
+/**
+ * The configured project, else the enclosing git repository, else the current directory. A config
+ * above the repository (a workspace folder's) is not this repository's: init creates its own.
+ */
 async function projectRoot(cwd: string): Promise<string> {
   const found = findRoot(cwd)
-  if (hasProject(found)) return found
   // Through core/git.ts: a GIT_DIR inherited from a git hook would otherwise name another repository.
-  const top = await git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => null)
-  return top?.ok ? top.stdout.trim() : cwd
+  const result = await git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => null)
+  const top = result?.ok ? result.stdout.trim() : null
+  if (hasProject(found) && (top === null || !isAbove(found, top))) return found
+  return top ?? cwd
+}
+
+/** Whether `dir` is a strict ancestor of `of`, by real path: git prints /private/tmp for /tmp. */
+function isAbove(dir: string, of: string): boolean {
+  const relative = path.relative(realpathSync(dir), realpathSync(of))
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
 }
 
 async function readConfig(root: string): Promise<{ text: string | null; config: Config | null }> {

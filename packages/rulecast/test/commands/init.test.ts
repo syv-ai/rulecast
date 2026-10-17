@@ -9,8 +9,9 @@ import type { Env } from "../../src/core/home"
 import { VERSION } from "../../src/core/version"
 import { createCatalogRepo } from "../helpers/catalog"
 import { runCli } from "../helpers/cli"
-import { createRepo } from "../helpers/git"
+import { createRepo, git } from "../helpers/git"
 import { testEnv } from "../helpers/home"
+import { createProject } from "../helpers/project"
 import { ACCEPT, CANCEL, scriptedPrompter } from "../helpers/prompter"
 
 let catalog: string
@@ -64,6 +65,24 @@ describe("rulecast init --yes", () => {
     expect(result.stdout).toContain(PROMPT)
     expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")
     expect(result.copied).toEqual([])
+  })
+
+  test("a config above the repository is not taken for this project's", async () => {
+    // A stray .rulecast-config.yaml in a parent directory (the home directory, a workspace folder)
+    // used to make init edit that file instead of creating the repository's own.
+    const outer = await createProject({ ".rulecast-config.yaml": "repos: []\n" })
+    const root = path.join(outer, "repo")
+    await mkdir(root)
+    for (const [file, text] of Object.entries(PROJECT)) {
+      await mkdir(path.dirname(path.join(root, file)), { recursive: true })
+      await writeFile(path.join(root, file), text)
+    }
+    await git(root, "init", "-q")
+    const result = await runCli(root, ["init", "--yes"], "", env)
+    expect(result.stderr).toBe("")
+    expect(result.code).toBe(0)
+    expect(existsSync(path.join(root, CONFIG_FILE))).toBe(true)
+    expect(await read(outer, CONFIG_FILE)).toBe("repos: []\n")
   })
 
   test("says so when nothing in the catalog applies, rather than only 'no rules yet'", async () => {

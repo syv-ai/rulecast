@@ -94,8 +94,16 @@ function header(delivery: Delivery): string | null {
 
 const repeatOf = (finding: Finding) => (finding.count > 1 ? ` (×${finding.count})` : "")
 
-function findingLines(finding: Finding): string[] {
+/**
+ * A finding's message, prefixed with where it is when the rule's message does not say: a rule author
+ * who leaves {{file}} out must not leave the agent guessing which file broke the rule.
+ */
+function findingLines(finding: Finding, template: string | undefined): string[] {
+  const variables = template === undefined ? null : templateVariables(template)
+  const named = variables === null ? finding.message.includes(finding.file) : variables.includes("file")
+  const where = named ? "" : `${locationOf(finding, !(variables?.includes("line") ?? false))} `
   const lines = finding.message.split("\n").map((line) => `  ${line}`)
+  lines[0] = `  ${where}${lines[0]!.slice(2)}`
   lines[lines.length - 1] += repeatOf(finding)
   return lines
 }
@@ -181,7 +189,7 @@ function ruleBlock(
   const files = new Set(findings.map((finding) => finding.file)).size + dropped.files
   const out = [grouped ? `${severity} ${rule} — ${total} in ${plural(files, "file")}` : `${severity} ${rule}`]
   if (grouped && template !== undefined) out.push(...groupedLines(shown, template))
-  else for (const finding of shown) out.push(...findingLines(finding))
+  else for (const finding of shown) out.push(...findingLines(finding, template))
 
   const more = hidden.length + dropped.count
   if (more > 0) {

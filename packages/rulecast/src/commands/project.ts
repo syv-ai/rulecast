@@ -1,13 +1,19 @@
 import { existsSync } from "node:fs"
+import { homedir } from "node:os"
 import path from "node:path"
 
 import { CONFIG_FILE } from "../core/config/load"
 
-/** Nearest ancestor of cwd containing .rulecast-config.yaml, or cwd itself. */
-export function findRoot(cwd: string): string {
-  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
-    if (existsSync(path.join(dir, CONFIG_FILE))) return dir
-    if (path.dirname(dir) === dir) return path.resolve(cwd)
+/**
+ * Nearest ancestor of cwd containing .rulecast-config.yaml, or cwd itself. A config in the home
+ * directory counts only from the home directory: below it, every repository without its own config
+ * would otherwise become part of one project rooted at `~`.
+ */
+export function findRoot(cwd: string, home: string = homedir()): string {
+  const start = path.resolve(cwd)
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, CONFIG_FILE)) && (dir !== path.resolve(home) || dir === start)) return dir
+    if (path.dirname(dir) === dir) return start
   }
 }
 
