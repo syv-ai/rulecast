@@ -103,4 +103,14 @@ describe("pipeline: the llm file budget", () => {
     expect(await stubArgv(root, "claude")).toEqual([])
     expect(result.delivery.warnings).toEqual([])
   })
+
+  test("a binary file is never sent to the model", async () => {
+    // A broad `files` pattern catches images and archives too; read as UTF-8 they are noise the
+    // provider is paid for, or rejects outright (abide #22).
+    const { root, send } = await scenario()
+    await writeFile(path.join(root, "app/logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]))
+    await send({ kind: "verify", files: ["app/logo.png", "app/a.py"] })
+    const asked = (await stubStdin(root, "claude")).map((prompt) => /## File: (\S+)/.exec(prompt)![1])
+    expect(asked).toEqual(["app/a.py"])
+  })
 })

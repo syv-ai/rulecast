@@ -19,8 +19,12 @@ function isAlreadyExists(error: unknown): boolean {
 
 /** mkdir is atomic, so the lock is a directory. Held only while `fn` runs. */
 export async function withLock<T>(dir: string, fn: () => Promise<T>, options: LockOptions = DEFAULTS): Promise<T> {
-  const lock = path.join(dir, ".lock")
   await mkdir(dir, { recursive: true })
+  return withLockAt(path.join(dir, ".lock"), fn, options)
+}
+
+/** `withLock` with the lock directory named outright; its parent must exist. */
+export async function withLockAt<T>(lock: string, fn: () => Promise<T>, options: LockOptions = DEFAULTS): Promise<T> {
   const started = Date.now()
   for (;;) {
     try {
@@ -40,7 +44,7 @@ export async function withLock<T>(dir: string, fn: () => Promise<T>, options: Lo
       continue
     }
     if (Date.now() - started > options.waitMs)
-      throw new LockTimeoutError(`could not lock ${dir} within ${options.waitMs} ms`)
+      throw new LockTimeoutError(`could not lock ${lock} within ${options.waitMs} ms`)
     await new Promise((resolve) => setTimeout(resolve, options.retryMs))
   }
   try {

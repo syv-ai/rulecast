@@ -65,4 +65,27 @@ describe("regex detector", () => {
       },
     ])
   })
+
+  test("a binary file has no matches", async () => {
+    const cwd = await createProject({ "assets/blob.bin": "TODO\u0000\u0001TODO" })
+    const result = await regexDetector.run({
+      event: "verify",
+      rules: [
+        {
+          id: "todo",
+          config: regexDetector.schema.parse({ pattern: "TODO" }),
+          files: ["assets/blob.bin"],
+          context: [],
+        },
+      ],
+      changes: new Map(),
+      read: fromDisk(cwd),
+      cache: memoryCache(),
+      settings: defaultDetectorSettings(),
+      cwd,
+      signal: new AbortController().signal,
+      deadlineAt: Date.now() + 60_000,
+    })
+    expect(result.findings).toEqual([])
+  })
 })

@@ -40,6 +40,15 @@ export function perRule<Config>(
   }
 }
 
+/**
+ * Whether text read as UTF-8 is a binary file: a NUL in its first 8 KiB, git's own test. Detectors
+ * that judge text skip these; a `files` pattern broad enough to catch an image is not a request to
+ * read one.
+ */
+export function isBinary(text: string): boolean {
+  return text.slice(0, 8192).includes("\0")
+}
+
 /** Reads a repo-relative (or absolute) file; null when it no longer exists. */
 export async function readSourceFile(cwd: string, file: string): Promise<string | null> {
   try {

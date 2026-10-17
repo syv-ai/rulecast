@@ -3,18 +3,32 @@ import { type FileHandle, mkdir, open, readFile, rename, rm, stat } from "node:f
 import path from "node:path"
 
 import { isNotFound } from "./errors"
+import { LockTimeoutError, withLockAt } from "./session/lock"
 
 export class CorruptStoreError extends Error {}
 
-/** Appends records as one write; small O_APPEND writes do not interleave across processes. */
+/**
+ * Appends records under a lock on the file. A small O_APPEND write does not interleave with another
+ * process's, but a large one (a tree state of a very dirty repository runs to megabytes) reaches the
+ * file in several writes, and another writer's record can land in the middle of it. A writer that
+ * cannot get the lock in time appends anyway: a hook must not stall on a stuck lock.
+ */
 export async function appendRecords(file: string, records: readonly unknown[]): Promise<void> {
   if (records.length === 0) return
   await mkdir(path.dirname(file), { recursive: true })
-  const handle = await open(file, "a+")
+  const append = async () => {
+    const handle = await open(file, "a+")
+    try {
+      await writeRecords(handle, records)
+    } finally {
+      await handle.close()
+    }
+  }
   try {
-    await writeRecords(handle, records)
-  } finally {
-    await handle.close()
+    await withLockAt(`${file}.lock`, append)
+  } catch (error) {
+    if (!(error instanceof LockTimeoutError)) throw error
+    await append()
   }
 }
 
@@ -103,24 +117,43 @@ async function writeRecords(handle: FileHandle, records: readonly unknown[]): Pr
 const TAIL_CHUNK = 64 * 1024
 
 /**
+ * How long a partial last line must sit unchanged before it is taken for a crash. A large record
+ * (a tree state of a very dirty repository) reaches the file in several writes, and another
+ * process can look in between: that is a live writer, and cutting its line loses its record.
+ */
+const SETTLED_MS = 2000
+const SETTLE_POLL_MS = 25
+
+/**
  * A crash mid-append leaves a partial last line; appending after it would make it non-final and so a store
- * error. Truncates it away. Two writers healing the same crash at once can lose one of their records.
+ * error. Truncates it away once the file has settled; until then another writer may be mid-record, and
+ * this waits for it. Two writers healing the same crash at once can lose one of their records.
  */
 async function dropPartialRecord(handle: FileHandle): Promise<void> {
-  const { size } = await handle.stat()
+  for (;;) {
+    const { size, mtimeMs } = await handle.stat()
+    const end = await lastRecordEnd(handle, size)
+    if (end === size) return
+    if (Date.now() - mtimeMs >= SETTLED_MS) {
+      await handle.truncate(end)
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
+  }
+}
+
+/** The offset just past the last newline, or 0. */
+async function lastRecordEnd(handle: FileHandle, size: number): Promise<number> {
   let end = size
   while (end > 0) {
     const start = Math.max(0, end - TAIL_CHUNK)
     const chunk = Buffer.alloc(end - start)
     await handle.read(chunk, 0, chunk.length, start)
     const newline = chunk.lastIndexOf(0x0a)
-    if (newline !== -1) {
-      end = start + newline + 1
-      break
-    }
+    if (newline !== -1) return start + newline + 1
     end = start
   }
-  if (end < size) await handle.truncate(end)
+  return 0
 }
 
 export async function readRecords<T>(file: string): Promise<T[]> {

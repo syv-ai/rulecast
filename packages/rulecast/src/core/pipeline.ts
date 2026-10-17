@@ -505,6 +505,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       }
     }
 
+    // One budget for the whole verify: measuring baselines below and the detectors after it share
+    // verify_ms, so a stop ends inside the hook's timeout (verify_ms plus a margin) and is not killed.
+    const verifyEnds = Date.now() + config.timeouts.verifyMs
     // One reader for the baseline diff and the detectors, so they agree on what "the file" is.
     const read = contentReader(root, event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE)
     const stage = await changesFor(
@@ -577,7 +580,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         changes,
         read,
         lines,
-        timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : config.timeouts.verifyMs,
+        timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : Math.max(1, verifyEnds - Date.now()),
       },
       event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
     )

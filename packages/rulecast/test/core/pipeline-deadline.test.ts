@@ -1,3 +1,6 @@
+import { writeFile } from "node:fs/promises"
+import path from "node:path"
+
 import { expect, test } from "vitest"
 import { z } from "zod"
 
@@ -94,4 +97,24 @@ test("a detector's timeout hint is added to its warning, whatever the detector i
 test("the llm detector declares the hint a field trial showed it needs", () => {
   // A real haiku call on a 135-line file measured 89 s against the 60 s default.
   expect(llmDetector.timeoutHint).toBe("an llm rule on a large file can need 120000 or more")
+})
+
+test("a stop's measuring and its detectors share one verify_ms, so the stop ends inside the hook's timeout", async () => {
+  // The hook's timeout is verify_ms plus ten seconds (adapters/claude-code/settings.ts). Measuring a
+  // `scope: removed` rule's baseline used to get a full verify_ms of its own before the detectors got
+  // another, so a slow stop could pass the timeout and be killed without a word.
+  const guarded: Detector<z.infer<typeof schema>> = { ...slowDetector, kind: "guarded", guards: true }
+  const root = await createRepo({
+    ".rulecast-config.yaml": localConfig(
+      [{ id: "keep/a", name: "Keep", files: "^app/", scope: "removed", detect: { guarded: {} }, message: "m" }],
+      { timeouts: { verify_ms: 400 } },
+    ),
+    "app/a.py": "x = 1\n",
+  })
+  const registry = createRegistry([...builtinDetectors, guarded])
+  await writeFile(path.join(root, "app/a.py"), "x = 2\n")
+  await pipelineAt(root, { kind: "edit", files: ["app/a.py"], cwd: root, session: { id: "s1" } }, { registry })
+  const began = Date.now()
+  await pipelineAt(root, { kind: "verify", files: [], cwd: root, session: { id: "s1" } }, { registry, stopGate: true })
+  expect(Date.now() - began).toBeLessThan(700)
 })

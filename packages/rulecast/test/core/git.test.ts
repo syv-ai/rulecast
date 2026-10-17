@@ -9,12 +9,29 @@ import {
   fileAtCommit,
   headCommit,
   mergeBase,
+  git as runGit,
   stagedFiles,
 } from "../../src/core/git"
 import { createRepo, git } from "../helpers/git"
 import { createProject } from "../helpers/project"
 
 describe("git helpers", () => {
+  test("git never takes an optional lock, so a status cannot collide with the agent's own commit", async () => {
+    // `git status` refreshes the index under .git/index.lock when it can; an agent's `git commit`
+    // running at the same moment then fails with "index.lock exists".
+    const root = await createRepo({ "a.txt": "a\n" })
+    const result = await runGit(root, ["-c", "alias.lockenv=!printenv GIT_OPTIONAL_LOCKS", "lockenv"])
+    expect(result).toEqual({ ok: true, stdout: "0\n" })
+  })
+
+  test("a git call past its timeout is a failed result, not a hang", async () => {
+    const root = await createRepo({ "a.txt": "a\n" })
+    const began = Date.now()
+    const result = await runGit(root, ["-c", "alias.nap=!sleep 5", "nap"], undefined, { timeoutMs: 100 })
+    expect(result.ok).toBe(false)
+    expect(Date.now() - began).toBeLessThan(2000)
+  })
+
   test("headCommit is null outside a repository", async () => {
     expect(await headCommit(await createProject({}))).toBeNull()
   })

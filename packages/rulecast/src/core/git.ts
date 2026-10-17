@@ -33,24 +33,45 @@ export function withoutInheritedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
 }
 
 function environment(extra?: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
-  return withoutInheritedGitEnv({ ...process.env, ...extra })
+  // No optional locks: `git status` would otherwise refresh the index under .git/index.lock, and an
+  // agent's own `git commit` running at that moment fails with "index.lock exists".
+  return withoutInheritedGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", ...extra })
 }
 
-/** Runs git; a non-zero exit is a result, not an exception. `env` is added to the process environment. */
-export async function git(cwd: string, args: string[], env?: Readonly<Record<string, string>>): Promise<GitResult> {
-  try {
-    const { stdout } = await exec("git", args, {
-      cwd,
-      maxBuffer: 64 * 1024 * 1024,
-      env: environment(env),
-    })
-    return { ok: true, stdout }
-  } catch (error) {
-    const failure = error as { code?: unknown; stderr?: string }
-    if (isNotFound(error)) throw new Error("git is not installed or not on PATH")
-    if (typeof failure.code === "number") return { ok: false, stderr: failure.stderr ?? "" }
-    throw error
-  }
+/**
+ * Runs git; a non-zero exit is a result, not an exception. `env` is added to the process environment.
+ * Past `timeoutMs` git is killed and the call is a failed result, without waiting for any process git
+ * started to let go of its output.
+ */
+export async function git(
+  cwd: string,
+  args: string[],
+  env?: Readonly<Record<string, string>>,
+  options: { timeoutMs?: number } = {},
+): Promise<GitResult> {
+  const running = exec("git", args, { cwd, maxBuffer: 64 * 1024 * 1024, env: environment(env) })
+  const finished = running.then(
+    ({ stdout }): GitResult => ({ ok: true, stdout }),
+    (error: unknown): GitResult => {
+      const failure = error as { code?: unknown; stderr?: string }
+      if (isNotFound(error)) throw new Error("git is not installed or not on PATH")
+      if (typeof failure.code === "number") return { ok: false, stderr: failure.stderr ?? "" }
+      throw error
+    },
+  )
+  if (options.timeoutMs === undefined) return finished
+  let timer: NodeJS.Timeout | undefined
+  const expired = new Promise<GitResult>((resolve) => {
+    timer = setTimeout(() => {
+      running.child.kill()
+      running.child.stdout?.destroy()
+      running.child.stderr?.destroy()
+      resolve({ ok: false, stderr: `git ${args[0]} timed out after ${options.timeoutMs} ms` })
+    }, options.timeoutMs)
+  })
+  // Once expired, the killed call's own rejection has nobody waiting for it.
+  finished.catch(() => {})
+  return Promise.race([finished, expired]).finally(() => clearTimeout(timer))
 }
 
 /** HEAD commit, or null outside a repository or before the first commit. */

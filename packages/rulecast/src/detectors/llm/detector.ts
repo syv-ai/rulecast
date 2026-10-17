@@ -1,4 +1,4 @@
-import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
+import { isBinary, pastDeadline, sourceReader } from "../../core/detection/per-rule"
 import { errorMessage } from "../../core/errors"
 import type {
   ChangeSet,
@@ -48,7 +48,7 @@ async function groupCalls(
       const changedLines = changedLinesOf(changes, file)
       if (changedLines === "skip") continue
       const source = await read(file)
-      if (source === null) continue
+      if (source === null || isBinary(source)) continue
       const key = `${file}\u0000${rule.config.model}`
       const call = calls.get(key)
       if (call) call.rules.push(rule)

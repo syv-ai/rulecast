@@ -66,16 +66,23 @@ function parseStatus(stdout: string): { head: string | null; paths: string[] } {
   return { head, paths }
 }
 
-/** null outside a git repository, or when git fails: the caller stays silent. */
+/**
+ * The shell hooks that take a tree state run under a 5 s timeout (adapters/claude-code/settings.ts).
+ * A git that has not answered by this is given up on, so the hook still answers in time.
+ */
+const TREE_GIT_TIMEOUT_MS = 3000
+
+/** null outside a git repository, or when git fails or is too slow: the caller stays silent. */
 export async function treeState(root: string): Promise<TreeState | null> {
   // Tracked changes and untracked files as two processes run side by side: finding untracked files
   // is most of the cost on a large repository (vscode: 110 of 135 ms), and in parallel the wall time
   // is the slower of the two rather than their sum. Limited to the project (`-- .`): a project below
   // the repository's top owns only its own files. `ls-files` already answers relative to `root`.
+  const bounded = { timeoutMs: TREE_GIT_TIMEOUT_MS }
   const [status, untracked, prefix] = await Promise.all([
-    git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no", "--", "."]),
-    git(root, ["ls-files", "-z", "--others", "--exclude-standard"]),
-    git(root, ["rev-parse", "--show-prefix"]),
+    git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no", "--", "."], undefined, bounded),
+    git(root, ["ls-files", "-z", "--others", "--exclude-standard"], undefined, bounded),
+    git(root, ["rev-parse", "--show-prefix"], undefined, bounded),
   ])
   if (!status.ok || !untracked.ok || !prefix.ok) return null
   const top = prefix.stdout.trim()

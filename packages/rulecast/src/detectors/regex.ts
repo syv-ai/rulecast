@@ -1,6 +1,7 @@
 import { createContext, Script } from "node:vm"
 import { z } from "zod"
 
+import { isBinary } from "../core/detection/per-rule"
 import { lineStarts, positionAt } from "../core/detection/positions"
 import { DeadlineError, errorMessage } from "../core/errors"
 import { renderTemplate, templateVariables } from "../core/template"
@@ -130,7 +131,7 @@ export const regexDetector: Detector<RegexConfig> = {
     for (const [file, rules] of byFile) {
       input.signal.throwIfAborted()
       const text = await input.read(file)
-      if (text === null) continue
+      if (text === null || isBinary(text)) continue
       const starts = lineStarts(text)
       const patterns = rules.map((rule) => new RegExp(rule.config.pattern, `${rule.config.flags}g`))
       const perPattern = matchAllWithin(text, patterns, input.deadlineAt - Date.now())
