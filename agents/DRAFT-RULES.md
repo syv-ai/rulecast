@@ -169,7 +169,7 @@ Run `rulecast validate` and `rulecast test --format json` a last time; `validate
 - the examples you invented;
 - the conventions you skipped, with the reason.
 
-When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/output.md](reference/output.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern, and one in `neverFired` may not be worth keeping.
+When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/output.md](reference/output.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong.
 
 ## Never
 

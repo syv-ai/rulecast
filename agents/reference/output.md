@@ -335,6 +335,18 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
     }
   ],
   "neverFired": ["frontend/no-generated-edits"],
+  "neverRan": ["frontend/no-generated-edits"],
+  "runs": { "backend/no-httpexception": 4, "frontend/no-generated-edits": 0 },
+  "stopBlocks": [
+    {
+      "rule": "backend/no-httpexception",
+      "byFiles": [
+        { "files": "1", "stops": 2, "blocked": 1 },
+        { "files": "2-5", "stops": 0, "blocked": 0 },
+        { "files": "6+", "stops": 0, "blocked": 0 }
+      ]
+    }
+  ],
   "unknownRules": []
 }
 ```
@@ -348,8 +360,11 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `sessions` | Agent sessions with a record in the window. |
 | `rules` | One entry per rule with a finding in the window, most fired first. |
 | `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. Left out when anything in the config did not compile (see `notCompiled`). |
+| `neverRan` | Of `neverFired`, the rules no check ran at all in the window: their `files` matched nothing the agents changed. A rule that ran many times and never fired has not been broken; one that never ran may have a `files` pattern that is wrong. Left out with `neverFired`. |
+| `runs` | Per enabled detector rule in the config, how many edit checks and stops in the window ran it to completion on at least one file. Left out with `neverFired`. |
+| `stopBlocks` | Per rule that blocked a stop in the window, its stops by how many files it judged there (`1`, `2-5`, `6+`), and how many of those it blocked. A block rate that climbs with the number of files, whatever they hold, is a rule that is sometimes wrong: each file is one more chance to block. Left out with `neverFired`. |
 | `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. Left out when anything in the config did not compile. |
-| `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
+| `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
 | `skippedLines` | Lines of the log that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:

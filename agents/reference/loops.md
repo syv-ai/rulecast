@@ -120,7 +120,7 @@ Not measured: whether each `/loop` iteration counts as a new prompt for the stop
 
 ## Learning from what the agent hits
 
-`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never fires may not be worth keeping.
+`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never ran may have a `files` pattern that matches nothing; one that ran often and never fired may not be worth keeping. A rule whose block rate climbs with the number of files at a stop (`stopBlocks`) is sometimes wrong.
 
 This takes two steps, and only the first runs unattended:
 
@@ -131,7 +131,8 @@ This takes two steps, and only the first runs unattended:
    jq -r '(.rules[] | select((.noisy | length) > 0 or .repeated > 0 or .suppressed > 0)
        | "- \(.rule): fired \(.fired), repeated \(.repeated), suppressed \(.suppressed), fixed \(.fixed)"
          + (if (.noisy | length) > 0 then ", noisy (\(.noisy | join(", ")))" else "" end)),
-     (.neverFired[] | "- \(.): never fired")' stats.json > rule-review.md
+     (.neverRan[] | "- \(.): never ran"),
+     (.neverFired[] as $r | select(.runs[$r] > 0) | "- \($r): ran \(.runs[$r]) times, never fired")' stats.json > rule-review.md
    ```
 
    The loop stops there. It can put the summary in an issue or a message for the developer. The keys are in [output.md](output.md#rulecast-stats).

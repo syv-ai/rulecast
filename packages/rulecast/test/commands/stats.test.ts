@@ -99,6 +99,18 @@ describe("rulecast stats", () => {
         },
       ],
       neverFired: ["frontend/no-generated-edits"],
+      neverRan: ["frontend/no-generated-edits"],
+      runs: { [RULE]: 6, "frontend/no-generated-edits": 0 },
+      stopBlocks: [
+        {
+          rule: RULE,
+          byFiles: [
+            { files: "1", stops: 3, blocked: 1 },
+            { files: "2-5", stops: 0, blocked: 0 },
+            { files: "6+", stops: 0, blocked: 0 },
+          ],
+        },
+      ],
       unknownRules: ["old/renamed-rule"],
     })
   })
@@ -115,12 +127,29 @@ describe("rulecast stats", () => {
         "backend/no-httpexception      1        1        0      1        0           0          0     0         0             1",
         "old/renamed-rule              1        0        0      0        1           0          0     0         0             -",
         "",
-        "never fired: frontend/no-generated-edits",
+        "blocks at stops, by the files a rule checked there:",
+        "  backend/no-httpexception  1 file: 1 of 3  ·  2-5 files: -  ·  6+ files: -",
+        "",
+        "never ran (no file the agents changed matched): frontend/no-generated-edits",
         "",
         "no longer configured: old/renamed-rule",
         "",
       ].join("\n"),
     )
+  })
+
+  test("a rule that ran and found nothing is told apart from one that never ran", async () => {
+    const quiet = (at: string): FindingsRecord => ({
+      ...record(at, "edit", []),
+      files: [USERS, "src/client/api.ts"],
+      ran: { [RULE]: [0], "frontend/no-generated-edits": [1] },
+    })
+    const root = await projectWithLog([quiet("2026-10-01T10:00:00.000Z"), quiet("2026-10-01T10:01:00.000Z")])
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.neverRan).toEqual([])
+    expect(document.runs).toEqual({ [RULE]: 2, "frontend/no-generated-edits": 2 })
+    const terminal = (await runCli(root, ["stats"])).stdout
+    expect(terminal).toContain(`ran but never fired: ${RULE} (2 checks), frontend/no-generated-edits (2 checks)`)
   })
 
   test("--since counts only findings first reported after it", async () => {

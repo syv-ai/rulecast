@@ -8,6 +8,7 @@ import { cacheHome, projectStateDir } from "../core/home"
 import { cachedRepos } from "../core/repos/provider"
 import { derive, type RuleStats, ruleStats } from "../core/stats/derive"
 import { readFindingsLog } from "../core/stats/log"
+import { ruleRuns, type StopBlocks, stopBlocks } from "../core/stats/runs"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -29,6 +30,12 @@ export interface StatsDocument {
    * `unknownRules`, when part of the config did not compile: its rules would read as removed.
    */
   neverFired?: string[]
+  /** Of `neverFired`, the rules no check ran at all: no file the agents changed matched them. */
+  neverRan?: string[]
+  /** Per enabled detector rule, the edit checks and stops in the window that ran it on a file. */
+  runs?: Record<string, number>
+  /** Per rule that blocked a stop in the window, its block rate by the number of files it judged there. */
+  stopBlocks?: StopBlocks[]
   /** Rules in the window that are no longer in the config. */
   unknownRules?: string[]
   /** What did not compile (a rule repo not fetched, a bad rule); present only when anything did not. */
@@ -107,8 +114,28 @@ function terminal(document: StatsDocument): string {
     }
     out.push("")
   }
-  if (document.neverFired !== undefined && document.neverFired.length > 0)
-    out.push(`never fired: ${document.neverFired.join(", ")}`, "")
+  if (document.stopBlocks !== undefined && document.stopBlocks.length > 0) {
+    out.push("blocks at stops, by the files a rule checked there:")
+    const width = Math.max(...document.stopBlocks.map((entry) => entry.rule.length))
+    for (const entry of document.stopBlocks) {
+      const buckets = entry.byFiles.map(
+        ({ files, stops, blocked }) =>
+          `${files} ${files === "1" ? "file" : "files"}: ${stops === 0 ? "-" : `${blocked} of ${stops}`}`,
+      )
+      out.push(`  ${entry.rule.padEnd(width)}  ${buckets.join("  ·  ")}`)
+    }
+    out.push("")
+  }
+  if (document.neverFired !== undefined && document.runs !== undefined) {
+    const runs = document.runs
+    const ran = document.neverFired.filter((rule) => (runs[rule] ?? 0) > 0)
+    if (ran.length > 0) {
+      const counted = ran.map((rule) => `${rule} (${runs[rule]} ${runs[rule] === 1 ? "check" : "checks"})`)
+      out.push(`ran but never fired: ${counted.join(", ")}`, "")
+    }
+  }
+  if (document.neverRan !== undefined && document.neverRan.length > 0)
+    out.push(`never ran (no file the agents changed matched): ${document.neverRan.join(", ")}`, "")
   if (document.unknownRules !== undefined && document.unknownRules.length > 0)
     out.push(`no longer configured: ${document.unknownRules.join(", ")}`, "")
   if (document.notCompiled !== undefined)
@@ -163,6 +190,10 @@ export async function statsCommand(
     (first, { at }) => (first === null || at < first ? at : first),
     null,
   )
+  // Touch rules have no detector and never fire a finding.
+  const detectorRules = project.rules.filter((rule) => rule.enabled && rule.detector !== null).map((rule) => rule.id)
+  const neverFired = detectorRules.filter((rule) => !fired.has(rule)).sort()
+  const runs = ruleRuns(windowed)
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
   const document: StatsDocument = {
     schemaVersion: STATS_SCHEMA_VERSION,
@@ -177,11 +208,10 @@ export async function statsCommand(
     ...(notCompiled.length > 0
       ? { notCompiled }
       : {
-          // Touch rules have no detector and never fire a finding.
-          neverFired: project.rules
-            .filter((rule) => rule.enabled && rule.detector !== null && !fired.has(rule.id))
-            .map((rule) => rule.id)
-            .sort(),
+          neverFired,
+          neverRan: neverFired.filter((rule) => (runs.get(rule) ?? 0) === 0),
+          runs: Object.fromEntries(detectorRules.map((rule) => [rule, runs.get(rule) ?? 0])),
+          stopBlocks: stopBlocks(windowed),
           unknownRules: [...fired].filter((rule) => !configured.has(rule)).sort(),
         }),
     ...(skipped > 0 ? { skippedLines: skipped } : {}),
