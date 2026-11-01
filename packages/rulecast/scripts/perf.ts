@@ -2,8 +2,10 @@ import {
   BUDGET_MS,
   type Measurement,
   measureEditHook,
+  measureNestedConfigs,
   measureNewWorktree,
   measureShellHooks,
+  type NestedMeasurement,
   SHELL_BEFORE_ADDED_MS,
   type ShellMeasurement,
   type WorktreeMeasurement,
@@ -55,6 +57,44 @@ function shellReport(result: ShellMeasurement): { text: string; pass: boolean } 
   return { text, pass: beforePass && afterPass }
 }
 
+/** Plan 19: the same hooks with a top config and a package config, the session launched at the top. */
+function nestedReport(result: NestedMeasurement): { text: string; pass: boolean } {
+  const added = result.before.p95 - result.floor.p95
+  const checks = [
+    {
+      pass: result.edit.p95 < BUDGET_MS,
+      text: `edit ${result.edit.p95.toFixed(0)} ms at p95 (budget ${BUDGET_MS} ms)`,
+    },
+    {
+      pass: added <= SHELL_BEFORE_ADDED_MS,
+      text: `Bash before adds ${added.toFixed(0)} ms at p95 over the floor (limit ${SHELL_BEFORE_ADDED_MS} ms)`,
+    },
+    {
+      pass: result.after.p95 < BUDGET_MS,
+      text: `Bash after ${result.after.p95.toFixed(0)} ms at p95 (budget ${BUDGET_MS} ms)`,
+    },
+    {
+      pass: result.stop.p95 < BUDGET_MS,
+      text: `stop ${result.stop.p95.toFixed(0)} ms at p95 (budget ${BUDGET_MS} ms)`,
+    },
+  ]
+  const row = (name: string, m: Measurement) => `  ${name.padEnd(13)}${ms(m.p50)}  ${ms(m.p95)}  ${ms(m.max)}`
+  const text = [
+    `${bold("rulecast with nested configs")} ${dim(`· top + package · ${result.edit.rules} rules · ${result.dirty} dirty files · ${result.edit.events} events each`)}`,
+    "",
+    dim("                   p50      p95      max"),
+    row("edit", result.edit),
+    row("Bash before", result.before),
+    row("Bash after", result.after),
+    row("floor", result.floor),
+    row("stop", result.stop),
+    "",
+    ...checks.map((check) => `  ${check.pass ? green("✓") : red("✗")} ${check.text}`),
+    "",
+  ].join("\n")
+  return { text, pass: checks.every((check) => check.pass) }
+}
+
 /** Report only (#29): a new worktree's first edit is not the warm hook the budget is about. */
 function worktreeReport(result: WorktreeMeasurement, warm: Measurement): string {
   const row = (name: string, m: Measurement) => `  ${name.padEnd(17)}${ms(m.p50)}  ${ms(m.p95)}  ${ms(m.max)}`
@@ -80,4 +120,6 @@ process.stdout.write(report(result))
 const shell = shellReport(await measureShellHooks())
 process.stdout.write(`\n${shell.text}`)
 process.stdout.write(`\n${worktreeReport(await measureNewWorktree(), result)}`)
-process.exitCode = result.p95 < BUDGET_MS && shell.pass ? 0 : 1
+const nested = nestedReport(await measureNestedConfigs())
+process.stdout.write(`\n${nested.text}`)
+process.exitCode = result.p95 < BUDGET_MS && shell.pass && nested.pass ? 0 : 1

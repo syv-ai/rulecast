@@ -35,23 +35,39 @@ export const SHELL_BEFORE_ADDED_MS = 150
 /** Files the user had changed before the session: what every tree state lists and `lstat`s. */
 const DIRTY = 20
 
-/** Spec §13: 30 rules across ast-grep, regex, path, a linter and command. */
-function perfProject(): Record<string, string> {
-  const topics = Array.from({ length: REGEX_RULES }, (_, i) => `## Topic ${i}\n\nGuidance for topic ${i}.\n`)
+interface RuleCounts {
+  regex: number
+  path: number
+  ast: number
+  linter: number
+  command: number
+}
+
+const COUNTS: RuleCounts = { regex: REGEX_RULES, path: PATH_RULES, ast: AST_RULES, linter: LINTER_RULES, command: 1 }
+
+/**
+ * The perf rules, `counts` of each kind. `id` prefixes the rule ids, `word` the regex rules' call
+ * (`<word><i>(…)`), and `files` is the pattern of the files they check, relative to the config.
+ */
+function perfRules(
+  counts: RuleCounts,
+  options: { id: string; word: string; files: string },
+): Record<string, unknown>[] {
+  const { id, word, files } = options
   const rules: Record<string, unknown>[] = []
-  for (let i = 0; i < REGEX_RULES; i++) {
+  for (let i = 0; i < counts.regex; i++) {
     rules.push({
-      id: `perf/regex-${i}`,
+      id: `${id}/regex-${i}`,
       name: `Regex ${i}`,
-      files: "^src/.*\\.ts$",
-      detect: { regex: { pattern: `forbidden${i}\\((?<arg>[^)]*)\\)` } },
-      message: `{{file}}:{{line}} calls forbidden${i}({{arg}}).`,
+      files,
+      detect: { regex: { pattern: `${word}${i}\\((?<arg>[^)]*)\\)` } },
+      message: `{{file}}:{{line}} calls ${word}${i}({{arg}}).`,
       context: [`@conventions/code.md#topic-${i}`],
     })
   }
-  for (let i = 0; i < PATH_RULES; i++) {
+  for (let i = 0; i < counts.path; i++) {
     rules.push({
-      id: `perf/path-${i}`,
+      id: `${id}/path-${i}`,
       name: `Path ${i}`,
       files: "^generated/",
       severity: "warning",
@@ -59,38 +75,50 @@ function perfProject(): Record<string, string> {
       message: "{{file}} is generated.",
     })
   }
-  for (let i = 0; i < AST_RULES; i++) {
+  for (let i = 0; i < counts.ast; i++) {
     rules.push({
-      id: `perf/ast-${i}`,
+      id: `${id}/ast-${i}`,
       name: `Structure ${i}`,
-      files: "^src/.*\\.ts$",
+      files,
       severity: "warning",
       detect: { "ast-grep": { language: "typescript", rule: { pattern: `banned${i}($$$ARGS)` } } },
       message: `{{file}}:{{line}} calls banned${i}({{ARGS}}).`,
     })
   }
-  for (let i = 0; i < LINTER_RULES; i++) {
+  for (let i = 0; i < counts.linter; i++) {
     rules.push({
-      id: `perf/lint-${i}`,
+      id: `${id}/lint-${i}`,
       name: `Lint ${i}`,
-      files: "^src/.*\\.ts$",
+      files,
       severity: "warning",
       detect: { linter: { tool: "oxlint" } },
       message: "{{file}}:{{line}} {{ruleId}}: {{message}}",
     })
   }
-  rules.push({
-    id: "perf/command",
-    name: "Command",
-    files: "^src/.*\\.ts$",
-    severity: "warning",
-    detect: { command: { run: ["./perf-check.sh", "{{files}}"], captures: ["layer"] } },
-    message: "{{file}}:{{line}} belongs to {{layer}}.",
-  })
+  for (let i = 0; i < counts.command; i++) {
+    rules.push({
+      id: `${id}/command`,
+      name: "Command",
+      files,
+      severity: "warning",
+      detect: { command: { run: ["./perf-check.sh", "{{files}}"], captures: ["layer"] } },
+      message: "{{file}}:{{line}} belongs to {{layer}}.",
+    })
+  }
+  return rules
+}
+
+const conventions = (topics: number) =>
+  ["# Code", "", ...Array.from({ length: topics }, (_, i) => `## Topic ${i}\n\nGuidance for topic ${i}.\n`)].join("\n")
+
+const source = () => `${Array.from({ length: 300 }, (_, i) => `export const value${i} = compute(${i})`).join("\n")}\n`
+
+/** Spec §13: 30 rules across ast-grep, regex, path, a linter and command. */
+function perfProject(): Record<string, string> {
   return {
-    ".rulecast-config.yaml": localConfig(rules),
-    "conventions/code.md": ["# Code", "", ...topics].join("\n"),
-    [FILE]: `${Array.from({ length: 300 }, (_, i) => `export const value${i} = compute(${i})`).join("\n")}\n`,
+    ".rulecast-config.yaml": localConfig(perfRules(COUNTS, { id: "perf", word: "forbidden", files: "^src/.*\\.ts$" })),
+    "conventions/code.md": conventions(REGEX_RULES),
+    [FILE]: source(),
     "generated/client.ts": "export const client = 1\n",
     "perf-check.sh": '#!/bin/sh\necho \'[{"file":"src/feature/orders.ts","line":1,"layer":"feature"}]\'\n',
   }
@@ -125,18 +153,22 @@ export interface Measurement {
 
 const RULES = REGEX_RULES + PATH_RULES + AST_RULES + LINTER_RULES + 1
 
-function percentiles(times: number[]): Measurement {
+function percentiles(times: number[], rules = RULES): Measurement {
   const sorted = [...times].sort((a, b) => a - b)
   const at = (q: number) => sorted[Math.ceil(sorted.length * q) - 1]!
-  return { p50: at(0.5), p95: at(0.95), max: sorted.at(-1)!, events: sorted.length, rules: RULES }
+  return { p50: at(0.5), p95: at(0.95), max: sorted.at(-1)!, events: sorted.length, rules }
 }
 
 /** The fixture as a committed repository, built and ready for hooks. `dirty` files are left changed. */
 let built = false
 
-async function preparedProject(dirty = 0): Promise<string> {
+function build(): void {
   if (!built) execFileSync("pnpm", ["build"], { cwd: packageDir, stdio: "ignore" })
   built = true
+}
+
+async function preparedProject(dirty = 0): Promise<string> {
+  build()
   const project = perfProject()
   for (let i = 0; i < dirty; i++) project[`src/dirty/file${i}.ts`] = `export const dirty${i} = ${i}\n`
   const root = await createRepo(project)
@@ -310,5 +342,144 @@ export async function measureNewWorktree(): Promise<WorktreeMeasurement> {
       execFileSync("git", ["-C", main, "worktree", "remove", "--force", root], { stdio: "ignore" })
     }
     for (const dir of [parent, ...homes]) rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/** The nested fixture's package, and the file under both configs, relative to the top. */
+const PACKAGE = "backend"
+const NESTED_FILE = `${PACKAGE}/${FILE}`
+
+/** The top config's share of the perf rules: repository-wide checks on every TypeScript file. */
+const TOP_COUNTS: RuleCounts = { regex: 6, path: 2, ast: 2, linter: 0, command: 0 }
+/** The package's share: its own regex and structure rules, and the tools that run in it. */
+const PACKAGE_COUNTS: RuleCounts = { regex: 6, path: 3, ast: 6, linter: LINTER_RULES, command: 1 }
+
+const count = (counts: RuleCounts) => counts.regex + counts.path + counts.ast + counts.linter + counts.command
+const NESTED_RULES = count(TOP_COUNTS) + count(PACKAGE_COUNTS)
+
+/**
+ * Plan 19: a repository with a top config and a package config, the same 30 rules split between
+ * them. The top's regex rules call `shared<i>(…)`, the package's `forbidden<i>(…)`, so one line can
+ * break a rule of each and the delivery must carry both.
+ */
+function nestedProject(dirty: number): Record<string, string> {
+  const project: Record<string, string> = {
+    ".rulecast-config.yaml": localConfig(perfRules(TOP_COUNTS, { id: "top", word: "shared", files: "\\.ts$" })),
+    "conventions/code.md": conventions(TOP_COUNTS.regex),
+    "generated/client.ts": "export const client = 1\n",
+    [`${PACKAGE}/.rulecast-config.yaml`]: localConfig(
+      perfRules(PACKAGE_COUNTS, { id: "backend", word: "forbidden", files: "^src/.*\\.ts$" }),
+    ),
+    [`${PACKAGE}/conventions/code.md`]: conventions(PACKAGE_COUNTS.regex),
+    [NESTED_FILE]: source(),
+    [`${PACKAGE}/generated/client.ts`]: "export const client = 1\n",
+    [`${PACKAGE}/perf-check.sh`]: '#!/bin/sh\necho \'[{"file":"src/feature/orders.ts","line":1,"layer":"feature"}]\'\n',
+  }
+  for (let i = 0; i < dirty; i++) project[`${PACKAGE}/src/dirty/file${i}.ts`] = `export const dirty${i} = ${i}\n`
+  return project
+}
+
+export interface NestedMeasurement {
+  /** PostToolUse Edit of a file under both configs: both projects' pipelines. Held to BUDGET_MS. */
+  edit: Measurement
+  /** PreToolUse Bash from the top. Held to SHELL_BEFORE_ADDED_MS over `floor`. */
+  before: Measurement
+  /** PostToolUse Bash after a command that changed the package's file. Held to BUDGET_MS. */
+  after: Measurement
+  /** A prompt event in the same session: the cost of a hook process that does nothing. */
+  floor: Measurement
+  /** Stop after an edit that broke a rule of each config. Held to BUDGET_MS. */
+  stop: Measurement
+  dirty: number
+}
+
+/**
+ * Plan 19, Task 8: the hooks in a repository with a top config and a package config, the session
+ * launched at the top ($CLAUDE_PROJECT_DIR) and every hook run from there. EVENTS edits of a file
+ * under both configs; EVENTS Bash calls, as measureShellHooks, with DIRTY package files changed; and
+ * EVENTS stops, each after an edit. Every edit, Bash call and stop must deliver a finding from each
+ * config.
+ */
+export async function measureNestedConfigs(): Promise<NestedMeasurement> {
+  build()
+  const project = nestedProject(DIRTY)
+  const root = await createRepo(project)
+  await chmod(path.join(root, PACKAGE, "perf-check.sh"), 0o755)
+  await linkTool(root, "oxlint")
+  for (let i = 0; i < DIRTY; i++) {
+    writeFileSync(path.join(root, `${PACKAGE}/src/dirty/file${i}.ts`), `export const dirty${i} = ${i + 1}\n`)
+  }
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: root }
+  const hook = (payload: unknown) => runHook(root, payload, HOME, env)
+  const payload = (name: string, toolUseId?: string) => {
+    const value = claudeCodePayload(name, { root, file: NESTED_FILE, sessionId: "perf-nested" })
+    if (toolUseId !== undefined) value.tool_use_id = toolUseId
+    return value
+  }
+  // Each phase starts from the committed file, so no rule's matches outgrow the per-rule cap shown.
+  const restore = () => writeFileSync(path.join(root, NESTED_FILE), project[NESTED_FILE]!)
+  /** A line breaking a top rule and a package rule, and the check that a hook delivered both. */
+  const breakBoth = (tag: string, i: number) => {
+    const top = `shared${i % TOP_COUNTS.regex}(${tag}${i})`
+    const own = `forbidden${i % PACKAGE_COUNTS.regex}(${tag}${i})`
+    appendFileSync(path.join(root, NESTED_FILE), `export const ${tag}${i} = [${top}, ${own}]\n`)
+    return (what: string, stdout: string) => {
+      for (const expected of [top, own]) {
+        if (!stdout.includes(expected)) throw new Error(`${what} ${i} delivered no finding for ${expected}`)
+      }
+    }
+  }
+
+  hook(payload("session-start.startup"))
+  // Warm, as the other hooks are measured warm.
+  hook(payload("post-tool-use.read.complete"))
+  for (let i = 0; i < 3; i++) {
+    hook(payload("post-tool-use.edit"))
+    hook(payload("pre-tool-use.bash", `toolu_nested_warm${i}`))
+    hook(payload("post-tool-use.bash", `toolu_nested_warm${i}`))
+    hook(payload("stop"))
+  }
+
+  const edit: number[] = []
+  restore()
+  for (let i = 0; i < EVENTS; i++) {
+    const check = breakBoth("edit", i)
+    const { ms, stdout } = hook(payload("post-tool-use.edit"))
+    check("edit", stdout)
+    edit.push(ms)
+  }
+
+  const before: number[] = []
+  const after: number[] = []
+  const floor: number[] = []
+  restore()
+  for (let i = 0; i < EVENTS; i++) {
+    const id = `toolu_nested${i}`
+    before.push(hook(payload("pre-tool-use.bash", id)).ms)
+    const check = breakBoth("shell", i)
+    const { ms, stdout } = hook(payload("post-tool-use.bash", id))
+    check("shell call", stdout)
+    after.push(ms)
+    floor.push(hook(payload("user-prompt-submit")).ms)
+  }
+
+  const stop: number[] = []
+  restore()
+  for (let i = 0; i < EVENTS; i++) {
+    const check = breakBoth("stop", i)
+    hook(payload("post-tool-use.edit"))
+    const { ms, stdout } = hook(payload("stop"))
+    check("stop", stdout)
+    stop.push(ms)
+  }
+
+  const measured = (times: number[]) => percentiles(times, NESTED_RULES)
+  return {
+    edit: measured(edit),
+    before: measured(before),
+    after: measured(after),
+    floor: measured(floor),
+    stop: measured(stop),
+    dirty: DIRTY,
   }
 }
