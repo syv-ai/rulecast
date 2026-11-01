@@ -52,7 +52,7 @@ const claudeCode: AdapterFixture = {
         warnings: ["one rule was skipped"],
         templates: {},
         omitted: { findings: [], rules: 0, preexisting: 0 },
-        overflowPath: null,
+        overflowPaths: [],
       },
     },
   ],

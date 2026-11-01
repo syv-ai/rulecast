@@ -20,7 +20,7 @@ A pair per case: `<name>.delivery.json` and `<name>.expected.txt`.
   "options": { "maxMatchesPerRule": 10 },
   "delivery": { "findings": [], "preexistingSummary": [], "references": [], "touches": [], "stop": null,
                 "warnings": [], "templates": {}, "omitted": { "findings": [], "rules": 0, "preexisting": 0 },
-                "overflowPath": null }
+                "overflowPaths": [] }
 }
 ```
 

@@ -363,8 +363,11 @@ export interface Delivery {
   /** `message` template per rule with findings: the skeleton a grouped rendering prints once. */
   templates: Record<string, string>
   omitted: Omitted
-  /** Absolute path of the untrimmed delivery, written when even the floor did not fit; null when it did. */
-  overflowPath: string | null
+  /**
+   * Where the untrimmed delivery was written, one per project whose floor did not fit; empty when
+   * everything fit. Several only when deliveries were combined (delivery/combine.ts).
+   */
+  overflowPaths: string[]
   /** The findings are in files the agent's shell command changed: the title says so. Absent: an edit tool. */
   via?: "shell"
   /**
@@ -457,6 +460,6 @@ export function emptyDelivery(): Delivery {
     warnings: [],
     templates: {},
     omitted: { findings: [], rules: 0, preexisting: 0 },
-    overflowPath: null,
+    overflowPaths: [],
   }
 }

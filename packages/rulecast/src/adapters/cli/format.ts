@@ -207,7 +207,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
 /**
  * What `--format json` publishes. Named rather than serialising the whole `Delivery`, which also
  * carries the renderer's bookkeeping — `templates` restates each rule's message, and `omitted` and
- * `overflowPath` are artefacts of the hook path's character budget that are always empty here,
+ * `overflowPaths` are artefacts of the hook path's character budget that are always empty here,
  * because the CLI runs unbudgeted. Adding a field to `Delivery` should not change this output.
  */
 function json(delivery: Delivery, options: FormatOptions): string {

@@ -121,9 +121,9 @@ describe("decide with a display path", () => {
     for (const limit of [300, 400, 500]) {
       const { delivery } = await decide({ ...base, findings, maxContextChars: limit, display: far })
       expect(delivery.findings[0]?.file.startsWith("../")).toBe(true)
-      expect(
-        renderAgentText({ ...delivery, overflowPath: null }, { maxMatchesPerRule: 10 }).length,
-      ).toBeLessThanOrEqual(limit)
+      expect(renderAgentText({ ...delivery, overflowPaths: [] }, { maxMatchesPerRule: 10 }).length).toBeLessThanOrEqual(
+        limit,
+      )
     }
   })
 })

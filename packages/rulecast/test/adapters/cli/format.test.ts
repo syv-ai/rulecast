@@ -147,7 +147,7 @@ describe("formatDelivery", () => {
     // The renderer's own bookkeeping stays out of the published output.
     expect(parsed).not.toHaveProperty("templates")
     expect(parsed).not.toHaveProperty("omitted")
-    expect(parsed).not.toHaveProperty("overflowPath")
+    expect(parsed).not.toHaveProperty("overflowPaths")
   })
 
   test("json says when the run was incomplete, and lists pre-existing findings and ignores by id", () => {

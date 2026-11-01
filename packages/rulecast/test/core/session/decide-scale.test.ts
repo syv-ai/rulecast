@@ -117,7 +117,7 @@ describe("decide: one rule with very many matches", () => {
         templates: {},
         omitted: { findings: [], rules: 0, preexisting: 0 },
         stop: null,
-        overflowPath: null,
+        overflowPaths: [],
       },
       { maxMatchesPerRule: 10 },
     )

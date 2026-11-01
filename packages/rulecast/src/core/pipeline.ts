@@ -891,8 +891,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       } catch {
         written = null
       }
-      decision.delivery.overflowPath =
-        written === null ? null : shown(path.relative(root, written).split(path.sep).join("/"))
+      decision.delivery.overflowPaths =
+        written === null ? [] : [shown(path.relative(root, written).split(path.sep).join("/"))]
     }
     for (const reference of decision.delivery.references) {
       if (reference.location === undefined || !path.isAbsolute(reference.location)) continue

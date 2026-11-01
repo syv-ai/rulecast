@@ -46,17 +46,17 @@ describe("pipeline: a delivery that does not fit", () => {
     )
 
     expect(delivery.omitted.rules).toBeGreaterThan(0)
-    expect(delivery.overflowPath).not.toBeNull()
-    expect(delivery.overflowPath!.startsWith(".rulecast/deliveries/")).toBe(true)
+    expect(delivery.overflowPaths).toHaveLength(1)
+    expect(delivery.overflowPaths[0]!.startsWith(".rulecast/deliveries/")).toBe(true)
     expect(readFileSync(path.join(root, ".rulecast", ".gitignore"), "utf8")).toContain("*")
 
     const message = renderAgentText(delivery, { maxMatchesPerRule: 10 })
     expect(message.length).toBeLessThanOrEqual(900)
     expect(message).toContain("rules and the conventions they cite did not fit here.")
-    expect(message).toContain(delivery.overflowPath!)
+    expect(message).toContain(delivery.overflowPaths[0]!)
 
     // Every rule that fired is in the file, including the ones the message had no room for.
-    const written = readFileSync(path.join(root, delivery.overflowPath!), "utf8")
+    const written = readFileSync(path.join(root, delivery.overflowPaths[0]!), "utf8")
     for (const rule of RULES) expect(written).toContain(rule.id)
     expect(readdirSync(deliveriesIn(root))).toHaveLength(1)
   })
@@ -73,7 +73,7 @@ describe("pipeline: a delivery that does not fit", () => {
     )
 
     expect(delivery.omitted.rules).toBe(0)
-    expect(delivery.overflowPath).toBeNull()
+    expect(delivery.overflowPaths).toEqual([])
     expect(existsSync(deliveriesIn(root))).toBe(false)
   })
 })

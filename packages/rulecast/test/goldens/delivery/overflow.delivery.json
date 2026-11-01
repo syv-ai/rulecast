@@ -27,6 +27,6 @@
       "rules": 2,
       "preexisting": 0
     },
-    "overflowPath": "/home/u/.cache/rulecast/state/overflow/s1.txt"
+    "overflowPaths": ["/home/u/.cache/rulecast/state/overflow/s1.txt"]
   }
 }

@@ -65,7 +65,7 @@ const UNLIMITED = { maxMatchesPerRule: Number.MAX_SAFE_INTEGER }
 const safeSegment = (value: string) => value.replace(/[^A-Za-z0-9._-]/g, "_")
 
 function markdown(delivery: Delivery, now: Date): string {
-  const body = renderAgentText({ ...delivery, overflowPath: null }, UNLIMITED)
+  const body = renderAgentText({ ...delivery, overflowPaths: [] }, UNLIMITED)
   return [
     `# rulecast delivery — ${now.toISOString()}`,
     "",

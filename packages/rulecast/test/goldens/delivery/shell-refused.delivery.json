@@ -37,7 +37,7 @@
       "rules": 0,
       "preexisting": 0
     },
-    "overflowPath": null,
+    "overflowPaths": [],
     "via": "shell",
     "refused": [
       { "file": "src/client/api.ts", "rule": "frontend/no-generated-edits", "dirtyAtStart": false },

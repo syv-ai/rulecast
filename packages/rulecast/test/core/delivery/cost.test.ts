@@ -119,7 +119,7 @@ describe("deliveryCost", () => {
 
   test("the overflow notice, with the longest path it allows for", () => {
     const path = `/${"p".repeat(191)}`
-    const notice = added({ ...base, omitted: { ...base.omitted, rules: 12 } }, { overflowPath: path })
+    const notice = added({ ...base, omitted: { ...base.omitted, rules: 12 } }, { overflowPaths: [path] })
     expect(deliveryCost.overflowNotice(12)).toBeGreaterThanOrEqual(notice)
   })
 })

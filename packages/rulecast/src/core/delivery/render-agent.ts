@@ -57,10 +57,10 @@ const backlogLine = (summary: { rule: string; file: string; count: number }) =>
   `  ${summary.rule} ×${summary.count} in ${summary.file}`
 const backlogMoreLine = (count: number) => `  …and ${count} more`
 const warningLine = (warning: string) => `  - ${warning}`
-const overflowLines = (rules: number, path: string) => [
+const overflowLines = (rules: number, paths: readonly string[]) => [
   `…${plural(rules, "rule")} and the conventions they cite did not fit here.`,
-  "Every finding, with the doc sections it cites, is in:",
-  `  ${path}`,
+  `Every finding, with the doc sections it cites, is in${paths.length === 1 ? "" : " these files"}:`,
+  ...paths.map((path) => `  ${path}`),
 ]
 
 /** Where a packed list of locations wraps. */
@@ -304,7 +304,7 @@ export const deliveryCost = {
   },
   /** The lines naming the overflow file, and the blank line before them. */
   overflowNotice(rules: number): number {
-    return linesCost(["", ...overflowLines(rules, "x".repeat(OVERFLOW_PATH_ALLOWANCE))])
+    return linesCost(["", ...overflowLines(rules, ["x".repeat(OVERFLOW_PATH_ALLOWANCE)])])
   },
 }
 
@@ -365,9 +365,9 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
     out.push(WARNINGS_HEADING, ...warnings.map(warningLine))
   }
 
-  if (delivery.overflowPath !== null) {
+  if (delivery.overflowPaths.length > 0) {
     if (out.at(-1) !== "") out.push("")
-    out.push(...overflowLines(delivery.omitted.rules, delivery.overflowPath))
+    out.push(...overflowLines(delivery.omitted.rules, delivery.overflowPaths))
   }
 
   if (notices.length > 0) {

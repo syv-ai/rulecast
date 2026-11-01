@@ -30,6 +30,8 @@ npx @syv-ai/rulecast init
 
 `init` reads your project — languages, docs, which agents you use — offers a small catalog of language- and tool-level rules, installs the hooks for your agent, and validates what it wrote. It shows you every file it will create or change before writing anything.
 
+A repository can have one config at the top, one per package, or both. Every config above a file applies to it. Run `init` in each config's directory, and `rulecast install` wherever you start agent sessions.
+
 Then, in your agent, ask it to draft rules for the conventions in your own docs. `init` prints the prompt to paste.
 
 ## A rule

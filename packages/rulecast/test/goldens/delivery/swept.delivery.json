@@ -47,7 +47,7 @@
       "rules": 0,
       "preexisting": 0
     },
-    "overflowPath": null,
+    "overflowPaths": [],
     "swept": ["app/services/users.py", "src/client/api.ts"]
   }
 }

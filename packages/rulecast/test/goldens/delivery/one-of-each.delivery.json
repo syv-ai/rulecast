@@ -38,6 +38,6 @@
       "rules": 1,
       "preexisting": 0
     },
-    "overflowPath": "/tmp/overflow.txt"
+    "overflowPaths": ["/tmp/overflow.txt"]
   }
 }

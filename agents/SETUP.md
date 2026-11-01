@@ -6,14 +6,18 @@ Relative links in this file resolve against this file's own URL.
 
 ## Steps
 
-1. Work from the project's root directory: the git repository root, unless the developer names a subdirectory.
+1. Work out with the developer where configs go and where agent sessions start. Look at the repository first: its packages, their languages and tools, and where its docs and agent instructions sit. Then propose, and let the developer decide:
+   - **Where `.rulecast-config.yaml` files go:** one at the repository top, one per package, or both. Every config above a file applies to it, each on its own: its rules, its paths and its findings. Nothing is merged. A rule for the whole repository goes in the top config, and `exclude` on it keeps it out of a package.
+   - **Where sessions start:** agents read hook settings only in the directory a session is started in, so hooks are installed there. One install there reaches every config in the repository.
+
+   Run step 2 in each config's directory. Where sessions start somewhere without its own config, run `npx @syv-ai/rulecast install --agent claude-code` there as well.
 2. Run `init` with `--agent` set to your own adapter name, `claude-code` if you are Claude Code:
 
    ```sh
    npx @syv-ai/rulecast init --agent claude-code
    ```
 
-   `init` detects the project, selects the catalog rules whose files it finds in the project, and prints a review: every file it would create or change. Without a terminal it writes nothing and exits 2. `--agent` installs your hooks and only yours; without it, `init` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet.
+   `init` sets up the project in the current directory. It detects the project, selects the catalog rules whose files it finds in the project, and prints a review: every file it would create or change. Without a terminal it writes nothing and exits 2. `--agent` installs your hooks and only yours; without it, `init` installs hooks for the agents it detects, or for every agent rulecast supports when nothing in the project marks one yet.
 
    The catalog only holds checks about a language or a tool, such as a swallowed exception or a skipped test. rulecast assumes nothing about the project's architecture: which layers it has, where they live, or what may call what. Those conventions come from step 6, decided with the developer.
 3. If it fails with `unknown agent`, rulecast has no adapter for you yet (the message lists the ones it has). Run it again without `--agent`, and tell the developer that rulecast cannot deliver rules to you yet. If it fails for any other reason than exit 2 with a review, show the developer its output and stop.

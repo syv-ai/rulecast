@@ -106,7 +106,7 @@ describe("a trimmed delivery fits its limit", () => {
       })
       // The pipeline names the overflow file after decide returns; price it at its longest.
       const rendered = renderAgentText(
-        { ...delivery, overflowPath: overflow === null ? null : OVERFLOW_PATH },
+        { ...delivery, overflowPaths: overflow === null ? [] : [OVERFLOW_PATH] },
         { maxMatchesPerRule: 10 },
       )
       expect(rendered.length, `seed ${seed} at limit ${limit}`).toBeLessThanOrEqual(limit)

@@ -108,8 +108,8 @@ function sweptMessage(delivery: Delivery, event: Event, options: { maxMatchesPer
 
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
-  if (delivery.overflowPath !== null) {
-    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${delivery.overflowPath}.`
+  if (delivery.overflowPaths.length > 0) {
+    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${delivery.overflowPaths.join(" and ")}.`
   }
   const session = event.session ? `--session ${event.session.id} ` : ""
   return `\n\n…cut to fit Claude Code's hook output limit. Run \`rulecast run ${session}--format agent\` for the full list.`

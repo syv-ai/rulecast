@@ -143,7 +143,7 @@ describe("renderAgentText: overflow", () => {
         { "backend/no-httpexception": HTTP },
         {
           omitted: { findings: [], rules: 4, preexisting: 2 },
-          overflowPath: "/cache/projects/ab12/deliveries/s1-2026-09-23.md",
+          overflowPaths: ["/cache/projects/ab12/deliveries/s1-2026-09-23.md"],
         },
       ),
     )
