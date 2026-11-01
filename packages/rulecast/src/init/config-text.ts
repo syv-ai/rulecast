@@ -55,8 +55,7 @@ function localRuleLines(rule: LocalRule): string[] {
     "  detect:",
     ...mappingLines(rule.detect).map((line) => `    ${line}`),
     `  message: ${JSON.stringify(rule.message)}`,
-    "  context:",
-    ...rule.context.map((ref) => `    - ${JSON.stringify(ref)}`),
+    ...(rule.context.length === 0 ? [] : ["  context:", ...rule.context.map((ref) => `    - ${JSON.stringify(ref)}`)]),
   ]
 }
 

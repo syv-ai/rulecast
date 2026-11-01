@@ -8,12 +8,12 @@ import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import type { Config } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
 import { cacheHome } from "../core/home"
+import { configRootsAbove, configRootsBelow, displayPath } from "../core/projects"
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import type { Adapter, AdapterInstall, InstallScope } from "../core/types"
 import { onPath } from "../core/which"
 import type { CliIo } from "./main"
-import { hasProject } from "./project"
 import { UsageError } from "./usage"
 
 /** Parsed settings, or null when the file does not exist. */
@@ -208,7 +208,26 @@ async function fetchMissingRepos(config: Config, io: CliIo): Promise<boolean> {
   return ok
 }
 
-export async function installCommand(root: string, args: string[], io: CliIo): Promise<number> {
+/**
+ * Where hooks are installed: the directory `install` (and `init`) is run in. Claude Code reads
+ * `.claude/settings*.json` only in the directory a session starts in, with no walk-up, so the
+ * settings go where sessions start, not next to a config.
+ */
+export function settingsDir(cwd: string): string {
+  return path.resolve(cwd)
+}
+
+/** Every config whose project a session started in `dir` can reach: at or above it, then below it. */
+export async function reachableConfigs(dir: string): Promise<string[]> {
+  return [...new Set([...configRootsAbove(dir), ...(await configRootsBelow(dir))])]
+}
+
+/** A config's directory as the person in `from` would name it: ".", "backend", "..". */
+export function configLabel(from: string, root: string): string {
+  return displayPath(root, from)(".")
+}
+
+export async function installCommand(args: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args,
     options: { agent: { type: "string", multiple: true }, scope: { type: "string", default: "shared" } },
@@ -218,18 +237,39 @@ export async function installCommand(root: string, args: string[], io: CliIo): P
     throw new UsageError(`unknown scope "${scope}" (use shared, personal)`)
   }
   const adapters = selectAdapters(values.agent)
-  if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents (run rulecast init)`)
-  const config = await loadProjectConfig(root, "install")
-  for (const adapter of adapters) {
-    printInstall(io, adapter, await installHooks(root, adapter, scope, config.timeouts.verifyMs))
+  const dir = settingsDir(io.cwd)
+  const roots = await reachableConfigs(dir)
+  if (roots.length === 0) {
+    throw new Error(`no ${CONFIG_FILE} in ${io.cwd}, its parents or below it (run rulecast init)`)
   }
-  return (await fetchMissingRepos(config, io)) ? 0 : 2
+  const configs: Config[] = []
+  for (const root of roots) {
+    try {
+      configs.push(await loadProjectConfig(root, "install"))
+    } catch (error) {
+      if (root === dir) throw error
+      throw new Error(`${path.join(configLabel(dir, root), CONFIG_FILE)}: ${errorMessage(error)}`)
+    }
+  }
+  if (roots.length > 1 || roots[0] !== dir) {
+    io.stdout(`configs: ${roots.map((root) => path.join(configLabel(dir, root), CONFIG_FILE)).join(", ")}\n`)
+  }
+  // Every project runs in parallel on Stop, so the slowest one's verify budget is the one to wait for.
+  const verifyMs = Math.max(...configs.map((config) => config.timeouts.verifyMs))
+  for (const adapter of adapters) {
+    printInstall(io, adapter, await installHooks(dir, adapter, scope, verifyMs))
+  }
+  // Hooks never fetch: a config whose repos are missing here would have its rules disabled.
+  let fetched = true
+  for (const config of configs) fetched = (await fetchMissingRepos(config, io)) && fetched
+  return fetched ? 0 : 2
 }
 
-export async function uninstallCommand(root: string, args: string[], io: CliIo): Promise<number> {
+export async function uninstallCommand(args: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({ args, options: { agent: { type: "string", multiple: true } } })
+  const dir = settingsDir(io.cwd)
   for (const adapter of selectAdapters(values.agent)) {
-    const results = await uninstallHooks(root, adapter)
+    const results = await uninstallHooks(dir, adapter)
     if (results.length === 0) io.stdout(`no ${adapter.label} hooks to remove\n`)
     for (const { file, removed } of results) {
       io.stdout(`removed ${adapter.label} hooks from ${file}: ${removed.join(", ")}\n`)

@@ -8,6 +8,7 @@ import { hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
+import { createRepo } from "../helpers/git"
 import { TEST_HOME } from "../helpers/home"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
@@ -169,6 +170,29 @@ describe("rulecast install", () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain(`could not fetch ${repoLabel("/nonexistent/rules.git", "v1.0.0")}`)
     expect(existsSync(path.join(root, SHARED))).toBe(true)
+  })
+
+  test("in a directory with only a package config below it: settings here, its repos fetched, its verify_ms", async () => {
+    const url = await createRuleRepo([{ tag: "v1.0.0", files: { ".rulecast-rules.yaml": "[]\n" } }])
+    const top = await createRepo({
+      "backend/.rulecast-config.yaml": `${repoConfig(url)}timeouts:\n  verify_ms: 300000\n`,
+    })
+    const result = await runCli(top, ["install"])
+    expect(result.stderr).toBe("")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("configs: backend/.rulecast-config.yaml\n")
+    expect(result.stdout).toContain(`fetched ${repoLabel(url, "v1.0.0")}\n`)
+    expect(existsSync(repoDir(TEST_HOME, url, "v1.0.0"))).toBe(true)
+    expect((await settingsOf(top)).hooks.Stop[0].hooks[0].timeout).toBe(310)
+    expect((await settingsOf(top)).hooks.SubagentStop[0].hooks[0].timeout).toBe(310)
+    expect(existsSync(path.join(top, "backend", SHARED))).toBe(false)
+
+    // doctor in the package names the config above and says the package's own settings have none.
+    await writeFile(path.join(top, ".rulecast-config.yaml"), "repos: []\n")
+    const doctor = await runCli(path.join(top, "backend"), ["doctor"])
+    expect(doctor.stdout).toContain("other configs\n  ../.rulecast-config.yaml\n")
+    expect(doctor.stdout).toMatch(/Claude Code — not installed/)
+    expect((await runCli(top, ["doctor"])).stdout).toContain("other configs\n  backend/.rulecast-config.yaml\n")
   })
 
   test("errors: unparseable settings, unknown agents and scopes, no project", async () => {

@@ -29,7 +29,7 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
-import { hookCommandResolves, hookState } from "./install"
+import { configLabel, hookCommandResolves, hookState, reachableConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -174,12 +174,21 @@ export async function doctorCommand(
     }
   }
 
-  io.stdout("\nhooks\n")
+  // Every config is its own project: the others a session started here also runs.
+  const dir = settingsDir(io.cwd)
+  const others = (await reachableConfigs(dir)).filter((other) => other !== root)
+  if (others.length > 0) {
+    io.stdout("\nother configs\n")
+    for (const other of others) io.stdout(`  ${path.join(configLabel(dir, other), CONFIG_FILE)}\n`)
+  }
+
+  // The settings in this directory: an agent reads them only where its session starts.
+  io.stdout(dir === root ? "\nhooks\n" : `\nhooks in ${dir}\n`)
   // Asked once, not per adapter: every adapter's hook runs the same rulecast.
-  const resolves = await hookCommandResolves(root)
+  const resolves = await hookCommandResolves(dir)
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
-    const state = await hookState(root, adapter, project.config.timeouts.verifyMs)
+    const state = await hookState(dir, adapter, project.config.timeouts.verifyMs)
     const file = state?.file ?? null
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
@@ -189,7 +198,7 @@ export async function doctorCommand(
     // The committed guard runs node_modules/.bin/rulecast or nothing: one on the PATH (npx, a
     // global install) does not make it run.
     const guarded = state?.local === true
-    const runs = guarded ? existsSync(path.join(root, "node_modules", ".bin", "rulecast")) : resolves
+    const runs = guarded ? existsSync(path.join(dir, "node_modules", ".bin", "rulecast")) : resolves
     // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
     // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
     const level: Level =

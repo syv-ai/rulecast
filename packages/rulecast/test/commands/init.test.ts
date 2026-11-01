@@ -92,6 +92,18 @@ describe("rulecast init --yes", () => {
     expect(await read(outer, CONFIG_FILE)).toBe("repos: []\n")
   })
 
+  test("in a package of a repository with a top config, creates the package's own config and hooks there", async () => {
+    const top = await createRepo({ ...PROJECT, ".rulecast-config.yaml": "repos: []\n", "backend/app.py": "x = 1\n" })
+    const backend = path.join(top, "backend")
+    const result = await runCli(backend, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.stderr).toBe("")
+    expect(result.code).toBe(0)
+    expect(existsSync(path.join(backend, CONFIG_FILE))).toBe(true)
+    expect(existsSync(path.join(backend, ".claude/settings.json"))).toBe(true)
+    expect(await read(top, CONFIG_FILE)).toBe("repos: []\n")
+    expect(existsSync(path.join(top, ".claude/settings.json"))).toBe(false)
+  })
+
   test("says so when nothing in the catalog matches, rather than only 'no rules yet'", async () => {
     const root = await createRepo({ "src/index.ts": "export const x = 1\n", "AGENTS.md": "# Agents\n" })
     const result = await runCli(root, ["init", "--yes"], "", env)
@@ -399,6 +411,27 @@ describe("rulecast init with the project's own hooks (plan 16)", () => {
     expect(local.rules.map((rule) => rule.id)).toEqual(["hook/types"])
     expect(result.stdout).toContain("new, 1 hook rule")
     expect(result.stdout).toContain("rulecast validate: 1 rule valid")
+  })
+
+  test("in a package, the hooks are read at the git top, and the rule cites nothing outside the project", async () => {
+    const top = await createRepo({
+      ...HOOKS,
+      "lefthook.yml":
+        "pre-commit:\n  jobs:\n    - name: pytest\n      root: backend/\n      glob: '*.py'\n      run: pytest\n",
+      "backend/app.py": "x = 1\n",
+    })
+    const backend = path.join(top, "backend")
+    const result = await runCli(backend, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.code).toBe(0)
+    const config = parse(await read(backend, CONFIG_FILE)) as {
+      repos: { repo: string; rules: { id: string; files?: string; context?: string[] }[] }[]
+    }
+    const local = config.repos.find((repo) => repo.repo === "local")!
+    expect(local.rules.map((rule) => [rule.id, rule.files, rule.context])).toEqual([
+      ["hook/types", undefined, undefined],
+      ["hook/pre-commit-pytest", "^.*\\.py$", undefined],
+    ])
+    expect(result.stdout).toContain("rulecast validate: 2 rules valid")
   })
 
   test("in a terminal they are offered, formatters unticked, and --no-hooks skips them", async () => {

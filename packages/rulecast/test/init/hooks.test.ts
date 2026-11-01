@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { addLocalRules, newConfigText } from "../../src/init/config-text"
-import { detectHooks, globToRegex, hookRule } from "../../src/init/hooks"
+import { detectHooks, globToRegex, hookRule, rebaseGlob } from "../../src/init/hooks"
 
 const files = (map: Record<string, string>) => async (file: string) => map[file] ?? null
 
@@ -84,6 +84,72 @@ describe("detectHooks", () => {
   test("no hook config is no hooks, and a config that does not parse is no hooks", async () => {
     expect(await detectHooks(files({}))).toEqual([])
     expect(await detectHooks(files({ ".pre-commit-config.yaml": "repos: [" }))).toEqual([])
+  })
+})
+
+describe("hooks for a project below the git top", () => {
+  const ROOTED = `pre-commit:
+  jobs:
+    - name: pytest
+      root: backend/
+      glob: "*.py"
+      run: pytest
+    - name: eslint
+      glob: "frontend/**/*.ts"
+      run: eslint
+`
+
+  test("a lefthook job's root: is prefixed onto its glob, then rebased onto the project", async () => {
+    const patterns = (hooks: Awaited<ReturnType<typeof detectHooks>>) => hooks.map((hook) => [hook.id, hook.files])
+    expect(patterns(await detectHooks(files({ "lefthook.yml": ROOTED }), "backend"))).toEqual([
+      ["hook/pre-commit-pytest", "^.*\\.py$"],
+    ])
+    expect(patterns(await detectHooks(files({ "lefthook.yml": ROOTED }), "frontend"))).toEqual([
+      ["hook/pre-commit-eslint", "^.*/.*\\.ts$"],
+    ])
+    expect(patterns(await detectHooks(files({ "lefthook.yml": ROOTED })))).toEqual([
+      ["hook/pre-commit-pytest", "^backend/.*\\.py$"],
+      ["hook/pre-commit-eslint", "^frontend/.*/.*\\.ts$"],
+    ])
+  })
+
+  test("the source is named from the project, and a rule does not cite a config outside it", async () => {
+    const [hook] = await detectHooks(files({ "lefthook.yml": ROOTED }), "services/backend")
+    expect(hook).toBeUndefined()
+    const [pytest] = await detectHooks(files({ "lefthook.yml": ROOTED }), "backend/")
+    expect(pytest!.source).toBe("../lefthook.yml")
+    expect(hookRule(pytest!).context).toEqual([])
+  })
+
+  test("pre-commit: a files: regex anchored to another directory is not offered; anything else is", async () => {
+    const config = `repos:
+  - repo: local
+    hooks:
+      - { id: web, entry: eslint, language: system, files: ^frontend/ }
+      - { id: api, entry: mypy, language: system, files: ^backend/.*\\.py$ }
+      - { id: any, entry: check, language: system, files: \\.py$ }
+      - { id: top, entry: check, language: system, files: ^(backend|frontend)/ }
+`
+    const ids = async (project: string) =>
+      (await detectHooks(files({ ".pre-commit-config.yaml": config }), project)).map((hook) => [hook.id, hook.files])
+    expect(await ids("backend")).toEqual([
+      ["hook/api", null],
+      ["hook/any", null],
+      ["hook/top", null],
+    ])
+    expect((await ids("")).length).toBe(4)
+  })
+
+  test("rebaseGlob: exact rebases only; anything else is not offered", () => {
+    expect(rebaseGlob("backend/*.py", "backend/")).toBe("^.*\\.py$")
+    expect(rebaseGlob("backend/src/*.py", "backend/")).toBe("^src/.*\\.py$")
+    expect(rebaseGlob("*.py", "backend/")).toBe("^.*\\.py$")
+    expect(rebaseGlob("**/*.py", "backend/")).toBe("^.*\\.py$")
+    expect(rebaseGlob("**/Makefile", "backend/")).toBe("^(.*/)?Makefile$")
+    expect(rebaseGlob("backend/*", "backend/")).toBeNull()
+    expect(rebaseGlob("frontend/*.ts", "backend/")).toBeUndefined()
+    expect(rebaseGlob("*/src/*.py", "backend/")).toBeUndefined()
+    expect(rebaseGlob("back?nd/*.py", "backend/")).toBeUndefined()
   })
 })
 

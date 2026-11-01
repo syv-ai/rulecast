@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -12,7 +12,7 @@ import { type Config, defaultConfig } from "../core/config/schema"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
-import { allFiles, git } from "../core/git"
+import { allFiles, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
 import { ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
@@ -26,8 +26,8 @@ import { draftPrompt } from "../init/draft-prompt"
 import { detectHooks, hookRule, type LocalRule } from "../init/hooks"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { Cancelled, type Choice, type Prompter } from "../init/prompts"
+import { settingsDir } from "./install"
 import type { CliIo } from "./main"
-import { findRoot, hasProject } from "./project"
 import { UsageError } from "./usage"
 
 /** The rule catalog: the rulecast repository itself (spec §4, Rule repos). RULECAST_CATALOG overrides it. */
@@ -107,25 +107,6 @@ function parseFlags(args: string[]): Flags {
     scope: scope as InstallScope | null,
     yes: values.yes,
   }
-}
-
-/**
- * The configured project, else the enclosing git repository, else the current directory. A config
- * above the repository (a workspace folder's) is not this repository's: init creates its own.
- */
-async function projectRoot(cwd: string): Promise<string> {
-  const found = findRoot(cwd)
-  // Through core/git.ts: a GIT_DIR inherited from a git hook would otherwise name another repository.
-  const result = await git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => null)
-  const top = result?.ok ? result.stdout.trim() : null
-  if (hasProject(found) && (top === null || !isAbove(found, top))) return found
-  return top ?? cwd
-}
-
-/** Whether `dir` is a strict ancestor of `of`, by real path: git prints /private/tmp for /tmp. */
-function isAbove(dir: string, of: string): boolean {
-  const relative = path.relative(realpathSync(dir), realpathSync(of))
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
 }
 
 async function readConfig(root: string): Promise<{ text: string | null; config: Config | null }> {
@@ -306,7 +287,11 @@ async function chooseHooks(root: string, config: Config | null, flags: Flags, ui
   if (flags.noHooks) return []
   const local = config?.repos.find((repo) => repo.repo === "local")
   const configured = new Set((local?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
-  const hooks = (await detectHooks((file) => readSourceFile(root, file))).filter((hook) => !configured.has(hook.id))
+  // Read at the git top, as the hook detector does; each job's files are rebased onto this project.
+  const top = await repositoryTop(root)
+  const project = path.relative(top, root).split(path.sep).join("/")
+  const detected = await detectHooks((file) => readSourceFile(top, file), project)
+  const hooks = detected.filter((hook) => !configured.has(hook.id))
   if (hooks.length === 0) return []
   const preselected = hooks.filter((hook) => !hook.modifies).map((hook) => hook.id)
   const chosen =
@@ -483,7 +468,9 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
 /** rulecast init (spec §12): detect, choose, review, write, validate, hand over the drafting prompt. */
 export async function initCommand(args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const flags = parseFlags(args)
-  const root = await projectRoot(io.cwd)
+  // The project is where init runs: its config there, or a new one. Its hooks go there too, where
+  // sessions start (install.ts settingsDir).
+  const root = settingsDir(io.cwd)
   const prompter = io.interactive && !flags.yes ? await io.prompter() : null
   const ui: Ui = {
     prompter,

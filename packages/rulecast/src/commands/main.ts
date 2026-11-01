@@ -70,9 +70,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "init":
         return await initCommand(args, registry, io)
       case "install":
-        return await installCommand(root, args, io)
+        return await installCommand(args, io)
       case "uninstall":
-        return await uninstallCommand(root, args, io)
+        return await uninstallCommand(args, io)
       case "run":
         return await runCommand(root, args, registry, io)
       case "baseline":
