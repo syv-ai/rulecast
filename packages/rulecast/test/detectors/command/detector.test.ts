@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { chmod, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
-import { argvFor, commandDetector } from "../../../src/detectors/command/detector"
+import { argvFor, commandDetector, runKey } from "../../../src/detectors/command/detector"
 import type { CommandConfig } from "../../../src/detectors/command/schema"
 import { createProject, fromDisk } from "../../helpers/project"
 
@@ -238,5 +238,31 @@ describe("command detector", () => {
 
   test("scope: project defaults to verify only", () => {
     expect(commandDetector.events(commandDetector.schema.parse({ run: ["x"], scope: "project" }))).toEqual(["verify"])
+  })
+
+  test("cwd: the command runs there, on files from there, and its findings come back from the root", async () => {
+    const root = await createProject({ "backend/tests/test_x.py": "assert False\n" })
+    // A relative run[0] is found from cwd, as it would be by hand.
+    const command = await script(
+      path.join(root, "backend"),
+      "check.sh",
+      'echo "$(pwd) $@" > argv.txt\necho \'[{"file":"tests/test_x.py","line":1}]\'',
+    )
+    const result = await run(root, [
+      ruleFor("tests", { run: [command, "{{files}}"], cwd: "backend" }, ["backend/tests/test_x.py"]),
+    ])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => [f.match.file, f.match.text])).toEqual([
+      ["backend/tests/test_x.py", "assert False"],
+    ])
+    expect(await readFile(path.join(root, "backend", "argv.txt"), "utf8")).toBe(
+      `${realpathSync(path.join(root, "backend"))} tests/test_x.py\n`,
+    )
+  })
+
+  test("rules with different cwds never share a run", () => {
+    const config = (cwd?: string) => commandDetector.schema.parse({ run: ["./c"], ...(cwd && { cwd }) })
+    expect(runKey(config("backend"))).not.toBe(runKey(config("frontend")))
+    expect(runKey(config("backend"))).not.toBe(runKey(config()))
   })
 })

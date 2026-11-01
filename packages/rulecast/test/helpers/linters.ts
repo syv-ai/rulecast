@@ -36,11 +36,17 @@ export async function linkTool(root: string, tool: string): Promise<void> {
 export async function stubTool(
   root: string,
   tool: string,
-  options: { exitCode?: number /** A recording other than <tool>.json. */; recording?: string } = {},
+  options: {
+    exitCode?: number
+    /** A recording other than <tool>.json. */
+    recording?: string
+    /** The directory the recording's absolute paths are under: where the tool ran. Default `root`. */
+    ranIn?: string
+  } = {},
 ): Promise<void> {
   const recording = (await readFile(path.join(payloads, `${options.recording ?? tool}.json`), "utf8")).replaceAll(
     "__ROOT__",
-    root,
+    options.ranIn ?? root,
   )
   await mkdir(binDir(root), { recursive: true })
   const output = path.join(binDir(root), `${tool}.recording.json`)
@@ -53,6 +59,8 @@ export async function stubTool(
       `printf '%s\\n' "$*" > "${path.join(root, `${tool}.argv`)}"`,
       // Every call, one line each: a tool can be run more than once per event.
       `printf '%s\\n' "$*" >> "${path.join(root, `${tool}.calls`)}"`,
+      // Where each call ran, one line each, in call order.
+      `pwd >> "${path.join(root, `${tool}.cwds`)}"`,
       // What the detector piped in: empty for a path run, the file's content for a stdin run.
       `cat > "${path.join(root, `${tool}.stdin`)}"`,
       `cat "${output}"`,
@@ -72,6 +80,11 @@ export async function stubArgv(root: string, tool: string): Promise<string> {
 /** Every argv a stub was called with, one space-joined line per call, in call order. */
 export async function stubCalls(root: string, tool: string): Promise<string[]> {
   return (await readFile(path.join(root, `${tool}.calls`), "utf8")).trim().split("\n")
+}
+
+/** The working directory of every call to a stub, in call order. */
+export async function stubCwds(root: string, tool: string): Promise<string[]> {
+  return (await readFile(path.join(root, `${tool}.cwds`), "utf8")).trim().split("\n")
 }
 
 /** What the detector wrote to a stub's stdin. */

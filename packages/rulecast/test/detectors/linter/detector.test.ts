@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
@@ -6,7 +7,7 @@ import { memoryCache } from "../../../src/core/detection/cache"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
-import { brokenTool, linkTool, stubArgv, stubCalls, stubTool } from "../../helpers/linters"
+import { brokenTool, linkTool, stubArgv, stubCalls, stubCwds, stubTool } from "../../helpers/linters"
 import { createProject, fromDisk } from "../../helpers/project"
 
 const ruleFor = (id: string, config: unknown, files: string[]): DetectorRuleInput<LinterConfig> => ({
@@ -248,5 +249,70 @@ describe("linter detector", () => {
 
   test("no rules is an empty result", async () => {
     expect(await run(await createProject({}), [])).toEqual({ findings: [], errors: [] })
+  })
+})
+
+describe("where a linter runs", () => {
+  test("a package's own eslint config: eslint runs there, and its finding comes back from the root", async () => {
+    const root = await createProject({ "frontend/eslint.config.js": "export default []\n", "frontend/src/a.js": JS })
+    // The tool sits in the root's node_modules/.bin: it is looked for from frontend/ upward.
+    await stubTool(root, "eslint", { ranIn: path.join(root, "frontend") })
+    const result = await run(root, [ruleFor("js", { tool: "eslint", rules: ["no-console"] }, ["frontend/src/a.js"])])
+    expect(await stubCalls(root, "eslint")).toEqual([
+      "--format=json --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
+    ])
+    expect(await stubCwds(root, "eslint")).toEqual([realpathSync(path.join(root, "frontend"))])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((finding) => [finding.match.file, finding.match.text])).toEqual([
+      ["frontend/src/a.js", "console.log"],
+    ])
+  })
+
+  test("two packages with their own pyproject.toml: one ruff run in each", async () => {
+    const root = await createProject({
+      "api/pyproject.toml": "[project]\nname = 'api'\n",
+      "api/app/a.py": PY,
+      "worker/pyproject.toml": "[project]\nname = 'worker'\n",
+      "worker/app/a.py": PY,
+    })
+    await stubTool(root, "ruff", { ranIn: path.join(root, "api") })
+    const result = await run(root, [ruleFor("py", { tool: "ruff" }, ["api/app/a.py", "worker/app/a.py"])])
+    expect(await stubCalls(root, "ruff")).toEqual([
+      "check --output-format json --force-exclude -- app/a.py",
+      "check --output-format json --force-exclude -- app/a.py",
+    ])
+    expect((await stubCwds(root, "ruff")).sort()).toEqual(
+      [path.join(root, "api"), path.join(root, "worker")].map((dir) => realpathSync(dir)),
+    )
+    expect(result.errors).toEqual([])
+    expect(new Set(result.findings.map((finding) => finding.match.file))).toEqual(new Set(["api/app/a.py"]))
+  })
+
+  test("a project with its config at the root: one run from the root, its arguments as ever", async () => {
+    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n", "app/a.py": PY, "lib/b.py": PY })
+    await stubTool(root, "ruff")
+    await run(root, [ruleFor("py", { tool: "ruff" }, ["app/a.py", "lib/b.py"])])
+    expect(await stubCalls(root, "ruff")).toEqual(["check --output-format json --force-exclude -- app/a.py lib/b.py"])
+    expect(await stubCwds(root, "ruff")).toEqual([realpathSync(root)])
+  })
+
+  test("content that is not on disk is piped in under its path from the package", async () => {
+    const root = await createProject({ "api/ruff.toml": "", "api/app/a.py": "on disk\n" })
+    await stubTool(root, "ruff", { ranIn: path.join(root, "api") })
+    const result = await linterDetector.run({
+      event: "verify",
+      rules: [ruleFor("py", { tool: "ruff" }, ["api/app/a.py"])],
+      changes: new Map(),
+      read: async (file) => (file === "api/app/a.py" ? PY : null),
+      fromDisk: false,
+      cache: memoryCache(),
+      settings: defaultDetectorSettings(),
+      cwd: root,
+      signal: new AbortController().signal,
+      deadlineAt: Date.now() + 60_000,
+    })
+    expect(await stubArgv(root, "ruff")).toBe("check --output-format json --force-exclude --stdin-filename app/a.py -")
+    expect(await stubCwds(root, "ruff")).toEqual([realpathSync(path.join(root, "api"))])
+    expect(result.findings.map((finding) => finding.match.file)).toContain("api/app/a.py")
   })
 })

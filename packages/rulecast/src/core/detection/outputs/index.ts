@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { repoRelativeTo } from "../paths"
+import { repoRelativeFrom } from "../paths"
 import { readCheckstyle } from "./checkstyle"
 import { readGitlab } from "./gitlab"
 import { readJson } from "./json"
@@ -62,9 +62,12 @@ export const outputSchema: z.ZodType<OutputFormat, z.ZodTypeDef, unknown> = z.un
  *
  * Output that is only whitespace is no findings in every format: a clean tool may print nothing.
  * Whether the tool failed is the exit code's question, not this one's.
+ *
+ * `cwd` is where the tool ran, which its relative paths are from; `root`, when that is not the
+ * project root, is what the findings' paths are made relative to.
  */
-export function readOutput(format: OutputFormat, text: string, cwd: string): ToolFinding[] {
-  const relative = repoRelativeTo(cwd)
+export function readOutput(format: OutputFormat, text: string, cwd: string, root = cwd): ToolFinding[] {
+  const relative = repoRelativeFrom(cwd, root)
   if (typeof format === "object") return readLines(format.lines, text, relative)
   if (text.trim() === "") return []
   switch (format) {

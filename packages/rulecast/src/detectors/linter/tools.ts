@@ -1,4 +1,4 @@
-import { repoRelativeTo } from "../../core/detection/paths"
+import { repoRelativeFrom } from "../../core/detection/paths"
 import type { DetectorEvent } from "../../core/types"
 import type { ToolName } from "./schema"
 
@@ -26,8 +26,16 @@ export interface LinterTool {
    * has no such mode, so content that is not on disk reaches it as a scratch copy.
    */
   stdinArgs?(file: string, select: string[]): string[]
-  /** "" for a finding's file when the tool names none, as gitleaks does for stdin. */
-  parse(stdout: string, root: string): LinterFinding[]
+  /**
+   * Files that hold the tool's config. A file is linted from the nearest directory above it that
+   * has one, as the tool would find its config from there (`runDirFor`).
+   */
+  markers: string[]
+  /**
+   * `cwd` is where the tool ran; the findings' files come back relative to `root`, the project's.
+   * "" for a finding's file when the tool names none, as gitleaks does for stdin.
+   */
+  parse(stdout: string, cwd: string, root?: string): LinterFinding[]
   /** The source a finding points at is itself sensitive (a secret), so `{{text}}` must not carry it. */
   redacts?: boolean
 }
@@ -63,16 +71,17 @@ const gitleaksRules = (select: string[]): string[] => select.flatMap((rule) => [
 export const TOOLS: Record<ToolName, LinterTool> = {
   gitleaks: {
     events: ["edit", "verify"],
+    markers: [".gitleaks.toml"],
     // The project's .gitleaks.toml, .gitleaksignore and `gitleaks:allow` comments apply in both modes.
     args: (files, select) => ["dir", ...GITLEAKS_FLAGS, ...gitleaksRules(select), "--", ...files],
     // gitleaks stdin takes no file name: its findings come back with File "", and the detector
     // gives them the file it piped in.
     stdinArgs: (_file, select) => ["stdin", ...GITLEAKS_FLAGS, ...gitleaksRules(select)],
     redacts: true,
-    parse(stdout, root) {
+    parse(stdout, cwd, root = cwd) {
       const parsed = json("gitleaks", stdout)
       if (!Array.isArray(parsed)) throw new Error("gitleaks output is not a JSON array of findings")
-      const relative = repoRelativeTo(root)
+      const relative = repoRelativeFrom(cwd, root)
       return parsed.filter(isObject).map((leak) => {
         const line = number(leak.StartLine, 1)
         return {
@@ -90,6 +99,7 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   },
   ruff: {
     events: ["edit", "verify"],
+    markers: ["pyproject.toml", "ruff.toml", ".ruff.toml"],
     // --extend-select adds to the config's selection; per-file-ignores and `# noqa` still apply.
     args: (files, select) => [
       "check",
@@ -110,10 +120,10 @@ export const TOOLS: Record<ToolName, LinterTool> = {
       file,
       "-",
     ],
-    parse(stdout, root) {
+    parse(stdout, cwd, root = cwd) {
       const parsed = json("ruff", stdout)
       if (!Array.isArray(parsed)) throw new Error("ruff output is not a JSON array of diagnostics")
-      const relative = repoRelativeTo(root)
+      const relative = repoRelativeFrom(cwd, root)
       return parsed.filter(isObject).map((result) => {
         const start = isObject(result.location) ? result.location : {}
         const end = isObject(result.end_location) ? result.end_location : {}
@@ -132,14 +142,15 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   },
   oxlint: {
     events: ["edit", "verify"],
+    markers: [".oxlintrc.json"],
     // -D turns a rule on as an error over the config; inline disable comments still apply.
     args: (files, select) => ["--format=json", ...select.flatMap((rule) => ["-D", rule]), "--", ...files],
-    parse(stdout, root) {
+    parse(stdout, cwd, root = cwd) {
       const parsed = json("oxlint", stdout)
       if (!isObject(parsed) || !Array.isArray(parsed.diagnostics)) {
         throw new Error("oxlint output is not JSON with diagnostics")
       }
-      const relative = repoRelativeTo(root)
+      const relative = repoRelativeFrom(cwd, root)
       return parsed.diagnostics.filter(isObject).map((diagnostic) => {
         const label = Array.isArray(diagnostic.labels) ? diagnostic.labels[0] : undefined
         const span = isObject(label) && isObject(label.span) ? label.span : {}
@@ -159,6 +170,14 @@ export const TOOLS: Record<ToolName, LinterTool> = {
   eslint: {
     // eslint is the slow one: spec §6 keeps it off the edit hook by default.
     events: ["verify"],
+    markers: [
+      "eslint.config.js",
+      "eslint.config.mjs",
+      "eslint.config.cjs",
+      "eslint.config.ts",
+      "eslint.config.mts",
+      "eslint.config.cts",
+    ],
     // --rule wins over the config, its per-file settings included; inline disable comments still
     // apply. A plugin rule needs its plugin loaded by the project's config.
     args: (files, select) => [
@@ -169,10 +188,10 @@ export const TOOLS: Record<ToolName, LinterTool> = {
       ...files,
     ],
     stdinArgs: (file, select) => ["--format=json", ...eslintRules(select), "--stdin", "--stdin-filename", file],
-    parse(stdout, root) {
+    parse(stdout, cwd, root = cwd) {
       const parsed = json("eslint", stdout)
       if (!Array.isArray(parsed)) throw new Error("eslint output is not a JSON array of file results")
-      const relative = repoRelativeTo(root)
+      const relative = repoRelativeFrom(cwd, root)
       const findings: LinterFinding[] = []
       for (const file of parsed.filter(isObject)) {
         const messages = Array.isArray(file.messages) ? file.messages : []

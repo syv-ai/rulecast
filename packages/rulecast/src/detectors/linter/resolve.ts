@@ -3,6 +3,7 @@ import path from "node:path"
 
 import { onPath } from "../../core/which"
 import type { ToolName } from "./schema"
+import { TOOLS } from "./tools"
 
 export interface ResolvedTool {
   command: string
@@ -22,20 +23,64 @@ async function reachable(file: string, mode: number): Promise<boolean> {
   }
 }
 
+/** `dir` and its parents up to and including `top`; `dir` alone when `top` is not above it. */
+function upTo(dir: string, top: string): string[] {
+  const relative = path.relative(top, dir)
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return [dir]
+  const dirs = [dir]
+  for (let current = dir; current !== top; ) {
+    current = path.dirname(current)
+    dirs.push(current)
+  }
+  return dirs
+}
+
 /**
- * Spec §6: the project's node_modules/.bin, then `uv run`, then PATH. `uv run` only helps for a
- * Python tool inside a Python project, so it is gated on both.
+ * Where a tool lints `file` (repo-relative) from: the nearest directory above it, up to the
+ * repository's top, that holds one of the tool's config files, so a package's own config and its
+ * relative paths apply as they do when the package runs the tool itself. The project root when
+ * there is none. `seen` remembers which directories have a config, across the files of one run.
+ */
+export async function runDirFor(
+  tool: ToolName,
+  file: string,
+  root: string,
+  top: string,
+  seen: Map<string, Promise<boolean>> = new Map(),
+): Promise<string> {
+  const hasMarker = (dir: string) => {
+    let found = seen.get(dir)
+    if (found === undefined) {
+      found = Promise.all(TOOLS[tool].markers.map((marker) => reachable(path.join(dir, marker), constants.F_OK))).then(
+        (present) => present.includes(true),
+      )
+      seen.set(dir, found)
+    }
+    return found
+  }
+  for (const dir of upTo(path.dirname(path.join(root, file)), top)) {
+    if (await hasMarker(dir)) return dir
+  }
+  return root
+}
+
+/**
+ * Spec §6: node_modules/.bin from `dir` up to the repository's `top`, then `uv run`, then PATH.
+ * `uv run` only helps for a Python tool inside a Python project, so it is gated on both.
  */
 export async function resolveTool(
   tool: ToolName,
-  root: string,
+  dir: string,
   available: (command: string) => boolean | Promise<boolean> = onPath,
+  top: string = dir,
 ): Promise<ResolvedTool> {
-  const local = path.join(root, "node_modules", ".bin", tool)
-  if (await reachable(local, constants.X_OK)) return { command: local, prefix: [] }
+  for (const from of upTo(dir, top)) {
+    const local = path.join(from, "node_modules", ".bin", tool)
+    if (await reachable(local, constants.X_OK)) return { command: local, prefix: [] }
+  }
   if (
     PYTHON_TOOLS.has(tool) &&
-    (await reachable(path.join(root, "pyproject.toml"), constants.F_OK)) &&
+    (await reachable(path.join(dir, "pyproject.toml"), constants.F_OK)) &&
     (await available("uv"))
   ) {
     return { command: "uv", prefix: ["run", "--", tool] }
@@ -65,10 +110,12 @@ export async function describeTool(
     signal?: AbortSignal
     /** Injected by tests to exercise the uv branch without a uv on the machine. */
     available?: (command: string) => boolean | Promise<boolean>
+    /** The repository's top, which node_modules/.bin is looked for up to, as a run does. */
+    top?: string
   } = {},
 ): Promise<DescribedTool> {
   const available = options.available ?? ((command: string) => onPath(command, options.signal))
-  const resolved = await resolveTool(tool, root, available)
+  const resolved = await resolveTool(tool, root, available, options.top)
   if (path.isAbsolute(resolved.command)) {
     // resolveTool only returns an absolute path after testing it for X_OK, so it exists.
     const relative = path.relative(root, resolved.command)

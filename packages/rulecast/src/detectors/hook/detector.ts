@@ -1,9 +1,11 @@
 import path from "node:path"
 
 import { readOutput, type ToolFinding } from "../../core/detection/outputs"
+import { filesFrom } from "../../core/detection/paths"
 import { pastDeadline } from "../../core/detection/per-rule"
 import { runTool, type ToolResult } from "../../core/detection/tool"
 import { errorMessage } from "../../core/errors"
+import { repositoryTop } from "../../core/git"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, DetectorRun } from "../../core/types"
 import { distribute } from "../command/detector"
 import { isToolError, toolFailure } from "../command/exit"
@@ -16,7 +18,6 @@ import {
   lefthookDump,
   PRE_COMMIT_CONFIG,
   preCommitRunner,
-  repositoryTop,
   substituteFiles,
 } from "./resolve"
 import { type HookConfig, hookName, hookSchema } from "./schema"
@@ -35,10 +36,6 @@ interface HookRun {
   dir: string
 }
 
-/** The rule's files as paths from `dir`. */
-const from = (dir: string, files: string[], input: DetectorRun<HookConfig>) =>
-  files.map((file) => path.relative(dir, path.join(input.cwd, file)))
-
 /** The repository declares and runs the hook, from its top; the files are the project's. */
 async function runPreCommit(id: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
   const top = await repositoryTop(input.cwd)
@@ -48,7 +45,7 @@ async function runPreCommit(id: string, files: string[], input: DetectorRun<Hook
   if (found === null) throw new Error("neither prek nor pre-commit is installed")
   const stage = hook.stage === "pre-commit" ? [] : ["--hook-stage", hook.stage]
   // `--files` runs on exactly these files and never stashes (pre-commit and prek both).
-  const ran = await runTool(found.command, ["run", id, ...stage, "--files", ...from(top, files, input)], {
+  const ran = await runTool(found.command, ["run", id, ...stage, "--files", ...filesFrom(top, input.cwd, files)], {
     cwd: top,
     signal: input.signal,
     notFound: `${found.runner} is not installed`,
@@ -76,7 +73,7 @@ async function runLefthook(spec: string, files: string[], input: DetectorRun<Hoo
   if (job === null) throw new Error(`lefthook has no job "${spec}" with a run command`)
   // lefthook runs a job from the repository's top, or its `root` under it, and gives it files from there.
   const dir = path.join(top, job.root)
-  const ran: ToolResult = await runTool("/bin/sh", ["-c", substituteFiles(job.run, from(dir, files, input))], {
+  const ran: ToolResult = await runTool("/bin/sh", ["-c", substituteFiles(job.run, filesFrom(dir, input.cwd, files))], {
     cwd: dir,
     signal: input.signal,
     notFound: "/bin/sh is not available",
@@ -169,11 +166,7 @@ export const hookDetector: Detector<HookConfig> = {
         if (ran.exitCode !== null && isToolError(ran.exitCode, config)) {
           throw new Error(toolFailure(name, { stdout: ran.output, stderr: "", exitCode: ran.exitCode }))
         }
-        const findings = readOutput(config.output, ran.output, ran.dir).map((finding) =>
-          ran.dir === input.cwd
-            ? finding
-            : { ...finding, file: path.relative(input.cwd, path.join(ran.dir, finding.file)) },
-        )
+        const findings = readOutput(config.output, ran.output, ran.dir, input.cwd)
         await distribute(findings, rules, input.read, result)
         if (ran.failed && changed.length === 0) {
           // The hook failed and nothing it said reached a rule — no format reads it, or it is all

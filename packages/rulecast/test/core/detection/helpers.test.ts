@@ -4,7 +4,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { describe, expect, test } from "vitest"
 
-import { repoRelative, repoRelativeTo } from "../../../src/core/detection/paths"
+import { filesFrom, repoRelative, repoRelativeFrom, repoRelativeTo } from "../../../src/core/detection/paths"
 import { sourceReader } from "../../../src/core/detection/per-rule"
 import { runTool } from "../../../src/core/detection/tool"
 
@@ -47,6 +47,28 @@ describe("repoRelative", () => {
     const relative = repoRelativeTo("/repo")
     for (const file of ["/repo/a.ts", "a.ts", "/elsewhere/b.ts"])
       expect(relative(file)).toBe(repoRelative(file, "/repo"))
+  })
+})
+
+describe("repoRelativeFrom and filesFrom", () => {
+  test("a path a tool reported from a directory below the root comes back from the root", () => {
+    const relative = repoRelativeFrom("/repo/backend", "/repo")
+    expect(relative("tests/test_x.py")).toBe("backend/tests/test_x.py")
+    expect(relative("/repo/backend/tests/test_x.py")).toBe("backend/tests/test_x.py")
+    expect(relative("../shared/a.py")).toBe("shared/a.py")
+    // No file named is still no file.
+    expect(relative("")).toBe("")
+  })
+
+  test("from a directory above the root, and from the root itself", () => {
+    expect(repoRelativeFrom("/top", "/top/pkg")("pkg/src/a.js")).toBe("src/a.js")
+    expect(repoRelativeFrom("/repo", "/repo")("/repo/a.ts")).toBe("a.ts")
+  })
+
+  test("filesFrom is the way there: the root's files as the directory sees them", () => {
+    expect(filesFrom("/repo/backend", "/repo", ["backend/tests/test_x.py"])).toEqual(["tests/test_x.py"])
+    expect(filesFrom("/top", "/top/pkg", ["src/a.js"])).toEqual(["pkg/src/a.js"])
+    expect(filesFrom("/repo", "/repo", ["a.ts"])).toEqual(["a.ts"])
   })
 })
 

@@ -4,7 +4,6 @@ import { parse } from "yaml"
 
 import { runTool } from "../../core/detection/tool"
 import { isNotFound } from "../../core/errors"
-import { git } from "../../core/git"
 import { onPath } from "../../core/which"
 import type { Runner } from "./framing"
 
@@ -42,16 +41,6 @@ export async function findPreCommitHook(root: string, id: string): Promise<{ id:
     }
   }
   return null
-}
-
-/**
- * The repository's top, where git hooks are declared and run: a rulecast project can sit below it.
- * As a path from `root` rather than git's own absolute one, which is the realpath and would not be
- * under a root reached through a symlink. `root` itself outside a repository.
- */
-export async function repositoryTop(root: string): Promise<string> {
-  const result = await git(root, ["rev-parse", "--show-cdup"])
-  return result.ok ? path.resolve(root, result.stdout.trim()) : root
 }
 
 /** The project's node_modules/.bin, then the repository's, then PATH. */

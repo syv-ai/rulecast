@@ -30,6 +30,28 @@ export function repoRelativeTo(cwd: string): (file: string) => string {
   }
 }
 
+/**
+ * A path a tool run from `dir` reported, made relative to the project's `root`. A tool's relative
+ * paths are its own working directory's, and a linter or command rule can run below the root (or
+ * above it, at a linter config further up), while a finding's file is always the root's.
+ * `dir` is `root` for most runs, and then this is `repoRelativeTo(root)`.
+ *
+ * "" stays "": it is a tool naming no file (gitleaks on stdin), not the directory it ran in.
+ */
+export function repoRelativeFrom(dir: string, root: string): (file: string) => string {
+  const fromDir = repoRelativeTo(dir)
+  if (dir === root) return fromDir
+  return (file) => {
+    const relative = fromDir(file)
+    return relative === "" ? "" : path.relative(root, path.join(dir, relative)).split(path.sep).join("/")
+  }
+}
+
+/** The project's files, given repo-relative, as paths from `dir`: what a tool run there is handed. */
+export function filesFrom(dir: string, root: string, files: string[]): string[] {
+  return dir === root ? files : files.map((file) => path.relative(dir, path.join(root, file)))
+}
+
 /** One path; for many from the same tool, take `repoRelativeTo(cwd)` once. */
 export function repoRelative(file: string, cwd: string): string {
   return repoRelativeTo(cwd)(file)

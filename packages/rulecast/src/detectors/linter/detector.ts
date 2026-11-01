@@ -1,24 +1,38 @@
+import { filesFrom } from "../../core/detection/paths"
 import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
 import { excerpt } from "../../core/detection/positions"
 import { runTool } from "../../core/detection/tool"
 import { errorMessage } from "../../core/errors"
+import { repositoryTop } from "../../core/git"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
-import { describeTool, resolveTool } from "./resolve"
+import { describeTool, resolveTool, runDirFor } from "./resolve"
 import { type LinterConfig, linterSchema, type ToolName } from "./schema"
 import { type LinterFinding, TOOLS } from "./tools"
 
+/** Where one run of a tool happens: its working directory, the project root and the repository's top. */
+interface RunPlace {
+  dir: string
+  root: string
+  top: string
+}
+
+/** `files` are repo-relative; the tool is given them from `place.dir`, and its findings come back repo-relative. */
 async function runLinter(
   tool: ToolName,
   files: string[],
   select: string[],
-  cwd: string,
+  place: RunPlace,
   signal: AbortSignal,
 ): Promise<LinterFinding[]> {
-  const resolved = await resolveTool(tool, cwd)
-  const args = [...resolved.prefix, ...TOOLS[tool].args(files, select)]
+  const resolved = await resolveTool(tool, place.dir, undefined, place.top)
+  const args = [...resolved.prefix, ...TOOLS[tool].args(filesFrom(place.dir, place.root, files), select)]
   // Linters exit non-zero when they find something; the output is the answer, not the exit code.
-  const { stdout } = await runTool(resolved.command, args, { cwd, signal, notFound: `${tool} is not installed` })
-  return TOOLS[tool].parse(stdout, cwd)
+  const { stdout } = await runTool(resolved.command, args, {
+    cwd: place.dir,
+    signal,
+    notFound: `${tool} is not installed`,
+  })
+  return TOOLS[tool].parse(stdout, place.dir, place.root)
 }
 
 /**
@@ -31,25 +45,46 @@ async function runLinterOnContent(
   files: string[],
   select: string[],
   read: (file: string) => Promise<string | null>,
-  cwd: string,
+  place: RunPlace,
   signal: AbortSignal,
 ): Promise<LinterFinding[]> {
-  const resolved = await resolveTool(tool, cwd)
+  const resolved = await resolveTool(tool, place.dir, undefined, place.top)
+  const local = filesFrom(place.dir, place.root, files)
   const findings: LinterFinding[] = []
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const stdin = await read(file)
     if (stdin === null) continue
-    const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(file, select)]
+    const args = [...resolved.prefix, ...TOOLS[tool].stdinArgs!(local[index]!, select)]
     const { stdout } = await runTool(resolved.command, args, {
-      cwd,
+      cwd: place.dir,
       signal,
       notFound: `${tool} is not installed`,
       stdin,
     })
     // A tool that names no file for stdin input (gitleaks) means the file it was given.
-    findings.push(...TOOLS[tool].parse(stdout, cwd).map((finding) => (finding.file ? finding : { ...finding, file })))
+    findings.push(
+      ...TOOLS[tool]
+        .parse(stdout, place.dir, place.root)
+        .map((finding) => (finding.file ? finding : { ...finding, file })),
+    )
   }
   return findings
+}
+
+/**
+ * The files grouped by the directory the tool lints them from (`runDirFor`), in first-file order.
+ * A project with its configs at the root is one group, run from the root as it always was.
+ */
+async function byRunDir(tool: ToolName, files: string[], root: string, top: string): Promise<Map<string, string[]>> {
+  const seen = new Map<string, Promise<boolean>>()
+  const dirs = await Promise.all(files.map((file) => runDirFor(tool, file, root, top, seen)))
+  const groups = new Map<string, string[]>()
+  for (const [index, dir] of dirs.entries()) {
+    const group = groups.get(dir)
+    if (group) group.push(files[index]!)
+    else groups.set(dir, [files[index]!])
+  }
+  return groups
 }
 
 export const linterDetector: Detector<LinterConfig> = {
@@ -76,6 +111,7 @@ export const linterDetector: Detector<LinterConfig> = {
     }
     const onDisk = input.fromDisk !== false
     const read = onDisk ? sourceReader(input.cwd) : input.read
+    const top = await repositoryTop(input.cwd)
 
     await Promise.all(
       [...runs.values()].map(async ({ tool, select, rules }) => {
@@ -85,9 +121,17 @@ export const linterDetector: Detector<LinterConfig> = {
         // {{text}} included: an unreadable file must not escape as a whole-run error and take the
         // other tools down with it (spec §14).
         try {
-          const findings = onDisk
-            ? await runLinter(tool, files, select, input.cwd, input.signal)
-            : await runLinterOnContent(tool, files, select, read, input.cwd, input.signal)
+          const groups = await byRunDir(tool, files, input.cwd, top)
+          const findings = (
+            await Promise.all(
+              [...groups].map(([dir, inDir]) => {
+                const place = { dir, root: input.cwd, top }
+                return onDisk
+                  ? runLinter(tool, inDir, select, place, input.signal)
+                  : runLinterOnContent(tool, inDir, select, read, place, input.signal)
+              }),
+            )
+          ).flat()
           for (const finding of findings) {
             const match: Match = {
               file: finding.file,
@@ -122,9 +166,13 @@ export const linterDetector: Detector<LinterConfig> = {
       if (group) group.push(rule.id)
       else byTool.set(rule.config.tool, [rule.id])
     }
+    // Doctor has no files, so it asks from the root, where a file with no config of its own is
+    // linted from. A tool installed only in a package's node_modules shows as missing here, though
+    // a run over that package's files finds it.
+    const top = await repositoryTop(input.cwd)
     return Promise.all(
       [...byTool].map(async ([tool, rules]): Promise<CheckResult> => {
-        const described = await describeTool(tool, input.cwd, { signal: input.signal })
+        const described = await describeTool(tool, input.cwd, { signal: input.signal, top })
         if (!described.found) return { what: tool, level: "error", detail: "not installed", rules }
         const detail = described.how === "path" ? `${described.command} (PATH)` : described.command
         return { what: tool, level: "ok", detail, rules: [] }

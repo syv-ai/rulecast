@@ -2,6 +2,7 @@ import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
 import { readOutput, type ToolFinding } from "../../core/detection/outputs"
+import { filesFrom } from "../../core/detection/paths"
 import { pastDeadline } from "../../core/detection/per-rule"
 import { excerpt } from "../../core/detection/positions"
 import { runTool } from "../../core/detection/tool"
@@ -100,8 +101,12 @@ export function runKey(config: CommandConfig): string {
     config.stream ?? "stdout",
     config.scope ?? "files",
     config.exit_codes,
+    config.cwd ?? ".",
   ])
 }
+
+/** Where a rule's command runs: its `cwd` under the project root, or the root. */
+const runDir = (config: CommandConfig, root: string) => (config.cwd ? path.resolve(root, config.cwd) : root)
 
 /**
  * A tool's findings handed to every rule of the run that selected the finding's file and whose
@@ -150,16 +155,18 @@ export const commandDetector: Detector<CommandConfig> = {
         const config = rules[0]!.config
         const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
         if (files.length === 0) return
+        const dir = runDir(config, input.cwd)
         // A project-scope tool is given no files; which findings matter is the rules' files.
-        const [command, ...rest] = argvFor(config.run, config.scope === "project" ? [] : files)
+        const given = config.scope === "project" ? [] : filesFrom(dir, input.cwd, files)
+        const [command, ...rest] = argvFor(config.run, given)
         try {
           const ran = await runTool(command!, rest, {
-            cwd: input.cwd,
+            cwd: dir,
             signal: input.signal,
             notFound: `command not found: ${command}`,
           })
           if (isToolError(ran.exitCode, config)) throw new Error(toolFailure(command!, ran))
-          const findings = readOutput(config.output, streamText(ran, config.stream), input.cwd)
+          const findings = readOutput(config.output, streamText(ran, config.stream), dir, input.cwd)
           await distribute(findings, rules, input.read, result)
         } catch (error) {
           if (pastDeadline(error, input)) throw error
@@ -173,16 +180,19 @@ export const commandDetector: Detector<CommandConfig> = {
   },
   async check(input) {
     // One result per distinct command, not per rule: two rules calling the same script share a fate.
-    const byCommand = new Map<string, string[]>()
+    // A relative path names a different script under a different cwd, so the cwd is part of it.
+    const byCommand = new Map<string, { command: string; dir: string; rules: string[] }>()
     for (const rule of input.rules) {
       const command = rule.config.run[0]!
-      const group = byCommand.get(command)
-      if (group) group.push(rule.id)
-      else byCommand.set(command, [rule.id])
+      const dir = runDir(rule.config, input.cwd)
+      const key = JSON.stringify([command, dir])
+      const group = byCommand.get(key)
+      if (group) group.rules.push(rule.id)
+      else byCommand.set(key, { command, dir, rules: [rule.id] })
     }
     return Promise.all(
-      [...byCommand].map(async ([command, rules]): Promise<CheckResult> => {
-        const { level, detail } = await reachable(command, input.cwd, input.signal)
+      [...byCommand.values()].map(async ({ command, dir, rules }): Promise<CheckResult> => {
+        const { level, detail } = await reachable(command, dir, input.signal)
         return { what: command, level, detail, rules: level === "ok" ? [] : rules }
       }),
     )

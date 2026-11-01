@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import path from "node:path"
 import { promisify } from "node:util"
 import { isNotFound } from "./errors"
 
@@ -150,4 +151,15 @@ export async function changedFilesBetween(cwd: string, from: string, to: string)
   const result = await git(cwd, ["diff", "--name-only", "-z", "--relative", "--diff-filter=d", from, to])
   if (!result.ok) throw new Error(`git diff ${from} ${to} failed: ${result.stderr.trim()}`)
   return nulSeparated(result.stdout)
+}
+
+/**
+ * The repository's top: where git hooks are declared and run, and how far up a rulecast project's
+ * tools and launch directories are looked for. A rulecast project can sit below it.
+ * As a path from `root` rather than git's own absolute one, which is the realpath and would not be
+ * under a root reached through a symlink. `root` itself outside a repository.
+ */
+export async function repositoryTop(root: string): Promise<string> {
+  const result = await git(root, ["rev-parse", "--show-cdup"])
+  return result.ok ? path.resolve(root, result.stdout.trim()) : root
 }

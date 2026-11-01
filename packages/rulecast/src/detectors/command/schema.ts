@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { z } from "zod"
 
 import { outputSchema } from "../../core/detection/outputs"
@@ -26,6 +28,12 @@ export const capturesSchema = z
     }
   })
 
+/** Relative to the project root and inside it: a rule must not reach out of the project it belongs to. */
+const insideProject = (dir: string) => {
+  const normal = path.posix.normalize(dir.replaceAll("\\", "/"))
+  return !path.posix.isAbsolute(normal) && !path.win32.isAbsolute(dir) && normal !== ".." && !normal.startsWith("../")
+}
+
 export const commandSchema = z
   .object({
     /** argv. The element exactly "{{files}}" is replaced by the rule's files; otherwise they are appended. */
@@ -40,6 +48,15 @@ export const commandSchema = z
      * dead-code tool, whose answer about one file depends on the rest.
      */
     scope: z.enum(["files", "project"]).optional(),
+    /**
+     * Where the command runs, relative to the project root: a backend's own test runner from the
+     * backend. `{{files}}` and the paths in the output are relative to it.
+     */
+    cwd: z
+      .string()
+      .min(1)
+      .refine(insideProject, "cwd must be a directory inside the project, relative to its root")
+      .optional(),
     captures: capturesSchema,
   })
   .strict()

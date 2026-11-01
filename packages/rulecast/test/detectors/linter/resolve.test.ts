@@ -2,7 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { describeTool, resolveTool } from "../../../src/detectors/linter/resolve"
+import { describeTool, resolveTool, runDirFor } from "../../../src/detectors/linter/resolve"
 import { createProject } from "../../helpers/project"
 
 describe("resolveTool", () => {
@@ -33,6 +33,47 @@ describe("resolveTool", () => {
   test("falls back to PATH when uv is not installed", async () => {
     const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n" })
     expect(await resolveTool("ruff", root, () => false)).toEqual({ command: "ruff", prefix: [] })
+  })
+})
+
+describe("runDirFor", () => {
+  test("the nearest directory with one of the tool's own config files, else the root", async () => {
+    const root = await createProject({
+      "pyproject.toml": "",
+      "api/ruff.toml": "",
+      "api/app/deep/a.py": "",
+      "web/eslint.config.mjs": "",
+      "web/src/a.js": "",
+    })
+    expect(await runDirFor("ruff", "api/app/deep/a.py", root, root)).toBe(path.join(root, "api"))
+    expect(await runDirFor("ruff", "web/src/a.py", root, root)).toBe(root)
+    expect(await runDirFor("eslint", "web/src/a.js", root, root)).toBe(path.join(root, "web"))
+    // Another tool's config is not this one's.
+    expect(await runDirFor("oxlint", "web/src/a.js", root, root)).toBe(root)
+  })
+
+  test("looks above the root up to the repository's top, and no further", async () => {
+    const top = await createProject({ ".oxlintrc.json": "{}", "pkg/src/a.js": "" })
+    const root = path.join(top, "pkg")
+    expect(await runDirFor("oxlint", "src/a.js", root, top)).toBe(top)
+    // With the top at the root, a config above it is outside the repository.
+    expect(await runDirFor("oxlint", "src/a.js", root, root)).toBe(root)
+  })
+})
+
+describe("resolveTool from a directory", () => {
+  test("looks in node_modules/.bin from the directory up to the top", async () => {
+    const top = await createProject({ "pkg/pyproject.toml": "" })
+    await mkdir(path.join(top, "node_modules", ".bin"), { recursive: true })
+    const binary = path.join(top, "node_modules", ".bin", "ruff")
+    await writeFile(binary, "#!/bin/sh\n")
+    await chmod(binary, 0o755)
+    expect(await resolveTool("ruff", path.join(top, "pkg"), () => true, top)).toEqual({ command: binary, prefix: [] })
+    // Without the top, only the directory's own: and it is a uv project.
+    expect(await resolveTool("ruff", path.join(top, "pkg"), () => true)).toEqual({
+      command: "uv",
+      prefix: ["run", "--", "ruff"],
+    })
   })
 })
 
