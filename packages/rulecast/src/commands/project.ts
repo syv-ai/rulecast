@@ -3,18 +3,11 @@ import { homedir } from "node:os"
 import path from "node:path"
 
 import { CONFIG_FILE } from "../core/config/load"
+import { configRootsAbove } from "../core/projects"
 
-/**
- * Nearest ancestor of cwd containing .rulecast-config.yaml, or cwd itself. A config in the home
- * directory counts only from the home directory: below it, every repository without its own config
- * would otherwise become part of one project rooted at `~`.
- */
+/** Nearest ancestor of cwd containing .rulecast-config.yaml, or cwd itself (home rule: see configRootsAbove). */
 export function findRoot(cwd: string, home: string = homedir()): string {
-  const start = path.resolve(cwd)
-  for (let dir = start; ; dir = path.dirname(dir)) {
-    if (existsSync(path.join(dir, CONFIG_FILE)) && (dir !== path.resolve(home) || dir === start)) return dir
-    if (path.dirname(dir) === dir) return start
-  }
+  return configRootsAbove(cwd, home)[0] ?? path.resolve(cwd)
 }
 
 export function hasProject(root: string): boolean {
