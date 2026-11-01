@@ -25,12 +25,15 @@ export function notices(input: {
   told: ReadonlySet<string>
   /** Protected files the agent changed with its shell (Delivery.refused). Default: none. */
   refused?: readonly { file: string; rule: string }[]
+  /** How a root-relative file is shown in a notice's text; its key stays root-relative. Default: as it is. */
+  display?: (file: string) => string
 }): Notice[] {
   const out: Notice[] = []
+  const display = input.display ?? ((file: string) => file)
   for (const { file, rule } of input.refused ?? []) {
     const key = `refused:${rule}:${file}`
     if (input.told.has(key)) continue
-    out.push({ key, text: `rulecast: the agent changed a protected file with Bash: ${file} (${rule})` })
+    out.push({ key, text: `rulecast: the agent changed a protected file with Bash: ${display(file)} (${rule})` })
   }
   const configKey = `config:${input.currentConfigHash ?? "gone"}`
   if (
@@ -40,13 +43,13 @@ export function notices(input: {
   ) {
     out.push({
       key: configKey,
-      text: `rulecast: ${CONFIG_FILE} changed during this session; findings may have been silenced. Review: git diff ${CONFIG_FILE}`,
+      text: `rulecast: ${display(CONFIG_FILE)} changed during this session; findings may have been silenced. Review: git diff ${display(CONFIG_FILE)}`,
     })
   }
   const keyOf = ({ rule, match }: { rule: string; match: Match }) => `ignore:${rule}:${match.file}:${match.line}`
   const added = input.ignored.filter((ignored) => ignored.status === "new" && !input.told.has(keyOf(ignored)))
   if (added.length > 0) {
-    const sites = added.map(({ rule, match, reason }) => `${match.file}:${match.line} (${rule}: "${reason}")`)
+    const sites = added.map(({ rule, match, reason }) => `${display(match.file)}:${match.line} (${rule}: "${reason}")`)
     const comments = added.length === 1 ? "a rulecast-ignore comment" : `${added.length} rulecast-ignore comments`
     out.push({
       key: added.map(keyOf).join("\n"),

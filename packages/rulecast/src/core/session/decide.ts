@@ -58,6 +58,8 @@ export interface DecideInput {
   listPreexisting?: boolean
   /** Configured rules that did not run (Delivery.disabled): attached whole, after the budget. */
   disabled?: DisabledGroup[]
+  /** AssembleInput.display. */
+  display?: (file: string) => string
 }
 
 export interface Decision {
@@ -106,12 +108,17 @@ function capturesFor(rule: CompiledRule, match: Match): Record<string, string> |
   return values
 }
 
-function renderFindings(findings: ClassifiedFinding[], status: Finding["status"]): Finding[] {
+function renderFindings(
+  findings: ClassifiedFinding[],
+  status: Finding["status"],
+  display: (file: string) => string,
+): Finding[] {
   const merged = new Map<string, Finding>()
   for (const { id, rule, match } of findings) {
+    const file = display(match.file)
     const message = renderTemplate(rule.message ?? "", {
       ...match.captures,
-      file: match.file,
+      file,
       line: String(match.line),
       column: String(match.column),
       text: match.text,
@@ -126,7 +133,7 @@ function renderFindings(findings: ClassifiedFinding[], status: Finding["status"]
         rule: rule.id,
         severity: rule.severity,
         status,
-        file: match.file,
+        file,
         ...site,
         message,
         count: 1,
@@ -204,6 +211,12 @@ export interface AssembleInput {
    * set on the hook path, where the summary is what an agent is given. Default: false.
    */
   listPreexisting?: boolean
+  /**
+   * The path a root-relative file is shown as (core/projects.ts `displayPath`): every file in the
+   * delivery goes through it, so the budget prices what the agent reads. Only what is shown: ids,
+   * keys and every record stay root-relative. Default: the file as it is.
+   */
+  display?: (file: string) => string
 }
 
 /**
@@ -225,6 +238,11 @@ export interface Assembled {
   touches: CompiledRule[]
   /** What assembling decided to record: touched rules, and a complete read as delivered. */
   context: ContextRecord[]
+  /**
+   * Each summary in `delivery.preexistingSummary` to its root-relative file, which is what is
+   * recorded once it is delivered; the summary's own `file` is the displayed one.
+   */
+  summaryFiles: ReadonlyMap<Delivery["preexistingSummary"][number], string>
 }
 
 export async function assemble(input: AssembleInput): Promise<Assembled> {
@@ -233,29 +251,38 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   const context: ContextRecord[] = []
   const touches = input.touches ?? []
   const state = input.context ?? emptyContext()
+  const display = input.display ?? ((file: string) => file)
 
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
-  delivery.findings = renderFindings(fresh, "new")
+  delivery.findings = renderFindings(fresh, "new", display)
   if (input.listPreexisting === true) {
     delivery.preexisting = renderFindings(
       input.findings.filter((finding) => finding.status === "preexisting"),
       "preexisting",
+      display,
     )
   }
   const swept = new Set(input.swept ?? [])
   const sweptWithFindings = [...new Set(fresh.map(({ match }) => match.file))].filter((file) => swept.has(file))
-  if (sweptWithFindings.length > 0) delivery.swept = sweptWithFindings.sort()
-  if ((input.refused ?? []).length > 0) delivery.refused = [...(input.refused ?? [])]
+  if (sweptWithFindings.length > 0) delivery.swept = sweptWithFindings.map(display).sort()
+  if ((input.refused ?? []).length > 0) {
+    delivery.refused = (input.refused ?? []).map((refused) => ({ ...refused, file: display(refused.file) }))
+  }
   for (const { rule } of fresh) if (rule.message !== null) delivery.templates[rule.id] = rule.message
   const summaries = new Map<string, { rule: string; file: string; count: number }>()
+  const summaryFiles = new Map<Delivery["preexistingSummary"][number], string>()
   for (const { rule, match, status } of input.findings) {
     if (status !== "preexisting") continue
     const key = preexistingKey(rule.id, match.file)
     if (state.preexisting.has(key)) continue
-    const summary = summaries.get(key) ?? { rule: rule.id, file: match.file, count: 0 }
+    let summary = summaries.get(key)
+    if (summary === undefined) {
+      summary = { rule: rule.id, file: display(match.file), count: 0 }
+      summaries.set(key, summary)
+      summaryFiles.set(summary, match.file)
+    }
     summary.count++
-    summaries.set(key, summary)
   }
   delivery.preexistingSummary = [...summaries.values()]
 
@@ -298,7 +325,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     }
   }
 
-  return { delivery, candidates, fresh, unwarned, touches, context }
+  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles }
 }
 
 export interface Trimmed {
@@ -509,7 +536,7 @@ export function trim(
     }
     used += deliveryCost.backlogSummary(summary)
     summariesKept.push(summary)
-    context.push({ t: "preexisting", rule: summary.rule, file: summary.file })
+    context.push({ t: "preexisting", rule: summary.rule, file: assembled.summaryFiles.get(summary) ?? summary.file })
   }
   delivery.preexistingSummary = summariesKept
   if (orphaned.size > 0) delivery.references = delivery.references.filter((one) => !orphaned.has(one.ref))

@@ -36,6 +36,8 @@ export interface GuardInput {
   recordContext: (records: ContextRecord[]) => Promise<void>
   /** The findings a refusal rests on, for the findings log (core/stats/log.ts); absent without a session. */
   recordFindings?: (refusing: { id: string; rule: CompiledRule; match: Match }[]) => Promise<void>
+  /** How a root-relative file is shown (AssembleInput.display). Default: as it is. */
+  display?: (file: string) => string
 }
 
 /**
@@ -137,6 +139,7 @@ export async function guardWrite(input: GuardInput): Promise<Delivery> {
     findings: refusing.map(({ id, rule, match }) => ({ id, rule, match, status: "new" as const })),
     resolver: input.resolver,
     maxBytes: input.config.context.maxBytes,
+    ...(input.display === undefined ? {} : { display: input.display }),
   })
   const { delivery, context } = trim(assembled, {
     maxContextChars: input.maxContextChars,

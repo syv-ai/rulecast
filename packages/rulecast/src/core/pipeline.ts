@@ -24,6 +24,7 @@ import { findingIds } from "./finding-id"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
+import { displayPath } from "./projects"
 import { appendActivity, duringCall, readActivity } from "./session/activity"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
@@ -89,6 +90,13 @@ export interface PipelineOptions {
    * mode its hooks did. The CLI's own runs never record one.
    */
   recordMode?: boolean
+  /**
+   * An absolute directory every path in the returned delivery is shown relative to: where the agent
+   * or the user is, when that is not the project root (core/projects.ts `displayPath`). Only what is
+   * shown: the session's records, baselines, finding ids and the findings log stay root-relative.
+   * Default: paths relative to the root, as they are stored.
+   */
+  displayFrom?: string
 }
 
 export interface PipelineResult {
@@ -255,6 +263,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let event = options.event
   const { root, config } = project
   const log = options.log ?? (() => {})
+  // How a root-relative path is shown. Applied by decide (and the guard) to the delivery before the
+  // budget, and here to the paths written after it; undefined leaves every path as it is stored.
+  const display = options.displayFrom === undefined ? undefined : displayPath(root, options.displayFrom)
+  const shown = display ?? ((file: string) => file)
   // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
   const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
   const warnings: Warning[] = compileWarnings(errors)
@@ -454,6 +466,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       resolver,
       maxContextChars: options.maxContextChars,
       log,
+      ...(display === undefined ? {} : { display }),
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
       recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
       ...(open && event.session
@@ -756,6 +769,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           : [],
         told: view.work.noticed,
         refused,
+        ...(display === undefined ? {} : { display }),
       })
       // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
       for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
@@ -794,7 +808,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     for (const { kind, max, setting, skipped } of overBudget) {
       warnings.push({
         key: `${kind}-budget:${skipped.join(",")}`,
-        text: `${kind} rules checked ${max} files; ${skipped.length} were not checked: ${skipped.join(", ")}. Raise ${setting}, or run rulecast run --files on them.`,
+        text: `${kind} rules checked ${max} files; ${skipped.length} were not checked: ${skipped.map(shown).join(", ")}. Raise ${setting}, or run rulecast run --files on them.`,
       })
     }
     const hintFor = (kind: string) => {
@@ -863,6 +877,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     ...(swept.length === 0 ? {} : { swept }),
     ...(refused.length === 0 ? {} : { refused }),
     ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
+    ...(display === undefined ? {} : { display }),
   })
 
   // A delivery the budget had to cut rules out of is written whole, and the message says where.
@@ -876,12 +891,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       } catch {
         written = null
       }
-      decision.delivery.overflowPath = written === null ? null : path.relative(root, written).split(path.sep).join("/")
+      decision.delivery.overflowPath =
+        written === null ? null : shown(path.relative(root, written).split(path.sep).join("/"))
     }
     for (const reference of decision.delivery.references) {
       if (reference.location === undefined || !path.isAbsolute(reference.location)) continue
       const copied = copyIntoProject(root, home, reference.location)
-      if (copied !== null) reference.location = copied
+      if (copied !== null) reference.location = shown(copied)
     }
     // After the budget: notices are for the user and never priced into agent context.
     if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
