@@ -603,6 +603,28 @@ const cases: Case[] = [
     content: "# CI\n",
     fires: false,
   },
+  // Plan 19: a package's own rulecast and Claude Code config is protected from a top project too.
+  {
+    rule: "loop-safety/protected-loop-config",
+    kind: "verify",
+    file: "backend/.rulecast-config.yaml",
+    content: "rules: []\n",
+    fires: true,
+  },
+  {
+    rule: "loop-safety/protected-loop-config",
+    kind: "verify",
+    file: "backend/.claude/settings.json",
+    content: '{ "hooks": {} }\n',
+    fires: true,
+  },
+  {
+    rule: "loop-safety/protected-loop-config",
+    kind: "verify",
+    file: "docs/claude.md",
+    content: "# Claude\n",
+    fires: false,
+  },
 ]
 
 describe("the rulecast repository's rule manifest", () => {

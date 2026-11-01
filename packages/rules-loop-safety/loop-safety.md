@@ -74,7 +74,7 @@ The rule cannot tell raising from lowering: it sees the file as it is now, not w
 
 ## Loop configuration
 
-Flagged, and refused in unattended mode: CI workflows and the actions they call (`.github/workflows/`, `.github/actions/`, `.gitlab-ci.yml`, `.circleci/`, `azure-pipelines.yml`, `.buildkite/`, `Jenkinsfile`), git hooks (`lefthook.yml`, `.lefthook.yml` and lefthook's TOML and JSON config, `.lefthook/`, `.husky/`, `.pre-commit-config.yaml`), `.rulecast-config.yaml`, and `.claude/settings.json` and `settings.local.json`, which hold the hooks rulecast runs from.
+Flagged, and refused in unattended mode: CI workflows and the actions they call (`.github/workflows/`, `.github/actions/`, `.gitlab-ci.yml`, `.circleci/`, `azure-pipelines.yml`, `.buildkite/`, `Jenkinsfile`), git hooks (`lefthook.yml`, `.lefthook.yml` and lefthook's TOML and JSON config, `.lefthook/`, `.husky/`, `.pre-commit-config.yaml`), `.rulecast-config.yaml`, and `.claude/settings.json` and `settings.local.json`, which hold the hooks rulecast runs from. CI files and `.pre-commit-config.yaml` count only at the repository top, where they are read. The others count in any directory, so a package's own `.rulecast-config.yaml` or `.claude/settings.json` is covered too.
 
 These files decide what "done" means for the run: which tests run, which checks gate a merge, and which rules hold. A run that changes them can make any check pass, so the run being judged must not change them. If one of them is wrong for the task, say what and why in your report.
 

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
-import { claudeConfigDir, listSessions, projectTranscriptDir, readSession } from "../adapters/claude-code/transcript"
+import { claudeConfigDir, listSessions, projectTranscriptDirs, readSession } from "../adapters/claude-code/transcript"
 import { compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { createReferenceResolver } from "../core/delivery/resolve"
@@ -124,8 +124,8 @@ export async function replayCommand(
   const known = new Set(project.rules.map((rule) => rule.id))
   for (const rule of rules) if (!known.has(rule)) throw new UsageError(`no rule "${rule}" (see rulecast validate)`)
 
-  const dir = await projectTranscriptDir(root, claudeConfigDir(io.env))
-  const sessions = await Promise.all((await listSessions(dir, limit)).map((entry) => readSession(entry, root)))
+  const dirs = await projectTranscriptDirs(root, claudeConfigDir(io.env))
+  const sessions = await Promise.all((await listSessions(dirs, limit)).map((entry) => readSession(entry, root)))
   const metered = new Set(registry.kinds().filter((kind) => registry.get(kind)?.metered === true))
   const onlyRules = rules.length === 0 ? undefined : new Set(rules)
 

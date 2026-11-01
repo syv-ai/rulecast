@@ -5,12 +5,13 @@ import path from "node:path"
 import { createInterface } from "node:readline"
 
 import { isNotFound } from "../../core/errors"
+import { repositoryTop } from "../../core/git"
 
 /**
  * Claude Code's session transcripts, read for `rulecast replay` (shapes recorded from Claude Code
  * 2.1.296, 2026-10-17; test/payloads/claude-code/transcripts/README.md).
  *
- * A session is `<config dir>/projects/<encoded root>/<session id>.jsonl`; each subagent it started is
+ * A session is `<config dir>/projects/<encoded launch dir>/<session id>.jsonl`; each subagent it started is
  * `<session id>/subagents/agent-<id>.jsonl`. An Edit or Write is a `user` record whose
  * `toolUseResult` has `filePath` and `structuredPatch`: Write gives the new `content` (`type`
  * `create` or `update`), Edit gives `oldString`, `newString` and `replaceAll`. Either may carry the
@@ -58,11 +59,37 @@ export async function projectTranscriptDir(root: string, configDir: string): Pro
   return path.join(configDir, "projects", real.replace(/[^A-Za-z0-9]/g, "-"))
 }
 
-/** The newest `limit` sessions, newest first, by when their transcript last changed. */
+/**
+ * Claude Code keys a session by the directory it was launched in, which may be the root or any
+ * directory above it in the same repository: the transcript dirs of the root and of each directory
+ * above it up to the git top. Outside git, the root's alone.
+ */
+export async function projectTranscriptDirs(root: string, configDir: string): Promise<string[]> {
+  const real = await realpath(root)
+  const top = await realpath(await repositoryTop(real)).catch(() => real)
+  const inside = path.relative(top, real)
+  if (inside.startsWith("..") || path.isAbsolute(inside)) return [await projectTranscriptDir(real, configDir)]
+  const dirs: string[] = []
+  for (let dir = real; ; dir = path.dirname(dir)) {
+    dirs.push(await projectTranscriptDir(dir, configDir))
+    if (dir === top || path.dirname(dir) === dir) break
+  }
+  return dirs
+}
+
+/** The newest `limit` sessions across `dirs`, newest first, by when their transcript last changed. */
 export async function listSessions(
-  dir: string,
+  dirs: readonly string[],
   limit: number,
 ): Promise<{ session: string; file: string; modified: number }[]> {
+  const listed = await Promise.all(dirs.map((dir) => sessionsIn(dir)))
+  return listed
+    .flat()
+    .sort((a, b) => b.modified - a.modified)
+    .slice(0, limit)
+}
+
+async function sessionsIn(dir: string): Promise<{ session: string; file: string; modified: number }[]> {
   let names: string[]
   try {
     names = await readdir(dir)
@@ -70,7 +97,7 @@ export async function listSessions(
     if (isNotFound(error)) return []
     throw error
   }
-  const sessions = await Promise.all(
+  return Promise.all(
     names
       .filter((name) => name.endsWith(".jsonl"))
       .map(async (name) => {
@@ -78,7 +105,6 @@ export async function listSessions(
         return { session: name.slice(0, -".jsonl".length), file, modified: (await stat(file)).mtimeMs }
       }),
   )
-  return sessions.sort((a, b) => b.modified - a.modified).slice(0, limit)
 }
 
 /** One session, with each of its subagents as an agent of its own. */

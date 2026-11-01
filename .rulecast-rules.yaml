@@ -517,7 +517,7 @@
 - id: loop-safety/protected-loop-config
   name: The checks that judge a run are not changed by it
   description: "For agents that run unattended: flags edits to CI workflows and actions, git hooks, .rulecast-config.yaml and .claude/settings*.json, and refuses them in unattended mode. These decide what done means, so the run being judged must not change them."
-  files: ^\.github/(workflows|actions)/|^\.gitlab-ci\.yml$|^\.circleci/|^azure-pipelines\.ya?ml$|^\.buildkite/|^Jenkinsfile$|(^|/)\.?lefthook(-local)?\.(ya?ml|toml|jsonc?)$|^\.lefthook/|^\.husky/|^\.pre-commit-config\.yaml$|^\.rulecast-config\.yaml$|^\.claude/settings(\.local)?\.json$
+  files: ^\.github/(workflows|actions)/|^\.gitlab-ci\.yml$|^\.circleci/|^azure-pipelines\.ya?ml$|^\.buildkite/|^Jenkinsfile$|(^|/)\.?lefthook(-local)?\.(ya?ml|toml|jsonc?)$|^\.lefthook/|(^|/)\.husky/|^\.pre-commit-config\.yaml$|(^|/)\.rulecast-config\.yaml$|(^|/)\.claude/settings(\.local)?\.json$
   severity: warning
   escalate: true
   refuse_write: unattended
