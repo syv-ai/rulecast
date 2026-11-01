@@ -2,10 +2,8 @@ import { randomBytes } from "node:crypto"
 import { chmod, lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
-import { exitCodeFor } from "../adapters/cli/format"
-import { compile, diagnosticText } from "../core/compile/project"
+import type { CompiledProject } from "../core/compile/project"
 import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
-import { CONFIG_FILE } from "../core/config/load"
 import { createReferenceResolver } from "../core/delivery/resolve"
 import { detectionFor } from "../core/detection/context"
 import { readSourceFile } from "../core/detection/per-rule"
@@ -16,11 +14,19 @@ import { runExamples } from "../core/examples"
 import { unifiedDiff } from "../core/fix/diff"
 import { type FixSite, fixPasses, MAX_PASSES } from "../core/fix/passes"
 import { cacheHome, ensureProjectState } from "../core/home"
-import { fetchingRepos } from "../core/repos/provider"
+import { displayPath } from "../core/projects"
 import type { Delivery } from "../core/types"
 import type { CliIo } from "./main"
-import { hasProject } from "./project"
-import { checkRun, formatRun, parseRunArgs, type RunArgs, selectFiles } from "./run"
+import {
+  checkRun,
+  compileRun,
+  exitCodeForChecks,
+  formatRun,
+  parseRunArgs,
+  type RunArgs,
+  routeRun,
+  type SelectedFiles,
+} from "./run"
 import { UsageError } from "./usage"
 
 interface FixArgs {
@@ -154,29 +160,107 @@ function notFixable(rule: string, warnings: readonly string[]): string {
  * A rule's fix is first run over its own `bad` examples, and a rule whose good or bad examples fail
  * is skipped.
  *
+ * Every project above a selected file fixes it, one project after another, so each reads the files as
+ * the one before left them; then every project checks, so each exit code sees every project's edits.
+ *
  * The exit code is `run`'s, from a check after writing. Under `--dry-run` nothing is written, so the
  * code is an estimate: the check of the files as they are, less the findings the fixes would remove.
  */
 export async function fixCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const { run, dryRun } = parseFixArgs(args)
-  if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
-  const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
-  const fatal = project.diagnostics.find((diagnostic) => diagnostic.fatal === true)
-  if (fatal !== undefined) throw new Error(`${diagnosticText(fatal)} (run ${fatal.hint ?? "rulecast validate"})`)
   const ruleId = run.leading[0] ?? null
-  if (ruleId !== null) {
-    const rule = project.rules.find((candidate) => candidate.id === ruleId)
-    if (rule === undefined) throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
-    if (!rule.fixable) {
-      const warnings = project.diagnostics
-        .filter((diagnostic) => diagnostic.rule === ruleId && diagnostic.level === "warning")
-        .map((diagnostic) => diagnostic.message)
-      throw new UsageError(notFixable(ruleId, warnings))
-    }
+  const { projects, displayFrom } = await compileRun(await routeRun(root, io.cwd, run), ruleId, run, registry, io)
+  if (
+    ruleId !== null &&
+    !projects.some(({ project }) => project.rules.some((rule) => rule.id === ruleId && rule.fixable))
+  ) {
+    const warnings = projects[0]!.project.diagnostics
+      .filter((diagnostic) => diagnostic.rule === ruleId && diagnostic.level === "warning")
+      .map((diagnostic) => diagnostic.message)
+    throw new UsageError(notFixable(ruleId, warnings))
   }
 
-  const input = { project, ruleId, run, registry, io, committedBaseline: true }
-  const selected = await selectFiles(root, io.cwd, run)
+  const fixes: ProjectFix[] = []
+  for (const { project, selected } of projects) {
+    fixes.push(
+      await fixProject(project, ruleId, selected, registry, io, dryRun, displayPath(project.root, displayFrom)),
+    )
+  }
+  const checks = await Promise.all(
+    projects.map(async ({ project, selected }, index) => {
+      const fix = fixes[index]!
+      const input = {
+        project,
+        ruleId,
+        run,
+        registry,
+        io,
+        committedBaseline: true,
+        ...(displayFrom === undefined ? {} : { displayFrom }),
+      }
+      const check = await checkRun(input, selected)
+      let delivery: Delivery = check.result.delivery
+      if (dryRun) {
+        // Nothing was written, so the check saw the files unfixed: leave out what the fixes would remove.
+        const removed = new Set(fix.fixed.map((site) => site.id))
+        delivery = {
+          ...delivery,
+          findings: delivery.findings.filter((finding) => !removed.has(finding.id)),
+          ...(delivery.preexisting === undefined
+            ? {}
+            : { preexisting: delivery.preexisting.filter((finding) => !removed.has(finding.id)) }),
+        }
+      }
+      delivery = { ...delivery, warnings: [...fix.warnings, ...delivery.warnings] }
+      return { project, check, delivery }
+    }),
+  )
+
+  const fixed = fixes.flatMap((fix) => fix.fixed.map(fix.shownSite))
+  const changed = fixes.flatMap((fix) => fix.changed.map(fix.shown))
+  const unresolved = fixes.flatMap((fix) => fix.unresolved.map(fix.shownSite))
+  const diff = fixes.map((fix) => fix.diff).join("")
+  if (run.format === "json") {
+    const extra = { dryRun, fixed, changedFiles: changed, unresolved, ...(dryRun ? { diff } : {}) }
+    io.stdout(`${await formatRun(run, checks, displayFrom, extra)}\n`)
+  } else {
+    const out: string[] = []
+    if (diff !== "") out.push(diff)
+    out.push(summaryLine(fixed, changed.length, dryRun))
+    for (const site of unresolved) {
+      out.push(
+        `  unresolved: ${site.file}:${site.line}  ${site.rule}  its fix did not remove the finding, so it was not applied`,
+      )
+    }
+    out.push("", await formatRun(run, checks, displayFrom))
+    io.stdout(`${out.join("\n")}\n`)
+  }
+  return exitCodeForChecks(checks)
+}
+
+/** What one project's fixes did, root-relative; `shown` and `shownSite` give the paths as printed. */
+interface ProjectFix {
+  warnings: string[]
+  fixed: FixSite[]
+  changed: string[]
+  unresolved: FixSite[]
+  /** Under --dry-run, the changes as a diff with printed paths; otherwise empty. */
+  diff: string
+  shown: (file: string) => string
+  shownSite: (site: FixSite) => FixSite
+}
+
+/** Applies one project's fixes to its selected files (under --dry-run, works them out only). */
+async function fixProject(
+  project: CompiledProject,
+  ruleId: string | null,
+  selected: SelectedFiles,
+  registry: DetectorRegistry,
+  io: CliIo,
+  dryRun: boolean,
+  shown: (file: string) => string,
+): Promise<ProjectFix> {
+  const root = project.root
   const stateDir = ensureProjectState(cacheHome(io.env), root)
   const detection = detectionFor(project, registry, stateDir, createReferenceResolver(root))
   const timeoutMs = project.config.timeouts.verifyMs
@@ -213,17 +297,17 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
   for (const error of passes.errors) warnings.push(`fixes not applied: ${error}`)
   for (const file of passes.unsettled) {
     warnings.push(
-      `fixes were still pending after ${MAX_PASSES} passes, so ${file} was left unchanged: two rules' fixes undo each other`,
+      `fixes were still pending after ${MAX_PASSES} passes, so ${shown(file)} was left unchanged: two rules' fixes undo each other`,
     )
   }
   for (const file of passes.unfinished) {
     warnings.push(
-      `fixes were still pending in ${file} after ${MAX_PASSES} passes: not finished; run rulecast fix again`,
+      `fixes were still pending in ${shown(file)} after ${MAX_PASSES} passes: not finished; run rulecast fix again`,
     )
   }
   for (const site of passes.uncovered) {
     warnings.push(
-      `a fix would move the rulecast-ignore for ${site.rule} away from ${site.file}:${site.line}, so ${site.file} was left unchanged`,
+      `a fix would move the rulecast-ignore for ${site.rule} away from ${shown(site.file)}:${site.line}, so ${shown(site.file)} was left unchanged`,
     )
   }
 
@@ -243,51 +327,22 @@ export async function fixCommand(root: string, args: string[], registry: Detecto
       problem = `${file}: could not ${dryRun ? "check" : "write"} it (${errorMessage(error)}); left unchanged`
     }
     if (problem !== null) {
-      warnings.push(problem)
+      // writeFixed names the file root-relative: it is shown from where fix was started.
+      warnings.push(problem.startsWith(`${file}: `) ? `${shown(file)}${problem.slice(file.length)}` : problem)
       skipped.add(file)
     }
   }
   const changed = passes.changed.filter((file) => !skipped.has(file))
-  const fixed = passes.fixed.filter((site) => !skipped.has(site.file))
-
-  const check = await checkRun(input, selected)
-  let delivery: Delivery = check.result.delivery
-  if (dryRun) {
-    // Nothing was written, so the check saw the files unfixed: leave out what the fixes would remove.
-    const removed = new Set(fixed.map((site) => site.id))
-    delivery = {
-      ...delivery,
-      findings: delivery.findings.filter((finding) => !removed.has(finding.id)),
-      ...(delivery.preexisting === undefined
-        ? {}
-        : { preexisting: delivery.preexisting.filter((finding) => !removed.has(finding.id)) }),
-    }
-  }
-  delivery = { ...delivery, warnings: [...warnings, ...delivery.warnings] }
-
   const diff = dryRun
-    ? changed.map((file) => unifiedDiff(file, contents.get(file)!, passes.contents.get(file)!)).join("")
+    ? changed.map((file) => unifiedDiff(shown(file), contents.get(file)!, passes.contents.get(file)!)).join("")
     : ""
-  if (run.format === "json") {
-    const extra = {
-      dryRun,
-      fixed,
-      changedFiles: changed,
-      unresolved: passes.unresolved,
-      ...(dryRun ? { diff } : {}),
-    }
-    io.stdout(`${await formatRun(project, run, check, delivery, extra)}\n`)
-  } else {
-    const out: string[] = []
-    if (diff !== "") out.push(diff)
-    out.push(summaryLine(fixed, changed.length, dryRun))
-    for (const site of passes.unresolved) {
-      out.push(
-        `  unresolved: ${site.file}:${site.line}  ${site.rule}  its fix did not remove the finding, so it was not applied`,
-      )
-    }
-    out.push("", await formatRun(project, run, check, delivery))
-    io.stdout(`${out.join("\n")}\n`)
+  return {
+    warnings,
+    fixed: passes.fixed.filter((site) => !skipped.has(site.file)),
+    changed,
+    unresolved: passes.unresolved,
+    diff,
+    shown,
+    shownSite: (site) => ({ ...site, file: shown(site.file) }),
   }
-  return exitCodeFor(delivery, check.complete)
 }

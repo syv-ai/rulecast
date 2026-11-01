@@ -9,6 +9,12 @@ rulecast run --from-ref origin/main --format json    # or --all-files, --files F
 rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 ```
 
+## Several projects
+
+Every `.rulecast-config.yaml` above a file judges it as its own project. In a git repository, `run` and `fix` choose the files in the directory they were started in and below it (with `--files`, the files named), and each file is checked by every config above it. Each project uses its own committed baseline, state and mode. The output is one document, and the exit code is the highest any project gives. A `RULE_ID` runs in the projects that define it, and is an error only when none does. With `--session`, and outside a git repository, only the nearest config above the directory runs.
+
+Paths in the output are relative to the directory `run` was started in, with `/` separators. Outside a git repository they are relative to the project root. With several projects, a warning or notice starts with the path of the config it came from, and a rule id that two configs define differently is shown as `<id> (<config dir>)` on its findings.
+
 ## Exit codes
 
 | Code | Meaning | stdout |
@@ -101,7 +107,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
 | `touches`, `notices`, `stop` | Agent-session fields; empty or `null` from the CLI. |
-| `baseline` | When the run classified against the committed baseline: `{ "file": ".rulecast/baseline.json", "entries": 412, "matched": 372, "stale": 40 }`. `entries` is how many ids the file lists, `matched` how many of this run's findings it made pre-existing, `stale` how many entries the run showed are gone (fixed, or the text changed). `null` when the run used no committed baseline. Never changes the exit code. |
+| `baseline` | When the run classified against the committed baseline: `{ "file": ".rulecast/baseline.json", "entries": 412, "matched": 372, "stale": 40 }`. `entries` is how many ids the file lists, `matched` how many of this run's findings it made pre-existing, `stale` how many entries the run showed are gone (fixed, or the text changed). `null` when the run used no committed baseline. Never changes the exit code. With several projects, `baselines` takes its place: one `{ "root": "backend", "baseline": … }` per project, nearest first, `root` relative to where `run` was started and `baseline` as above. |
 
 ### A finding
 
@@ -111,7 +117,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `rule` | The rule's id, or its alias when it has one. |
 | `severity` | `error` or `warning`. |
 | `status` | `new` or `preexisting`. |
-| `file` | Relative to the project root (the directory holding `.rulecast-config.yaml`), with `/` separators. |
+| `file` | Relative to the directory `run` was started in ([Several projects](#several-projects)), with `/` separators. |
 | `line`, `endLine`, `column` | 1-based. `endLine` is the last line of the match. |
 | `message` | The rule's `message` with its template variables filled in. |
 | `count` | How many matches this finding stands for. Findings of one rule in one file with the same rendered message are merged into one; that only happens when the message has no `{{line}}`. A merged finding shows its earliest match, and carries that match's id. |
@@ -178,7 +184,7 @@ Because it is keyed by id, the rules above apply: a finding whose text was edite
 
 ## SARIF
 
-`--format sarif` prints a SARIF 2.1.0 log with one run.
+`--format sarif` prints a SARIF 2.1.0 log with one run per project, each with its own `tool.driver.rules`. With several projects, each run's `automationDetails.id` is `rulecast/<root>/`, the root relative to where `run` was started (`rulecast/` for that directory itself).
 
 | SARIF | From |
 |---|---|
@@ -191,7 +197,7 @@ Because it is keyed by id, the rules above apply: a finding whose text was edite
 | `results[].ruleIndex` | The rule's index in `tool.driver.rules`. |
 | `invocations[0]` | `executionSuccessful` is `complete`; `toolExecutionNotifications` are the `warnings`. |
 
-`artifactLocation.uri` is relative to the project root. For a project below the repository's top, code scanning needs paths relative to the repository; until rulecast writes them, run it from a project at the repository's top.
+`artifactLocation.uri` is relative to the directory `run` was started in, in every run. Code scanning needs paths relative to the repository, so run it from the repository's top.
 
 ## rulecast test
 

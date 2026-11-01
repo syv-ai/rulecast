@@ -1,3 +1,4 @@
+import path from "node:path"
 import { parseArgs } from "node:util"
 
 import {
@@ -20,13 +21,23 @@ import {
 import { type CompiledProject, type CompileOptions, compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import { WORKTREE } from "../core/content"
+import { combineDeliveries } from "../core/delivery/combine"
 import { createReferenceResolver, resolveRuleContext } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { FINDING_ID_VERSION } from "../core/finding-id"
-import { allFiles, changedFilesBetween, changedFilesSince, headCommit, mergeBase, stagedFiles } from "../core/git"
+import {
+  allFiles,
+  changedFilesBetween,
+  changedFilesSince,
+  headCommit,
+  insideWorkTree,
+  mergeBase,
+  stagedFiles,
+} from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { CorruptStoreError } from "../core/jsonl"
 import { type PipelineResult, runPipeline } from "../core/pipeline"
+import { configRootsAbove, configRootsBelow, displayPath, projectsForFiles } from "../core/projects"
 import { fetchingRepos } from "../core/repos/provider"
 import { recordedMode, sessionDir } from "../core/session/session"
 import type { ContentSource, Delivery } from "../core/types"
@@ -164,6 +175,56 @@ export async function selectFiles(root: string, cwd: string, run: RunArgs): Prom
   }
 }
 
+/** One project a run checks, and the files it judges (root-relative). */
+export interface ProjectSelection {
+  root: string
+  selected: SelectedFiles
+}
+
+/** The projects a run checks, nearest first; `displayFrom` is where their paths are shown from. */
+export interface RoutedRun {
+  projects: ProjectSelection[]
+  /** Undefined: paths are shown root-relative, as before configs could sit anywhere. */
+  displayFrom: string | undefined
+}
+
+const noProject = (cwd: string) => new Error(`no ${CONFIG_FILE} in ${cwd} or its parents`)
+
+/**
+ * Which projects a run checks, and each one's files. In a git work tree, the files are chosen as
+ * `selectFiles` chooses them, from `cwd` and limited to its subtree (`--files`: as named), and every
+ * config above a file judges it (core/projects.ts). The nearest config above `cwd` always runs, with
+ * no files if none reached it, so "nothing staged" is said as before. A run over a session, and any run
+ * outside git, is the nearest project's alone. `root`: the nearest config's directory (`findRoot`).
+ */
+export async function routeRun(root: string, cwd: string, run: RunArgs): Promise<RoutedRun> {
+  const nearest = hasProject(root) ? path.resolve(root) : null
+  if (run.session !== null || !(await insideWorkTree(cwd))) {
+    if (nearest === null) throw noProject(cwd)
+    return { projects: [{ root: nearest, selected: await selectFiles(nearest, cwd, run) }], displayFrom: undefined }
+  }
+  const gathered: SelectedFiles =
+    run.files !== null
+      ? { selection: "files", files: run.files, baseCommit: null, content: WORKTREE }
+      : await selectFiles(cwd, cwd, run)
+  const routed = projectsForFiles(cwd, gathered.files)
+  const above = configRootsAbove(cwd)
+  const roots = [
+    ...above.filter((dir) => dir === nearest || routed.has(dir)),
+    ...[...routed.keys()].filter((dir) => !above.includes(dir)).sort(),
+  ]
+  if (roots.length === 0) {
+    // Configs only below cwd, and none of them reached: the first one says what was checked.
+    const below = await configRootsBelow(cwd)
+    if (below.length === 0) throw noProject(cwd)
+    roots.push(below[0]!)
+  }
+  return {
+    projects: roots.map((dir) => ({ root: dir, selected: { ...gathered, files: routed.get(dir) ?? [] } })),
+    displayFrom: path.resolve(cwd),
+  }
+}
+
 export interface RunInput {
   project: CompiledProject
   /** Run only this rule; null: every rule. */
@@ -173,6 +234,8 @@ export interface RunInput {
   io: CliIo
   /** Read `.rulecast/baseline.json` when the run has no other baseline. False for try-repo: foreign rules, foreign ids. */
   committedBaseline: boolean
+  /** Where paths are shown from (`RoutedRun`); undefined: root-relative. */
+  displayFrom?: string
 }
 
 /** SARIF's rule metadata for the rules that have findings, with the text of the sections they cite. */
@@ -243,7 +306,7 @@ export interface RunCheck {
  * code. `selected`: files already chosen, so a check after a fix judges the files the fix looked at.
  */
 export async function checkRun(
-  { project, ruleId, run, registry, io, committedBaseline }: RunInput,
+  { project, ruleId, run, registry, io, committedBaseline, displayFrom }: RunInput,
   selected?: SelectedFiles,
 ): Promise<RunCheck> {
   const root = project.root
@@ -289,46 +352,100 @@ export async function checkRun(
     // The machine formats report pre-existing findings by id; the others summarise them.
     listPreexisting: run.format === "json" || run.format === "sarif",
     reportDisabled: true,
+    ...(displayFrom === undefined ? {} : { displayFrom }),
   })
   // A warning, not a failure: every rule ran, and the findings are right for a run with no baseline.
   result.delivery.warnings.push(...baselineWarnings)
   return { result, selected, skipped, complete: !result.failed, committed }
 }
 
-/** A check as `run` prints it. `extra`: keys another command adds to the JSON document. */
+/** One project's check as `formatRun` takes it; `delivery` replaces the check's own (fix's dry run). */
+export interface ProjectCheck {
+  project: CompiledProject
+  check: RunCheck
+  delivery?: Delivery
+}
+
+/**
+ * Checks, nearest project first, as `run` prints them: one answer from every project's delivery
+ * (`combineDeliveries`), SARIF one run per project. `extra`: keys another command adds to the JSON
+ * document. `maxMatchesPerRule` is the nearest project's.
+ */
 export async function formatRun(
-  project: CompiledProject,
   run: RunArgs,
-  check: RunCheck,
-  delivery: Delivery = check.result.delivery,
+  checks: readonly ProjectCheck[],
+  displayFrom: string | undefined,
   extra?: Record<string, unknown>,
 ): Promise<string> {
-  const { result, selected, skipped, complete, committed } = check
-  const withFindings = new Set([...delivery.findings, ...(delivery.preexisting ?? [])].map((finding) => finding.rule))
+  const parts = checks.map((part) => ({ ...part, delivery: part.delivery ?? part.check.result.delivery }))
+  const nearest = parts[0]!
+  const delivery =
+    displayFrom === undefined
+      ? nearest.delivery
+      : combineDeliveries(
+          parts.map(({ project, delivery }) => ({ root: project.root, delivery })),
+          displayFrom,
+        )
+  const shown = (root: string) => displayPath(root, displayFrom)
+  const checkedFiles = new Set(
+    parts.flatMap(({ project, check }) => check.selected.files.map((file) => path.resolve(project.root, file))),
+  )
+  const baselines = parts.map(({ project, check }) => ({
+    root: shown(project.root)("."),
+    baseline:
+      check.committed === null
+        ? null
+        : { ...baselineUse(project, check.committed, check.result), file: shown(project.root)(BASELINE_FILE) },
+  }))
+  const complete = parts.every(({ check }) => check.complete)
+  const withFindings = (part: (typeof parts)[number]) =>
+    new Set([...part.delivery.findings, ...(part.delivery.preexisting ?? [])].map((finding) => finding.rule))
   return formatDelivery(delivery, run.format, {
-    maxMatchesPerRule: project.config.maxMatchesPerRule,
+    maxMatchesPerRule: nearest.project.config.maxMatchesPerRule,
     findings: !run.summary,
     backlog: run.allFiles || run.summary,
-    skipped,
-    checked: { files: selected.files.length, selection: selected.selection },
-    ignored: (result.ignored ?? []).map(({ id, rule, match, reason }) => ({
-      ...(id === undefined ? {} : { id }),
-      rule: rule.id,
-      file: match.file,
-      line: match.line,
-      reason,
-    })),
+    skipped: [...new Set(parts.flatMap(({ check }) => check.skipped))],
+    checked: { files: checkedFiles.size, selection: nearest.check.selected.selection },
+    ignored: parts.flatMap(({ project, check }) =>
+      (check.result.ignored ?? []).map(({ id, rule, match, reason }) => ({
+        ...(id === undefined ? {} : { id }),
+        rule: rule.id,
+        file: shown(project.root)(match.file),
+        line: match.line,
+        reason,
+      })),
+    ),
     complete,
-    baseline: committed === null ? null : baselineUse(project, committed, result),
-    ...(run.format === "sarif" ? { rules: await ruleMetadata(project, withFindings) } : {}),
+    ...(parts.length === 1 ? { baseline: baselines[0]!.baseline } : { baselines }),
+    ...(run.format !== "sarif"
+      ? {}
+      : parts.length === 1
+        ? { rules: await ruleMetadata(nearest.project, withFindings(nearest)) }
+        : {
+            runs: await Promise.all(
+              parts.map(async (part, index) => ({
+                root: baselines[index]!.root,
+                delivery: part.delivery,
+                rules: await ruleMetadata(part.project, withFindings(part)),
+                complete: part.check.complete,
+              })),
+            ),
+          }),
     ...(extra === undefined ? {} : { extra }),
   })
+}
+
+/** The highest exit code across the projects' checks. */
+export function exitCodeForChecks(checks: readonly ProjectCheck[]): number {
+  return Math.max(
+    ...checks.map(({ check, delivery }) => exitCodeFor(delivery ?? check.result.delivery, check.complete)),
+  )
 }
 
 /** A verify event over the selected files, printed in the chosen format. Shared by run and try-repo. */
 export async function executeRun(input: RunInput): Promise<number> {
   const check = await checkRun(input)
-  const text = await formatRun(input.project, input.run, check)
+  const text = await formatRun(input.run, [{ project: input.project, check }], input.displayFrom)
   if (text) input.io.stdout(`${text}\n`)
   return exitCodeFor(check.result.delivery, check.complete)
 }
@@ -350,16 +467,73 @@ async function modeFor(root: string, run: RunArgs, io: CliIo): Promise<Pick<Comp
   return recorded === null ? { env: io.env } : { mode: recorded }
 }
 
+/** A routed run's projects, compiled, nearest first. */
+export interface CompiledRun {
+  projects: { project: CompiledProject; selected: SelectedFiles }[]
+  displayFrom: string | undefined
+}
+
+/**
+ * Compiles every project of a routed run, in parallel. A config that does not load fails the whole
+ * run, nearest first. With `ruleId`, only the projects that define it are kept: an error when none
+ * does.
+ */
+export async function compileRun(
+  routed: RoutedRun,
+  ruleId: string | null,
+  run: RunArgs,
+  registry: DetectorRegistry,
+  io: CliIo,
+): Promise<CompiledRun> {
+  const compiled = await Promise.all(
+    routed.projects.map(async ({ root, selected }) => ({
+      project: await compile({
+        root,
+        registry,
+        repos: fetchingRepos(cacheHome(io.env)),
+        ...(await modeFor(root, run, io)),
+      }),
+      selected,
+    })),
+  )
+  for (const { project } of compiled) {
+    const fatal = project.diagnostics.find((diagnostic) => diagnostic.fatal === true)
+    if (fatal !== undefined) throw new Error(`${diagnosticText(fatal)} (run ${fatal.hint ?? "rulecast validate"})`)
+  }
+  const projects =
+    ruleId === null ? compiled : compiled.filter(({ project }) => project.rules.some((rule) => rule.id === ruleId))
+  if (projects.length === 0) throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
+  return { projects, displayFrom: routed.displayFrom }
+}
+
+/**
+ * Every project above a selected file checks it, each with its own baseline, state and mode, in
+ * parallel: each writes only its own state directory. One answer, and the highest exit code.
+ */
 export async function runCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const run = parseRunArgs(args)
   if (run.ref !== null) throw new UsageError("--ref only applies to try-repo")
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
-  if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
-  const project = await compile({
-    root,
-    registry,
-    repos: fetchingRepos(cacheHome(io.env)),
-    ...(await modeFor(root, run, io)),
-  })
-  return executeRun({ project, ruleId: run.leading[0] ?? null, run, registry, io, committedBaseline: true })
+  const ruleId = run.leading[0] ?? null
+  const { projects, displayFrom } = await compileRun(await routeRun(root, io.cwd, run), ruleId, run, registry, io)
+  const checks = await Promise.all(
+    projects.map(async ({ project, selected }) => ({
+      project,
+      check: await checkRun(
+        {
+          project,
+          ruleId,
+          run,
+          registry,
+          io,
+          committedBaseline: true,
+          ...(displayFrom === undefined ? {} : { displayFrom }),
+        },
+        selected,
+      ),
+    })),
+  )
+  const text = await formatRun(run, checks, displayFrom)
+  if (text) io.stdout(`${text}\n`)
+  return exitCodeForChecks(checks)
 }

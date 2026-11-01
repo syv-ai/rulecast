@@ -163,3 +163,9 @@ export async function repositoryTop(root: string): Promise<string> {
   const result = await git(root, ["rev-parse", "--show-cdup"])
   return result.ok ? path.resolve(root, result.stdout.trim()) : root
 }
+
+/** Whether `dir` is inside a git work tree. */
+export async function insideWorkTree(dir: string): Promise<boolean> {
+  const result = await git(dir, ["rev-parse", "--is-inside-work-tree"])
+  return result.ok && result.stdout.trim() === "true"
+}

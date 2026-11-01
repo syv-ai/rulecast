@@ -27,6 +27,10 @@ export interface FormatOptions {
   rules?: RuleMetadata[]
   /** The committed baseline this run classified against; absent or null when it used none. */
   baseline?: BaselineUse | null
+  /** Several projects: each one's committed baseline, by root. Replaces `baseline` in json. */
+  baselines?: { root: string; baseline: BaselineUse | null }[]
+  /** Several projects: SARIF writes one run per entry. Absent: one run, from the delivery and `rules`. */
+  runs?: SarifRun[]
   /** Keys a command adds after json's own (`rulecast fix`'s `fixed`, `changedFiles`). Additive only. */
   extra?: Record<string, unknown>
 }
@@ -40,6 +44,14 @@ export interface BaselineUse {
   matched: number
   /** No longer found where the run looked: fixed, or the text changed. Never changes the exit code. */
   stale: number
+}
+
+/** One project's SARIF run: its own delivery and rule metadata. `root`: relative to where run started. */
+export interface SarifRun {
+  root: string
+  delivery: Delivery
+  rules: RuleMetadata[]
+  complete: boolean
 }
 
 /** What SARIF says about a rule: built by `run` from the compiled rules and their cited sections. */
@@ -60,10 +72,22 @@ function ignoredLine(ignored: readonly unknown[]): string {
 }
 
 /** Fixed legacy violations are worth seeing, and the file only shrinks when someone prunes it. */
-function staleLine(baseline: FormatOptions["baseline"]): string[] {
+function staleLine(options: FormatOptions): string[] {
+  const entries = (stale: number) => (stale === 1 ? "1 entry" : `${stale} entries`)
+  if (options.baselines !== undefined) {
+    return options.baselines.flatMap(({ root, baseline }) =>
+      baseline === null || baseline.stale === 0
+        ? []
+        : [
+            `baseline ${baseline.file}: ${entries(baseline.stale)} no longer found (fixed or changed); rulecast baseline --prune in ${root} drops them`,
+          ],
+    )
+  }
+  const baseline = options.baseline
   if (baseline === undefined || baseline === null || baseline.stale === 0) return []
-  const entries = baseline.stale === 1 ? "1 entry" : `${baseline.stale} entries`
-  return [`baseline: ${entries} no longer found (fixed or changed); rulecast baseline --prune drops them`]
+  return [
+    `baseline: ${entries(baseline.stale)} no longer found (fixed or changed); rulecast baseline --prune drops them`,
+  ]
 }
 
 /** Names what a staged run left out and the flag that puts it back. */
@@ -140,7 +164,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
     if (options.backlog === true && (options.ignored ?? []).length > 0) out.push("", ignoredLine(options.ignored!))
     // What was left out and what was looked at are as true of a summary as of the full list.
     const tail = [
-      ...staleLine(options.baseline),
+      ...staleLine(options),
       ...((options.skipped ?? []).length > 0 ? [skippedLine(options.skipped!)] : []),
       ...(options.checked !== undefined ? [checkedLine(options.checked)] : []),
     ]
@@ -184,7 +208,7 @@ function terminal(delivery: Delivery, options: FormatOptions): string {
   out.push(...problemsBlock(delivery.warnings), ...disabledBlock(delivery))
 
   for (const notice of delivery.notices ?? []) out.push(notice, "")
-  out.push(...staleLine(options.baseline))
+  out.push(...staleLine(options))
   if ((options.skipped ?? []).length > 0) out.push(skippedLine(options.skipped!))
   if (options.checked !== undefined) out.push(checkedLine(options.checked))
   const errors = delivery.findings.filter((finding) => finding.severity === "error").length
@@ -232,7 +256,7 @@ function json(delivery: Delivery, options: FormatOptions): string {
       // Additive: what did not run, so a consumer can tell "no findings" from "not checked".
       disabled: (delivery.disabled ?? []).map(({ reason, rules }) => ({ reason, rules })),
       stop: delivery.stop,
-      baseline: options.baseline ?? null,
+      ...(options.baselines === undefined ? { baseline: options.baseline ?? null } : { baselines: options.baselines }),
       ...options.extra,
     },
     null,
@@ -280,50 +304,52 @@ function sarifRule(id: string, metadata: RuleMetadata | undefined) {
  * `partialFingerprints` entry, so an upload matches the same finding across runs.
  */
 function sarif(delivery: Delivery, options: FormatOptions): string {
+  const runs = options.runs?.map((run) => sarifRun(run.delivery, run.rules, run.complete, run.root)) ?? [
+    sarifRun(delivery, options.rules ?? [], options.complete !== false, null),
+  ]
+  return JSON.stringify({ $schema: "https://json.schemastore.org/sarif-2.1.0.json", version: "2.1.0", runs }, null, 2)
+}
+
+/**
+ * One project's run. With several, each names its project root in `automationDetails`, so a viewer
+ * that keys runs by tool and category keeps them apart. Locations are relative to where run started.
+ */
+function sarifRun(delivery: Delivery, ruleMetadata: RuleMetadata[], complete: boolean, root: string | null) {
   const findings = [
     ...delivery.findings.map((finding) => ({ finding, baselineState: "new" })),
     ...(delivery.preexisting ?? []).map((finding) => ({ finding, baselineState: "unchanged" })),
   ]
   const ids = [...new Set(findings.map(({ finding }) => finding.rule))]
-  const metadata = new Map((options.rules ?? []).map((rule) => [rule.id, rule]))
+  const metadata = new Map(ruleMetadata.map((rule) => [rule.id, rule]))
   const rules = ids.map((id) => sarifRule(id, metadata.get(id)))
   const indexOf = new Map(ids.map((id, index) => [id, index]))
-  return JSON.stringify(
-    {
-      $schema: "https://json.schemastore.org/sarif-2.1.0.json",
-      version: "2.1.0",
-      runs: [
+  return {
+    tool: { driver: { name: "rulecast", version: VERSION, informationUri: INFORMATION_URI, rules } },
+    ...(root === null ? {} : { automationDetails: { id: root === "." ? "rulecast/" : `rulecast/${root}/` } }),
+    invocations: [
+      {
+        executionSuccessful: complete,
+        toolExecutionNotifications: delivery.warnings.map((text) => ({ level: "warning", message: { text } })),
+      },
+    ],
+    results: findings.map(({ finding, baselineState }) => ({
+      ruleId: finding.rule,
+      ruleIndex: indexOf.get(finding.rule),
+      level: finding.severity,
+      message: { text: finding.message },
+      baselineState,
+      partialFingerprints: { [FINGERPRINT_KEY]: finding.id },
+      ...(finding.count > 1 ? { occurrenceCount: finding.count } : {}),
+      locations: [
         {
-          tool: { driver: { name: "rulecast", version: VERSION, informationUri: INFORMATION_URI, rules } },
-          invocations: [
-            {
-              executionSuccessful: options.complete !== false,
-              toolExecutionNotifications: delivery.warnings.map((text) => ({ level: "warning", message: { text } })),
-            },
-          ],
-          results: findings.map(({ finding, baselineState }) => ({
-            ruleId: finding.rule,
-            ruleIndex: indexOf.get(finding.rule),
-            level: finding.severity,
-            message: { text: finding.message },
-            baselineState,
-            partialFingerprints: { [FINGERPRINT_KEY]: finding.id },
-            ...(finding.count > 1 ? { occurrenceCount: finding.count } : {}),
-            locations: [
-              {
-                physicalLocation: {
-                  artifactLocation: { uri: finding.file },
-                  region: { startLine: finding.line, startColumn: finding.column, endLine: finding.endLine },
-                },
-              },
-            ],
-          })),
+          physicalLocation: {
+            artifactLocation: { uri: finding.file },
+            region: { startLine: finding.line, startColumn: finding.column, endLine: finding.endLine },
+          },
         },
       ],
-    },
-    null,
-    2,
-  )
+    })),
+  }
 }
 
 export function formatDelivery(delivery: Delivery, format: CliFormat, options: FormatOptions): string {
