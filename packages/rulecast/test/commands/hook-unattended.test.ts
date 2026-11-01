@@ -1,13 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from "vitest"
 
 import type { Env } from "../../src/core/home"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
-import { stateDirFor, testEnv } from "../helpers/home"
+import { forgetSessionRoots, stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload, type Payload } from "../helpers/payloads"
 import { pipelineAt } from "../helpers/pipeline"
 
@@ -24,7 +24,11 @@ const violation = (status: number) => `def get():\n    raise HTTPException(404)\
 const UNATTENDED = "Nobody is watching this run to ask"
 const REPORT = "Record each one as unresolved in your final report"
 
+beforeEach(forgetSessionRoots)
+
 async function session(settings: Record<string, unknown> = {}, env: Env = testEnv, files: Record<string, string> = {}) {
+  // A new repository is a new session, though every test calls it "s1".
+  forgetSessionRoots()
   const root = await createRepo({
     ...fixtureFiles,
     ...files,

@@ -10,19 +10,34 @@ export const CONTEXT_LIMIT = 10_000
 /** Budget handed to commit: far enough below the limit that rendering overhead never crosses it. */
 const CONTEXT_BUDGET = 9_000
 
-const BLOCK_PREAMBLE =
-  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
-  'If you believe a finding is wrong, say so to the user rather than changing .rulecast-config.yaml; add a "rulecast-ignore: <rule> <reason>" comment only if they agree.'
+/**
+ * How a preamble names the rules: the config file for one project, every contributing config for
+ * several (Delivery.configs). `source` opens a sentence; `files` is what the agent must not change.
+ */
+interface Configs {
+  source: string
+  files: string
+}
+
+function configsOf(delivery: Delivery): Configs {
+  const configs = delivery.configs ?? []
+  if (configs.length <= 1) return { source: "rulecast rules (.rulecast-config.yaml)", files: ".rulecast-config.yaml" }
+  return { source: `rulecast rules (these configs: ${configs.join(", ")})`, files: "these configs" }
+}
+
+const BLOCK_PREAMBLE = ({ source, files }: Configs) =>
+  `${source} found problems in code changed in this session. Fix them before you finish. ` +
+  `If you believe a finding is wrong, say so to the user rather than changing ${files}; add a "rulecast-ignore: <rule> <reason>" comment only if they agree.`
 
 /** Nobody is there to ask: a disputed finding is written down where the run's results are read. */
-const UNATTENDED_BLOCK_PREAMBLE =
-  "This project's rulecast rules (.rulecast-config.yaml) found problems in code changed in this session. Fix them before you finish. " +
+const UNATTENDED_BLOCK_PREAMBLE = ({ source, files }: Configs) =>
+  `${source} found problems in code changed in this session. Fix them before you finish. ` +
   "Nobody is watching this run to ask. If you believe a finding is wrong, leave that code as it is, record the finding and your reason in this run's decisions file or final report, and carry on with the rest. " +
-  'Do not change .rulecast-config.yaml. A "rulecast-ignore" comment does not silence a finding in code changed in this run.'
+  `Do not change ${files}. A "rulecast-ignore" comment does not silence a finding in code changed in this run.`
 
 /** Unattended, once per prompt: the last block, which turns what is left into the run's report. */
-const REPORT_PREAMBLE =
-  "This project's rulecast rules (.rulecast-config.yaml) still find these problems, and rulecast will not block this run for them again " +
+const REPORT_PREAMBLE = ({ source }: Configs) =>
+  `${source} still find these problems, and rulecast will not block this run for them again ` +
   "(its stop limit is reached, or they have already blocked twice). Do not keep retrying them. " +
   "Record each one as unresolved in your final report, and in this run's decisions file if it keeps one, with why it is unresolved. Then finish."
 
@@ -31,8 +46,8 @@ const REPORT_PREAMBLE =
  * `rulecast install` can rewrite hook settings, and an agent changing rulecast's own setup to get
  * past it is the thing a loop must not learn. Fixing the environment is the pipeline's job.
  */
-const INCOMPLETE_PREAMBLE =
-  "rulecast could not run some of this project's rules, so your work was not checked against them. " +
+const INCOMPLETE_PREAMBLE = ({ files }: Configs) =>
+  `rulecast could not run some of the rules in ${files}, so your work was not checked against them. ` +
   "Do not try to repair rulecast's setup. State in your final report, and in this run's decisions file if it keeps one, " +
   "that these checks did not run and why. Then finish."
 
@@ -44,8 +59,8 @@ const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved
 const SWEPT_PREAMBLE =
   "rulecast: files changed outside the agent's tool calls this session have findings (not blocking the agent)."
 
-const DENY_PREAMBLE =
-  "This project's rulecast rules (.rulecast-config.yaml) refuse this write. Change what you are writing, or the file you are writing it to, and try again."
+const DENY_PREAMBLE = ({ source }: Configs) =>
+  `${source} refuse this write. Change what you are writing, or the file you are writing it to, and try again.`
 
 /**
  * What the user sees, once per session, when the project's hooks are committed and rulecast is not
@@ -108,8 +123,13 @@ function sweptMessage(delivery: Delivery, event: Event, options: { maxMatchesPer
 
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
-  if (delivery.overflowPaths.length > 0) {
-    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${delivery.overflowPaths.join(" and ")}.`
+  const overflow = delivery.overflowPaths
+  // Combined from several projects, each one that overflowed wrote its own file; one that fit wrote none.
+  if (overflow.length > 0 && (delivery.configs ?? []).length > 1) {
+    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery of each config that did not fit is in ${overflow.join(" and ")}.`
+  }
+  if (overflow.length > 0) {
+    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${overflow.join(" and ")}.`
   }
   const session = event.session ? `--session ${event.session.id} ` : ""
   return `\n\n…cut to fit Claude Code's hook output limit. Run \`rulecast run ${session}--format agent\` for the full list.`
@@ -152,7 +172,7 @@ export const claudeCodeAdapter: Adapter = {
       disabled.length === 0 ? [] : ["rulecast: rules that did not run:", ...disabled.map((d) => `  - ${d}`)]
     const notices = [...(delivery.notices ?? []), ...problems, ...notRun].join("\n")
     if (event.kind === "verify" && delivery.stop === "incomplete") {
-      const reason = `${INCOMPLETE_PREAMBLE}\n\n${disabled.map((d) => `- ${d}`).join("\n")}`
+      const reason = `${INCOMPLETE_PREAMBLE(configsOf(delivery))}\n\n${disabled.map((d) => `- ${d}`).join("\n")}`
       const outside = sweptMessage(delivery, event, options)
       const message = [notices, outside].filter((part) => part !== null && part !== "").join("\n\n")
       return json({ decision: "block", reason, systemMessage: message })
@@ -169,7 +189,7 @@ export const claudeCodeAdapter: Adapter = {
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: withinLimit(`${DENY_PREAMBLE}\n\n${text}`, delivery, event),
+            permissionDecisionReason: withinLimit(`${DENY_PREAMBLE(configsOf(delivery))}\n\n${text}`, delivery, event),
           },
         })
       case "touch":
@@ -197,12 +217,13 @@ export const claudeCodeAdapter: Adapter = {
         // A Stop hook reaches the agent only by blocking: Claude Code takes no additionalContext from
         // Stop, and a stop that is let through ends a headless run. So the unattended report is a block.
         if (delivery.stop === "block" || delivery.stop === "report") {
-          const preamble =
+          const preamble = (
             delivery.stop === "report"
               ? REPORT_PREAMBLE
               : delivery.unattended === true
                 ? UNATTENDED_BLOCK_PREAMBLE
                 : BLOCK_PREAMBLE
+          )(configsOf(delivery))
           // Before the findings, so the limit's cut, which takes the tail, never takes it.
           const notChecked =
             disabled.length === 0 ? "" : `${NOT_CHECKED}\n${disabled.map((d) => `- ${d}`).join("\n")}\n\n`

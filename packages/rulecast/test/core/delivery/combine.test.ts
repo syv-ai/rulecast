@@ -73,6 +73,7 @@ describe("combineDeliveries", () => {
     expect(both.findings.map((f) => f.file)).toEqual(["a.ts", "backend/b.py"])
     expect(both.touches).toEqual(["a.ts", "backend/b.py"])
     expect(both.overflowPaths).toEqual([".rulecast/deliveries/1.md", "backend/.rulecast/deliveries/2.md"])
+    expect(both.configs).toEqual([".rulecast-config.yaml", "backend/.rulecast-config.yaml"])
   })
 
   test("omitted findings are merged per rule, counts and files summed", () => {

@@ -27,6 +27,7 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  * - `stop`: the strongest (STOPS). `unattended` and `via: "shell"`: set if any part sets them.
  * - `warnings` and `notices`: concatenated, each prefixed with its config's path relative to
  *   `displayFrom`. `agentNotices` are about the session, not a config: unprefixed, said once.
+ * - `configs`: each part's config, relative to `displayFrom`, in part order.
  * - `omitted`: `findings` merged per rule and per swept/not swept (the renderer finds an entry by
  *   both), counts and files summed; `rules` and `preexisting` summed.
  */
@@ -50,6 +51,7 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     templates: {},
     omitted: { findings: [], rules: 0, preexisting: 0 },
     overflowPaths: [],
+    configs: parts.map(({ root }) => configLabel(root)),
   }
   const firstTemplate = new Map<string, string>()
   const agentNotices = new Set<string>()

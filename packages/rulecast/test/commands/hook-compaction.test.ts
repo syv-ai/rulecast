@@ -1,12 +1,15 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
+import { forgetSessionRoots } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 
 const USERS = "app/services/users.py"
+
+beforeEach(forgetSessionRoots)
 
 function hook(root: string, name: string, file?: string) {
   const payload = claudeCodePayload(name, { root, file, sessionId: "s1" })

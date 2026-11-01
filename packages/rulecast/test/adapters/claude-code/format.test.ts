@@ -82,7 +82,7 @@ describe("Claude Code adapter: format", () => {
   test("a blocked stop hands the findings to the agent as the block reason", () => {
     const output = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout)
     expect(output.decision).toBe("block")
-    expect(output.reason).toMatch(/^This project's rulecast rules/)
+    expect(output.reason).toMatch(/^rulecast rules \(\.rulecast-config\.yaml\)/)
     expect(output.reason).toContain("raises HTTPException(500)")
   })
 
@@ -92,7 +92,7 @@ describe("Claude Code adapter: format", () => {
     const value = delivery({ findings: [finding()], stop: "block", unattended: true })
     const output = JSON.parse(format(value, "verify").stdout)
     expect(output.decision).toBe("block")
-    expect(output.reason).toMatch(/^This project's rulecast rules/)
+    expect(output.reason).toMatch(/^rulecast rules \(\.rulecast-config\.yaml\)/)
     expect(output.reason).toContain("decisions file or final report")
     expect(output.reason).not.toContain("say so to the user")
     expect(output.reason).toContain("raises HTTPException(500)")
@@ -214,6 +214,26 @@ describe("Claude Code adapter: format", () => {
     expect(text.length).toBeLessThanOrEqual(CONTEXT_LIMIT)
     expect(text).toMatch(/The whole delivery is in \/cache\/projects\/ab12\/deliveries\/s1-2026-09-23\.md\.$/)
     expect(text).not.toContain("rulecast run --session")
+  })
+
+  test("combined from several configs, the preambles and the cut notice name them", () => {
+    const configs = [".rulecast-config.yaml", "backend/.rulecast-config.yaml"]
+    const stop = JSON.parse(format(delivery({ findings: [finding()], stop: "block", configs }), "verify").stdout)
+    expect(stop.reason).toMatch(
+      /^rulecast rules \(these configs: \.rulecast-config\.yaml, backend\/\.rulecast-config\.yaml\) found problems/,
+    )
+    expect(stop.reason).toContain("rather than changing these configs;")
+    const deny = JSON.parse(format(delivery({ findings: [finding()], configs }), "guard").stdout)
+    expect(deny.hookSpecificOutput.permissionDecisionReason).toMatch(/^rulecast rules \(these configs: /)
+    const findings = Array.from({ length: 300 }, (_, i) =>
+      finding({ line: i + 1, message: `app/services/users.py:${i + 1} ${"x".repeat(60)}` }),
+    )
+    const big = delivery({ findings, configs, overflowPaths: ["backend/.rulecast/deliveries/2.md"] })
+    const text = JSON.parse(format(big, "edit", { maxMatchesPerRule: 1000 }).stdout).hookSpecificOutput
+      .additionalContext as string
+    expect(text).toMatch(
+      /The whole delivery of each config that did not fit is in backend\/\.rulecast\/deliveries\/2\.md\.$/,
+    )
   })
 
   test("a reset delivers the restored conventions as SessionStart additional context", () => {
