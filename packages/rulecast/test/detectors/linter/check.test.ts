@@ -34,7 +34,7 @@ describe("linter detector check", () => {
   })
 
   test("a python tool in a uv project is reported as the command a person would type", async () => {
-    const root = await createRepo({ "pyproject.toml": "[project]\nname = 'x'\n" })
+    const root = await createRepo({ "pyproject.toml": "[project]\nname = 'x'\n", "uv.lock": "" })
     // PATH is stubbed, so the only uv reachable is the one this test puts there.
     const bin = path.join(root, "fake-path")
     await mkdir(bin, { recursive: true })

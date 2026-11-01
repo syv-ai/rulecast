@@ -16,7 +16,7 @@ describe("resolveTool", () => {
   })
 
   test("falls back to uv run for a python tool in a uv project", async () => {
-    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n" })
+    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n", "uv.lock": "" })
     expect(await resolveTool("ruff", root, (command) => command === "uv")).toEqual({
       command: "uv",
       prefix: ["run", "--", "ruff"],
@@ -63,7 +63,7 @@ describe("runDirFor", () => {
 
 describe("resolveTool from a directory", () => {
   test("looks in node_modules/.bin from the directory up to the top", async () => {
-    const top = await createProject({ "pkg/pyproject.toml": "" })
+    const top = await createProject({ "pkg/pyproject.toml": "", "pkg/uv.lock": "" })
     await mkdir(path.join(top, "node_modules", ".bin"), { recursive: true })
     const binary = path.join(top, "node_modules", ".bin", "ruff")
     await writeFile(binary, "#!/bin/sh\n")
@@ -71,6 +71,22 @@ describe("resolveTool from a directory", () => {
     expect(await resolveTool("ruff", path.join(top, "pkg"), () => true, top)).toEqual({ command: binary, prefix: [] })
     // Without the top, only the directory's own: and it is a uv project.
     expect(await resolveTool("ruff", path.join(top, "pkg"), () => true)).toEqual({
+      command: "uv",
+      prefix: ["run", "--", "ruff"],
+    })
+  })
+})
+
+describe("resolveTool and uv.lock", () => {
+  // uv run in a project without a lock would write uv.lock and a .venv into the user's tree.
+  test("a pyproject.toml without a uv.lock is not run through uv", async () => {
+    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n" })
+    expect(await resolveTool("ruff", root, () => true)).toEqual({ command: "ruff", prefix: [] })
+  })
+
+  test("a workspace member uses uv when the lock is at the workspace root", async () => {
+    const top = await createProject({ "uv.lock": "", "pkg/pyproject.toml": "" })
+    expect(await resolveTool("ruff", path.join(top, "pkg"), () => true, top)).toEqual({
       command: "uv",
       prefix: ["run", "--", "ruff"],
     })
@@ -92,7 +108,7 @@ describe("describeTool", () => {
   })
 
   test("the uv branch is reported as the command a person would type", async () => {
-    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n" })
+    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n", "uv.lock": "" })
     expect(await describeTool("ruff", root, { available: (command) => command === "uv" })).toEqual({
       command: "uv run -- ruff",
       how: "uv",

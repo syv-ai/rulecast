@@ -66,8 +66,17 @@ export async function runDirFor(
 
 /**
  * Spec §6: node_modules/.bin from `dir` up to the repository's `top`, then `uv run`, then PATH.
- * `uv run` only helps for a Python tool inside a Python project, so it is gated on both.
+ * `uv run` only helps for a Python tool inside a project uv already manages: a `pyproject.toml` in
+ * `dir`, and a `uv.lock` there or above it up to `top` (a workspace member has its lock at the
+ * workspace root). Without the lock, `uv run` would create one and a `.venv` in the user's tree.
  */
+async function uvLocked(dir: string, top: string): Promise<boolean> {
+  for (const from of upTo(dir, top)) {
+    if (await reachable(path.join(from, "uv.lock"), constants.F_OK)) return true
+  }
+  return false
+}
+
 export async function resolveTool(
   tool: ToolName,
   dir: string,
@@ -81,6 +90,7 @@ export async function resolveTool(
   if (
     PYTHON_TOOLS.has(tool) &&
     (await reachable(path.join(dir, "pyproject.toml"), constants.F_OK)) &&
+    (await uvLocked(dir, top)) &&
     (await available("uv"))
   ) {
     return { command: "uv", prefix: ["run", "--", tool] }
