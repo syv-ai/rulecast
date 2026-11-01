@@ -170,16 +170,19 @@ function referenceLines(reference: DeliveredReference): string[] {
 }
 
 /** What the budget dropped for a rule before the renderer saw it. */
-function omittedFor(omitted: Omitted, rule: string, swept: boolean): { count: number; files: number } {
+function omittedFor(omitted: Omitted, rule: string, swept: boolean): Cut {
   const entry = omitted.findings.find((finding) => finding.rule === rule && (finding.swept === true) === swept)
-  return { count: entry?.count ?? 0, files: entry?.files ?? 0 }
+  return { count: entry?.count ?? 0, files: entry?.files ?? 0, ...(entry?.inFiles ? { inFiles: entry.inFiles } : {}) }
 }
+
+/** A rule's findings the budget cut: see `Omitted.findings`. */
+type Cut = { count: number; files: number; inFiles?: readonly string[] }
 
 function ruleBlock(
   rule: string,
   findings: Finding[],
   template: string | undefined,
-  dropped: { count: number; files: number },
+  dropped: Cut,
   options: RenderOptions,
 ): string[] {
   const shown = findings.slice(0, options.maxMatchesPerRule)
@@ -195,7 +198,12 @@ function ruleBlock(
 
   const more = hidden.length + dropped.count
   if (more > 0) {
-    const moreFiles = new Set(hidden.map((finding) => finding.file)).size + dropped.files
+    // The files the rest are in, shown or not. Without `inFiles` only the cut ones' unshown files are known.
+    const hiddenFiles = new Set(hidden.map((finding) => finding.file))
+    const moreFiles =
+      dropped.inFiles === undefined
+        ? hiddenFiles.size + dropped.files
+        : new Set([...hiddenFiles, ...dropped.inFiles]).size
     out.push(`  …and ${more} more in ${plural(moreFiles, "file")}`)
   }
   return out
@@ -226,7 +234,12 @@ export function measureRuleBlock(
 ): number {
   const shownFiles = new Set(shown.map((finding) => finding.file))
   const rest = all.slice(shown.length)
-  const cut = { count: rest.length, files: new Set(rest.map((f) => f.file).filter((f) => !shownFiles.has(f))).size }
+  const restFiles = new Set(rest.map((f) => f.file))
+  const cut = {
+    count: rest.length,
+    files: [...restFiles].filter((f) => !shownFiles.has(f)).length,
+    inFiles: [...restFiles],
+  }
   // The block's lines and the blank line the renderer puts after every block. This used to be
   // `lines.join("\n").length + 1`, which counts the newline after the last line but not the blank
   // line's own, so every block was charged one character short.

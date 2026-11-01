@@ -139,6 +139,7 @@ describe("measureRuleBlock", () => {
               rule: "r",
               count: cut.length,
               files: new Set(cut.map((f) => f.file).filter((f) => !shown.some((s) => s.file === f))).size,
+              inFiles: [...new Set(cut.map((f) => f.file))],
             },
           ],
           rules: 0,

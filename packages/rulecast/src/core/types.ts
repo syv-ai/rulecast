@@ -338,8 +338,13 @@ export interface DeliveredReference {
 
 /** What the context budget left out. A renderer says how much is missing; it never recomputes it. */
 export interface Omitted {
-  /** Findings of a rule that is still delivered, and how many files they were in. */
-  findings: { rule: string; count: number; files: number; swept?: true }[]
+  /**
+   * Findings of a rule that is still delivered. `files`: how many files they were in that no
+   * delivered finding of the rule is in (what the rule's total adds). `inFiles`: every file they were
+   * in, as displayed, which is what "…and N more in M files" counts; a cut finding is often in a
+   * file that is already shown. Absent in a delivery written before it existed.
+   */
+  findings: { rule: string; count: number; files: number; inFiles?: string[]; swept?: true }[]
   /** Rules dropped whole, with their findings: only when the floor itself did not fit. */
   rules: number
   preexisting: number

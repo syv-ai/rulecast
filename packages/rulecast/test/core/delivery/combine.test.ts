@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { combineDeliveries } from "../../../src/core/delivery/combine"
+import { renderAgentText } from "../../../src/core/delivery/render-agent"
 import { type Delivery, emptyDelivery, type Finding } from "../../../src/core/types"
 
 const finding = (rule: string, file: string): Finding => ({
@@ -103,6 +104,29 @@ describe("combineDeliveries", () => {
       rules: 3,
       preexisting: 5,
     })
+  })
+
+  test("one rule from two parts, both cut: '…and N more' counts each file the rest is in once", () => {
+    const at = (file: string, line: number) => ({ ...finding("r", file), id: `${file}:${line}`, line })
+    const cut = (file: string) => ({
+      findings: [{ rule: "r", count: 1, files: 0, inFiles: [file] }],
+      rules: 0,
+      preexisting: 0,
+    })
+    const both = combineDeliveries(
+      [
+        top({ findings: [1, 2, 3].map((line) => at("a.py", line)), templates: { r: "m" }, omitted: cut("a.py") }),
+        backend({
+          findings: [1, 2, 3].map((line) => at("backend/b.py", line)),
+          templates: { r: "m" },
+          omitted: cut("backend/b.py"),
+        }),
+      ],
+      FROM,
+    )
+    expect(both.omitted.findings).toEqual([{ rule: "r", count: 2, files: 0, inFiles: ["a.py", "backend/b.py"] }])
+    // Three of a.py shown; three of backend/b.py hidden by the cap, and one cut from each file.
+    expect(renderAgentText(both, { maxMatchesPerRule: 3 })).toContain("…and 5 more in 2 files")
   })
 
   test("one rule id with different templates: the later part's rule is labelled with its config dir", () => {

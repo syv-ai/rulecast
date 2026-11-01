@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { renderAgentText } from "../../../src/core/delivery/render-agent"
 import { displayPath } from "../../../src/core/projects"
+import { parseReference } from "../../../src/core/references"
 import { type ClassifiedFinding, type DecideInput, decide, findingKey } from "../../../src/core/session/decide"
 import { blockedKey, emptyContext, emptyWork } from "../../../src/core/session/state"
 import type { Match } from "../../../src/core/types"
@@ -125,5 +126,63 @@ describe("decide with a display path", () => {
         limit,
       )
     }
+  })
+
+  test("a project reference is labelled from where the agent is; its delivered record stays the root's", async () => {
+    const spec = parseReference("@conventions/code.md#topic", "inject", { dir: ROOT, label: null })
+    const decision = await decide({
+      ...base,
+      findings: [finding("app/x.py", 3, "new", { context: [spec] })],
+      resolver: fakeResolver({ "conventions/code.md#topic": "## Topic\nDo it." }),
+      display,
+    })
+    expect(decision.delivery.references).toEqual([
+      { ref: "backend/conventions/code.md#topic", state: "full", content: "## Topic\nDo it." },
+    ])
+    expect(decision.context).toContainEqual(
+      expect.objectContaining({ t: "delivered", path: "conventions/code.md", anchor: "topic" }),
+    )
+    expect(renderAgentText(decision.delivery, { maxMatchesPerRule: 10 })).toContain(
+      "--- backend/conventions/code.md#topic ---",
+    )
+  })
+
+  test("a demoted project reference keeps its displayed label, and the budget prices it", async () => {
+    const spec = parseReference("@conventions/code.md#topic", "inject", { dir: ROOT, label: null })
+    const findings = [finding("app/x.py", 3, "new", { context: [spec] })]
+    const resolver = fakeResolver({ "conventions/code.md#topic": "x".repeat(400) })
+    let kept = 0
+    // Around the edge where the rule and its reference line just fit: priced by the root's shorter
+    // label, the reference would be kept at limits its displayed line does not fit.
+    for (let limit = 180; limit <= 260; limit++) {
+      const { delivery } = await decide({ ...base, findings, resolver, maxContextChars: limit, display })
+      if (delivery.references.length === 0) continue
+      kept++
+      expect(delivery.references).toEqual([
+        { ref: "backend/conventions/code.md#topic", state: "read", reason: "budget" },
+      ])
+      expect(renderAgentText(delivery, { maxMatchesPerRule: 10 }).length).toBeLessThanOrEqual(limit)
+    }
+    expect(kept).toBeGreaterThan(0)
+  })
+})
+
+describe("the '…and N more' line", () => {
+  test("counts the files the cut findings are in, even when every one is a file already shown", async () => {
+    const findings = Array.from({ length: 11 }, (_, n) => finding("app/x.py", n + 1))
+    const { delivery } = await decide({ ...base, findings, maxContextChars: 10_000 })
+    const text = renderAgentText(delivery, { maxMatchesPerRule: 10 })
+    expect(text).toContain("…and 1 more in 1 file")
+  })
+
+  test("counts a file once when some cut findings share it with shown ones and some are elsewhere", async () => {
+    const findings = [
+      ...Array.from({ length: 12 }, (_, n) => finding("app/x.py", n + 1)),
+      finding("app/y.py", 1),
+      finding("app/y.py", 2),
+    ]
+    const { delivery } = await decide({ ...base, findings, maxContextChars: 10_000 })
+    const text = renderAgentText(delivery, { maxMatchesPerRule: 10 })
+    expect(text).toContain("…and 4 more in 2 files")
   })
 })

@@ -64,7 +64,9 @@ describe("decide: one rule with very many matches", () => {
 
     // The budget still does its job: ten matches shown, the rest counted.
     expect(delivery.findings).toHaveLength(10)
-    expect(delivery.omitted.findings).toEqual([{ rule: "scale/compute", count: 59_990, files: 0 }])
+    expect(delivery.omitted.findings).toEqual([
+      { rule: "scale/compute", count: 59_990, files: 0, inFiles: ["src/generated.ts"] },
+    ])
     expect(elapsed).toBeLessThan(4_000)
   })
 

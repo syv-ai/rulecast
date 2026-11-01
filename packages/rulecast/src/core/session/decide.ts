@@ -88,6 +88,16 @@ const WARNING_SHARE = 0.15
 /** What replaces the warnings the share could not hold. */
 const moreWarnings = (count: number) => `…and ${count} more (run rulecast validate)`
 
+/**
+ * What a reference is called in a delivery. A project reference names a file in the project, so it
+ * is shown like any other file (`display`); a rule repo's keeps its label. Its spec's `ref` stays the
+ * root's: that is its identity in the config and in what the session records.
+ */
+function shownRef(spec: ReferenceSpec, display: (file: string) => string): string {
+  if (path.isAbsolute(spec.path)) return spec.ref
+  return spec.anchor === null ? display(spec.path) : `${display(spec.path)}#${spec.anchor}`
+}
+
 /** Rule repo references have absolute paths; the agent needs that path to read them. */
 function locationOf(spec: ReferenceSpec): { location?: string } {
   return path.isAbsolute(spec.path) ? { location: spec.path } : {}
@@ -243,6 +253,11 @@ export interface Assembled {
    * recorded once it is delivered; the summary's own `file` is the displayed one.
    */
   summaryFiles: ReadonlyMap<Delivery["preexistingSummary"][number], string>
+  /**
+   * A reference's `ref` to what `delivery.references` calls it, where the two differ: a project
+   * reference shown from somewhere other than the root (`shownRef`).
+   */
+  refLabels: ReadonlyMap<string, string>
 }
 
 export async function assemble(input: AssembleInput): Promise<Assembled> {
@@ -309,23 +324,26 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   // References.
   const ruleOrder = [...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(), ...touches]
   const candidates: Assembled["candidates"] = []
+  const refLabels = new Map<string, string>()
   for (const spec of referencesInOrder(ruleOrder)) {
+    const ref = shownRef(spec, display)
+    if (ref !== spec.ref) refLabels.set(spec.ref, ref)
     const resolved = await input.resolver.resolve(spec)
     if (!resolved.found) {
-      delivery.references.push({ ref: spec.ref, state: "missing" })
+      delivery.references.push({ ref, state: "missing" })
     } else if (await isCovered(spec, delivered, input.resolver)) {
-      delivery.references.push({ ref: spec.ref, state: "pointer" })
+      delivery.references.push({ ref, state: "pointer" })
     } else if (spec.mode === "read") {
-      delivery.references.push({ ref: spec.ref, state: "read", reason: "mode", ...locationOf(spec) })
+      delivery.references.push({ ref, state: "read", reason: "mode", ...locationOf(spec) })
     } else if (resolved.bytes > input.maxBytes) {
-      delivery.references.push({ ref: spec.ref, state: "read", reason: "tooLarge", ...locationOf(spec) })
+      delivery.references.push({ ref, state: "read", reason: "tooLarge", ...locationOf(spec) })
     } else {
       candidates.push({ index: delivery.references.length, resolved })
-      delivery.references.push({ ref: spec.ref, state: "full", content: resolved.content })
+      delivery.references.push({ ref, state: "full", content: resolved.content })
     }
   }
 
-  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles }
+  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels }
 }
 
 export interface Trimmed {
@@ -406,8 +424,12 @@ export function trim(
   // it is demoted to "read this", which the renderer still prints. The line is charged with the rule
   // that cites it, because the two are one floor item — a finding without its section explains
   // nothing, and a section for a finding the agent cannot see explains nothing either.
+  // Keyed by what the delivery calls a reference, which is not its spec's `ref` for a project
+  // reference shown from elsewhere (Assembled.refLabels).
+  const shown = (ref: string) => assembled.refLabels.get(ref) ?? ref
   const specs = new Map<string, ReferenceSpec>()
-  for (const rule of [...rulesById.values(), ...touches]) for (const spec of rule.context) specs.set(spec.ref, spec)
+  for (const rule of [...rulesById.values(), ...touches])
+    for (const spec of rule.context) specs.set(shown(spec.ref), spec)
   const lineCost = (ref: string) => {
     const spec = specs.get(ref)
     return deliveryCost.referenceLine(ref, spec === undefined ? undefined : locationOf(spec).location)
@@ -420,7 +442,9 @@ export function trim(
   const floorWithin = (cap: number) => {
     const spent = { chars: 0, kept: new Map<string, Finding[]>(), refs: new Set<string>(), dropped: new Set<string>() }
     const uncharged = (rule: CompiledRule) => [
-      ...new Set(rule.context.map((spec) => spec.ref).filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref))),
+      ...new Set(
+        rule.context.map((spec) => shown(spec.ref)).filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref)),
+      ),
     ]
     for (const [id, findings] of byRule) {
       const rule = rulesById.get(ruleOf(id))
@@ -501,11 +525,12 @@ export function trim(
 
   for (const { index, resolved } of candidates) {
     // Its line is already paid for at the floor; this is what printing it in full adds.
-    const size = deliveryCost.referenceContent(resolved.spec.ref, resolved.content, locationOf(resolved.spec).location)
-    if (orphaned.has(resolved.spec.ref)) continue
+    const ref = shown(resolved.spec.ref)
+    const size = deliveryCost.referenceContent(ref, resolved.content, locationOf(resolved.spec).location)
+    if (orphaned.has(ref)) continue
     if (!fits(size)) {
       delivery.references[index] = {
-        ref: resolved.spec.ref,
+        ref,
         state: "read",
         reason: "budget",
         ...locationOf(resolved.spec),
@@ -570,10 +595,12 @@ export function trim(
       if (shown.length === 0 || shown.length === findings.length) continue
       const shownFiles = new Set(shown.map((finding) => finding.file))
       const dropped = findings.slice(shown.length)
+      const droppedFiles = [...new Set(dropped.map((finding) => finding.file))]
       delivery.omitted.findings.push({
         rule: ruleOf(rule),
         count: dropped.length,
-        files: new Set(dropped.map((finding) => finding.file).filter((file) => !shownFiles.has(file))).size,
+        files: droppedFiles.filter((file) => !shownFiles.has(file)).length,
+        inFiles: droppedFiles,
         ...(rule === ruleOf(rule) ? {} : { swept: true }),
       })
     }

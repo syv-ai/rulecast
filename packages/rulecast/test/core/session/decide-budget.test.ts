@@ -76,7 +76,7 @@ describe("decide: the context budget", () => {
       { ref: "conventions/backend.md#errors", state: "full", content: files["conventions/backend.md#errors"] },
     ])
     expect(delivery.omitted.findings).toEqual([
-      { rule: "backend/no-httpexception", count: 20 - delivery.findings.length, files: 0 },
+      { rule: "backend/no-httpexception", count: 20 - delivery.findings.length, files: 0, inFiles: ["a.py"] },
     ])
   })
 

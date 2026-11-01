@@ -146,6 +146,30 @@ describe("rulecast hook claude-code: configs anywhere", () => {
     expect(await session.guard("backend/app/c.py")).toBeNull()
   })
 
+  test("each config's own doc section is named from the agent, and a rule past its cap counts its files", async () => {
+    const cites = (id: string, pattern: string) => ({
+      id,
+      name: id,
+      files: "\\.py$",
+      detect: { regex: { pattern } },
+      message: "{{file}}:{{line}} broke it.",
+      context: ["@conventions/code.md#topic-1"],
+    })
+    const section = (who: string) => `# Code\n\n## Topic 1\n\nThe ${who} way.\n`
+    const repo = await createRepo({
+      ...BASE,
+      ".rulecast-config.yaml": localConfig([cites("top/no-print", "print\\(")]),
+      "conventions/code.md": section("top"),
+      "backend/.rulecast-config.yaml": localConfig([cites("backend/no-todo", "TODO")]),
+      "backend/conventions/code.md": section("backend"),
+    })
+    const told = await agent(repo).edit("backend/app/x.py", `print('x')\n${"x = 1  # TODO\n".repeat(11)}`)
+    expect(told).toContain("--- conventions/code.md#topic-1 ---\n## Topic 1\n\nThe top way.")
+    expect(told).toContain("--- backend/conventions/code.md#topic-1 ---\n## Topic 1\n\nThe backend way.")
+    expect(told).toContain("…and 1 more in 1 file")
+    expect(told).not.toContain("in 0 files")
+  })
+
   test("a single-project repository gets exactly what one pipeline run delivers", async () => {
     const USERS = "app/services/users.py"
     const VIOLATION = "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n"

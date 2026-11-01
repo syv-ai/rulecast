@@ -29,7 +29,7 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  *   `displayFrom`. `agentNotices` are about the session, not a config: unprefixed, said once.
  * - `configs`: each part's config, relative to `displayFrom`, in part order.
  * - `omitted`: `findings` merged per rule and per swept/not swept (the renderer finds an entry by
- *   both), counts and files summed; `rules` and `preexisting` summed.
+ *   both), counts and files summed, `inFiles` joined; `rules` and `preexisting` summed.
  */
 export function combineDeliveries(parts: { root: string; delivery: Delivery }[], displayFrom: string): Delivery {
   if (parts.length === 1) return parts[0]!.delivery
@@ -122,6 +122,9 @@ function mergeOmitted(into: Omitted, from: Omitted, label: (rule: string) => str
     else {
       entry.count += cut.count
       entry.files += cut.files
+      // Parts' files are distinct (each is relative to displayFrom), but a union costs nothing.
+      if (entry.inFiles === undefined || cut.inFiles === undefined) delete entry.inFiles
+      else entry.inFiles = [...new Set([...entry.inFiles, ...cut.inFiles])]
     }
   }
 }
