@@ -18,11 +18,28 @@ export function catalogUrl(env: Env): string {
   return env.RULECAST_CATALOG || DEFAULT_CATALOG
 }
 
+/**
+ * The config's entry for the catalog, however its URL is spelled (`.git`, a trailing slash): the one
+ * lookup `list --catalog` and `add` share, so they agree on what is configured. `url` is the entry's
+ * own spelling when there is one, so rules are added to it rather than to a second entry.
+ */
+export function catalogEntry<Entry extends { repo: string; rev?: string }>(
+  repos: readonly Entry[],
+  env: Env,
+): { url: string; entry: Entry | null } {
+  const url = catalogUrl(env)
+  const same = (other: string) => repoLabel(other, "") === repoLabel(url, "")
+  const entry = repos.find((repo) => repo.repo !== "local" && same(repo.repo)) ?? null
+  return { url: entry?.repo ?? url, entry }
+}
+
 export interface Catalog {
   url: string
   rev: string
   /** "syv-ai/rulecast@v0.6.0". */
   label: string
+  /** The checkout, where the rules' cited docs are read from. */
+  dir: string
   rules: CompiledRule[]
 }
 
@@ -42,7 +59,7 @@ export async function loadCatalog(
     }
     const dir = await ensureRepo(home, url, pinned)
     const { rules } = await compileManifest(dir, registry)
-    return { url, rev: pinned, label: repoLabel(url, pinned), rules }
+    return { url, rev: pinned, label: repoLabel(url, pinned), dir, rules }
   } catch (error) {
     return errorMessage(error)
   }

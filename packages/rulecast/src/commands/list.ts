@@ -9,7 +9,7 @@ import { createReferenceResolver } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { allFiles } from "../core/git"
 import { cacheHome } from "../core/home"
-import { catalogUrl, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
+import { catalogEntry, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { fetchingRepos } from "../core/repos/provider"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
@@ -130,7 +130,13 @@ export async function listCommand(
   // Where a new convention's section goes (plan 20): add-rule and DRAFT-RULES.md read it here.
   if (ruleId === null) {
     const target = await conventionsFor(root)
-    out.push(target === null ? "Conventions: not set" : `Conventions: ${target.path} (from ${target.from})`, "")
+    out.push(target === null ? "Conventions: not set" : `Conventions: ${target.path} (from ${target.from})`)
+    // The developer's consent to llm rules (plan 20): agents draft an llm rule only when this says allowed.
+    const model = project.config.llm.model
+    out.push(
+      model === null ? "llm rules: not allowed (no llm.model)" : `llm rules: allowed, on ${model} (llm.model)`,
+      "",
+    )
   }
   for (const rule of rules) out.push(...ruleLines(rule))
   if (ruleId === null) {
@@ -188,6 +194,8 @@ export interface CatalogEntry extends ListedRule {
   installed: boolean
   /** For a metered rule, what it costs and where the file goes; null otherwise. */
   cost: string | null
+  /** With a RULE_ID only: the rule's own good and bad examples, which show what it catches. */
+  examples?: { good: { path: string; code: string }[]; bad: { path: string; code: string }[] }
 }
 
 /**
@@ -202,8 +210,7 @@ async function listCatalog(
   io: CliIo,
 ): Promise<number> {
   const config = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
-  const url = catalogUrl(io.env)
-  const entry = config.config.repos.find((repo) => repo.repo === url)
+  const { url, entry } = catalogEntry(config.config.repos, io.env)
   const catalog = await loadCatalog(url, entry?.rev, cacheHome(io.env), registry)
   if (typeof catalog === "string") throw new Error(`the catalog could not be loaded: ${catalog}`)
   const compiled = catalog.rules.filter((rule) => ruleId === null || rule.id === ruleId)
@@ -223,7 +230,10 @@ async function listCatalog(
   })
   if (ruleId !== null) {
     const rule = compiled[0]!
-    const resolver = createReferenceResolver(root)
+    // A catalog rule cites docs in the catalog, not in this project.
+    const resolver = createReferenceResolver(catalog.dir)
+    const pick = ({ path, code }: { path: string; code: string }) => ({ path, code })
+    entries[0]!.examples = { good: (rule.examples?.good ?? []).map(pick), bad: (rule.examples?.bad ?? []).map(pick) }
     entries[0]!.matching = (files ?? []).filter((file) => rule.matches(file))
     entries[0]!.message = rule.message
     entries[0]!.sections = await Promise.all(
@@ -244,6 +254,11 @@ async function listCatalog(
     if (entry.description !== null) lines.splice(2, 0, `  ${entry.description}`)
     if (entry.cost !== null) lines.splice(2, 0, `  ${entry.cost}`)
     out.push(...lines)
+    for (const kind of ["bad", "good"] as const) {
+      for (const example of entry.examples?.[kind] ?? []) {
+        out.push(`${kind} example: ${example.path}`, example.code.trimEnd(), "")
+      }
+    }
   }
   if (ruleId === null) {
     for (const [name, pack] of Object.entries(PACKS)) {

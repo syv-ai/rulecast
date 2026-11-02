@@ -286,15 +286,17 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     )
   }
 
-  if (flags.format === "json") io.stdout(`${JSON.stringify(report, null, 2)}\n`)
-  else io.stdout(terminalText(report, detection, scan))
+  // \u003c rather than <: the agent pastes this into setup-page.html's script data block, which a
+  // literal "</script>" in a file's content would end early.
+  if (flags.format === "json") io.stdout(`${JSON.stringify(report, null, 2).replaceAll("<", "\\u003c")}\n`)
+  else io.stdout(terminalText(report, detection, scan, report.written ? flags.hooks : []))
   if (report.validate === null) return 0
   return report.validate.errors > 0 || !fetched ? 2 : 0
 }
 
-function terminalText(report: InitReport, detection: Detection, scan: HookScan): string {
+function terminalText(report: InitReport, detection: Detection, scan: HookScan, wrapped: readonly string[]): string {
   const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
-  const offered = report.hooks.offered.filter((hook) => !hook.configured)
+  const offered = report.hooks.offered.filter((hook) => !hook.configured && !wrapped.includes(hook.id))
   if (offered.length > 0 || scan.skipped.length > 0) {
     out.push("Hooks")
     if (offered.length > 0) {

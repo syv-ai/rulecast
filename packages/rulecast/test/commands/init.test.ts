@@ -91,6 +91,13 @@ describe("rulecast init", () => {
     expect(dry.report.changes.map((change) => change.file)).toEqual([CONFIG_FILE, ".claude/settings.json"])
   })
 
+  test("the JSON report writes < as \\u003c, so a closing script tag cannot end a page's data block", async () => {
+    const root = await createRepo({ ...PROJECT, "AGENTS.md": "# Agents\n\n## Use </script> carefully\n" })
+    const result = await init(root, "--dry-run", "--format", "json")
+    expect(result.stdout).not.toContain("<")
+    expect((JSON.parse(result.stdout) as InitReport).detected.docs[0]!.headings).toContain("Use </script> carefully")
+  })
+
   test("the JSON report says what init found, for the agent's interview", async () => {
     const root = await createRepo({ ...HOOKS, [CONFIG_FILE]: "conventions: docs/c.md\nrepos: []\n" })
     const { report: found } = await report(root, "--dry-run")
@@ -112,6 +119,7 @@ describe("rulecast init", () => {
     const root = await createRepo(HOOKS)
     const result = await init(root, "--hooks", "hook/types")
     expect(result.code).toBe(0)
+    expect(result.stdout).toContain("Offered as rules with --hooks: hook/black (changes files)")
     expect(localIds(await read(root, CONFIG_FILE))).toEqual(["hook/types"])
     expect(result.stdout).toContain("new, 1 hook rule")
     expect(result.stdout).toContain("rulecast validate: 1 rule valid")

@@ -61,7 +61,7 @@ From the answers, draft the principles and conventions in plain language: short 
 
 ## 5. Review
 
-Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its head comment describes, with:
+Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its head comment describes (every `<` inside a JSON string written as `\u003c`), with:
 
 - `decisionsTitle`: `"Conventions"`, and `columns`: `["Convention", "Found", "You said", "Goes in"]`;
 - one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `said` what the developer said, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`);

@@ -7,7 +7,7 @@ import { CONFIG_FILE, parseConfig } from "../core/config/load"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { cacheHome } from "../core/home"
-import { catalogUrl, loadCatalog, selectRules } from "../core/repos/catalog"
+import { catalogEntry, loadCatalog, selectRules } from "../core/repos/catalog"
 import { addCatalogRules } from "../init/config-text"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
@@ -35,13 +35,19 @@ export async function addCommand(root: string, args: string[], registry: Detecto
   if (!parsed.ok) throw new Error(`${parsed.message} (fix it, then run rulecast add again)`)
 
   const home = cacheHome(io.env)
-  const url = catalogUrl(io.env)
-  const entry = parsed.value.repos.find((repo) => repo.repo === url)
+  const { url, entry } = catalogEntry(parsed.value.repos, io.env)
   const catalog = await loadCatalog(url, entry?.rev, home, registry)
   if (typeof catalog === "string") throw new Error(`the catalog could not be loaded: ${catalog}`)
 
   const { rules, unknown } = selectRules(catalog, positionals)
-  if (unknown.length > 0) throw new UsageError(`"${unknown[0]}" is not a rule or pack in ${catalog.label}`)
+  if (unknown.length > 0) {
+    // The config's pin decides the catalog version; a pack newer than the pin reads as missing.
+    const pinned =
+      entry?.rev === undefined
+        ? ""
+        : ` (the config pins ${catalog.label}; rulecast autoupdate moves it to the latest tag)`
+    throw new UsageError(`"${unknown[0]}" is not a rule or pack in ${catalog.label}${pinned}`)
+  }
   const installed = new Set((entry?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
   const added = rules.filter((rule) => !installed.has(rule.id))
   const already = rules.filter((rule) => installed.has(rule.id))

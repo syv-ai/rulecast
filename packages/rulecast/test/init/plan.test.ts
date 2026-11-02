@@ -78,8 +78,17 @@ describe("planInit", () => {
   test("settings are added to an existing config", async () => {
     const files = { [CONFIG_FILE]: newConfigText() }
     const [change] = await planInit({ hooks: [], settings: { llmModel: "haiku" }, agents: [] }, context(files))
-    expect(change).toMatchObject({ file: CONFIG_FILE, created: false, summary: "+llm" })
+    expect(change).toMatchObject({ file: CONFIG_FILE, created: false, summary: "+llm.model haiku" })
     expect(change!.content).toContain("model: haiku")
+  })
+
+  test("a replaced setting is named with its old value; an unchanged one is not named", async () => {
+    const files = { [CONFIG_FILE]: newConfigText([], { conventions: "docs/old/", llmModel: "haiku" }) }
+    const [change] = await planInit(
+      { hooks: [], settings: { conventions: "docs/new/", llmModel: "haiku" }, agents: [] },
+      context(files),
+    )
+    expect(change!.summary).toBe("conventions docs/old/ → docs/new/")
   })
 
   test("with nothing chosen a new config has only the local repo", async () => {

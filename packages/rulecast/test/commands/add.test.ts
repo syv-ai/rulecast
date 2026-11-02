@@ -5,6 +5,7 @@ import { parse } from "yaml"
 
 import { CONFIG_FILE } from "../../src/core/config/load"
 import type { Env } from "../../src/core/home"
+import { catalogEntry } from "../../src/core/repos/catalog"
 import { createCatalogRepo } from "../helpers/catalog"
 import { runCli } from "../helpers/cli"
 import { createRepo } from "../helpers/git"
@@ -99,12 +100,33 @@ describe("rulecast add", () => {
     expect(again.stdout).toContain("Nothing to add.")
   })
 
+  test("a catalog entry spelled with a trailing slash is the same catalog: nothing is added twice", async () => {
+    for (const spelling of [`${catalog}/`]) {
+      const config = `repos:\n  - repo: ${spelling}\n    rev: v0.2.0\n    rules:\n      - id: python/no-silent-except\n`
+      const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: config })
+      const again = await runCli(root, ["add", "python/no-silent-except"], "", env)
+      expect(again.stdout).toContain("Already configured: python/no-silent-except")
+      expect(await read(root)).toBe(config)
+      const more = await runCli(root, ["add", "generated-code"], "", env)
+      expect(more.code).toBe(0)
+      const parsed = parse(await read(root)) as { repos: { repo: string; rules: { id: string }[] }[] }
+      expect(parsed.repos).toHaveLength(1)
+      expect(parsed.repos[0]!.rules.map((rule) => rule.id)).toEqual(["python/no-silent-except", "generated-code"])
+    }
+  })
+
   test("an unknown id is a usage error and writes nothing", async () => {
     const root = await createRepo(PROJECT)
     const result = await runCli(root, ["add", "python/no-silent-except", "nope/missing"], "", env)
     expect(result.code).toBe(2)
     expect(result.stderr).toContain('"nope/missing" is not a rule or pack')
+    expect(result.stderr).not.toContain("the config pins")
     expect(await read(root)).toBe(PROJECT[CONFIG_FILE])
+
+    // With the catalog pinned, the error says the pin may be what is missing it.
+    await runCli(root, ["add", "generated-code"], "", env)
+    const pinned = await runCli(root, ["add", "nope/missing"], "", env)
+    expect(pinned.stderr).toMatch(/the config pins \S+@v0\.2\.0; rulecast autoupdate moves it to the latest tag/)
   })
 
   test("without a config it says to set rulecast up first", async () => {
@@ -112,6 +134,18 @@ describe("rulecast add", () => {
     const result = await runCli(root, ["add", "python/no-silent-except"], "", env)
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("set rulecast up first")
+  })
+})
+
+test("catalogEntry finds the catalog however its URL is spelled, and keeps the config's spelling", () => {
+  const env = { RULECAST_CATALOG: "https://github.com/syv-ai/rulecast" }
+  for (const repo of ["https://github.com/syv-ai/rulecast.git", "https://github.com/syv-ai/rulecast/"]) {
+    const found = catalogEntry([{ repo: "local" }, { repo, rev: "v1" }], env)
+    expect(found).toEqual({ url: repo, entry: { repo, rev: "v1" } })
+  }
+  expect(catalogEntry([{ repo: "https://github.com/other/rules" }], env)).toEqual({
+    url: "https://github.com/syv-ai/rulecast",
+    entry: null,
   })
 })
 
@@ -143,6 +177,14 @@ describe("rulecast list --catalog", () => {
     const result = await runCli(root, ["list", "--catalog", "python/no-silent-except"], "", env)
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("message ")
-    expect(result.stdout).toMatch(/--- .+ ---/)
+    // The cited section is read from the catalog, not looked for in the project.
+    expect(result.stdout).toMatch(/^--- \S+ ---$/m)
+    expect(result.stdout).not.toContain("--- not found")
+    expect(result.stdout).toContain("bad example: ")
+    const json = JSON.parse(
+      (await runCli(root, ["list", "--catalog", "python/no-silent-except", "--format", "json"], "", env)).stdout,
+    )
+    expect(json[0].sections.every((section: { content: string | null }) => section.content !== null)).toBe(true)
+    expect(json[0].examples.bad.length).toBeGreaterThan(0)
   })
 })

@@ -15,13 +15,15 @@ describe("rulecast list", () => {
     await mkdir(path.join(root, "pkg"))
     await writeFile(path.join(root, "pkg", ".rulecast-config.yaml"), localConfig([rule]))
     expect((await runCli(root, ["list"])).stdout).toMatch(
-      /^Conventions: docs\/conventions\/ \(from \.rulecast-config\.yaml\)\n\n/,
+      /^Conventions: docs\/conventions\/ \(from \.rulecast-config\.yaml\)\nllm rules: not allowed \(no llm\.model\)\n\n/,
     )
     expect((await runCli(path.join(root, "pkg"), ["list"])).stdout).toMatch(
       /^Conventions: docs\/conventions\/ \(from \.rulecast-config\.yaml\)\n/,
     )
     const bare = await createRepo({ ".rulecast-config.yaml": localConfig([rule]) })
     expect((await runCli(bare, ["list"])).stdout).toMatch(/^Conventions: not set\n/)
+    const allowed = await createRepo({ ".rulecast-config.yaml": `llm:\n  model: haiku\n${localConfig([rule])}` })
+    expect((await runCli(allowed, ["list"])).stdout).toContain("llm rules: allowed, on haiku (llm.model)\n")
     // The JSON shape is unchanged: one entry per rule.
     expect(Array.isArray(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout))).toBe(true)
   })

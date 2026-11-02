@@ -47,23 +47,46 @@ describe("newConfigText", () => {
 })
 
 describe("setSettings", () => {
-  test("adds the settings, keeping comments and the keys already there", () => {
-    const text = "# ours\nllm:\n  provider: opencode # keep\nrepos: []\n"
-    const updated = setSettings(text, { llmModel: "haiku", conventions: "docs/c.md" })
-    expect(updated).toContain("# ours")
-    expect(updated).toContain("provider: opencode # keep")
-    expect(parse(updated)).toEqual({
-      llm: { provider: "opencode", model: "haiku" },
-      repos: [],
-      conventions: "docs/c.md",
-    })
+  const LONG = `    rules: []  # ${"a long comment that runs well past eighty columns, ".repeat(2)}\n`
+
+  test("adds settings above repos and changes no other byte", () => {
+    const text = `# ours\nfiles: x   # spaced comment\nrepos:\n  - repo: local\n${LONG}`
+    const { text: updated, changes } = setSettings(text, { llmModel: "haiku", conventions: "docs/c.md" })
+    expect(updated).toBe(
+      `# ours\nfiles: x   # spaced comment\nconventions: docs/c.md\nllm:\n  model: haiku\nrepos:\n  - repo: local\n${LONG}`,
+    )
+    expect(changes).toEqual([
+      { key: "conventions", from: null, to: "docs/c.md" },
+      { key: "llm.model", from: null, to: "haiku" },
+    ])
   })
 
-  test("replaces a different value, and leaves the text alone when nothing changes", () => {
-    const text = "conventions: docs/old.md\nrepos: []\n"
-    expect(parse(setSettings(text, { conventions: "docs/new/" })).conventions).toBe("docs/new/")
-    expect(setSettings(text, { conventions: "docs/old.md" })).toBe(text)
-    expect(setSettings(text, {})).toBe(text)
+  test("adds model to an existing llm block, keeping its provider and comment", () => {
+    const text = "llm:\n  provider: opencode   # keep\nrepos: []\n"
+    const { text: updated } = setSettings(text, { llmModel: "haiku" })
+    expect(updated).toBe("llm:\n  model: haiku\n  provider: opencode   # keep\nrepos: []\n")
+  })
+
+  test("replaces a different value in place and says what it was", () => {
+    const text = "conventions: docs/old/   # where they go\nllm:\n  model: sonnet\nrepos: []\n"
+    const { text: updated, changes } = setSettings(text, { conventions: "docs/new/", llmModel: "haiku" })
+    expect(updated).toBe("conventions: docs/new/   # where they go\nllm:\n  model: haiku\nrepos: []\n")
+    expect(changes).toEqual([
+      { key: "conventions", from: "docs/old/", to: "docs/new/" },
+      { key: "llm.model", from: "sonnet", to: "haiku" },
+    ])
+  })
+
+  test("leaves the text alone when nothing changes", () => {
+    const text = "conventions: docs/old.md\nrepos: [] # flow is fine here\n"
+    expect(setSettings(text, { conventions: "docs/old.md" })).toEqual({ text, changes: [] })
+    expect(setSettings(text, {})).toEqual({ text, changes: [] })
+  })
+
+  test("refuses an llm block it cannot add to without rewriting it", () => {
+    expect(() => setSettings("llm: { provider: opencode }\nrepos: []\n", { llmModel: "haiku" })).toThrow(
+      ConfigTextError,
+    )
   })
 })
 

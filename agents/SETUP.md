@@ -43,7 +43,7 @@ Ask in this order, one question at a time, with your question tool if you have o
 
 ## 4. Show the page
 
-Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and replace only the JSON in its `setup-data` block; its head comment describes the fields.
+Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and replace only the JSON in its `setup-data` block; its head comment describes the fields. In that JSON, write every `<` inside a string as `\u003c`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
 
 - `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, the files that change, and what is not touched.
 - `rules`: the hook rules chosen, and llm rules if allowed.
@@ -57,8 +57,10 @@ In Claude Code, publish the page as a private artifact. Otherwise write it outsi
 Only after the developer approves. In each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku] [--conventions docs/conventions/]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/]
 ```
+
+Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
 
 `init` writes the config and the agent hooks, validates them, and says what to commit. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
 

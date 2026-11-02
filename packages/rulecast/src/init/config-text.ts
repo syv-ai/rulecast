@@ -71,12 +71,6 @@ export interface ConfigSettings {
   llmProvider?: string | null
 }
 
-const SETTING_PATHS = {
-  conventions: ["conventions"],
-  llmModel: ["llm", "model"],
-  llmProvider: ["llm", "provider"],
-} as const
-
 function settingLines(settings: ConfigSettings): string[] {
   const lines: string[] = []
   if (settings.conventions) lines.push(`conventions: ${scalar(settings.conventions)}`)
@@ -96,22 +90,91 @@ export function newConfigText(local: LocalRule[] = [], settings: ConfigSettings 
   return `${lines.join("\n")}\n`
 }
 
+/** One setting init changed: `from` is null when the config did not have it. */
+export interface SettingChange {
+  key: "conventions" | "llm.model" | "llm.provider"
+  from: string | null
+  to: string
+}
+
 /**
- * Sets init's settings in an existing config, keeping its comments and every other key: a key that
- * already holds the value is left as it is, so a re-run changes nothing.
+ * Sets init's settings in an existing config, changing only those values: every other byte, comments
+ * and spacing included, stays as it is. A key that already holds the value is left alone, so a re-run
+ * changes nothing; `changes` says what was added and what was replaced, and with what.
  */
-export function setSettings(text: string, settings: ConfigSettings): string {
-  const doc = parseDocument(text)
+export function setSettings(text: string, settings: ConfigSettings): { text: string; changes: SettingChange[] } {
+  const doc = parseDocument(text, { keepSourceTokens: true })
   if (doc.errors.length > 0) throw new ConfigTextError(doc.errors[0]!.message)
-  if (!isMap(doc.contents)) throw new ConfigTextError("the config must be a mapping")
-  let changed = false
-  for (const [key, pathOf] of Object.entries(SETTING_PATHS) as [keyof ConfigSettings, readonly string[]][]) {
-    const value = settings[key]
-    if (value === undefined || value === null || doc.getIn(pathOf) === value) continue
-    doc.setIn(pathOf, value)
-    changed = true
+  const root = doc.contents
+  if (!isMap(root) || root.flow) throw new ConfigTextError("the config must be a block mapping")
+  const edits: Edit[] = []
+  const changes: SettingChange[] = []
+  const before: string[] = []
+
+  const replace = (node: Node, value: string) => {
+    const [start, end] = node.range!
+    edits.push({ start, end, insert: scalar(value) })
   }
-  return changed ? doc.toString() : text
+  const current = (node: unknown): string | null => (isScalar(node) ? String(node.value) : null)
+
+  if (settings.conventions) {
+    const node = root.get("conventions", true)
+    const from = current(node)
+    if (from !== settings.conventions) {
+      if (node === undefined || node === null) before.push(`conventions: ${scalar(settings.conventions)}`)
+      else if (isScalar(node)) replace(node, settings.conventions)
+      else throw new ConfigTextError("conventions must be a path")
+      changes.push({ key: "conventions", from, to: settings.conventions })
+    }
+  }
+
+  const llmKeys = (
+    [
+      ["provider", settings.llmProvider],
+      ["model", settings.llmModel],
+    ] as const
+  ).filter((entry): entry is readonly ["provider" | "model", string] => Boolean(entry[1]))
+  if (llmKeys.length > 0) {
+    const llm = root.get("llm", true)
+    if (llm === undefined || llm === null) {
+      before.push("llm:", ...llmKeys.map(([key, value]) => `  ${key}: ${scalar(value)}`))
+      for (const [key, value] of llmKeys) changes.push({ key: `llm.${key}`, from: null, to: value })
+    } else {
+      if (!isMap(llm) || llm.flow || llm.items.length === 0) {
+        throw new ConfigTextError("write llm in block style, one key per line, so rulecast can add to it")
+      }
+      const column = columnOf(text, (llm.items[0]!.key as Node).range![0])
+      const added: string[] = []
+      for (const [key, value] of llmKeys) {
+        const node = llm.get(key, true)
+        const from = current(node)
+        if (from === value) continue
+        if (node === undefined || node === null) added.push(`${" ".repeat(column)}${key}: ${scalar(value)}`)
+        else replace(node as Node, value)
+        changes.push({ key: `llm.${key}`, from, to: value })
+      }
+      if (added.length > 0) {
+        const at = lineEndAfter(text, pairKey(root, "llm")!.range![0])
+        edits.push({ start: at, end: at, insert: added.map((line) => `${line}\n`).join("") })
+      }
+    }
+  }
+
+  if (before.length > 0) {
+    // New top-level keys go above repos, where a new config has them.
+    const repos = pairKey(root, "repos")
+    const at = repos === null ? text.length : repos.range![0] - columnOf(text, repos.range![0])
+    const prefix = at === text.length && text !== "" && !text.endsWith("\n") ? "\n" : ""
+    edits.push({ start: at, end: at, insert: `${prefix}${before.map((line) => `${line}\n`).join("")}` })
+  }
+
+  let updated = text
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    updated = updated.slice(0, edit.start) + edit.insert + updated.slice(edit.end)
+  }
+  const check = parseDocument(updated)
+  if (check.errors.length > 0) throw new ConfigTextError(`could not update the config: ${check.errors[0]!.message}`)
+  return { text: updated, changes }
 }
 
 function columnOf(text: string, offset: number): number {
@@ -136,7 +199,7 @@ function appendToSeq(text: string, seq: YAMLSeq, keyNode: Node, items: string[])
     const at = lineEndAfter(text, valueEnd)
     const rest = text.slice(valueEnd, at).trim()
     if (seq.items.length > 0 || (rest !== "" && !rest.startsWith("#"))) {
-      throw new ConfigTextError("write repos and their rules in block style so rulecast init can add to them")
+      throw new ConfigTextError("write repos and their rules in block style so rulecast can add to them")
     }
     let from = start
     while (from > 0 && (text[from - 1] === " " || text[from - 1] === "\t")) from--

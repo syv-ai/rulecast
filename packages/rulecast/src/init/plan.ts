@@ -1,7 +1,7 @@
 import { CONFIG_FILE } from "../core/config/load"
 import { errorMessage } from "../core/errors"
 import type { Adapter, InstallScope } from "../core/types"
-import { addLocalRules, type ConfigSettings, newConfigText, setSettings } from "./config-text"
+import { addLocalRules, type ConfigSettings, newConfigText, type SettingChange, setSettings } from "./config-text"
 import type { LocalRule } from "./hooks"
 
 export interface AgentChoice {
@@ -51,28 +51,30 @@ function parseSettings(text: string, file: string): unknown {
   }
 }
 
+/** "+llm.model haiku", or "llm.model sonnet → haiku" when an existing value is replaced. */
+function settingText(change: SettingChange): string {
+  return change.from === null ? `+${change.key} ${change.to}` : `${change.key} ${change.from} → ${change.to}`
+}
+
 function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
   const { hooks, settings } = selections
-  const named = [
-    ...(hooks.length === 0 ? [] : [plural(hooks.length, "hook rule")]),
-    ...(settings.conventions ? ["conventions"] : []),
-    ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
-  ]
+  const rules = hooks.length === 0 ? [] : [plural(hooks.length, "hook rule")]
   if (configText === null) {
+    const named = [
+      ...rules,
+      ...(settings.conventions ? ["conventions"] : []),
+      ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
+    ]
     const summary = named.length === 0 ? "new, no rules yet" : `new, ${named.join(", ")}`
     return { file: CONFIG_FILE, content: newConfigText(hooks, settings), created: true, summary, commit: true }
   }
-  let content = configText
-  if (hooks.length > 0) content = addLocalRules(content, hooks)
-  content = setSettings(content, settings)
+  const withRules = hooks.length > 0 ? addLocalRules(configText, hooks) : configText
+  const set = setSettings(withRules, settings)
+  const content = set.text
   if (content === configText) return null
-  return {
-    file: CONFIG_FILE,
-    content,
-    created: false,
-    summary: named.map((part) => `+${part}`).join(", "),
-    commit: true,
-  }
+  const added = withRules === configText ? [] : rules.map((part) => `+${part}`)
+  const summary = [...added, ...set.changes.map(settingText)].join(", ")
+  return { file: CONFIG_FILE, content, created: false, summary, commit: true }
 }
 
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange | null> {

@@ -43,7 +43,8 @@ export const COMMANDS: CommandHelp[] = [
     ],
     notes: [
       "Run by a coding agent after the developer approved the setup (agents/SETUP.md). Re-running adds",
-      "what is missing and changes nothing that is already there.",
+      "what is missing, replaces a setting given a new value and names the old one, and leaves the rest.",
+      "The JSON writes every < as \\u003c, so it can be pasted into an HTML page's data block as it is.",
     ],
   },
 
