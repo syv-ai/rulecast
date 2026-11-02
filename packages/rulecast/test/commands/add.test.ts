@@ -143,6 +143,8 @@ test("catalogEntry finds the catalog however its URL is spelled, and keeps the c
     const found = catalogEntry([{ repo: "local" }, { repo, rev: "v1" }], env)
     expect(found).toEqual({ url: repo, entry: { repo, rev: "v1" } })
   }
+  // A fork on another host, or another repository with the same name, is not the catalog.
+  expect(catalogEntry([{ repo: "https://gitlab.com/syv-ai/rulecast" }], env).entry).toBeNull()
   expect(catalogEntry([{ repo: "https://github.com/other/rules" }], env)).toEqual({
     url: "https://github.com/syv-ai/rulecast",
     entry: null,

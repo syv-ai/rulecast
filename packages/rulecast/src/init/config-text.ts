@@ -110,12 +110,27 @@ export function setSettings(text: string, settings: ConfigSettings): { text: str
   const edits: Edit[] = []
   const changes: SettingChange[] = []
   const before: string[] = []
+  // New lines follow the file's own line endings.
+  const eol = text.includes("\r\n") ? "\r\n" : "\n"
 
   const replace = (node: Node, value: string) => {
     const [start, end] = node.range!
+    if (isScalar(node) && (node.type === "BLOCK_LITERAL" || node.type === "BLOCK_FOLDED")) {
+      // A block scalar's range runs through its last line break, which the replacement keeps.
+      edits.push({ start, end, insert: `${scalar(value)}${eol}` })
+      return
+    }
+    if (start === end) {
+      // An empty value (`key:` or `key: # comment`): space it from the colon and from a comment.
+      const pad = text[start - 1] === " " ? "" : " "
+      const after = text[end] === "#" ? " " : ""
+      edits.push({ start, end, insert: `${pad}${scalar(value)}${after}` })
+      return
+    }
     edits.push({ start, end, insert: scalar(value) })
   }
-  const current = (node: unknown): string | null => (isScalar(node) ? String(node.value) : null)
+  const current = (node: unknown): string | null =>
+    isScalar(node) && node.value !== null && node.value !== "" ? String(node.value) : null
 
   if (settings.conventions) {
     const node = root.get("conventions", true)
@@ -155,7 +170,7 @@ export function setSettings(text: string, settings: ConfigSettings): { text: str
       }
       if (added.length > 0) {
         const at = lineEndAfter(text, pairKey(root, "llm")!.range![0])
-        edits.push({ start: at, end: at, insert: added.map((line) => `${line}\n`).join("") })
+        edits.push({ start: at, end: at, insert: added.map((line) => `${line}${eol}`).join("") })
       }
     }
   }
@@ -164,8 +179,8 @@ export function setSettings(text: string, settings: ConfigSettings): { text: str
     // New top-level keys go above repos, where a new config has them.
     const repos = pairKey(root, "repos")
     const at = repos === null ? text.length : repos.range![0] - columnOf(text, repos.range![0])
-    const prefix = at === text.length && text !== "" && !text.endsWith("\n") ? "\n" : ""
-    edits.push({ start: at, end: at, insert: `${prefix}${before.map((line) => `${line}\n`).join("")}` })
+    const prefix = at === text.length && text !== "" && !text.endsWith("\n") ? eol : ""
+    edits.push({ start: at, end: at, insert: `${prefix}${before.map((line) => `${line}${eol}`).join("")}` })
   }
 
   let updated = text

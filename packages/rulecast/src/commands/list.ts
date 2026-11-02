@@ -133,8 +133,13 @@ export async function listCommand(
     out.push(target === null ? "Conventions: not set" : `Conventions: ${target.path} (from ${target.from})`)
     // The developer's consent to llm rules (plan 20): agents draft an llm rule only when this says allowed.
     const model = project.config.llm.model
+    const loaded = !project.diagnostics.some((diagnostic) => diagnostic.fatal === true)
     out.push(
-      model === null ? "llm rules: not allowed (no llm.model)" : `llm rules: allowed, on ${model} (llm.model)`,
+      !loaded
+        ? "llm rules: unknown, the config does not load (rulecast validate)"
+        : model === null
+          ? "llm rules: not allowed (no llm.model)"
+          : `llm rules: allowed, on ${model} (llm.model)`,
       "",
     )
   }

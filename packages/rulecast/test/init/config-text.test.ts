@@ -77,6 +77,36 @@ describe("setSettings", () => {
     ])
   })
 
+  test("fills an empty value, with or without a comment after it", () => {
+    expect(setSettings("conventions:\nrepos: []\n", { conventions: "docs/x/" }).text).toBe(
+      "conventions: docs/x/\nrepos: []\n",
+    )
+    const commented = setSettings("conventions: # later\nllm:\n  model: # pick\nrepos: []\n", {
+      conventions: "docs/x/",
+      llmModel: "haiku",
+    })
+    expect(commented.text).toBe("conventions: docs/x/ # later\nllm:\n  model: haiku # pick\nrepos: []\n")
+    expect(parse(commented.text)).toMatchObject({ conventions: "docs/x/", llm: { model: "haiku" } })
+    // An empty or null value was never set: it is reported as added, not replaced.
+    expect(commented.changes.map((change) => change.from)).toEqual([null, null])
+    expect(setSettings("conventions: ~\nrepos: []\n", { conventions: "docs/x/" }).changes).toEqual([
+      { key: "conventions", from: null, to: "docs/x/" },
+    ])
+  })
+
+  test("replaces a block scalar, keeping the line break after it", () => {
+    const { text } = setSettings("conventions: |\n  docs/a/\nrepos: []\n", { conventions: "docs/b/" })
+    expect(text).toBe("conventions: docs/b/\nrepos: []\n")
+  })
+
+  test("new lines follow a CRLF file's line endings", () => {
+    const text = "# mine\r\nconventions: docs/old/\r\nrepos: []\r\n"
+    const updated = setSettings(text, { llmModel: "haiku", llmProvider: "anthropic" }).text
+    expect(updated).toBe(
+      "# mine\r\nconventions: docs/old/\r\nllm:\r\n  provider: anthropic\r\n  model: haiku\r\nrepos: []\r\n",
+    )
+  })
+
   test("leaves the text alone when nothing changes", () => {
     const text = "conventions: docs/old.md\nrepos: [] # flow is fine here\n"
     expect(setSettings(text, { conventions: "docs/old.md" })).toEqual({ text, changes: [] })

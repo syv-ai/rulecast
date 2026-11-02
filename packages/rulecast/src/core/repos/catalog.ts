@@ -28,7 +28,13 @@ export function catalogEntry<Entry extends { repo: string; rev?: string }>(
   env: Env,
 ): { url: string; entry: Entry | null } {
   const url = catalogUrl(env)
-  const same = (other: string) => repoLabel(other, "") === repoLabel(url, "")
+  // The whole URL, host included, with only `.git` and trailing slashes dropped.
+  const plain = (value: string) =>
+    value
+      .replace(/\/+$/, "")
+      .replace(/\.git$/, "")
+      .replace(/\/+$/, "")
+  const same = (other: string) => plain(other) === plain(url)
   const entry = repos.find((repo) => repo.repo !== "local" && same(repo.repo)) ?? null
   return { url: entry?.repo ?? url, entry }
 }

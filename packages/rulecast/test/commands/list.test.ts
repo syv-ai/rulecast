@@ -24,6 +24,11 @@ describe("rulecast list", () => {
     expect((await runCli(bare, ["list"])).stdout).toMatch(/^Conventions: not set\n/)
     const allowed = await createRepo({ ".rulecast-config.yaml": `llm:\n  model: haiku\n${localConfig([rule])}` })
     expect((await runCli(allowed, ["list"])).stdout).toContain("llm rules: allowed, on haiku (llm.model)\n")
+    // A config that does not load says nothing about consent.
+    const broken = await createRepo({
+      ".rulecast-config.yaml": `llm:\n  model: haiku\nbogus: 1\n${localConfig([rule])}`,
+    })
+    expect((await runCli(broken, ["list"])).stdout).toContain("llm rules: unknown, the config does not load")
     // The JSON shape is unchanged: one entry per rule.
     expect(Array.isArray(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout))).toBe(true)
   })
