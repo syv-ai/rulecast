@@ -10,6 +10,6 @@ The developer asked to set rulecast up. They said: $ARGUMENTS
 
 Setting rulecast up is a conversation with the developer: they decide every choice, and nothing is written until they approve. If they are not here, stop and say so.
 
-Read [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.8.0/agents/SETUP.md) and follow it. What the developer said above answers some of its questions: say how you read it, and don't ask those again.
+Read [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.8.1/agents/SETUP.md) and follow it. What the developer said above answers some of its questions: say how you read it, and don't ask those again.
 
 Commands there say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
