@@ -113,6 +113,64 @@ describe("detectHooks", () => {
     for (const hook of hooks) expect(hook.id).toMatch(RULE_ID)
   })
 
+  test("a hook that runs a script is judged by the script, or said to be unknown (plan 21, #5)", async () => {
+    // "npm run lint" ran biome --write, and init called it read-only; so were a shell script that
+    // regenerates a client and a Python script that rewrites release notes.
+    const preCommit = `repos:
+  - repo: local
+    hooks:
+      - id: lint-write
+        name: lint
+        entry: npm run lint
+        language: system
+      - id: check
+        name: check
+        entry: pnpm run check
+        language: system
+      - id: lint-elsewhere
+        name: lint elsewhere
+        entry: npm run lint:all
+        language: system
+      - id: gen
+        name: generate client
+        entry: bash ./scripts/generate-client.sh
+        language: system
+      - id: release-date
+        name: release date
+        entry: uv run python scripts/add_latest_release_date.py
+        language: system
+      - id: missing
+        name: missing script
+        entry: npm run nope
+        language: system
+      - id: ruff-lint
+        name: ruff lint
+        entry: uv run ruff check
+        language: system
+`
+    const lefthook = `pre-commit:
+  jobs:
+    - name: eslint
+      run: pnpm eslint {staged_files}
+`
+    const packageJson = JSON.stringify({
+      scripts: { lint: "biome check --write .", check: "eslint .", "lint:all": "bun run --filter frontend lint" },
+    })
+    const hooks = await detectHooks(
+      files({ ".pre-commit-config.yaml": preCommit, "lefthook.yml": lefthook, "package.json": packageJson }),
+    )
+    expect(hooks.map((hook) => [hook.id, hook.modifies, hook.runs])).toEqual([
+      ["hook/lint-write", true, undefined],
+      ["hook/check", false, undefined],
+      ["hook/lint-elsewhere", null, "npm run lint:all"],
+      ["hook/gen", null, "./scripts/generate-client.sh"],
+      ["hook/release-date", null, "scripts/add_latest_release_date.py"],
+      ["hook/missing", null, "npm run nope"],
+      ["hook/ruff-lint", false, undefined],
+      ["hook/pre-commit-eslint", false, undefined],
+    ])
+  })
+
   test("one pre-commit id listed twice is offered once: one rule runs every entry with that id", async () => {
     const config = `repos:
   - repo: https://github.com/pre-commit/mirrors-mypy

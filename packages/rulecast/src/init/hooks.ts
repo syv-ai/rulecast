@@ -15,8 +15,13 @@ export interface DetectedHook {
    * file, and the runner filters.
    */
   files: string | null
-  /** It looks like a formatter or a fixer: offered, never ticked, since it would change files. */
-  modifies: boolean
+  /**
+   * true: it looks like a formatter or a fixer, by its name, its flags or the package script it
+   * runs. null: it runs a script init cannot see into (`runs`), so it may. false: neither.
+   */
+  modifies: boolean | null
+  /** What a hook whose `modifies` is null runs: "npm run lint:all", "./scripts/generate-client.sh". */
+  runs?: string
   /**
    * The config that declares it, relative to the project: `../lefthook.yml` for a project below the
    * git top. The rule cites it until the developer names a convention, when it is inside the project.
@@ -50,6 +55,38 @@ const FIXER_NAME =
   /format|fmt|fix|prettier|black|isort|autopep8|yapf|trailing-whitespace|end-of-file|mixed-line-ending|pretty/i
 /** Flags that turn a checker into a fixer. */
 const FIXER_FLAG = /(^|\s)(--fix\b|--write\b|-w\b|--in-place\b|format\b)/
+
+/** `npm run lint`, `pnpm check`, `yarn test`: a package manager and what it runs. */
+const PACKAGE_RUN = /(?:^|[\s;&|(])(npm|pnpm|yarn|bun)\s+(run(?:-script)?\s+)?([^\s;&|()-][^\s;&|()]*)/
+/** Package-manager commands that are not scripts. */
+const NOT_A_SCRIPT = new Set(["install", "i", "ci", "add", "exec", "dlx", "x", "remove", "update"])
+/** A script file run directly or by an interpreter: `./scripts/gen.sh`, `uv run python scripts/x.py`. */
+const SCRIPT_FILE =
+  /(?:^|[;&|(]\s*|\b(?:bash|sh|zsh|python3?|node|tsx|ts-node|ruby|perl|bun|deno\s+run)\s+)((?:\.{0,2}\/)?[\w./-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl))(?=$|[\s;&|)])/
+
+/** The project's package.json scripts, by name. */
+export type PackageScripts = Readonly<Record<string, string>>
+
+/**
+ * Whether a hook's command changes files. A package script is looked up one level, in the
+ * package.json at the git top, where the hook runs; past that, and for a script file, init cannot
+ * tell, and says what it runs instead of calling it read-only (plan 21, #5).
+ */
+function writes(command: string, scripts: PackageScripts): Pick<DetectedHook, "modifies" | "runs"> {
+  if (FIXER_FLAG.test(` ${command}`)) return { modifies: true }
+  const file = SCRIPT_FILE.exec(command)
+  if (file) return { modifies: null, runs: file[1]! }
+  const run = PACKAGE_RUN.exec(command)
+  if (!run || NOT_A_SCRIPT.has(run[3]!)) return { modifies: false }
+  const [, manager, explicit, name] = run as unknown as [string, string, string | undefined, string]
+  const body = Object.hasOwn(scripts, name) ? scripts[name] : undefined
+  // `pnpm eslint`: a binary when no script has that name. `npm lint` is not a thing npm runs.
+  if (body === undefined && explicit === undefined && manager !== "npm") return { modifies: false }
+  const runs = `${manager} run ${name}`
+  if (body === undefined) return { modifies: null, runs }
+  if (FIXER_FLAG.test(` ${body}`)) return { modifies: true }
+  return PACKAGE_RUN.test(body) || SCRIPT_FILE.test(body) ? { modifies: null, runs } : { modifies: false }
+}
 
 type JsonObject = Record<string, unknown>
 const isObject = (value: unknown): value is JsonObject =>
@@ -97,7 +134,13 @@ const overlaps = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
 /** The project's directory as init names it: "backend", from "backend/". */
 const dirName = (prefix: string) => prefix.replace(/\/$/, "")
 
-function preCommitHooks(config: unknown, project: string, source: string, scan: HookScan): void {
+function preCommitHooks(
+  config: unknown,
+  project: string,
+  source: string,
+  scan: HookScan,
+  scripts: PackageScripts,
+): void {
   if (!isObject(config) || !Array.isArray(config.repos)) return
   const hooks = scan.offered
   for (const repo of config.repos) {
@@ -124,7 +167,7 @@ function preCommitHooks(config: unknown, project: string, source: string, scan: 
         name,
         detect: { "pre-commit": hook.id },
         files: null,
-        modifies: FIXER_NAME.test(hook.id) || FIXER_FLAG.test(` ${entry} ${args}`),
+        ...(FIXER_NAME.test(hook.id) ? { modifies: true } : writes(`${entry} ${args}`, scripts)),
         source,
         ...(description === "" ? {} : { description }),
       })
@@ -189,7 +232,14 @@ function rootPrefix(root: unknown): string {
   return dir === "" || dir === "." ? "" : `${dir}/`
 }
 
-function lefthookJobs(jobs: unknown, hook: string, source: string, project: string, scan: HookScan): void {
+function lefthookJobs(
+  jobs: unknown,
+  hook: string,
+  source: string,
+  project: string,
+  scan: HookScan,
+  scripts: PackageScripts,
+): void {
   const add = (name: string, job: JsonObject) => {
     const run = text(job.run)
     if (run === "" || runsRulecast(run)) return
@@ -214,14 +264,14 @@ function lefthookJobs(jobs: unknown, hook: string, source: string, project: stri
       name,
       detect: { lefthook: `${hook}/${name}` },
       files,
-      modifies: job.stage_fixed === true || FIXER_FLAG.test(` ${run}`),
+      ...(job.stage_fixed === true ? { modifies: true } : writes(run, scripts)),
       source,
     })
   }
   if (Array.isArray(jobs)) {
     for (const job of jobs) {
       if (!isObject(job)) continue
-      if (isObject(job.group)) lefthookJobs(job.group.jobs, hook, source, project, scan)
+      if (isObject(job.group)) lefthookJobs(job.group.jobs, hook, source, project, scan, scripts)
       else if (typeof job.name === "string") add(job.name, job)
     }
   } else if (isObject(jobs)) {
@@ -277,19 +327,32 @@ function distinctIds(hooks: DetectedHook[]): DetectedHook[] {
   return out
 }
 
+function packageScripts(text: string | null): PackageScripts {
+  try {
+    const scripts = text === null ? null : (JSON.parse(text) as { scripts?: unknown }).scripts
+    if (!isObject(scripts)) return {}
+    return Object.fromEntries(
+      Object.entries(scripts).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    )
+  } catch {
+    return {}
+  }
+}
+
 /** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
 export async function scanHooks(read: (file: string) => Promise<string | null>, project = ""): Promise<HookScan> {
   const prefix = project === "" || project === "." ? "" : `${project.replace(/\/+$/, "")}/`
   const up = prefix === "" ? "" : "../".repeat(prefix.split("/").length - 1)
   const scan: HookScan = { offered: [], skipped: [] }
-  preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`, scan)
+  const scripts = packageScripts(await read("package.json"))
+  preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`, scan, scripts)
   for (const file of LEFTHOOK_CONFIGS) {
     const config = load(await read(file))
     if (!isObject(config)) continue
     for (const [hook, body] of Object.entries(config)) {
       if (!isObject(body)) continue
-      lefthookJobs(body.jobs, hook, `${up}${file}`, prefix, scan)
-      lefthookJobs(body.commands, hook, `${up}${file}`, prefix, scan)
+      lefthookJobs(body.jobs, hook, `${up}${file}`, prefix, scan, scripts)
+      lefthookJobs(body.commands, hook, `${up}${file}`, prefix, scan, scripts)
     }
     break
   }

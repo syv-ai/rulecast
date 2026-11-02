@@ -117,10 +117,14 @@ describe("rulecast init", () => {
     expect(found.detected.stack).toContain("python")
     expect(found.detected.docs[0]).toEqual({ file: "AGENTS.md", headings: ["Agents", "Errors"] })
     expect(found.detected.agents).toContainEqual({ name: "claude-code", label: "Claude Code", supported: true })
-    expect(found.hooks.offered.map((hook) => [hook.id, hook.modifies])).toEqual([
-      ["hook/types", false],
-      ["hook/black", true],
+    expect(found.hooks.offered.map((hook) => [hook.id, hook.modifies, hook.runs])).toEqual([
+      ["hook/types", null, "./types.sh"],
+      ["hook/black", true, undefined],
     ])
+    // A script init cannot see into is named, not called read-only (plan 21, #5).
+    expect((await init(root, "--dry-run")).stdout).toContain(
+      "hook/types (may change files: runs ./types.sh), hook/black (changes files)",
+    )
     expect(found.config).toEqual({
       exists: true,
       conventions: { path: "docs/c.md", from: CONFIG_FILE },
@@ -141,7 +145,9 @@ describe("rulecast init", () => {
   test("without --hooks no hook is wrapped, and the terminal output names the ones on offer", async () => {
     const root = await createRepo(HOOKS)
     const result = await init(root, "--dry-run")
-    expect(result.stdout).toContain("Offered as rules with --hooks: hook/types, hook/black (changes files)")
+    expect(result.stdout).toContain(
+      "Offered as rules with --hooks: hook/types (may change files: runs ./types.sh), hook/black (changes files)",
+    )
     expect(result.stdout).toContain("Nothing written (--dry-run).")
   })
 

@@ -159,7 +159,15 @@ export interface InitReport {
     agents: { name: string; label: string; supported: boolean }[]
   }
   hooks: {
-    offered: { id: string; name: string; source: string; modifies: boolean; configured: boolean }[]
+    /** modifies: null when the hook runs a script init cannot see into, named by `runs`. */
+    offered: {
+      id: string
+      name: string
+      source: string
+      modifies: boolean | null
+      runs?: string
+      configured: boolean
+    }[]
     skipped: { name: string; source: string; reason: string }[]
   }
   config: {
@@ -253,6 +261,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
         name: hook.name,
         source: hook.source,
         modifies: hook.modifies,
+        ...(hook.runs === undefined ? {} : { runs: hook.runs }),
         configured: configured.has(hook.id),
       })),
       skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
@@ -300,9 +309,7 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   if (offered.length > 0 || scan.skipped.length > 0) {
     out.push("Hooks")
     if (offered.length > 0) {
-      out.push(
-        `Offered as rules with --hooks: ${offered.map((hook) => `${hook.id}${hook.modifies ? " (changes files)" : ""}`).join(", ")}`,
-      )
+      out.push(`Offered as rules with --hooks: ${offered.map((hook) => `${hook.id}${writesNote(hook)}`).join(", ")}`)
     }
     out.push(...notOfferedLines(scan.skipped), "")
   }
@@ -318,4 +325,11 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   else if ((report.validate?.errors ?? 0) > 0) out.push("Not ready to commit: fix what validate reports above.")
   else out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
   return `${out.join("\n")}\n`
+}
+
+/** How init's text says whether an offered hook changes files. */
+function writesNote(hook: { modifies: boolean | null; runs?: string }): string {
+  if (hook.modifies === true) return " (changes files)"
+  if (hook.modifies === null) return ` (may change files: runs ${hook.runs})`
+  return ""
 }

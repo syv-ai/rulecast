@@ -15,3 +15,4 @@ Fixes from an end-to-end review of setup.
 - SETUP.md and CONVENTIONS.md publish the page as an artifact only where the agent has a tool for it.
 - A damaged line in a session store is skipped. Before, one such line dropped the session's memory, and with it the stop check, for every later hook of that session.
 - The session lock is kept fresh while its holder works and released only by its holder, so a holder slower than the 5 s stale limit no longer lets other hook processes in alongside it.
+- `init` judges a hook that runs a package script by that script (one level), and one that runs a script it cannot see into as "may change files", naming it (`modifies: null` and `runs` in JSON). Before, `npm run lint` running `biome --write` was offered as read-only.
