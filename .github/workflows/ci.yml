@@ -30,6 +30,9 @@ jobs:
       - run: pnpm lenses --check
       - run: pnpm readme --check
       - run: pnpm sync-version --check
+      # The Claude Code plugin and its marketplace, as Claude Code reads them. Needs no login or API key.
+      - run: npx -y @anthropic-ai/claude-code@2.1.316 plugin validate . --strict
+      - run: npx -y @anthropic-ai/claude-code@2.1.316 plugin validate plugins/rulecast --strict
       # rulecast on rulecast: what this pull request changed, judged against its merge base.
       - run: pnpm build
         if: github.event_name == 'pull_request'
