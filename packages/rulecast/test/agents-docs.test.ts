@@ -88,13 +88,14 @@ describe("agent docs", () => {
     // A URL on `main` resolves only as long as main still has that file; a tag resolves forever,
     // and the agent docs are versioned by tag (spec §12). Placeholders are fine — whatever fills
     // them in supplies the tag.
-    // README.md too: any repository URL it hands developers must be pinned. (Its paste-this prompt
+    // README.md and the plugin's skills too: any repository URL it hands developers must be pinned. (Its paste-this prompt
     // names the docs site's copy of agents/SETUP.md instead, which the site builds from the latest
     // release tag — packages/site/scripts/content-from.ts.) Only the root one — the package copy's relative links are rewritten to
     // blob/main/ by pnpm readme, which is a different thing and not a doc reference.
     const files = [
       path.join(repoRoot, "README.md"),
       ...(await filesUnder("agents", ".md")),
+      ...(await filesUnder("plugins", ".md")),
       ...(await filesUnder("packages/rulecast/src", ".ts")),
     ]
     const failures: string[] = []
@@ -120,7 +121,11 @@ describe("agent docs", () => {
   })
 
   test("every rulecast repository URL in agents/ and src/ points at a file in the repository", async () => {
-    const files = [...(await filesUnder("agents", ".md")), ...(await filesUnder("packages/rulecast/src", ".ts"))]
+    const files = [
+      ...(await filesUnder("agents", ".md")),
+      ...(await filesUnder("plugins", ".md")),
+      ...(await filesUnder("packages/rulecast/src", ".ts")),
+    ]
     const failures: string[] = []
     for (const file of files) {
       for (const target of repositoryPaths(await readFile(file, "utf8"))) {

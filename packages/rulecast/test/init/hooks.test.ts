@@ -243,7 +243,7 @@ describe("hook rules in the config", () => {
   })
 
   test("a new config holds them under repo: local", () => {
-    const text = newConfigText(null, [], [hookRule(mypy)])
+    const text = newConfigText([hookRule(mypy)])
     expect(text).toContain("  - repo: local\n    rules:\n      - id: hook/mypy\n")
     expect(text).toContain('        message: "{{file}}:{{line}}: {{message}}"\n')
   })

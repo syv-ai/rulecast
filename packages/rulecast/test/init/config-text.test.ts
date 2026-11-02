@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { addCatalogRules, ConfigTextError, newConfigText, type RuleSelection } from "../../src/init/config-text"
+import {
+  addCatalogRules,
+  ConfigTextError,
+  newConfigText,
+  type RuleSelection,
+  setSettings,
+} from "../../src/init/config-text"
 
 const catalog = { url: "https://github.com/syv-ai/rulecast", rev: "v0.2.0" }
 const rules: RuleSelection[] = [
@@ -17,16 +23,12 @@ const NEW_RULES = [
 ]
 
 describe("newConfigText", () => {
-  test("writes the catalog repo with the selected rules and an empty local repo", () => {
-    expect(newConfigText(catalog, rules)).toBe(
+  test("with nothing chosen it writes an empty local repo", () => {
+    expect(newConfigText()).toBe(
       [
         "# rulecast config: https://github.com/syv-ai/rulecast",
         "# Rules from rule repos are pinned by rev; add your own rules under repo: local.",
         "repos:",
-        "  - repo: https://github.com/syv-ai/rulecast",
-        "    rev: v0.2.0",
-        "    rules:",
-        ...NEW_RULES,
         "  - repo: local",
         "    rules: []",
         "",
@@ -34,10 +36,34 @@ describe("newConfigText", () => {
     )
   })
 
-  test("without catalog rules only the local repo is written", () => {
-    const text = newConfigText(catalog, [])
-    expect(parse(text)).toEqual({ repos: [{ repo: "local", rules: [] }] })
-    expect(newConfigText(null, [])).toBe(text)
+  test("the interview's settings go before repos", () => {
+    const text = newConfigText([], { conventions: "docs/conventions/", llmModel: "haiku", llmProvider: "opencode" })
+    expect(text).toContain("conventions: docs/conventions/\nllm:\n  provider: opencode\n  model: haiku\nrepos:\n")
+    expect(parse(text)).toMatchObject({
+      conventions: "docs/conventions/",
+      llm: { model: "haiku", provider: "opencode" },
+    })
+  })
+})
+
+describe("setSettings", () => {
+  test("adds the settings, keeping comments and the keys already there", () => {
+    const text = "# ours\nllm:\n  provider: opencode # keep\nrepos: []\n"
+    const updated = setSettings(text, { llmModel: "haiku", conventions: "docs/c.md" })
+    expect(updated).toContain("# ours")
+    expect(updated).toContain("provider: opencode # keep")
+    expect(parse(updated)).toEqual({
+      llm: { provider: "opencode", model: "haiku" },
+      repos: [],
+      conventions: "docs/c.md",
+    })
+  })
+
+  test("replaces a different value, and leaves the text alone when nothing changes", () => {
+    const text = "conventions: docs/old.md\nrepos: []\n"
+    expect(parse(setSettings(text, { conventions: "docs/new/" })).conventions).toBe("docs/new/")
+    expect(setSettings(text, { conventions: "docs/old.md" })).toBe(text)
+    expect(setSettings(text, {})).toBe(text)
   })
 })
 
@@ -121,8 +147,8 @@ describe("addCatalogRules", () => {
   })
 
   test("re-running only adds: listed rules are skipped and nothing new leaves the text unchanged", () => {
-    const once = addCatalogRules(newConfigText(catalog, [rules[0]!]), catalog, rules)
-    expect(parse(once).repos[0].rules.map((rule: { id: string }) => rule.id)).toEqual([
+    const once = addCatalogRules(addCatalogRules(newConfigText(), catalog, [rules[0]!]), catalog, rules)
+    expect(parse(once).repos[1].rules.map((rule: { id: string }) => rule.id)).toEqual([
       "generated-code",
       "python/layering",
     ])

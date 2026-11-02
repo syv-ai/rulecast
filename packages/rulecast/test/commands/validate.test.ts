@@ -33,7 +33,6 @@ describe("rulecast validate", () => {
       stdout: ".rulecast-config.yaml: 3 rules valid\n",
       stderr: "",
       warmed: [],
-      copied: [],
     })
   })
 

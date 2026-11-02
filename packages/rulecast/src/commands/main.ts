@@ -4,7 +4,6 @@ import { errorMessage } from "../core/errors"
 import type { Env } from "../core/home"
 import { VERSION } from "../core/version"
 import { builtinDetectors } from "../detectors"
-import type { Prompter } from "../init/prompts"
 import { addCommand } from "./add"
 import { autoupdateCommand } from "./autoupdate"
 import { baselineCommand } from "./baseline"
@@ -30,12 +29,6 @@ export interface CliIo {
   cwd: string
   /** Environment variables; the cache home comes from RULECAST_HOME or XDG_CACHE_HOME (core/home.ts). */
   env: Env
-  /** stdin and stdout are terminals: init may prompt. */
-  interactive: boolean
-  /** The terminal prompter, loaded on demand; only init calls it, and only when interactive. */
-  prompter(): Promise<Prompter>
-  /** Copies text to the system clipboard; false when no clipboard command exists or it fails. */
-  copyToClipboard(text: string): Promise<boolean>
   stdout(text: string): void
   stderr(text: string): void
   /** All of stdin. */

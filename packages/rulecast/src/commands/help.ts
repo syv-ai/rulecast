@@ -28,21 +28,25 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "init",
     synopsis:
-      "rulecast init [--rules id,id | --no-rules] [--agent <name>... | --no-agents] [--no-hooks] [--scope shared|personal] [--yes]",
-    summary: "Set rulecast up: config, catalog rules, agent hooks",
+      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--dry-run] [--format terminal|json]",
+    summary: "Set rulecast up: config, settings, your existing git hooks as rules, agent hooks",
     flags: [
-      [
-        "--rules id,id",
-        "Install these catalog rules, or groups such as loop-safety, instead of the ones that match your files",
-      ],
-      ["--no-rules", "Install no catalog rules"],
-      ["--agent <name>", "Install hooks for this agent (claude-code); repeatable"],
+      ["--agent <name>", "Install hooks for this agent (claude-code); repeatable. Default: the agents detected"],
       ["--no-agents", "Install no agent hooks"],
-      ["--no-hooks", "Offer none of the project's pre-commit or lefthook hooks as rules"],
-      ["--scope shared|personal", "Write hooks to the shared or the personal settings file"],
-      ["--yes", "Take every default and write without asking"],
+      ["--scope shared|personal", "Write hooks to the shared (default) or the personal settings file"],
+      ["--hooks id,id", "Run these of the project's pre-commit or lefthook hooks as rules (--dry-run lists them)"],
+      ["--llm-model <name>", "Allow llm rules, and run those that name no model on this one (e.g. haiku)"],
+      ["--llm-provider <name>", "claude-code (default), opencode, anthropic or openai-compatible"],
+      ["--conventions <path>", "The file or folder where new conventions are written"],
+      ["--dry-run", "Write nothing; show what was found and every file that would be written"],
+      ["--format", "terminal or json"],
+    ],
+    notes: [
+      "Run by a coding agent after the developer approved the setup (agents/SETUP.md). Re-running adds",
+      "what is missing and changes nothing that is already there.",
     ],
   },
+
   {
     name: "install",
     synopsis: "rulecast install [--agent <name>]... [--scope shared|personal]",

@@ -29,9 +29,6 @@ importers:
       '@ast-grep/napi':
         specifier: ^0.45.3
         version: 0.45.3
-      '@clack/prompts':
-        specifier: ^1.8.1
-        version: 1.8.1
       diff:
         specifier: ^8.0.4
         version: 8.0.4

@@ -62,13 +62,56 @@ function localRuleLines(rule: LocalRule): string[] {
 
 const indent = (lines: string[], column: number) => lines.map((line) => `${" ".repeat(column)}${line}\n`).join("")
 
-/** The text of a new config: the catalog repo (when it has rules) and the local repo, with any `local` rules. */
-export function newConfigText(catalog: CatalogRef | null, rules: RuleSelection[], local: LocalRule[] = []): string {
-  const lines = [...HEADER, "repos:"]
-  if (catalog !== null && rules.length > 0) lines.push(...repoLines(catalog, rules).map((line) => `  ${line}`))
+/** The top-level settings init writes from the interview's answers (plan 20). */
+export interface ConfigSettings {
+  /** Where new conventions are written, relative to the config. */
+  conventions?: string | null
+  /** The model for llm rules: the developer agreed to llm rules. */
+  llmModel?: string | null
+  llmProvider?: string | null
+}
+
+const SETTING_PATHS = {
+  conventions: ["conventions"],
+  llmModel: ["llm", "model"],
+  llmProvider: ["llm", "provider"],
+} as const
+
+function settingLines(settings: ConfigSettings): string[] {
+  const lines: string[] = []
+  if (settings.conventions) lines.push(`conventions: ${scalar(settings.conventions)}`)
+  const llm = [
+    ...(settings.llmProvider ? [`  provider: ${scalar(settings.llmProvider)}`] : []),
+    ...(settings.llmModel ? [`  model: ${scalar(settings.llmModel)}`] : []),
+  ]
+  if (llm.length > 0) lines.push("llm:", ...llm)
+  return lines
+}
+
+/** The text of a new config: its settings, then the local repo with any `local` rules. */
+export function newConfigText(local: LocalRule[] = [], settings: ConfigSettings = {}): string {
+  const lines = [...HEADER, ...settingLines(settings), "repos:"]
   if (local.length === 0) lines.push("  - repo: local", "    rules: []")
   else lines.push("  - repo: local", "    rules:", ...local.flatMap(localRuleLines).map((line) => `      ${line}`))
   return `${lines.join("\n")}\n`
+}
+
+/**
+ * Sets init's settings in an existing config, keeping its comments and every other key: a key that
+ * already holds the value is left as it is, so a re-run changes nothing.
+ */
+export function setSettings(text: string, settings: ConfigSettings): string {
+  const doc = parseDocument(text)
+  if (doc.errors.length > 0) throw new ConfigTextError(doc.errors[0]!.message)
+  if (!isMap(doc.contents)) throw new ConfigTextError("the config must be a mapping")
+  let changed = false
+  for (const [key, pathOf] of Object.entries(SETTING_PATHS) as [keyof ConfigSettings, readonly string[]][]) {
+    const value = settings[key]
+    if (value === undefined || value === null || doc.getIn(pathOf) === value) continue
+    doc.setIn(pathOf, value)
+    changed = true
+  }
+  return changed ? doc.toString() : text
 }
 
 function columnOf(text: string, offset: number): number {

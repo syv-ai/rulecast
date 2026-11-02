@@ -5,8 +5,7 @@ import { parseArgs } from "node:util"
 import { parse } from "yaml"
 
 import { ADAPTERS, adapterByName } from "../adapters"
-import { compile } from "../core/compile/project"
-import type { CompiledRule } from "../core/compile/rule"
+import { conventionsFor } from "../core/config/conventions"
 import { CONFIG_FILE, parseConfig } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { readSourceFile } from "../core/detection/per-rule"
@@ -14,65 +13,67 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import { allFiles, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
-import { type Catalog, catalogUrl, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
-import { fetchingRepos } from "../core/repos/provider"
-import type { Adapter, InstallScope } from "../core/types"
-import { VERSION } from "../core/version"
-import type { RuleSelection } from "../init/config-text"
-import { type Detection, detectionSummary, detectProject, docChoices, markerExists, matchHeading } from "../init/detect"
-import { draftPrompt } from "../init/draft-prompt"
-import { hookRule, type LocalRule, notOfferedLines, scanHooks } from "../init/hooks"
+import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } from "../core/types"
+import type { ConfigSettings } from "../init/config-text"
+import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
+import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
-import { Cancelled, type Choice, type Prompter } from "../init/prompts"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
+import { validationReport } from "./validate"
 
-/** The rule catalog: the rulecast repository itself (spec §4, Rule repos). RULECAST_CATALOG overrides it. */
 const NO_HOOKS = "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>."
 
 const SCOPES: readonly InstallScope[] = ["shared", "personal"]
 
 interface Flags {
-  /** --rules; null when not given. */
-  rules: string[] | null
-  noRules: boolean
   agents: Adapter[]
   /** --no-agents: install no hooks, whatever is detected. */
   noAgents: boolean
-  /** --no-hooks: offer none of the project's own pre-commit or lefthook hooks. */
-  noHooks: boolean
-  scope: InstallScope | null
-  yes: boolean
-}
-
-/** Where init writes to: the output channel differs between prompting and plain runs. */
-interface Ui {
-  /** null: no prompts; every choice takes its flag or its detected default. */
-  prompter: Prompter | null
-  say(message: string, title?: string): void
+  scope: InstallScope
+  /** --hooks: the project's own hooks to run as rules, by the ids the dry run offers. */
+  hooks: string[]
+  settings: ConfigSettings
+  dryRun: boolean
+  format: "terminal" | "json"
 }
 
 const installable = () => ADAPTERS.filter((adapter) => adapter.install !== null)
+
+const list = (value: string | undefined) =>
+  (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
 
 function parseFlags(args: string[]): Flags {
   const { values } = parseArgs({
     args,
     options: {
-      rules: { type: "string" },
-      "no-rules": { type: "boolean", default: false },
       agent: { type: "string", multiple: true },
       "no-agents": { type: "boolean", default: false },
-      "no-hooks": { type: "boolean", default: false },
       scope: { type: "string" },
-      yes: { type: "boolean", default: false },
+      hooks: { type: "string" },
+      "llm-model": { type: "string" },
+      "llm-provider": { type: "string" },
+      conventions: { type: "string" },
+      "dry-run": { type: "boolean", default: false },
+      format: { type: "string", default: "terminal" },
     },
   })
-  if (values.rules !== undefined && values["no-rules"]) throw new UsageError("use --rules or --no-rules, not both")
   if (values.agent !== undefined && values["no-agents"]) throw new UsageError("use --agent or --no-agents, not both")
-  const scope = values.scope ?? null
-  if (scope !== null && !SCOPES.includes(scope as InstallScope)) {
-    throw new UsageError(`unknown scope "${scope}" (use shared or personal)`)
+  const scope = values.scope ?? "shared"
+  if (!SCOPES.includes(scope as InstallScope)) throw new UsageError(`unknown scope "${scope}" (use shared or personal)`)
+  if (values.format !== "terminal" && values.format !== "json") {
+    throw new UsageError(`unknown format "${values.format}" (use terminal or json)`)
+  }
+  const provider = values["llm-provider"]
+  if (provider !== undefined && !LLM_PROVIDERS.includes(provider as LlmProviderName)) {
+    throw new UsageError(`unknown llm provider "${provider}" (use ${LLM_PROVIDERS.join(", ")})`)
+  }
+  if (values.conventions !== undefined && path.isAbsolute(values.conventions)) {
+    throw new UsageError("--conventions takes a path relative to the config's directory")
   }
   const agents = (values.agent ?? []).map((name) => {
     const adapter = adapterByName(name)
@@ -82,21 +83,18 @@ function parseFlags(args: string[]): Flags {
     }
     return adapter
   })
-  const rules =
-    values.rules === undefined
-      ? null
-      : values.rules
-          .split(",")
-          .map((id) => id.trim())
-          .filter(Boolean)
   return {
-    rules,
-    noRules: values["no-rules"],
     agents,
     noAgents: values["no-agents"],
-    noHooks: values["no-hooks"],
-    scope: scope as InstallScope | null,
-    yes: values.yes,
+    scope: scope as InstallScope,
+    hooks: list(values.hooks),
+    settings: {
+      conventions: values.conventions ?? null,
+      llmModel: values["llm-model"]?.trim() || null,
+      llmProvider: provider ?? null,
+    },
+    dryRun: values["dry-run"],
+    format: values.format,
   }
 }
 
@@ -119,146 +117,11 @@ const idOf = (entry: unknown): string | null => {
   return typeof id === "string" ? id : null
 }
 
-async function chooseRules(
-  catalog: Catalog,
-  installed: ReadonlySet<string>,
-  files: readonly string[],
-  flags: Flags,
-  ui: Ui,
-  registry: DetectorRegistry,
-  unattended: boolean,
-): Promise<CompiledRule[]> {
-  const metered = (rule: CompiledRule) => rule.detector !== null && registry.get(rule.detector.kind)?.metered === true
-  const optIn = (rule: CompiledRule) => !unattended && groupOf(rule.id) in PACKS
-  const available = catalog.rules.filter((rule) => !installed.has(rule.id))
-  if (flags.noRules) return []
-  if (flags.rules !== null) {
-    // A group name selects the group: `--rules loop-safety` is the pack.
-    const known = new Set(
-      catalog.rules.flatMap((rule) => (rule.id.includes("/") ? [rule.id, groupOf(rule.id)] : [rule.id])),
-    )
-    const unknown = flags.rules.find((id) => !known.has(id))
-    if (unknown !== undefined) throw new UsageError(`"${unknown}" is not a rule in ${catalog.label}`)
-    return available.filter((rule) => flags.rules!.includes(rule.id) || flags.rules!.includes(groupOf(rule.id)))
-  }
-  // Preselected: rules that apply to at least one project file — except metered ones and opt-in
-  // packs. Spec §6, Consent: an llm rule sends file contents to a third party and costs money per
-  // file, so it is never ticked on someone's behalf. Both are still offered, and --rules still
-  // installs them. This also covers --yes and the no-TTY path, which take `preselected` directly below.
-  const preselected = available
-    .filter((rule) => !metered(rule) && !optIn(rule) && files.some((file) => rule.matches(file)))
-    .map((rule) => rule.id)
-  const packs = Object.entries(PACKS).filter(([group]) => available.some((rule) => groupOf(rule.id) === group))
-  if (ui.prompter === null) {
-    // An empty config otherwise reads as a dead one: say the catalog was consulted and why it gave nothing.
-    if (available.length > 0 && preselected.length === 0) {
-      ui.say(`Nothing in ${catalog.label} matches this project's files. Draft rules from your own docs.`, "Rules")
-    }
-    for (const [group, pack] of packs) {
-      if (preselected.some((id) => groupOf(id) === group)) continue
-      const total = catalog.rules.filter((rule) => groupOf(rule.id) === group).length
-      const missing = available.filter((rule) => groupOf(rule.id) === group).length
-      const status =
-        missing === total
-          ? `Not installed. Add it with: rulecast init --rules ${group}`
-          : `${missing} of ${total} ${group} rules not installed. Add them with: rulecast init --rules ${group}`
-      ui.say(`${pack.note}\n${status}`, pack.title)
-    }
-    return available.filter((rule) => preselected.includes(rule.id))
-  }
-  // A group header cannot carry a hint, so the note goes just before the prompt.
-  for (const [, pack] of packs) ui.say(pack.note, pack.title)
-  if (available.length === 0) {
-    ui.say(`Every rule from ${catalog.label} is already configured.`, "Rules")
-    return []
-  }
-  const groups: Record<string, Choice[]> = {}
-  for (const rule of catalog.rules) {
-    const group = groupOf(rule.id)
-    const done = installed.has(rule.id)
-    const choices = groups[group] ?? []
-    choices.push({
-      value: rule.id,
-      label: group === "general" ? rule.id : rule.id.slice(group.length + 1),
-      hint: done ? "installed" : hintFor(rule, registry),
-      disabled: done,
-    })
-    groups[group] = choices
-  }
-  const chosen = await ui.prompter.groupMultiselect({
-    message: `Rules from ${catalog.label}`,
-    groups,
-    initialValues: preselected,
-  })
-  return available.filter((rule) => chosen.includes(rule.id))
-}
-
-/**
- * A metered rule says what it costs and where the file goes, so ticking it is an informed choice.
- * The detector words its own cost: init has no business knowing the shape of an llm rule's config.
- */
-function hintFor(rule: CompiledRule, registry: DetectorRegistry): string {
-  const description = rule.description ?? rule.name
-  const cost = rule.detector === null ? undefined : registry.get(rule.detector.kind)?.cost?.(rule.detector.config)
-  return cost === undefined ? description : `${cost} — ${description}`
-}
-
-async function chooseConventions(rules: CompiledRule[], detection: Detection, ui: Ui): Promise<RuleSelection[]> {
-  const choices = detection.docs.flatMap(docChoices)
-  const selections: RuleSelection[] = []
-  for (const rule of rules) {
-    if (ui.prompter === null || rule.context.length === 0 || choices.length === 0) {
-      selections.push({ id: rule.id, context: null })
-      continue
-    }
-    const keep: Choice = {
-      value: "",
-      label: "keep the package's doc",
-      hint: rule.context.map((spec) => spec.ref).join(", "),
-    }
-    // The project's own words by default, when one of its headings plainly matches the package doc.
-    const matched = rule.context.map((spec) => matchHeading(spec, detection.docs)).find((value) => value !== null)
-    const answer = await ui.prompter.select({
-      message: `Conventions for ${rule.id}`,
-      choices: [keep, ...choices],
-      initialValue: matched !== undefined && choices.some((choice) => choice.value === matched) ? matched : "",
-    })
-    selections.push({ id: rule.id, context: answer === "" ? null : [answer] })
-  }
-  return selections
-}
-
-/**
- * The project's own pre-commit and lefthook hooks, offered as `hook` rules (plan 16). A hook that
- * changes files is offered but never ticked: rulecast restores the file and reports the change,
- * which is only useful when the developer asks for it.
- */
-async function chooseHooks(root: string, config: Config | null, flags: Flags, ui: Ui): Promise<LocalRule[]> {
-  if (flags.noHooks) return []
-  const local = config?.repos.find((repo) => repo.repo === "local")
-  const configured = new Set((local?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
-  // Read at the git top, as the hook detector does; each job's files are rebased onto this project.
+/** The project's own pre-commit and lefthook hooks, read at the git top as the hook detector does. */
+async function projectHooks(root: string): Promise<HookScan> {
   const top = await repositoryTop(root)
   const project = path.relative(top, root).split(path.sep).join("/")
-  const scan = await scanHooks((file) => readSourceFile(top, file), project)
-  // Said before the choice, so a hook missing from it is not a mystery.
-  if (scan.skipped.length > 0) ui.say(notOfferedLines(scan.skipped).join("\n"), "Hooks")
-  const hooks = scan.offered.filter((hook) => !configured.has(hook.id))
-  if (hooks.length === 0) return []
-  const preselected = hooks.filter((hook) => !hook.modifies).map((hook) => hook.id)
-  const chosen =
-    ui.prompter === null
-      ? preselected
-      : await ui.prompter.multiselect({
-          message: "Run your project's hooks as rules",
-          choices: hooks.map((hook) => ({
-            value: hook.id,
-            label: hook.name,
-            hint: hook.modifies ? `changes files: reported, never applied · ${hook.source}` : hook.source,
-          })),
-          initialValues: preselected,
-        })
-  return hooks.filter((hook) => chosen.includes(hook.id)).map(hookRule)
+  return scanHooks((file) => readSourceFile(top, file), project)
 }
 
 /**
@@ -271,52 +134,10 @@ export function defaultAgents(detected: readonly string[], adapters: readonly Ad
   return found.length > 0 ? found : [...adapters]
 }
 
-async function chooseAgents(detection: Detection, flags: Flags, ui: Ui): Promise<AgentChoice[]> {
+function chooseAgents(detection: Detection, flags: Flags): AgentChoice[] {
   const detected = detection.agents.filter((agent) => agent.adapter !== null).map((agent) => agent.name)
-  const defaults = defaultAgents(detected, installable())
-  let chosen: Adapter[]
-  if (flags.noAgents) chosen = []
-  else if (flags.agents.length > 0) chosen = flags.agents
-  else if (ui.prompter === null) chosen = defaults
-  else {
-    const choices: Choice[] = installable().map((adapter) => ({
-      value: adapter.name,
-      label: adapter.label,
-      hint: detected.includes(adapter.name) ? "detected" : undefined,
-    }))
-    for (const agent of detection.agents) {
-      if (agent.adapter === null) {
-        choices.push({
-          value: `unsupported:${agent.name}`,
-          label: agent.label,
-          hint: "not supported yet",
-          disabled: true,
-        })
-      }
-    }
-    const names = await ui.prompter.multiselect({
-      message: "Install hooks for",
-      choices,
-      initialValues: defaults.map((adapter) => adapter.name),
-    })
-    chosen = installable().filter((adapter) => names.includes(adapter.name))
-  }
-  const agents: AgentChoice[] = []
-  for (const adapter of chosen) {
-    let scope: InstallScope = flags.scope ?? "shared"
-    if (flags.scope === null && ui.prompter !== null) {
-      scope = (await ui.prompter.select({
-        message: `${adapter.label} hooks in`,
-        choices: adapter.install!.scopes.map((entry) => ({
-          value: entry.scope,
-          label: `${entry.scope} (${entry.file})`,
-        })),
-        initialValue: "shared",
-      })) as InstallScope
-    }
-    agents.push({ adapter, scope })
-  }
-  return agents
+  const chosen = flags.noAgents ? [] : flags.agents.length > 0 ? flags.agents : defaultAgents(detected, installable())
+  return chosen.map((adapter) => ({ adapter, scope: flags.scope }))
 }
 
 async function write(root: string, changes: readonly PlannedChange[]): Promise<void> {
@@ -327,26 +148,43 @@ async function write(root: string, changes: readonly PlannedChange[]): Promise<v
   }
 }
 
-/** rulecast validate on what init wrote; fetches rule repos missing from the cache. Returns the error count. */
-async function validate(root: string, home: string, registry: DetectorRegistry, ui: Ui): Promise<number> {
-  const project = await compile({ root, registry, repos: fetchingRepos(home) })
-  const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
-  const lines = project.diagnostics.map(
-    (diagnostic) =>
-      `${diagnostic.level === "warning" ? "warning: " : ""}${diagnostic.source}${diagnostic.rule ? ` (${diagnostic.rule})` : ""}: ${diagnostic.message}`,
-  )
-  if (errors.length === 0) {
-    const count = project.rules.length
-    lines.push(`rulecast validate: ${count} ${count === 1 ? "rule" : "rules"} valid`)
+/** What `rulecast init --format json` prints: what it found, and what it would write or wrote (plan 20). */
+export interface InitReport {
+  root: string
+  detected: {
+    stack: string[]
+    /** The first AGENTS.md, else the first standalone CLAUDE.md. */
+    primaryDoc: string | null
+    docs: { file: string; headings: string[] }[]
+    agents: { name: string; label: string; supported: boolean }[]
   }
-  ui.say(lines.join("\n"), "Validate")
-  return errors.length
+  hooks: {
+    offered: { id: string; name: string; source: string; modifies: boolean; configured: boolean }[]
+    skipped: { name: string; source: string; reason: string }[]
+  }
+  config: {
+    exists: boolean
+    /** Where new conventions go, from this config or one above it; null when none names it. */
+    conventions: { path: string; from: string } | null
+    llm: { model: string | null; provider: string }
+  }
+  changes: { file: string; created: boolean; commit: boolean; summary: string; content: string }[]
+  notes: string[]
+  written: boolean
+  validate: { errors: number; lines: string[] } | null
 }
 
-async function run(root: string, flags: Flags, registry: DetectorRegistry, io: CliIo, ui: Ui): Promise<number> {
+/**
+ * rulecast init (plan 20): the agent runs it after the developer approved the setup, with the
+ * interview's answers as flags. It writes the config and the agent hooks at once; `--dry-run` shows
+ * what it found and every file it would write, which is what the setup page previews.
+ */
+export async function initCommand(args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
+  const flags = parseFlags(args)
+  // The project is where init runs: its config there, or a new one. Its hooks go there too, where
+  // sessions start (install.ts settingsDir).
+  const root = settingsDir(io.cwd)
   const home = cacheHome(io.env)
-  if (ui.prompter !== null) ui.prompter.intro(`rulecast init · ${root}`)
-  else io.stdout(`rulecast init · ${root}\n\n`)
 
   const { text: configText, config } = await readConfig(root)
   const files = await allFiles(root)
@@ -356,30 +194,29 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
     exists: markerExists(root),
     adapters: ADAPTERS,
   })
-  ui.say(detectionSummary(detection), "Detected")
 
-  const url = catalogUrl(io.env)
-  const configured = config?.repos.find((repo) => repo.repo === url)
-  const loaded = await loadCatalog(url, configured?.rev, home, registry)
-  const catalog = typeof loaded === "string" ? null : loaded
-  if (typeof loaded === "string") ui.say(`${loaded}. Continuing without catalog rules.`, "Catalog unavailable")
-  const installed = new Set((configured?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
-  const rules =
-    catalog === null
-      ? []
-      : await chooseRules(catalog, installed, files, flags, ui, registry, config?.mode === "unattended")
-  const selections = await chooseConventions(rules, detection, ui)
-  const hooks = await chooseHooks(root, config, flags, ui)
-  const agents = await chooseAgents(detection, flags, ui)
+  const scan = await projectHooks(root)
+  const local = config?.repos.find((repo) => repo.repo === "local")
+  const configured = new Set((local?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
+  const unknown = flags.hooks.find((id) => !scan.offered.some((hook) => hook.id === id))
+  if (unknown !== undefined) {
+    const offered = scan.offered.map((hook) => hook.id)
+    throw new UsageError(
+      `"${unknown}" is not a hook offered here (${offered.length === 0 ? "none are" : `offered: ${offered.join(", ")}`})`,
+    )
+  }
+  const hooks = scan.offered.filter((hook) => flags.hooks.includes(hook.id) && !configured.has(hook.id)).map(hookRule)
+  const agents = chooseAgents(detection, flags)
 
   // The hooks serve every config a session started here reaches, as rulecast install's do.
   const own = config ?? defaultConfig()
+  const notes: string[] = []
   // Another config that does not load is not this one's to fix: said, and left out of the hooks' timeout.
   const reached = await hookConfigs(root, "init", own, (problem) =>
-    ui.say(`${problem}\nLeft out of the hooks' timeout and repo fetch.`, "Warning"),
+    notes.push(`${problem}\nLeft out of the hooks' timeout and repo fetch.`),
   )
   const changes = await planInit(
-    { catalog: catalog === null ? null : { url: catalog.url, rev: catalog.rev }, rules: selections, agents, hooks },
+    { agents, hooks, settings: flags.settings },
     {
       configText,
       verifyMs: reached.verifyMs,
@@ -387,9 +224,7 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
       readText: (file) => readSourceFile(root, file),
     },
   )
-
-  // Said in the Review, where the developer decides: with no hooks, rulecast does nothing in the agent.
-  const notes = agents.length === 0 ? [NO_HOOKS] : []
+  if (agents.length === 0) notes.push(NO_HOOKS)
   // Hook rules from a config above the project cite nothing: their findings come without a doc section.
   const uncited = hooks.filter((hook) => hook.context.length === 0).length
   if (uncited > 0) {
@@ -399,63 +234,85 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
         : `${uncited} hook rules cite no doc section: their config is outside this project.`,
     )
   }
-  if (changes.length === 0) ui.say(["Nothing to change.", ...notes].join("\n"), "Review")
-  else {
-    ui.say([reviewText(changes), ...notes].join("\n"), "Review")
-    if (ui.prompter !== null) {
-      if (!(await ui.prompter.confirm({ message: "Write?", initialValue: true }))) {
-        ui.prompter.outro("Nothing written.")
-        return 0
-      }
-    } else if (!flags.yes) {
-      io.stdout("Nothing written. Rerun with --yes to write these changes, or run rulecast init in a terminal.\n")
-      return 2
-    }
+
+  const report: InitReport = {
+    root,
+    detected: {
+      stack: detection.stack,
+      primaryDoc: detection.primaryDoc,
+      docs: detection.docs.map((doc) => ({ file: doc.file, headings: doc.headings.map((heading) => heading.text) })),
+      agents: detection.agents.map((agent) => ({
+        name: agent.name,
+        label: agent.label,
+        supported: agent.adapter !== null,
+      })),
+    },
+    hooks: {
+      offered: scan.offered.map((hook) => ({
+        id: hook.id,
+        name: hook.name,
+        source: hook.source,
+        modifies: hook.modifies,
+        configured: configured.has(hook.id),
+      })),
+      skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
+    },
+    config: {
+      exists: config !== null,
+      conventions: await conventionsFor(root),
+      llm: { model: own.llm.model, provider: own.llm.provider },
+    },
+    changes: changes.map(({ file, created, commit, summary, content }) => ({
+      file,
+      created,
+      commit,
+      summary,
+      content,
+    })),
+    notes,
+    written: false,
+    validate: null,
+  }
+
+  let fetched = true
+  if (!flags.dryRun) {
     await write(root, changes)
+    report.written = true
+    report.validate = await validationReport(root, home, registry)
+    // validate fetched this config's repos; hooks never fetch, so the other configs' are fetched here.
+    fetched = await fetchHookRepos(
+      reached.configs.filter((each) => each !== own),
+      io,
+    )
   }
 
-  const errors = await validate(root, home, registry, ui)
-  // validate fetched this config's repos; hooks never fetch, so the other configs' are fetched here.
-  const fetched = await fetchHookRepos(
-    reached.configs.filter((each) => each !== own),
-    io,
-  )
-
-  const prompt = draftPrompt(catalog?.rev ?? `v${VERSION}`, detection.primaryDoc)
-  const toCommit = changes.filter((change) => change.commit).map((change) => change.file)
-  const closing = toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`
-  if (ui.prompter !== null) {
-    ui.say(prompt, "Work out your conventions with your coding agent, then draft rules for them. Paste this into it:")
-    if (await ui.prompter.confirm({ message: "Copy to clipboard?", initialValue: true })) {
-      ui.say((await io.copyToClipboard(prompt)) ? "Copied." : "No clipboard command found: copy it from above.")
-    }
-    ui.prompter.outro(closing)
-  } else {
-    ui.say(prompt, "Work out your conventions with your coding agent, then draft rules for them. Paste this into it:")
-    io.stdout(`${closing}\n`)
-  }
-  return errors > 0 || !fetched ? 2 : 0
+  if (flags.format === "json") io.stdout(`${JSON.stringify(report, null, 2)}\n`)
+  else io.stdout(terminalText(report, detection, scan))
+  if (report.validate === null) return 0
+  return report.validate.errors > 0 || !fetched ? 2 : 0
 }
 
-/** rulecast init (spec §12): detect, choose, review, write, validate, hand over the drafting prompt. */
-export async function initCommand(args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
-  const flags = parseFlags(args)
-  // The project is where init runs: its config there, or a new one. Its hooks go there too, where
-  // sessions start (install.ts settingsDir).
-  const root = settingsDir(io.cwd)
-  const prompter = io.interactive && !flags.yes ? await io.prompter() : null
-  const ui: Ui = {
-    prompter,
-    say: (message, title) => {
-      if (prompter !== null) prompter.note(message, title)
-      else io.stdout(`${title === undefined ? "" : `${title}\n`}${message}\n\n`)
-    },
+function terminalText(report: InitReport, detection: Detection, scan: HookScan): string {
+  const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
+  const offered = report.hooks.offered.filter((hook) => !hook.configured)
+  if (offered.length > 0 || scan.skipped.length > 0) {
+    out.push("Hooks")
+    if (offered.length > 0) {
+      out.push(
+        `Offered as rules with --hooks: ${offered.map((hook) => `${hook.id}${hook.modifies ? " (changes files)" : ""}`).join(", ")}`,
+      )
+    }
+    out.push(...notOfferedLines(scan.skipped), "")
   }
-  try {
-    return await run(root, flags, registry, io, ui)
-  } catch (error) {
-    if (!(error instanceof Cancelled)) throw error
-    io.stderr("rulecast: init cancelled\n")
-    return 130
-  }
+  const planned = report.changes as PlannedChange[]
+  out.push(
+    report.written ? "Written" : "Would write",
+    planned.length === 0 ? "Nothing to change." : reviewText(planned),
+  )
+  out.push(...report.notes, "")
+  if (report.validate !== null) out.push(...report.validate.lines, "")
+  const toCommit = report.changes.filter((change) => change.commit).map((change) => change.file)
+  if (report.written) out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
+  else out.push("Nothing written (--dry-run).")
+  return `${out.join("\n")}\n`
 }

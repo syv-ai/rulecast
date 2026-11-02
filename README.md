@@ -96,7 +96,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 
 | Command | Does |
 |---|---|
-| `rulecast init` | Set rulecast up: config, catalog rules, your existing git hooks as rules, agent hooks |
+| `rulecast init` | Set rulecast up: config, settings, your existing git hooks as rules, agent hooks |
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
 | `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |

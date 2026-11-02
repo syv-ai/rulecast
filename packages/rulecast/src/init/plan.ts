@@ -1,8 +1,7 @@
 import { CONFIG_FILE } from "../core/config/load"
 import { errorMessage } from "../core/errors"
-import { repoLabel } from "../core/repos/layout"
 import type { Adapter, InstallScope } from "../core/types"
-import { addCatalogRules, addLocalRules, type CatalogRef, newConfigText, type RuleSelection } from "./config-text"
+import { addLocalRules, type ConfigSettings, newConfigText, setSettings } from "./config-text"
 import type { LocalRule } from "./hooks"
 
 export interface AgentChoice {
@@ -11,14 +10,12 @@ export interface AgentChoice {
 }
 
 export interface InitSelections {
-  /** null: the catalog could not be loaded. */
-  catalog: CatalogRef | null
-  /** Catalog rules to add; none of them is configured yet. */
-  rules: RuleSelection[]
   /** Adapters with an install, and where their hooks go. */
   agents: AgentChoice[]
   /** The project's own pre-commit or lefthook hooks, as local rules. */
-  hooks?: LocalRule[]
+  hooks: LocalRule[]
+  /** Top-level settings from the interview: conventions, llm.model, llm.provider. */
+  settings: ConfigSettings
 }
 
 export interface PlannedChange {
@@ -55,23 +52,27 @@ function parseSettings(text: string, file: string): unknown {
 }
 
 function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
-  const { catalog, rules } = selections
-  const hooks = selections.hooks ?? []
-  const from = catalog === null ? "" : ` from ${repoLabel(catalog.url, catalog.rev)}`
-  const catalogRules = catalog === null ? [] : rules
-  const parts = (sign: string) => [
-    ...(catalogRules.length === 0 ? [] : [`${sign}${plural(catalogRules.length, "rule")}${from}`]),
-    ...(hooks.length === 0 ? [] : [`${sign}${plural(hooks.length, "hook rule")}`]),
+  const { hooks, settings } = selections
+  const named = [
+    ...(hooks.length === 0 ? [] : [plural(hooks.length, "hook rule")]),
+    ...(settings.conventions ? ["conventions"] : []),
+    ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
   ]
   if (configText === null) {
-    const summary = parts("").length === 0 ? "new, no rules yet" : `new, ${parts("").join(", ")}`
-    return { file: CONFIG_FILE, content: newConfigText(catalog, rules, hooks), created: true, summary, commit: true }
+    const summary = named.length === 0 ? "new, no rules yet" : `new, ${named.join(", ")}`
+    return { file: CONFIG_FILE, content: newConfigText(hooks, settings), created: true, summary, commit: true }
   }
   let content = configText
-  if (catalog !== null && rules.length > 0) content = addCatalogRules(content, catalog, rules)
   if (hooks.length > 0) content = addLocalRules(content, hooks)
+  content = setSettings(content, settings)
   if (content === configText) return null
-  return { file: CONFIG_FILE, content, created: false, summary: parts("+").join(", "), commit: true }
+  return {
+    file: CONFIG_FILE,
+    content,
+    created: false,
+    summary: named.map((part) => `+${part}`).join(", "),
+    commit: true,
+  }
 }
 
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange | null> {
