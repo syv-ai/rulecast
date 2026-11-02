@@ -35,7 +35,6 @@ import {
   stagedFiles,
 } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
-import { CorruptStoreError } from "../core/jsonl"
 import { type PipelineResult, runPipeline } from "../core/pipeline"
 import {
   configRootsAbove,
@@ -477,13 +476,7 @@ export async function executeRun(input: RunInput): Promise<number> {
  */
 async function modeFor(root: string, run: RunArgs, io: CliIo): Promise<Pick<CompileOptions, "mode" | "env">> {
   if (run.session === null) return {}
-  let recorded = null
-  try {
-    recorded = await recordedMode(sessionDir(ensureProjectState(cacheHome(io.env), root), run.session))
-  } catch (error) {
-    // The pipeline reads the store again, and says it could not.
-    if (!(error instanceof CorruptStoreError)) throw error
-  }
+  const recorded = await recordedMode(sessionDir(ensureProjectState(cacheHome(io.env), root), run.session))
   return recorded === null ? { env: io.env } : { mode: recorded }
 }
 

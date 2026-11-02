@@ -13,3 +13,5 @@ Fixes from an end-to-end review of setup.
 - `add` and `list --catalog` find the catalog however its GitHub URL is cased (`Syv-AI/rulecast`), rather than add a second entry that fails validation. `list --catalog` labels catalog rules with the catalog, not `local`.
 - The README's pre-commit `rev` and Status follow the version (`pnpm sync-version`). They said 0.4.
 - SETUP.md and CONVENTIONS.md publish the page as an artifact only where the agent has a tool for it.
+- A damaged line in a session store is skipped. Before, one such line dropped the session's memory, and with it the stop check, for every later hook of that session.
+- The session lock is kept fresh while its holder works and released only by its holder, so a holder slower than the 5 s stale limit no longer lets other hook processes in alongside it.

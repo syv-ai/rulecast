@@ -12,12 +12,11 @@ const USERS = "app/services/users.py"
 const SESSION = "corrupt"
 
 /**
- * Spec §14: a store that cannot be read runs the invocation without session state and warns. It
- * did not — `CorruptStoreError` was thrown out of `runPipeline`, so the hook crashed.
- *
- * `core/jsonl.ts` tolerates an unparseable *last* line, because only a crash mid-append can leave
- * one. A half-written record anywhere else is a `CorruptStoreError`, and `pipeline.ts` caught only
- * `LockTimeoutError` — the other half of the same row in §14's table.
+ * Spec §14: a session store with an unparseable line mid-file. It used to throw out of the hook,
+ * then (until plan 21) dropped session memory, and with it the stop check, for every later hook of
+ * the session, since nothing repaired the store. A line can be lost when two writers interleave
+ * (an append that could not get the lock in time) or after a crash; the line is skipped, and the
+ * rest of the session's records still count.
  */
 async function corrupt(root: string, file: string): Promise<void> {
   const store = path.join(sessionDir(stateDirFor(root), SESSION), file)
@@ -26,28 +25,31 @@ async function corrupt(root: string, file: string): Promise<void> {
 }
 
 const send = (root: string, event: Omit<Event, "cwd" | "session">) =>
-  pipelineAt(root, { ...event, cwd: root, session: { id: SESSION } })
+  pipelineAt(root, { ...event, cwd: root, session: { id: SESSION } }, { stopGate: true })
 
-describe("pipeline with an unreadable session store", () => {
-  test("a half-written record mid-file delivers without session memory instead of throwing", async () => {
+describe("pipeline with a damaged session store", () => {
+  test("a half-written record mid-file is skipped: the session keeps its memory and its stop check", async () => {
     const root = await createFixture()
+    await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(418)\n")
     await send(root, { kind: "edit", files: [USERS] })
     await corrupt(root, "work.jsonl")
 
-    await writeFile(path.join(root, USERS), "def get():\n    raise HTTPException(418)\n")
-    const { delivery } = await send(root, { kind: "edit", files: [USERS] })
+    const edit = await send(root, { kind: "edit", files: [USERS] })
+    expect(edit.delivery.warnings).toEqual([])
+    expect(edit.delivery.findings.map((finding) => finding.rule)).toEqual(["backend/no-httpexception"])
 
-    expect(delivery.warnings).toContain("session state could not be read; delivered without session memory")
-    // Detection still runs: the point of failing open is that the agent still hears about the rule.
-    expect(delivery.findings.map((finding) => finding.rule)).toEqual(["backend/no-httpexception"])
+    // The stop still knows what the agent edited, and holds it there.
+    const stop = await send(root, { kind: "verify", files: [] })
+    expect(stop.delivery.stop).toBe("block")
+    expect(stop.delivery.findings.map((finding) => finding.rule)).toEqual(["backend/no-httpexception"])
   })
 
-  test("a corrupt baseline is handled the same way", async () => {
+  test("a damaged baseline is read the same way", async () => {
     const root = await createFixture()
     await send(root, { kind: "touch", files: [USERS], completeRead: true })
     await corrupt(root, "baseline.jsonl")
 
     const { delivery } = await send(root, { kind: "edit", files: [USERS] })
-    expect(delivery.warnings).toContain("session state could not be read; delivered without session memory")
+    expect(delivery.warnings).toEqual([])
   })
 })

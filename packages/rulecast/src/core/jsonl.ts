@@ -5,8 +5,6 @@ import path from "node:path"
 import { isNotFound } from "./errors"
 import { LockTimeoutError, withLockAt } from "./session/lock"
 
-export class CorruptStoreError extends Error {}
-
 /**
  * Appends records under a lock on the file. A small O_APPEND write does not interleave with another
  * process's, but a large one (a tree state of a very dirty repository runs to megabytes) reaches the
@@ -164,17 +162,16 @@ export async function readRecords<T>(file: string): Promise<T[]> {
     if (isNotFound(error)) return []
     throw error
   }
-  const lines = text.split("\n")
   const records: T[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!
+  for (const line of text.split("\n")) {
     if (line.trim() === "") continue
     try {
       records.push(JSON.parse(line) as T)
     } catch {
-      // Only a crash mid-append can leave a partial record, and only as the last line.
-      if (i === lines.length - 1) break
-      throw new CorruptStoreError(`${file}: unparseable record on line ${i + 1}`)
+      // A crash mid-append leaves a partial last line. One mid-file is two writers interleaved (an
+      // append that could not get the lock in time) or a crash followed by more appends: skipped,
+      // since failing the whole store would drop the session's memory and its stop check for the
+      // rest of the session (plan 21).
     }
   }
   return records

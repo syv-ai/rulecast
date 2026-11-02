@@ -2,7 +2,7 @@ import { appendFile, utimes } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { appendRecords, CorruptStoreError, readRecords } from "../../src/core/jsonl"
+import { appendRecords, readRecords } from "../../src/core/jsonl"
 import { createProject } from "../helpers/project"
 
 /** A partial line nobody is writing any more: the file has not changed for a minute. */
@@ -80,9 +80,9 @@ describe("jsonl", () => {
     )
   })
 
-  test("an unparseable line before the end is corruption", async () => {
+  test("an unparseable line before the end is skipped, and the rest is read (plan 21)", async () => {
     const file = path.join(await createProject({}), "work.jsonl")
-    await appendFile(file, 'garbage\n{"t":"a"}\n')
-    await expect(readRecords(file)).rejects.toBeInstanceOf(CorruptStoreError)
+    await appendFile(file, '{"t":"a"}\ngarbage\n{"t":"b"}{"t":"c"}\n{"t":"d"}\n')
+    expect(await readRecords(file)).toEqual([{ t: "a" }, { t: "d" }])
   })
 })
