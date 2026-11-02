@@ -22,6 +22,25 @@ export interface DetectedHook {
    * git top. The rule cites it until the developer names a convention, when it is inside the project.
    */
   source: string
+  /** The hook's own `description`, when its config gives one. */
+  description?: string
+}
+
+/** A hook the config declares that init does not offer in this project, and why. */
+export interface SkippedHook {
+  name: string
+  /** The config that declares it, as in DetectedHook. */
+  source: string
+  /** "glob <g> can't be rebased onto <dir>", "files only under <dir>" or "runs outside <dir>". */
+  reason: string
+  /** It belongs to another directory, not a glob init can't rebase: summarised when there are many. */
+  elsewhere: boolean
+}
+
+/** What a repository's hook configs hold for one project. */
+export interface HookScan {
+  offered: DetectedHook[]
+  skipped: SkippedHook[]
 }
 
 const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"]
@@ -75,9 +94,12 @@ function anchoredPrefix(regex: string): string | null {
 /** Whether one of two literal path prefixes starts the other: some path could have both. */
 const overlaps = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
 
-function preCommitHooks(config: unknown, project: string, source: string): DetectedHook[] {
-  if (!isObject(config) || !Array.isArray(config.repos)) return []
-  const hooks: DetectedHook[] = []
+/** The project's directory as init names it: "backend", from "backend/". */
+const dirName = (prefix: string) => prefix.replace(/\/$/, "")
+
+function preCommitHooks(config: unknown, project: string, source: string, scan: HookScan): void {
+  if (!isObject(config) || !Array.isArray(config.repos)) return
+  const hooks = scan.offered
   for (const repo of config.repos) {
     // meta hooks check the config itself, not the code.
     if (!isObject(repo) || repo.repo === "meta" || !Array.isArray(repo.hooks)) continue
@@ -89,18 +111,25 @@ function preCommitHooks(config: unknown, project: string, source: string): Detec
       // The runner applies `files:` itself; it only decides whether the hook can reach this project.
       // Python regexes are not rewritten into the rule's `files`: only a `^literal` start is read.
       const prefix = typeof hook.files === "string" ? anchoredPrefix(hook.files) : null
-      if (project !== "" && prefix !== null && !overlaps(prefix, project)) continue
+      const name = text(hook.name) || hook.id
+      if (project !== "" && prefix !== null && !overlaps(prefix, project)) {
+        // The directory the regex is anchored to: `^frontend/src/.*\.ts` is under frontend/src/.
+        const under = prefix.includes("/") ? prefix.slice(0, prefix.lastIndexOf("/") + 1) : prefix
+        scan.skipped.push({ name, source, reason: `files only under ${under}`, elsewhere: true })
+        continue
+      }
+      const description = text(hook.description)
       hooks.push({
         id: `hook/${hook.id}`,
-        name: text(hook.name) || hook.id,
+        name,
         detect: { "pre-commit": hook.id },
         files: null,
         modifies: FIXER_NAME.test(hook.id) || FIXER_FLAG.test(` ${entry} ${args}`),
         source,
+        ...(description === "" ? {} : { description }),
       })
     }
   }
-  return hooks
 }
 
 /** lefthook's glob, where `*` crosses directories, as a rule's `files` pattern. */
@@ -160,16 +189,27 @@ function rootPrefix(root: unknown): string {
   return dir === "" || dir === "." ? "" : `${dir}/`
 }
 
-function lefthookJobs(jobs: unknown, hook: string, source: string, project: string, into: DetectedHook[]): void {
+function lefthookJobs(jobs: unknown, hook: string, source: string, project: string, scan: HookScan): void {
   const add = (name: string, job: JsonObject) => {
     const run = text(job.run)
     if (run === "" || runsRulecast(run)) return
     const glob = Array.isArray(job.glob) ? text(job.glob[0]) : text(job.glob)
     const root = rootPrefix(job.root)
     // A job's root: limits it to files below it, and its glob is matched under it.
-    const files = glob === "" && root === "" ? null : rebaseGlob(`${root}${glob === "" ? "*" : glob}`, project)
-    if (files === undefined) return
-    into.push({
+    const full = `${root}${glob === "" ? "*" : glob}`
+    const files = glob === "" && root === "" ? null : rebaseGlob(full, project)
+    if (files === undefined) {
+      // No file of the project can match when the glob's literal start leads elsewhere.
+      const special = full.search(GLOB_SPECIAL)
+      const literal = special === -1 ? full : full.slice(0, special)
+      const elsewhere = !overlaps(literal, project)
+      const reason = elsewhere
+        ? `runs outside ${dirName(project)}`
+        : `glob ${full} can't be rebased onto ${dirName(project)}`
+      scan.skipped.push({ name, source, reason, elsewhere })
+      return
+    }
+    scan.offered.push({
       id: `hook/${hook}-${name}`,
       name,
       detect: { lefthook: `${hook}/${name}` },
@@ -181,7 +221,7 @@ function lefthookJobs(jobs: unknown, hook: string, source: string, project: stri
   if (Array.isArray(jobs)) {
     for (const job of jobs) {
       if (!isObject(job)) continue
-      if (isObject(job.group)) lefthookJobs(job.group.jobs, hook, source, project, into)
+      if (isObject(job.group)) lefthookJobs(job.group.jobs, hook, source, project, scan)
       else if (typeof job.name === "string") add(job.name, job)
     }
   } else if (isObject(jobs)) {
@@ -202,26 +242,51 @@ export async function detectHooks(
   read: (file: string) => Promise<string | null>,
   project = "",
 ): Promise<DetectedHook[]> {
+  return (await scanHooks(read, project)).offered
+}
+
+/** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
+export async function scanHooks(read: (file: string) => Promise<string | null>, project = ""): Promise<HookScan> {
   const prefix = project === "" || project === "." ? "" : `${project.replace(/\/+$/, "")}/`
   const up = prefix === "" ? "" : "../".repeat(prefix.split("/").length - 1)
-  const hooks = preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`)
+  const scan: HookScan = { offered: [], skipped: [] }
+  preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`, scan)
   for (const file of LEFTHOOK_CONFIGS) {
     const config = load(await read(file))
     if (!isObject(config)) continue
     for (const [hook, body] of Object.entries(config)) {
       if (!isObject(body)) continue
-      lefthookJobs(body.jobs, hook, `${up}${file}`, prefix, hooks)
-      lefthookJobs(body.commands, hook, `${up}${file}`, prefix, hooks)
+      lefthookJobs(body.jobs, hook, `${up}${file}`, prefix, scan)
+      lefthookJobs(body.commands, hook, `${up}${file}`, prefix, scan)
     }
     break
   }
-  return hooks
+  return scan
+}
+
+/** Past this many, the hooks of other directories in one config are counted, not listed. */
+const LIST_ELSEWHERE = 3
+
+/** The lines init prints for the hooks it does not offer: one per hook, or a count for other directories. */
+export function notOfferedLines(skipped: readonly SkippedHook[]): string[] {
+  const lines: string[] = []
+  for (const source of [...new Set(skipped.map((hook) => hook.source))]) {
+    const from = skipped.filter((hook) => hook.source === source)
+    const elsewhere = from.filter((hook) => hook.elsewhere)
+    const listed = elsewhere.length > LIST_ELSEWHERE ? from.filter((hook) => !hook.elsewhere) : from
+    for (const hook of listed) lines.push(`Not offered from ${source}: ${hook.name} (${hook.reason})`)
+    if (listed.length < from.length) {
+      lines.push(`Not offered from ${source}: ${elsewhere.length} hooks for other directories`)
+    }
+  }
+  return lines
 }
 
 /** The local rule init writes for a hook. */
 export interface LocalRule {
   id: string
   name: string
+  description?: string
   files?: string
   detect: Record<string, unknown>
   message: string
@@ -230,13 +295,20 @@ export interface LocalRule {
 
 export function hookRule(hook: DetectedHook): LocalRule {
   const runner = "lefthook" in hook.detect ? "lefthook" : "pre-commit"
+  const outside = hook.source.startsWith("../")
+  // Said in the rule, since its findings come without a doc section.
+  const note = outside
+    ? `Runs the ${runner === "lefthook" ? "lefthook job" : "pre-commit hook"} ${hook.name} from ${hook.source}. No doc section: the config is outside this project.`
+    : ""
+  const description = [hook.description ?? "", note].filter((part) => part !== "").join(" ")
   return {
     id: hook.id,
     name: `${hook.name} (${runner})`,
+    ...(description === "" ? {} : { description }),
     ...(hook.files === null ? {} : { files: hook.files }),
     detect: { hook: hook.detect },
     message: "{{file}}:{{line}}: {{message}}",
     // A reference cannot leave its project: a config at the git top above it is not cited.
-    context: hook.source.startsWith("../") ? [] : [`@${hook.source}`],
+    context: outside ? [] : [`@${hook.source}`],
   }
 }

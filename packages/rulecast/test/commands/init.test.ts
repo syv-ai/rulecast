@@ -461,6 +461,34 @@ describe("rulecast init with the project's own hooks (plan 16)", () => {
     expect(result.stdout).toContain("rulecast validate: 2 rules valid")
   })
 
+  test("in a package, the hooks not offered are named with why, and the rules say they cite no doc", async () => {
+    const top = await createRepo({
+      ...PROJECT,
+      "lefthook.yml":
+        "pre-commit:\n  jobs:\n    - name: lint\n      glob: '{a,b}/*.py'\n      run: ruff check\n    - name: web\n      root: frontend/\n      run: eslint\n    - name: pytest\n      root: backend/\n      glob: '*.py'\n      run: pytest\n",
+      "backend/app.py": "x = 1\n",
+    })
+    const backend = path.join(top, "backend")
+    const result = await runCli(backend, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      "Not offered from ../lefthook.yml: lint (glob {a,b}/*.py can't be rebased onto backend)",
+    )
+    expect(result.stdout).toContain("Not offered from ../lefthook.yml: web (runs outside backend)")
+    expect(result.stdout).toContain("1 hook rule cites no doc section: its config is outside this project.")
+    const config = parse(await read(backend, CONFIG_FILE)) as {
+      repos: { repo: string; rules: { id: string; description?: string }[] }[]
+    }
+    const local = config.repos.find((repo) => repo.repo === "local")!
+    expect(local.rules.map((rule) => [rule.id, rule.description])).toEqual([
+      [
+        "hook/pre-commit-pytest",
+        "Runs the lefthook job pytest from ../lefthook.yml. No doc section: the config is outside this project.",
+      ],
+    ])
+    expect(result.stdout).toContain("rulecast validate: 1 rule valid")
+  })
+
   test("in a terminal they are offered, formatters unticked, and --no-hooks skips them", async () => {
     const root = await createRepo(HOOKS)
     const script = scriptedPrompter([[], ACCEPT, ACCEPT, "shared", false])

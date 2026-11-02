@@ -23,7 +23,7 @@ import { VERSION } from "../core/version"
 import type { CatalogRef, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, docChoices, markerExists, matchHeading } from "../init/detect"
 import { draftPrompt } from "../init/draft-prompt"
-import { detectHooks, hookRule, type LocalRule } from "../init/hooks"
+import { hookRule, type LocalRule, notOfferedLines, scanHooks } from "../init/hooks"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { Cancelled, type Choice, type Prompter } from "../init/prompts"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
@@ -290,8 +290,10 @@ async function chooseHooks(root: string, config: Config | null, flags: Flags, ui
   // Read at the git top, as the hook detector does; each job's files are rebased onto this project.
   const top = await repositoryTop(root)
   const project = path.relative(top, root).split(path.sep).join("/")
-  const detected = await detectHooks((file) => readSourceFile(top, file), project)
-  const hooks = detected.filter((hook) => !configured.has(hook.id))
+  const scan = await scanHooks((file) => readSourceFile(top, file), project)
+  // Said before the choice, so a hook missing from it is not a mystery.
+  if (scan.skipped.length > 0) ui.say(notOfferedLines(scan.skipped).join("\n"), "Hooks")
+  const hooks = scan.offered.filter((hook) => !configured.has(hook.id))
   if (hooks.length === 0) return []
   const preselected = hooks.filter((hook) => !hook.modifies).map((hook) => hook.id)
   const chosen =
@@ -437,10 +439,19 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   )
 
   // Said in the Review, where the developer decides: with no hooks, rulecast does nothing in the agent.
-  const noHooks = agents.length === 0 ? [NO_HOOKS] : []
-  if (changes.length === 0) ui.say(["Nothing to change.", ...noHooks].join("\n"), "Review")
+  const notes = agents.length === 0 ? [NO_HOOKS] : []
+  // Hook rules from a config above the project cite nothing: their findings come without a doc section.
+  const uncited = hooks.filter((hook) => hook.context.length === 0).length
+  if (uncited > 0) {
+    notes.push(
+      uncited === 1
+        ? "1 hook rule cites no doc section: its config is outside this project."
+        : `${uncited} hook rules cite no doc section: their config is outside this project.`,
+    )
+  }
+  if (changes.length === 0) ui.say(["Nothing to change.", ...notes].join("\n"), "Review")
   else {
-    ui.say([reviewText(changes), ...noHooks].join("\n"), "Review")
+    ui.say([reviewText(changes), ...notes].join("\n"), "Review")
     if (ui.prompter !== null) {
       if (!(await ui.prompter.confirm({ message: "Write?", initialValue: true }))) {
         ui.prompter.outro("Nothing written.")

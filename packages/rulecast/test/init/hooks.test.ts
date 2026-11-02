@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { addLocalRules, newConfigText } from "../../src/init/config-text"
-import { detectHooks, globToRegex, hookRule, rebaseGlob } from "../../src/init/hooks"
+import { detectHooks, globToRegex, hookRule, notOfferedLines, rebaseGlob, scanHooks } from "../../src/init/hooks"
 
 const files = (map: Record<string, string>) => async (file: string) => map[file] ?? null
 
@@ -138,6 +138,58 @@ describe("hooks for a project below the git top", () => {
       ["hook/top", null],
     ])
     expect((await ids("")).length).toBe(4)
+  })
+
+  test("the hooks left out of a project are kept, each with why", async () => {
+    const config = `pre-commit:
+  jobs:
+    - name: lint
+      glob: "{a,b}/*.py"
+      run: ruff check
+    - name: web
+      root: frontend/
+      run: eslint
+    - name: types
+      glob: "*.py"
+      run: mypy
+`
+    const scan = await scanHooks(files({ "lefthook.yml": config }), "backend")
+    expect(scan.offered.map((hook) => hook.id)).toEqual(["hook/pre-commit-types"])
+    expect(notOfferedLines(scan.skipped)).toEqual([
+      "Not offered from ../lefthook.yml: lint (glob {a,b}/*.py can't be rebased onto backend)",
+      "Not offered from ../lefthook.yml: web (runs outside backend)",
+    ])
+    const preCommit =
+      "repos:\n  - repo: local\n    hooks:\n      - { id: web, entry: eslint, language: system, files: ^frontend/src/ }\n"
+    const pre = await scanHooks(files({ ".pre-commit-config.yaml": preCommit }), "backend")
+    expect(notOfferedLines(pre.skipped)).toEqual([
+      "Not offered from ../.pre-commit-config.yaml: web (files only under frontend/src/)",
+    ])
+    expect((await scanHooks(files({ "lefthook.yml": config }))).skipped).toEqual([])
+  })
+
+  test("many hooks of other directories are counted in one line", () => {
+    const other = (name: string) => ({ name, source: "../lefthook.yml", reason: "runs outside api", elsewhere: true })
+    const skipped = [other("a"), other("b"), other("c"), other("d")]
+    skipped.push({
+      name: "lint",
+      source: "../lefthook.yml",
+      reason: "glob {a,b}/*.py can't be rebased onto api",
+      elsewhere: false,
+    })
+    expect(notOfferedLines(skipped)).toEqual([
+      "Not offered from ../lefthook.yml: lint (glob {a,b}/*.py can't be rebased onto api)",
+      "Not offered from ../lefthook.yml: 4 hooks for other directories",
+    ])
+  })
+
+  test("a hook rule from a config outside the project says so in its description", async () => {
+    const [pytest] = await detectHooks(files({ "lefthook.yml": ROOTED }), "backend")
+    expect(hookRule(pytest!).description).toBe(
+      "Runs the lefthook job pytest from ../lefthook.yml. No doc section: the config is outside this project.",
+    )
+    const [top] = await detectHooks(files({ "lefthook.yml": ROOTED }))
+    expect(hookRule(top!).description).toBeUndefined()
   })
 
   test("rebaseGlob: exact rebases only; anything else is not offered", () => {

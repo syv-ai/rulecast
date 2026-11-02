@@ -51,6 +51,7 @@ function localRuleLines(rule: LocalRule): string[] {
   return [
     `- id: ${rule.id}`,
     `  name: ${scalar(rule.name)}`,
+    ...(rule.description === undefined ? [] : [`  description: ${JSON.stringify(rule.description)}`]),
     ...(rule.files === undefined ? [] : [`  files: ${JSON.stringify(rule.files)}`]),
     "  detect:",
     ...mappingLines(rule.detect).map((line) => `    ${line}`),
