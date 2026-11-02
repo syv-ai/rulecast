@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { LOCAL_COMMAND } from "../../../src/adapters/claude-code/adapter"
+import { HOOK_COMMAND } from "../../../src/adapters/claude-code/adapter"
 import { mergeHooks, removeHooks, SettingsError } from "../../../src/adapters/claude-code/settings"
 
 const COMMAND = "rulecast hook claude-code"
@@ -99,10 +99,10 @@ describe("Claude Code settings: mergeHooks", () => {
       'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
       "grep -q '\"hook_event_name\": *\"SessionStart\"' && printf '%s' '{}'; exit 0"
     const older = mergeHooks({}, previous, 60_000).settings
-    const upgraded = mergeHooks(older, LOCAL_COMMAND, 60_000, LOCAL_COMMAND)
+    const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000, HOOK_COMMAND)
     expect(upgraded.added).toEqual([])
     expect(upgraded.updated).toContain("Stop")
-    expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
+    expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
   })
 
   test("a released guard is rewritten to the current guard, never to the bare command, without node_modules", () => {
@@ -113,10 +113,10 @@ describe("Claude Code settings: mergeHooks", () => {
       `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
     const unguarded = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     for (const older of [released, unguarded]) {
-      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, COMMAND, 60_000, LOCAL_COMMAND)
+      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, COMMAND, 60_000, HOOK_COMMAND)
       expect(upgraded.added).toEqual([])
       expect(upgraded.updated).toContain("Stop")
-      expect(upgraded.settings).toEqual(mergeHooks({}, LOCAL_COMMAND, 60_000).settings)
+      expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
     }
   })
 

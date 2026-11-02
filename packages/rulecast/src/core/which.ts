@@ -14,12 +14,15 @@ const exec = promisify(execFile)
  * second half — and doctor asks this about a `command` rule's argv[0], which comes from a config
  * a rule repo may have written.
  *
+ * `PATH`, when given, is searched instead of the process's own.
+ *
  * `signal` matters more here than it looks: a PATH entry on a stalled network mount makes
  * `command -v` block forever, and doctor's checks have no other way to give up.
  */
-export async function onPath(command: string, signal?: AbortSignal): Promise<boolean> {
+export async function onPath(command: string, signal?: AbortSignal, PATH?: string): Promise<boolean> {
   try {
-    await exec("/bin/sh", ["-c", 'command -v "$1" > /dev/null', "sh", command], { signal })
+    const env = PATH === undefined ? undefined : { ...process.env, PATH }
+    await exec("/bin/sh", ["-c", 'command -v "$1" > /dev/null', "sh", command], { signal, env })
     return true
   } catch {
     return false

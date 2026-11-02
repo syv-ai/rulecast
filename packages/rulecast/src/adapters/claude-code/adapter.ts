@@ -2,7 +2,7 @@ import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
 import { parseClaudeCode } from "./parse"
-import { mergeHooks, removeHooks, runsProjectRulecast } from "./settings"
+import { mergeHooks, removeHooks } from "./settings"
 
 /** Claude Code replaces longer additionalContext with a pointer to a file (test/payloads/claude-code/README.md). */
 export const CONTEXT_LIMIT = 10_000
@@ -69,7 +69,7 @@ const DENY_PREAMBLE = ({ source }: Configs) =>
  * installed yet — a fresh clone before `npm install`. Every other event says nothing.
  */
 export const NOT_INSTALLED =
-  "rulecast is configured in this project but not installed. Run npm install (or pnpm install), then rulecast doctor."
+  "rulecast is configured in this project but not installed. Run npm install (or pnpm install), or install @syv-ai/rulecast globally, then rulecast doctor."
 
 /**
  * What every stop says when rulecast is not installed and the run is unattended as the shell can
@@ -88,17 +88,19 @@ const SHELL_UNATTENDED =
   'case "$RULECAST_MODE" in unattended) U=1;; attended|interactive) U=;; esac; '
 
 /**
- * The committed hook command, guarded. A bare path to `node_modules/.bin/rulecast` exits 127 in a
- * clone that has not installed yet, which Claude Code shows as a hook error on every Read and Edit
- * (recorded in test/payloads/claude-code/README.md). Guarded, it runs rulecast when it is there and
- * otherwise exits 0, after telling the user on `SessionStart`, and — unattended — at every stop.
- * Never a block: without session state it could not hold the agent only once per prompt. stdin is
- * read only on that branch; `exec` hands it to rulecast untouched. One string for every event, so
- * the plugin API's `command(local)` is unchanged, and it still contains "rulecast hook claude-code",
- * which is how settings.ts recognises its own hooks.
+ * The hook command, guarded, wherever it is installed. A command naming a rulecast that is not
+ * there exits 127, which Claude Code shows as a hook error on every Read and Edit (recorded in
+ * test/payloads/claude-code/README.md): a clone before `npm install`, or a setup run through npx
+ * with nothing installed (plan 21). Guarded, it runs the project's own rulecast, else one on the
+ * PATH (a global install, as a project without a package.json has), and otherwise exits 0, after
+ * telling the user on `SessionStart`, and — unattended — at every stop. Never a block: without
+ * session state it could not hold the agent only once per prompt. stdin is read only on that
+ * branch; `exec` hands it to rulecast untouched. One string for every event, and it still contains
+ * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
  */
-export const LOCAL_COMMAND =
+export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
+  "command -v rulecast >/dev/null 2>&1 && exec rulecast hook claude-code; " +
   SHELL_UNATTENDED +
   "P=$(cat); " +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
@@ -257,12 +259,12 @@ export const claudeCodeAdapter: Adapter = {
       { scope: "shared", file: ".claude/settings.json" },
       { scope: "personal", file: ".claude/settings.local.json" },
     ],
-    command: (local) => (local ? LOCAL_COMMAND : "rulecast hook claude-code"),
+    // The guard is right with or without the project's own rulecast (plan 21).
+    command: () => HOOK_COMMAND,
     // The guarded command is never rewritten to the bare one. It is right with or without
     // node_modules, and `install` in a clone that has not installed yet would otherwise swap the
     // committed command for one that exits 127 on every hook.
-    merge: (settings, command, verifyMs) => mergeHooks(settings, command, verifyMs, LOCAL_COMMAND),
+    merge: (settings, command, verifyMs) => mergeHooks(settings, command, verifyMs, HOOK_COMMAND),
     remove: removeHooks,
-    local: runsProjectRulecast,
   },
 }

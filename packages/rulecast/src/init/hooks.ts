@@ -120,7 +120,7 @@ function preCommitHooks(config: unknown, project: string, source: string, scan: 
       }
       const description = text(hook.description)
       hooks.push({
-        id: `hook/${hook.id}`,
+        id: `hook/${idSegment(hook.id)}`,
         name,
         detect: { "pre-commit": hook.id },
         files: null,
@@ -210,7 +210,7 @@ function lefthookJobs(jobs: unknown, hook: string, source: string, project: stri
       return
     }
     scan.offered.push({
-      id: `hook/${hook}-${name}`,
+      id: `hook/${idSegment(`${hook}-${name}`)}`,
       name,
       detect: { lefthook: `${hook}/${name}` },
       files,
@@ -245,6 +245,29 @@ export async function detectHooks(
   return (await scanHooks(read, project)).offered
 }
 
+/**
+ * A hook's name as one segment of a rule id. A lefthook job's name is free text ("lint typescript")
+ * and a local pre-commit id may hold underscores or capitals; a rule id may not (plan 21).
+ */
+function idSegment(name: string): string {
+  const segment = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return segment === "" ? "hook" : segment
+}
+
+/** Two names that make the same id: the later ones get -2, -3. */
+function distinctIds(hooks: DetectedHook[]): DetectedHook[] {
+  const seen = new Set<string>()
+  return hooks.map((hook) => {
+    let id = hook.id
+    for (let n = 2; seen.has(id); n++) id = `${hook.id}-${n}`
+    seen.add(id)
+    return id === hook.id ? hook : { ...hook, id }
+  })
+}
+
 /** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
 export async function scanHooks(read: (file: string) => Promise<string | null>, project = ""): Promise<HookScan> {
   const prefix = project === "" || project === "." ? "" : `${project.replace(/\/+$/, "")}/`
@@ -261,7 +284,7 @@ export async function scanHooks(read: (file: string) => Promise<string | null>, 
     }
     break
   }
-  return scan
+  return { ...scan, offered: distinctIds(scan.offered) }
 }
 
 /** Past this many, the hooks of other directories in one config are counted, not listed. */

@@ -99,16 +99,6 @@ export function mergeHooks(
   return { settings: { ...(settings as JsonObject), hooks: merged }, added, updated }
 }
 
-/** Whether rulecast's hooks here all run the project's own rulecast: a guard runs nothing else. */
-export function runsProjectRulecast(settings: unknown): boolean {
-  const commands = Object.values(hooksOf(settings))
-    .flatMap((groups) => (Array.isArray(groups) ? groups : []))
-    .flatMap((group) => (isObject(group) && Array.isArray(group.hooks) ? group.hooks : []))
-    .filter(isRulecastHook)
-    .map((hook) => (hook as JsonObject).command as string)
-  return commands.length > 0 && commands.every((command) => PROJECT_RULECAST.test(command))
-}
-
 /**
  * Removes the hooks rulecast added (commands running `rulecast hook claude-code`). Groups and events that only
  * held rulecast hooks go too, and so does a `hooks` object left empty. Everything else is kept as it is.

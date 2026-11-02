@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { claudeCodeAdapter, LOCAL_COMMAND } from "../../src/adapters/claude-code/adapter"
+import { claudeCodeAdapter, HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
 import { hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
@@ -37,7 +37,7 @@ describe("rulecast install", () => {
     ])
     expect(settings.hooks.Stop[0].hooks[0]).toEqual({
       type: "command",
-      command: "rulecast hook claude-code",
+      command: HOOK_COMMAND,
       timeout: 70,
     })
 
@@ -60,14 +60,16 @@ describe("rulecast install", () => {
     expect(existsSync(path.join(root, SHARED))).toBe(false)
   })
 
-  test("uses the project's own rulecast when it is installed", async () => {
+  test("writes the guarded command with or without the project's own rulecast, never the bare one", async () => {
+    // The bare command exits 127 on every tool call where rulecast is not on the PATH: the plugin's
+    // setup runs init through npx, so that was every first setup (plan 21, #1).
     const root = await createFixture()
     await runCli(root, ["install"])
-    expect((await settingsOf(root)).hooks.Stop[0].hooks[0].command).toBe("rulecast hook claude-code")
+    expect((await settingsOf(root)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
     await runCli(local, ["install"])
-    expect((await settingsOf(local)).hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
-    expect(claudeCodeAdapter.install?.command(true)).toBe(LOCAL_COMMAND)
+    expect((await settingsOf(local)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
+    expect(claudeCodeAdapter.install?.command(true)).toBe(HOOK_COMMAND)
   })
 
   test("re-running install upgrades rulecast's own hooks from an older command, and nothing else", async () => {
@@ -84,7 +86,7 @@ describe("rulecast install", () => {
     const result = await runCli(local, ["install"])
     expect(result.stdout).toContain("updated Claude Code hooks in .claude/settings.json to the current command")
     const after = await settingsOf(local)
-    expect(after.hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
+    expect(after.hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     expect(after.hooks.Stop[1].hooks[0].command).toBe("dash-hook stop")
     expect((await runCli(local, ["install"])).stdout).toContain("already installed")
   })
@@ -128,7 +130,7 @@ describe("rulecast install", () => {
     })
     expect((await runCli(clone, ["doctor"])).stdout).not.toContain("old command")
     expect((await runCli(clone, ["install"])).stdout).toContain("already installed")
-    expect((await settingsOf(clone)).hooks.Stop[0].hooks[0].command).toBe(LOCAL_COMMAND)
+    expect((await settingsOf(clone)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
   })
 
   test("a clone without node_modules upgrades a released guard to the current guard, not the bare command", async () => {
@@ -138,7 +140,7 @@ describe("rulecast install", () => {
     const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
     await runCli(local, ["install"])
     const committed = JSON.parse(
-      (await read(local, SHARED)).replaceAll(JSON.stringify(LOCAL_COMMAND), JSON.stringify(released)),
+      (await read(local, SHARED)).replaceAll(JSON.stringify(HOOK_COMMAND), JSON.stringify(released)),
     )
     const clone = await createProject({
       ".rulecast-config.yaml": "repos: []\n",
@@ -151,7 +153,7 @@ describe("rulecast install", () => {
     )
       .flat()
       .flatMap((group) => group.hooks.map((hook) => hook.command))
-    expect(new Set(commands)).toEqual(new Set([LOCAL_COMMAND]))
+    expect(new Set(commands)).toEqual(new Set([HOOK_COMMAND]))
   })
 
   test("fetches rule repos missing from the cache", async () => {

@@ -4,6 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
+import { HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
 import type { InitReport } from "../../src/commands/init"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import { runCli } from "../helpers/cli"
@@ -36,6 +37,18 @@ const localIds = (text: string) =>
     .rules.map((rule) => rule.id)
 
 describe("rulecast init", () => {
+  test("a config that fails validation is not called ready to commit", async () => {
+    // init wrote a config validate refused, exited 2, and still said "Commit …" (plan 21, #3).
+    const root = await createRepo({
+      ...PROJECT,
+      [CONFIG_FILE]: "repos:\n  - repo: local\n    rules:\n      - id: Bad Id\n        files: x\n",
+    })
+    const result = await runCli(root, ["init", "--no-agents", "--llm-model", "haiku"])
+    expect(result.code).toBe(2)
+    expect(result.stdout).not.toContain("Commit ")
+    expect(result.stdout).toContain("Not ready to commit: fix what validate reports above.")
+  })
+
   test("writes a config and shared hooks at once, validates them and says what to commit", async () => {
     const root = await createRepo(PROJECT)
     const result = await init(root)
@@ -43,7 +56,7 @@ describe("rulecast init", () => {
     expect(result.code).toBe(0)
     expect(parse(await read(root, CONFIG_FILE))).toEqual({ repos: [{ repo: "local", rules: [] }] })
     const settings = JSON.parse(await read(root, ".claude/settings.json"))
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe("rulecast hook claude-code")
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     expect(result.stdout).toContain("python · AGENTS.md (imported by CLAUDE.md) · Claude Code (CLAUDE.md)")
     expect(result.stdout).toContain("rulecast validate: 0 rules valid")
     expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")

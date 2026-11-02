@@ -45,7 +45,7 @@ Ask in this order, one question at a time, with your question tool if you have o
 
 Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and replace only the JSON in its `setup-data` block; its head comment describes the fields. In that JSON, write every `<` inside a string as `\u003c`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
 
-- `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, the files that change, and what is not touched.
+- `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
 - `rules`: the hook rules chosen, and llm rules if allowed.
 - `decisions`: one row per question in step 3. `found` is what step 2 showed, or null. `said` is the developer's answer, close to their words. `why` says what the choice means here. `detail` shows exactly what changes: take the file contents from the dry run's `changes[].content`, run again with the agreed flags, and for hook rules show the rules.
 - `candidates`: on the as-you-go path, the first-rule candidates from step 6, each with a rough `sketch` of its rule.
@@ -54,7 +54,12 @@ In Claude Code, publish the page as a private artifact. Otherwise write it outsi
 
 ## 5. Write
 
-Only after the developer approves. In each config's directory:
+Only after the developer approves. First, install rulecast where the hooks will find it:
+
+- **The project has a `package.json`:** add `@syv-ai/rulecast` as a devDependency with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one, so everyone gets the same version.
+- **It has none:** everyone whose sessions run here installs it globally (`npm install -g @syv-ai/rulecast`). Tell the developer.
+
+Then, in each config's directory:
 
 ```sh
 rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/]

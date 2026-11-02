@@ -314,7 +314,8 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   out.push(...report.notes, "")
   if (report.validate !== null) out.push(...report.validate.lines, "")
   const toCommit = report.changes.filter((change) => change.commit).map((change) => change.file)
-  if (report.written) out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
-  else out.push("Nothing written (--dry-run).")
+  if (!report.written) out.push("Nothing written (--dry-run).")
+  else if ((report.validate?.errors ?? 0) > 0) out.push("Not ready to commit: fix what validate reports above.")
+  else out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
   return `${out.join("\n")}\n`
 }

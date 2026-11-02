@@ -7,7 +7,7 @@ import { ADAPTERS, adapterByName } from "../adapters"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import type { Config } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
-import { cacheHome } from "../core/home"
+import { cacheHome, type Env } from "../core/home"
 import { configRootsAbove, configRootsBelow, displayPath } from "../core/projects"
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
@@ -57,16 +57,25 @@ function inFile<T>(file: string, transform: () => T): T {
 }
 
 /**
- * Can the command an installed hook runs actually be found?
+ * Can the command an installed hook runs actually find rulecast?
  *
- * The hook command is `rulecast hook <adapter>` unless rulecast is in the project's
- * `node_modules/.bin`, in which case it is that path. The bare form needs rulecast on the PATH, and
- * a project where it is on neither has hooks that are installed and silently do nothing — which
- * `doctor` exists to catch, and did not until a self-install on this repository walked into it.
+ * The hook runs the project's `node_modules/.bin/rulecast`, else one on the PATH. A project with
+ * neither has hooks that are installed and run no rules — which `doctor` exists to catch, and did
+ * not until a self-install on this repository walked into it.
+ *
+ * `env`'s PATH, without the temporary bins of `npx` and `pnpm dlx`: the setup docs run doctor as
+ * `npx @syv-ai/rulecast doctor`, which puts its own rulecast on the PATH it runs doctor with, and
+ * the hooks never run under npx (plan 21).
  */
-export async function hookCommandResolves(root: string, signal?: AbortSignal): Promise<boolean> {
-  return existsSync(path.join(root, "node_modules", ".bin", "rulecast")) || (await onPath("rulecast", signal))
+export async function hookCommandResolves(root: string, env: Env, signal?: AbortSignal): Promise<boolean> {
+  if (existsSync(path.join(root, "node_modules", ".bin", "rulecast"))) return true
+  const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
+  const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
+  return onPath("rulecast", signal, PATH)
 }
+
+/** Where `npx` and `pnpm dlx` put the packages they run for one command. */
+const TEMPORARY_BIN = /[\\/](_npx|dlx)[\\/]/
 
 /**
  * The adapter's settings file its hooks are already in, or null. A hook counts wherever it is
@@ -76,12 +85,10 @@ export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: n
   return (await hookState(root, adapter, verifyMs))?.file ?? null
 }
 
-/** `local`: the hooks run only the project's own rulecast, so one on the PATH does not make them run. */
 export interface HookState {
   file: string
   stale: string[]
   missing: string[]
-  local: boolean
 }
 
 /**
@@ -98,10 +105,9 @@ export async function hookState(root: string, adapter: Adapter, verifyMs: number
     const current = await readSettings(root, file)
     if (current === null) continue
     const merged = inFile(file, () => install.merge(current.value, command, verifyMs))
-    const local = inFile(file, () => install.local?.(current.value) ?? false)
-    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [], local }
+    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [] }
     const ours = inFile(file, () => install.remove(current.value)).removed.length > 0
-    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added, local }
+    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added }
   }
   return partial
 }

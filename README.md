@@ -141,7 +141,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 - `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
 - **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse. Recipes for `/goal`, `/loop` and scheduled sweeps: [`agents/reference/loops.md`](agents/reference/loops.md).
 
-rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks need it there anyway), and wire it into the one you use.
+rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks use it from there too), and wire it into the one you use.
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
@@ -203,7 +203,7 @@ A CI job, a cloud agent session or a new container starts with nothing installed
 
 1. Install dependencies (`npm ci` or `pnpm install`) before the agent starts. Without them the agent hooks do nothing, and in unattended mode every stop says so.
 2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
-3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (a committed hook command runs only `node_modules/.bin/rulecast`, so a global or `npx` rulecast does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
+3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
 4. Check out with `fetch-depth: 0` if you use `--from-ref`.
 5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
 6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
@@ -348,6 +348,8 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
+
+A project without a `package.json`, such as a Python service, can use a global install instead (`npm install -g @syv-ai/rulecast`). The agent hooks run the project's own rulecast when there is one, else the one on the PATH, and otherwise only say once per session that it is not installed.
 
 Then set it up with your agent, as [Getting started](#getting-started) describes.
 

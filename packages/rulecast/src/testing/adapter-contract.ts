@@ -106,7 +106,7 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
           assert.ok(install.markers.length > 0, "markers must not be empty")
           assert.ok(install.scopes.length > 0, "scopes must not be empty")
           for (const { file } of install.scopes) assert.ok(file.length > 0, "a scope needs a settings file")
-          assert.notEqual(install.command(true), install.command(false), "a local install runs a different command")
+          for (const local of [true, false]) assert.ok(install.command(local).length > 0, "the hook command is empty")
         },
       },
       {
@@ -122,9 +122,11 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
             assert.deepEqual(twice.added, [], "merging twice must add nothing")
             if (twice.updated !== undefined) assert.deepEqual(twice.updated, [], "merging twice must update nothing")
             // A different command over hooks already installed: rewritten in place, never added twice.
-            const upgraded = install.merge(structuredClone(once.settings), install.command(true), 5_000)
+            // Only for an adapter with two commands; one guard for both has nothing to switch to.
+            const other = install.command(true)
+            const upgraded = install.merge(structuredClone(once.settings), other, 5_000)
             assert.deepEqual(upgraded.added, [], "merging another command over installed hooks must add nothing")
-            if (upgraded.updated !== undefined) {
+            if (upgraded.updated !== undefined && other !== command) {
               assert.deepEqual(
                 [...upgraded.updated].sort(),
                 [...once.added].sort(),

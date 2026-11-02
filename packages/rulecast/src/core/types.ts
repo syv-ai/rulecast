@@ -447,7 +447,10 @@ export interface AdapterInstall {
   markers: string[]
   /** Settings files, repo-relative, that hooks can be written to. */
   scopes: { scope: InstallScope; file: string }[]
-  /** The hook command; local: rulecast is installed in the project's node_modules. */
+  /**
+   * The hook command; local: rulecast is installed in the project's node_modules. An adapter may
+   * return the same command either way, as Claude Code's guard does.
+   */
   command(local: boolean): string
   /**
    * Adds the hooks. `updated` (optional, for adapters that can tell): the adapter's own hooks whose
@@ -459,11 +462,6 @@ export interface AdapterInstall {
     verifyMs: number,
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
-  /**
-   * Whether the installed hooks run only the project's own rulecast (node_modules/.bin), so one on
-   * the PATH does not count (`doctor`). Absent: the adapter cannot tell.
-   */
-  local?(settings: unknown): boolean
 }
 
 export interface Adapter {

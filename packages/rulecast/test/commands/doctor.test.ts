@@ -288,9 +288,29 @@ describe("rulecast doctor", () => {
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
     expect(result.stdout).toContain("warning  Claude Code — .claude/settings.json")
-    expect(result.stdout).toContain("so the hooks do nothing")
+    expect(result.stdout).toContain("so no rules run")
     // A warning, not an error: the installation is wrong, not broken beyond use.
     expect(result.code).toBe(0)
+  })
+
+  test("a rulecast on the PATH runs the hooks, but npx's own temporary one does not", async () => {
+    // The setup docs run `npx @syv-ai/rulecast doctor`, and npx puts its own bin on the PATH of what
+    // it runs. The hooks never run under npx, so that rulecast is not one they will find (#1, plan 21).
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "npm-cache/_npx/0123abcd/node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+      "global/bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "npm-cache/_npx/0123abcd/node_modules/.bin/rulecast"), 0o755)
+    await chmod(path.join(root, "global/bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    const npx = { ...testEnv, PATH: `${path.join(root, "npm-cache/_npx/0123abcd/node_modules/.bin")}:/usr/bin:/bin` }
+    expect((await runCli(root, ["doctor"], "", npx)).stdout).toContain("so no rules run")
+    const global = { ...testEnv, PATH: `${path.join(root, "global/bin")}:/usr/bin:/bin` }
+    expect((await runCli(root, ["doctor"], "", global)).stdout).toContain(
+      "ok       Claude Code — .claude/settings.json",
+    )
   })
 
   /** #29: what a fresh environment gets wrong, checked as the hooks and `rulecast run --from-ref` meet it. */
@@ -327,7 +347,8 @@ describe("rulecast doctor", () => {
       expect((await doctor(root)).stdout).toContain("warning  Claude Code — .claude/settings.json")
     })
 
-    test("a committed guard without node_modules fails although rulecast is on the PATH: the guard never runs that one", async () => {
+    test("a committed guard without node_modules runs a rulecast on the PATH; with neither, --ci fails", async () => {
+      // A global install is what a project without a package.json has (plan 21).
       const root = await createRepo({
         ".rulecast-config.yaml": localConfig([RULE("a")]),
         "src/x.ts": "const x = 1\n",
@@ -338,11 +359,12 @@ describe("rulecast doctor", () => {
       const bin = await createProject({ rulecast: "#!/bin/sh\n" })
       await chmod(path.join(bin, "rulecast"), 0o755)
       vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`)
-      const result = await ci(root)
-      expect(result.stdout).toMatch(
-        /error {4}Claude Code — \.claude\/settings\.json — but the hooks run node_modules\/\.bin\/rulecast/,
-      )
-      expect(result.code).toBe(2)
+      const global = await ci(root)
+      expect(global.stdout).toContain("ok       Claude Code — .claude/settings.json\n")
+      vi.stubEnv("PATH", "/usr/bin:/bin")
+      const neither = await ci(root)
+      expect(neither.stdout).toMatch(/error {4}Claude Code — \.claude\/settings\.json — but rulecast is in neither/)
+      expect(neither.code).toBe(2)
     })
 
     test("hooks not installed at all stay a warning: a CI job may only run rulecast run", async () => {

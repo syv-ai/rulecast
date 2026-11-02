@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -194,7 +193,7 @@ export async function doctorCommand(
   // The settings in this directory: an agent reads them only where its session starts.
   io.stdout(dir === root ? "\nhooks\n" : `\nhooks in ${dir}\n`)
   // Asked once, not per adapter: every adapter's hook runs the same rulecast.
-  const resolves = await hookCommandResolves(dir)
+  const runs = await hookCommandResolves(dir, io.env)
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
     const state = await hookState(dir, adapter, project.config.timeouts.verifyMs)
@@ -204,10 +203,6 @@ export async function doctorCommand(
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0
     const missing = state?.missing ?? []
-    // The committed guard runs node_modules/.bin/rulecast or nothing: one on the PATH (npx, a
-    // global install) does not make it run.
-    const guarded = state?.local === true
-    const runs = guarded ? existsSync(path.join(dir, "node_modules", ".bin", "rulecast")) : resolves
     // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
     // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
     const level: Level =
@@ -222,9 +217,7 @@ export async function doctorCommand(
             ? `${file} — but the hooks use an old command; run rulecast install`
             : runs
               ? file
-              : guarded
-                ? `${file} — but the hooks run node_modules/.bin/rulecast, which is not installed, so they do nothing. Run npm ci (or pnpm install).`
-                : `${file} — but "rulecast" is on neither the PATH nor node_modules/.bin, so the hooks do nothing. Add it to the project (pnpm add -D @syv-ai/rulecast) and run rulecast install again.`
+              : `${file} — but rulecast is in neither node_modules/.bin nor on the PATH, so no rules run. Add it to the project (pnpm add -D @syv-ai/rulecast), or install it globally.`
     io.stdout(line(level, adapter.label, detail))
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 
+import { RULE_ID } from "../../src/core/config/schema"
 import { addLocalRules, newConfigText } from "../../src/init/config-text"
 import { detectHooks, globToRegex, hookRule, notOfferedLines, rebaseGlob, scanHooks } from "../../src/init/hooks"
 
@@ -79,6 +80,37 @@ describe("detectHooks", () => {
       ["hook/pre-commit-typecheck", { lefthook: "pre-commit/typecheck" }, "^.*\\.ts$", false],
       ["hook/pre-push-test", { lefthook: "pre-push/test" }, null, false],
     ])
+  })
+
+  test("hook names that are not rule ids become valid, distinct ids; detect keeps the real name", async () => {
+    // A lefthook job's name is free text, and a local pre-commit hook's id may have underscores or
+    // capitals: "lint typescript" was offered as hook/pre-commit-lint typescript, which init then
+    // wrote and validate refused (plan 21, #3).
+    const lefthook = `pre-commit:
+  jobs:
+    - name: lint typescript
+      run: eslint {staged_files}
+    - name: Format JSON/CSS
+      run: prettier --check {staged_files}
+    - name: format json css
+      run: prettier --check {staged_files}
+`
+    const preCommit = `repos:
+  - repo: local
+    hooks:
+      - id: run_Tests
+        name: tests
+        entry: pytest
+        language: system
+`
+    const hooks = await detectHooks(files({ "lefthook.yml": lefthook, ".pre-commit-config.yaml": preCommit }))
+    expect(hooks.map((hook) => [hook.id, hook.detect])).toEqual([
+      ["hook/run-tests", { "pre-commit": "run_Tests" }],
+      ["hook/pre-commit-lint-typescript", { lefthook: "pre-commit/lint typescript" }],
+      ["hook/pre-commit-format-json-css", { lefthook: "pre-commit/Format JSON/CSS" }],
+      ["hook/pre-commit-format-json-css-2", { lefthook: "pre-commit/format json css" }],
+    ])
+    for (const hook of hooks) expect(hook.id).toMatch(RULE_ID)
   })
 
   test("no hook config is no hooks, and a config that does not parse is no hooks", async () => {
