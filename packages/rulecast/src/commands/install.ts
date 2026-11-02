@@ -185,7 +185,7 @@ export function printInstall(
 ): void {
   const updated = result.updated ?? []
   if (updated.length > 0) {
-    io.stdout(`updated ${adapter.label} hooks in ${result.file} to the current command: ${updated.join(", ")}\n`)
+    io.stdout(`updated ${adapter.label} hooks in ${result.file}: ${updated.join(", ")}\n`)
   }
   if (result.added.length > 0) {
     io.stdout(`installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`)

@@ -57,7 +57,8 @@ function hooksOf(settings: unknown): JsonObject {
  * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. An entry
  * whose command is `keep` is current whatever `command` is, and one that runs the project's own
  * rulecast in an older form is rewritten to `keep`, never to `command`: in a clone without
- * node_modules `command` is the bare one, which exits 127 on every hook.
+ * node_modules `command` is the bare one, which exits 127 on every hook. One whose timeout is below
+ * what `verifyMs` needs gets that timeout, and is reported as `updated` too.
  */
 export function mergeHooks(
   settings: unknown,
@@ -78,11 +79,18 @@ export function mergeHooks(
         return {
           ...group,
           hooks: group.hooks.map((hook) => {
+            if (!isRulecastHook(hook)) return hook
             const current = (hook as JsonObject).command
-            if (!isRulecastHook(hook) || current === command || current === keep) return hook
+            const currentCommand = current === command || current === keep
+            // Claude Code kills a hook at its timeout. One lower than the stop check's budget skips
+            // that check silently; a higher one is kept, since install sizes it for every config.
+            const old = (hook as JsonObject).timeout
+            const tooShort = typeof old === "number" && old < timeout
+            if (currentCommand && !tooShort) return hook
             changed = true
             const local = keep !== undefined && PROJECT_RULECAST.test(current as string)
-            return { ...(hook as JsonObject), command: local ? keep : command }
+            const next = currentCommand ? current : local ? keep : command
+            return { ...(hook as JsonObject), command: next, ...(tooShort ? { timeout } : {}) }
           }),
         }
       })

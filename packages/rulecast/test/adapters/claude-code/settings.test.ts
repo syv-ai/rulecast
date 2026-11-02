@@ -125,6 +125,31 @@ describe("Claude Code settings: mergeHooks", () => {
   })
 })
 
+describe("Claude Code settings: hook timeouts", () => {
+  const stopTimeouts = (settings: unknown) => {
+    const hooks = (settings as { hooks: Record<string, { hooks: { timeout: number }[] }[]> }).hooks
+    return [hooks.Stop?.[0]?.hooks[0]?.timeout, hooks.SubagentStop?.[0]?.hooks[0]?.timeout]
+  }
+
+  test("a raised verify_ms raises the stop hooks' timeout, reported as updated (plan 21, #2)", () => {
+    // Claude Code kills a hook at its timeout: a stop check budgeted 300 s and killed at 70 s
+    // is silently skipped.
+    const installed = mergeHooks({}, HOOK_COMMAND, 60_000).settings
+    expect(stopTimeouts(installed)).toEqual([70, 70])
+    const raised = mergeHooks(installed, HOOK_COMMAND, 300_000)
+    expect(stopTimeouts(raised.settings)).toEqual([310, 310])
+    expect(raised.added).toEqual([])
+    expect(raised.updated).toEqual(["Stop", "SubagentStop"])
+  })
+
+  test("a timeout above what is needed is kept: install sizes it for the largest verify_ms of every config", () => {
+    const installed = mergeHooks({}, HOOK_COMMAND, 300_000).settings
+    const lowered = mergeHooks(installed, HOOK_COMMAND, 60_000)
+    expect(lowered.updated).toEqual([])
+    expect(lowered.settings).toEqual(installed)
+  })
+})
+
 describe("Claude Code settings: removeHooks", () => {
   const dash = { type: "command", command: "dash-hook stop" }
 

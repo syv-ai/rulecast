@@ -42,7 +42,7 @@ repos:
 | `max_matches_per_rule` | `10` | Findings shown per rule |
 | `max_file_bytes` | `1048576` | A larger file is skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and guard, where an agent is waiting. `verify` always runs |
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
-| `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run` |
+| `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install`: the stop hooks' timeout follows it |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
 | `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
 | `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |

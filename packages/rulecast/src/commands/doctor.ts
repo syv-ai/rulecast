@@ -214,7 +214,7 @@ export async function doctorCommand(
         : missing.length > 0
           ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
           : stale
-            ? `${file} — but the hooks use an old command; run rulecast install`
+            ? `${file} — but the hooks are out of date; run rulecast install`
             : runs
               ? file
               : `${file} — but rulecast is in neither node_modules/.bin nor on the PATH, so no rules run. Add it to the project (pnpm add -D @syv-ai/rulecast), or install it globally.`

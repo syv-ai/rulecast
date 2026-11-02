@@ -82,9 +82,9 @@ describe("rulecast install", () => {
     }
     settings.hooks.Stop.push({ hooks: [{ type: "command", command: "dash-hook stop" }] })
     await writeFile(path.join(local, ".claude/settings.json"), JSON.stringify(settings))
-    expect((await runCli(local, ["doctor"])).stdout).toContain("the hooks use an old command; run rulecast install")
+    expect((await runCli(local, ["doctor"])).stdout).toContain("the hooks are out of date; run rulecast install")
     const result = await runCli(local, ["install"])
-    expect(result.stdout).toContain("updated Claude Code hooks in .claude/settings.json to the current command")
+    expect(result.stdout).toContain("updated Claude Code hooks in .claude/settings.json: ")
     const after = await settingsOf(local)
     expect(after.hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     expect(after.hooks.Stop[1].hooks[0].command).toBe("dash-hook stop")
@@ -146,7 +146,7 @@ describe("rulecast install", () => {
       ".rulecast-config.yaml": "repos: []\n",
       ".claude/settings.json": JSON.stringify(committed),
     })
-    expect((await runCli(clone, ["doctor"])).stdout).toContain("the hooks use an old command; run rulecast install")
+    expect((await runCli(clone, ["doctor"])).stdout).toContain("the hooks are out of date; run rulecast install")
     expect((await runCli(clone, ["install"])).code).toBe(0)
     const commands = Object.values(
       (await settingsOf(clone)).hooks as Record<string, { hooks: { command: string }[] }[]>,
@@ -172,6 +172,18 @@ describe("rulecast install", () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain(`could not fetch ${repoLabel("/nonexistent/rules.git", "v1.0.0")}`)
     expect(existsSync(path.join(root, SHARED))).toBe(true)
+  })
+
+  test("raising verify_ms after install: doctor says the hooks are out of date, install raises the stop timeout", async () => {
+    const root = await createProject({ ".rulecast-config.yaml": "repos: []\n" })
+    await runCli(root, ["install"])
+    expect((await settingsOf(root)).hooks.Stop[0].hooks[0].timeout).toBe(70)
+    await writeFile(path.join(root, ".rulecast-config.yaml"), "repos: []\ntimeouts:\n  verify_ms: 300000\n")
+    expect((await runCli(root, ["doctor"])).stdout).toContain("the hooks are out of date; run rulecast install")
+    const result = await runCli(root, ["install"])
+    expect(result.stdout).toContain("updated Claude Code hooks in .claude/settings.json: Stop, SubagentStop")
+    expect((await settingsOf(root)).hooks.Stop[0].hooks[0].timeout).toBe(310)
+    expect((await settingsOf(root)).hooks.SubagentStop[0].hooks[0].timeout).toBe(310)
   })
 
   test("in a directory with only a package config below it: settings here, its repos fetched, its verify_ms", async () => {
