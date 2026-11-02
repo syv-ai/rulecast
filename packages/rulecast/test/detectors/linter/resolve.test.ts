@@ -77,6 +77,55 @@ describe("resolveTool from a directory", () => {
   })
 })
 
+describe("resolveTool and a project virtualenv", () => {
+  async function executable(file: string) {
+    await mkdir(path.dirname(file), { recursive: true })
+    await writeFile(file, "#!/bin/sh\n")
+    await chmod(file, 0o755)
+  }
+
+  test("finds ruff in a package's .venv/bin from the package", async () => {
+    const top = await createProject({ "pkg/pyproject.toml": "" })
+    const pkg = path.join(top, "pkg")
+    const binary = path.join(pkg, ".venv", "bin", "ruff")
+    await executable(binary)
+    expect(await resolveTool("ruff", pkg, () => false, top)).toEqual({ command: binary, prefix: [] })
+    expect(await describeTool("ruff", top, { available: () => false, top, dir: pkg })).toEqual({
+      command: "pkg/.venv/bin/ruff",
+      how: "local",
+      found: true,
+    })
+  })
+
+  test("finds venv/bin above the directory, up to the top", async () => {
+    const top = await createProject({ "pkg/pyproject.toml": "" })
+    const binary = path.join(top, "venv", "bin", "ruff")
+    await executable(binary)
+    expect(await resolveTool("ruff", path.join(top, "pkg"), () => false, top)).toEqual({ command: binary, prefix: [] })
+  })
+
+  test("a project's .venv beats uv run", async () => {
+    const root = await createProject({ "pyproject.toml": "[project]\nname = 'x'\n", "uv.lock": "" })
+    const binary = path.join(root, ".venv", "bin", "ruff")
+    await executable(binary)
+    expect(await resolveTool("ruff", root, () => true)).toEqual({ command: binary, prefix: [] })
+  })
+
+  test("node_modules/.bin still comes first", async () => {
+    const root = await createProject({})
+    await executable(path.join(root, ".venv", "bin", "ruff"))
+    const local = path.join(root, "node_modules", ".bin", "ruff")
+    await executable(local)
+    expect(await resolveTool("ruff", root, () => false)).toEqual({ command: local, prefix: [] })
+  })
+
+  test("a JavaScript tool ignores the .venv", async () => {
+    const root = await createProject({})
+    await executable(path.join(root, ".venv", "bin", "eslint"))
+    expect(await resolveTool("eslint", root, () => true)).toEqual({ command: "eslint", prefix: [] })
+  })
+})
+
 describe("resolveTool and uv.lock", () => {
   // uv run in a project without a lock would write uv.lock and a .venv into the user's tree.
   test("a pyproject.toml without a uv.lock is not run through uv", async () => {

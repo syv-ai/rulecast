@@ -194,16 +194,22 @@ export interface DetectorResult {
 }
 
 export interface DetectorWarm<Config> {
-  /** Every rule of this detector kind in the project. */
-  rules: { id: string; config: Config }[]
+  /**
+   * Every rule of this detector kind in the project. `files`, when the caller listed the project's
+   * files: the root-relative ones the rule matches, so a check can ask from where the rule would run.
+   */
+  rules: { id: string; config: Config; files?: string[] }[]
   cache: Cache
   cwd: string
   signal: AbortSignal
 }
 
 export interface DetectorCheck<Config> {
-  /** Every rule of this detector kind in the project. */
-  rules: { id: string; config: Config }[]
+  /**
+   * Every rule of this detector kind in the project. `files`, when the caller listed the project's
+   * files: the root-relative ones the rule matches, so a check can ask from where the rule would run.
+   */
+  rules: { id: string; config: Config; files?: string[] }[]
   /** Project settings from .rulecast-config.yaml; the same value a run gets. */
   settings: DetectorSettings
   /** The process environment, so a check can look for credentials without reaching for process.env. */

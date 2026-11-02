@@ -158,8 +158,17 @@ export async function doctorCommand(
     io.stdout(line(baseline.level, baseline.text, ""))
   }
 
+  // Listed once, for the checks (where each rule would run its tool from) and the dry run.
+  const listed: { files: string[] } | { error: unknown } =
+    project.rules.length === 0
+      ? { files: [] }
+      : await allFiles(project.root).then(
+          (files) => ({ files }),
+          (error: unknown) => ({ error }),
+        )
   const results = await checkDetectors({
     project,
+    ...("files" in listed && { files: listed.files }),
     registry,
     settings: { llm: project.config.llm },
     env: io.env,
@@ -237,7 +246,7 @@ export async function doctorCommand(
     }
   }
   io.stdout("\ndry run\n")
-  const dry = await dryRun(project, detectionFor(project, registry, stateDir, createReferenceResolver(root)))
+  const dry = await dryRun(project, detectionFor(project, registry, stateDir, createReferenceResolver(root)), listed)
   if (dry.length === 0) io.stdout("  nothing to run\n")
   for (const result of dry) {
     count(result.level)
@@ -373,14 +382,14 @@ const DRY_RUN_FOOTER = "the dry run tries one file per rule; rulecast run --all-
  * A memory cache, not the project's: a dry run that quietly answered from a stale cache would be
  * the wrong answer to the question being asked.
  */
-async function dryRun(project: CompiledProject, detection: DetectionContext): Promise<DryRunLine[]> {
+async function dryRun(
+  project: CompiledProject,
+  detection: DetectionContext,
+  listed: { files: string[] } | { error: unknown },
+): Promise<DryRunLine[]> {
   if (project.rules.length === 0) return []
-  let files: string[]
-  try {
-    files = await allFiles(project.root)
-  } catch (error) {
-    return [{ rule: "not run", level: "warning", detail: errorMessage(error) }]
-  }
+  if ("error" in listed) return [{ rule: "not run", level: "warning", detail: errorMessage(listed.error) }]
+  const { files } = listed
 
   const lines: DryRunLine[] = []
   for (const rule of project.rules) {

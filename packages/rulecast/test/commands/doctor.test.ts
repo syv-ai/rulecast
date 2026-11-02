@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { chmod, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -156,6 +156,47 @@ describe("rulecast doctor", () => {
     expect(result.stdout).toContain("environment\n")
     expect(result.stdout).toContain("ok       oxlint — node_modules/.bin/oxlint")
     expect(result.stdout).toContain(`ok       ./check.sh — ${path.join(root, "check.sh")}`)
+  })
+
+  describe("a linter installed only in a package", () => {
+    const RUFF = {
+      id: "lint",
+      name: "Lint",
+      files: "\\.py$",
+      detect: { linter: { tool: "ruff" } },
+      message: "{{file}}:{{line}} {{ruleId}}: {{message}}",
+    }
+    async function stubRuff(dir: string) {
+      const bin = path.join(dir, "node_modules", ".bin")
+      await mkdir(bin, { recursive: true })
+      await writeFile(path.join(bin, "ruff"), "#!/bin/sh\necho '[]'\n")
+      await chmod(path.join(bin, "ruff"), 0o755)
+    }
+
+    test("is found from the package its files are linted from", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([RUFF]),
+        "backend/pyproject.toml": "[project]\nname = 'x'\n",
+        "backend/app.py": "x = 1\n",
+      })
+      await stubRuff(path.join(root, "backend"))
+      const result = await doctor(root)
+      expect(result.stdout).toContain("ok       ruff — backend/node_modules/.bin/ruff")
+    })
+
+    test("missing where some of its files are linted from is an error naming those directories", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([RUFF]),
+        "backend/pyproject.toml": "[project]\nname = 'x'\n",
+        "backend/app.py": "x = 1\n",
+        "frontend/ruff.toml": "",
+        "frontend/tool.py": "x = 1\n",
+      })
+      await stubRuff(path.join(root, "backend"))
+      const result = await doctor(root)
+      expect(result.stdout).toContain("error    ruff — not installed for frontend")
+      expect(result.stdout).toContain("(lint)")
+    })
   })
 
   test("a command that is not executable is an error naming its rule, and exits 2", async () => {

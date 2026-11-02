@@ -14,9 +14,9 @@ beforeEach(() => {
   return () => vi.unstubAllEnvs()
 })
 
-function check(root: string, rules: { id: string; tool: ToolName }[]) {
+function check(root: string, rules: { id: string; tool: ToolName; files?: string[] }[]) {
   return linterDetector.check!({
-    rules: rules.map((rule) => ({ id: rule.id, config: { tool: rule.tool } })),
+    rules: rules.map((rule) => ({ id: rule.id, config: { tool: rule.tool }, files: rule.files })),
     settings: defaultDetectorSettings(),
     env: process.env,
     cwd: root,
@@ -76,5 +76,22 @@ describe("linter detector check", () => {
       { what: "eslint", level: "error", detail: "not installed", rules: ["a", "c"] },
       { what: "oxlint", level: "ok", detail: "node_modules/.bin/oxlint", rules: [] },
     ])
+  })
+
+  test("with files, the tool is looked for from each directory they are linted from", async () => {
+    const root = await createRepo({ "backend/pyproject.toml": "", "frontend/ruff.toml": "" })
+    const bin = path.join(root, "backend", "node_modules", ".bin")
+    await mkdir(bin, { recursive: true })
+    await writeFile(path.join(bin, "ruff"), "#!/bin/sh\n")
+    await chmod(path.join(bin, "ruff"), 0o755)
+    expect(await check(root, [{ id: "a", tool: "ruff", files: ["backend/a.py"] }])).toEqual([
+      { what: "ruff", level: "ok", detail: "backend/node_modules/.bin/ruff", rules: [] },
+    ])
+    expect(
+      await check(root, [
+        { id: "a", tool: "ruff", files: ["backend/a.py"] },
+        { id: "b", tool: "ruff", files: ["frontend/b.py", "c.py"] },
+      ]),
+    ).toEqual([{ what: "ruff", level: "error", detail: "not installed for ., frontend", rules: ["a", "b"] }])
   })
 })

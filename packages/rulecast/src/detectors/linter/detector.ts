@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { filesFrom } from "../../core/detection/paths"
 import { pastDeadline, sourceReader } from "../../core/detection/per-rule"
 import { excerpt } from "../../core/detection/positions"
@@ -160,23 +162,42 @@ export const linterDetector: Detector<LinterConfig> = {
   },
   async check(input) {
     // One result per tool, in first-use order: every rule naming a tool shares its fate.
-    const byTool = new Map<ToolName, string[]>()
+    const byTool = new Map<ToolName, { rules: string[]; files: string[] | undefined }>()
     for (const rule of input.rules) {
-      const group = byTool.get(rule.config.tool)
-      if (group) group.push(rule.id)
-      else byTool.set(rule.config.tool, [rule.id])
+      const group = byTool.get(rule.config.tool) ?? { rules: [], files: undefined }
+      group.rules.push(rule.id)
+      if (rule.files !== undefined) group.files = [...(group.files ?? []), ...rule.files]
+      byTool.set(rule.config.tool, group)
     }
-    // Doctor has no files, so it asks from the root, where a file with no config of its own is
-    // linted from. A tool installed only in a package's node_modules shows as missing here, though
-    // a run over that package's files finds it.
     const top = await repositoryTop(input.cwd)
     return Promise.all(
-      [...byTool].map(async ([tool, rules]): Promise<CheckResult> => {
-        const described = await describeTool(tool, input.cwd, { signal: input.signal, top })
-        if (!described.found) return { what: tool, level: "error", detail: "not installed", rules }
-        const detail = described.how === "path" ? `${described.command} (PATH)` : described.command
-        return { what: tool, level: "ok", detail, rules: [] }
+      [...byTool].map(async ([tool, { rules, files }]): Promise<CheckResult> => {
+        const dirs = await checkDirs(tool, files, input.cwd, top)
+        const described = await Promise.all(
+          dirs.map((dir) => describeTool(tool, input.cwd, { signal: input.signal, top, dir })),
+        )
+        const missing = dirs.filter((_, index) => !described[index]!.found)
+        if (missing.length === dirs.length) return { what: tool, level: "error", detail: "not installed", rules }
+        if (missing.length > 0) {
+          const where = missing.map((dir) => path.relative(input.cwd, dir).split(path.sep).join("/") || ".")
+          return { what: tool, level: "error", detail: `not installed for ${where.join(", ")}`, rules }
+        }
+        const shown = [...new Set(described.map((one) => (one.how === "path" ? `${one.command} (PATH)` : one.command)))]
+        return { what: tool, level: "ok", detail: shown.join(", "), rules: [] }
       }),
     )
   },
+}
+
+/**
+ * The directories a run would start `tool` from: each matched file's run dir, as a run picks it.
+ * The root alone when the files are not known or none match, where a file with no config of its
+ * own is linted from. Sorted, so doctor's output is stable.
+ */
+async function checkDirs(tool: ToolName, files: string[] | undefined, root: string, top: string): Promise<string[]> {
+  if (files === undefined || files.length === 0) return [root]
+  const seen = new Map<string, Promise<boolean>>()
+  const dirs = new Set<string>()
+  for (const file of new Set(files)) dirs.add(await runDirFor(tool, file, root, top, seen))
+  return [...dirs].sort()
 }

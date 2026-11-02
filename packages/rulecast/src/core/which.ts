@@ -39,17 +39,37 @@ export function upTo(dir: string, top: string): string[] {
 }
 
 /**
+ * The first executable among `relatives` (paths relative to a directory), tried in each directory
+ * from `from` up to the repository's `top`, nearest first. Null when there is none. The one walker
+ * behind every "the project's own install" lookup.
+ */
+export async function firstExecutable(relatives: readonly string[], from: string, top: string): Promise<string | null> {
+  for (const dir of upTo(from, top)) {
+    for (const relative of relatives) {
+      const candidate = path.join(dir, relative)
+      try {
+        await access(candidate, constants.X_OK)
+        return candidate
+      } catch {}
+    }
+  }
+  return null
+}
+
+/**
  * The project's own install of `name`: the nearest executable `node_modules/.bin/<name>` from `from`
  * up to the repository's `top` (a package's own, a workspace's, the repository's). Null when there
  * is none. Every detector that runs a project's tool looks for it here first.
  */
-export async function localBin(name: string, from: string, top: string): Promise<string | null> {
-  for (const dir of upTo(from, top)) {
-    const local = path.join(dir, "node_modules", ".bin", name)
-    try {
-      await access(local, constants.X_OK)
-      return local
-    } catch {}
-  }
-  return null
+export function localBin(name: string, from: string, top: string): Promise<string | null> {
+  return firstExecutable([path.join("node_modules", ".bin", name)], from, top)
+}
+
+/**
+ * A Python tool installed in the project's own virtualenv: the nearest executable `.venv/bin/<name>`
+ * or `venv/bin/<name>` from `from` up to `top`. A venv kept elsewhere (Poetry's default, in its cache
+ * directory) is not looked for; once activated, its bin is on the PATH, which covers it.
+ */
+export function venvBin(name: string, from: string, top: string): Promise<string | null> {
+  return firstExecutable([path.join(".venv", "bin", name), path.join("venv", "bin", name)], from, top)
 }

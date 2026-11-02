@@ -1,7 +1,7 @@
 import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
-import { localBin, onPath, upTo } from "../../core/which"
+import { localBin, onPath, upTo, venvBin } from "../../core/which"
 import type { ToolName } from "./schema"
 import { TOOLS } from "./tools"
 
@@ -53,7 +53,9 @@ export async function runDirFor(
 }
 
 /**
- * Spec §6: node_modules/.bin from `dir` up to the repository's `top`, then `uv run`, then PATH.
+ * Spec §6: node_modules/.bin from `dir` up to the repository's `top`, then, for a Python tool, the
+ * project's own `.venv/bin` or `venv/bin` over the same directories, then `uv run`, then PATH. A
+ * tool the project installed itself beats one uv would resolve.
  * `uv run` only helps for a Python tool inside a project uv already manages: a `pyproject.toml` in
  * `dir`, and a `uv.lock` there or above it up to `top` (a workspace member has its lock at the
  * workspace root). Without the lock, `uv run` would create one and a `.venv` in the user's tree.
@@ -73,6 +75,10 @@ export async function resolveTool(
 ): Promise<ResolvedTool> {
   const local = await localBin(tool, dir, top)
   if (local !== null) return { command: local, prefix: [] }
+  if (PYTHON_TOOLS.has(tool)) {
+    const venv = await venvBin(tool, dir, top)
+    if (venv !== null) return { command: venv, prefix: [] }
+  }
   if (
     PYTHON_TOOLS.has(tool) &&
     (await reachable(path.join(dir, "pyproject.toml"), constants.F_OK)) &&
@@ -85,7 +91,7 @@ export async function resolveTool(
 }
 
 export interface DescribedTool {
-  /** The command as a person would type it: a repo-relative path, "uv run -- ruff", or the bare name. */
+  /** The command as a person would type it: a root-relative path, "uv run -- ruff", or the bare name. */
   command: string
   /** Which of resolveTool's three branches answered. */
   how: "local" | "uv" | "path"
@@ -108,10 +114,12 @@ export async function describeTool(
     available?: (command: string) => boolean | Promise<boolean>
     /** The repository's top, which node_modules/.bin is looked for up to, as a run does. */
     top?: string
+    /** Where the tool runs from, when not `root`; a found path is still shown relative to `root`. */
+    dir?: string
   } = {},
 ): Promise<DescribedTool> {
   const available = options.available ?? ((command: string) => onPath(command, options.signal))
-  const resolved = await resolveTool(tool, root, available, options.top)
+  const resolved = await resolveTool(tool, options.dir ?? root, available, options.top)
   if (path.isAbsolute(resolved.command)) {
     // resolveTool only returns an absolute path after testing it for X_OK, so it exists.
     const relative = path.relative(root, resolved.command)

@@ -11,6 +11,8 @@ export interface CheckOptions {
   settings: DetectorSettings
   env: Readonly<Record<string, string | undefined>>
   timeoutMs: number
+  /** The project's files, root-relative, when the caller has listed them; each rule gets its matches. */
+  files?: readonly string[]
 }
 
 /** A check's answer, and which detector gave it. */
@@ -37,7 +39,7 @@ export async function checkDetectors(options: CheckOptions): Promise<KindCheckRe
   const perKind = await Promise.all(
     kinds.map(async (kind): Promise<KindCheckResult[]> => {
       const detector = registry.get(kind)!
-      const rules = rulesOfKind(project.rules, kind)
+      const rules = withFiles(project, rulesOfKind(project.rules, kind), options.files)
       try {
         const results = await detector.check!({
           rules,
@@ -63,4 +65,18 @@ export async function checkDetectors(options: CheckOptions): Promise<KindCheckRe
     }),
   )
   return perKind.flat()
+}
+
+/** Each rule with the files it matches, when the files are known. */
+function withFiles(
+  project: CompiledProject,
+  rules: { id: string; config: unknown }[],
+  files: readonly string[] | undefined,
+): { id: string; config: unknown; files?: string[] }[] {
+  if (files === undefined) return rules
+  const byId = new Map(project.rules.map((rule) => [rule.id, rule]))
+  return rules.map((rule) => {
+    const compiled = byId.get(rule.id)
+    return { ...rule, files: compiled === undefined ? [] : files.filter((file) => compiled.matches(file)) }
+  })
 }
