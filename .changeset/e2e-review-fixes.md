@@ -18,3 +18,10 @@ Fixes from an end-to-end review of setup.
 - `init` judges a hook that runs a package script by that script (one level), and one that runs a script it cannot see into as "may change files", naming it (`modifies: null` and `runs` in JSON). It sees past package-manager flags and workspace selectors (`pnpm --filter web lint`, `yarn workspace web lint`), treats turbo, nx, lerna, npm-run-all and concurrently as unknown, and counts black, isort and `ruff format` as writers unless they `--check`. Before, `npm run lint` running `biome --write` was offered as read-only.
 - Session stores no longer grow by the whole dirty tree twice per shell call: a tree state is written as a reference to one the store already holds, or as its change from the agent's last one. With 2000 shell calls and 30 dirty files, a store went from 40 MB to 1 MB, and reading it from 375 ms to 27 ms on every hook.
 - `init`, `install` and `doctor` plan the agent hooks in one place. `init` now completes a partial install where it is, as `install` does, instead of writing a second set into the shared settings, and `doctor` judges the stop timeout by the largest `verify_ms` of every config the hooks serve.
+
+Breaking:
+
+- Session stores use a new tree record format. Stores from before this version are not supported.
+- `init --format json`: `hooks.offered[].modifies` can be `null` (rulecast cannot tell), with `runs` naming what the hook runs.
+- The Claude Code hook command changed. Run `rulecast install` to rewrite existing settings.
+- `Event` (exported types) is a discriminated union, one variant per `kind`.
