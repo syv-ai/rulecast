@@ -57,6 +57,12 @@ export interface PipelineOptions {
   registry: DetectorRegistry
   /** From the adapter; null = unlimited. */
   maxContextChars: number | null
+  /**
+   * Several pipelines sharing one event's budget (commands/hook.ts): called once, just before the
+   * budget is applied, with whether this pipeline has anything for the agent; resolves to the share
+   * to use in place of `maxContextChars`. Never called on a path that applies no budget.
+   */
+  shareBudget?: (delivers: boolean) => Promise<number | null>
   /** Recently accessed files the agent re-attaches after compaction (adapter.restoredFiles); reset re-delivers their touch context. */
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */
@@ -386,6 +392,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   }
 
+  /** The budget this pipeline applies: its share, when it shares one (PipelineOptions.shareBudget). */
+  let maxContextChars = options.maxContextChars
+  const claimBudget = async (delivers: boolean) => {
+    if (options.shareBudget !== undefined) maxContextChars = await options.shareBudget(delivers)
+  }
+
   const view: SessionView = session
     ? await readingStore(() => openSession(session!.dir, session!.agent), empty())
     : empty()
@@ -455,6 +467,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
     // that reads it later would not have the value this branch checked.
     const open = session
+    await claimBudget(relevant(event.files).length > 0)
     const delivery = await guardWrite({
       detection,
       config,
@@ -464,7 +477,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       mode: project.mode.mode,
       work: view.work,
       resolver,
-      maxContextChars: options.maxContextChars,
+      maxContextChars,
       log,
       ...(display === undefined ? {} : { display }),
       record: open ? (records) => appendWork(open.dir, records) : async () => {},
@@ -869,7 +882,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     maxBytes: config.context.maxBytes,
     maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
     mode: project.mode.mode,
-    maxContextChars: options.maxContextChars,
+    maxContextChars,
     maxMatchesPerRule: config.maxMatchesPerRule,
     stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
     ...(options.listPreexisting === true ? { listPreexisting: true } : {}),
@@ -947,6 +960,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
+  // What decide could put before the agent; touch rules already in its context it would not.
+  await claimBudget(
+    findings.length > 0 ||
+      touches.some((rule) => !view.context.touched.has(rule.id)) ||
+      swept.length > 0 ||
+      refused.length > 0 ||
+      disabledGroups.length > 0,
+  )
   if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
 
   await appendWork(session.dir, workRecords)

@@ -45,7 +45,15 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     const home = cacheHome(io.env)
     const projects = await projectsFor(parsed, event, launchDir, home)
     if (projects.size === 0) return 0
-    const routed = { parsed, event, adapter, registry, io, home, count: projects.size }
+    const routed = {
+      parsed,
+      event,
+      adapter,
+      registry,
+      io,
+      home,
+      seat: budgetSeats(adapter.maxContextChars, projects.size),
+    }
     const sessionId = event?.session?.id
     const [, ...runs] = await Promise.all([
       // A start recorded its roots while finding them (projectsForEvent).
@@ -102,8 +110,53 @@ interface Routed {
   registry: DetectorRegistry
   io: CliIo
   home: string
-  /** How many projects share the event, and so the adapter's context budget. */
-  count: number
+  /** Each project's seat at the adapter's context budget (budgetSeats). */
+  seat: () => BudgetSeat
+}
+
+interface BudgetSeat {
+  /** This project has (or has not) something for the agent; resolves to its share once every project has said. */
+  claim: (delivers: boolean) => Promise<number | null>
+  /** This project applies no budget: a path without output, or a failure. A no-op after `claim`. */
+  leave: () => void
+}
+
+/**
+ * One event's context budget, shared by its projects: divided only among those with something for
+ * the agent (at least one), so a session with many configs does not shrink the one that found
+ * something. Each project says so just before its budget is applied (PipelineOptions.shareBudget),
+ * after its detectors ran: the claims wait for each other, not for a second run. Every seat must
+ * claim or leave exactly once, or the claims never resolve.
+ */
+function budgetSeats(total: number | null, parties: number): () => BudgetSeat {
+  let waiting = parties
+  let delivering = 0
+  let release: (share: number | null) => void = () => {}
+  const shared = new Promise<number | null>((resolve) => {
+    release = resolve
+  })
+  const settle = () => {
+    waiting -= 1
+    if (waiting === 0) release(total === null ? null : Math.floor(total / Math.max(1, delivering)))
+  }
+  return () => {
+    let done = false
+    return {
+      claim: (delivers) => {
+        if (!done) {
+          done = true
+          if (delivers) delivering += 1
+          settle()
+        }
+        return shared
+      },
+      leave: () => {
+        if (done) return
+        done = true
+        settle()
+      },
+    }
+  }
 }
 
 interface ProjectRun {
@@ -113,12 +166,13 @@ interface ProjectRun {
 }
 
 /**
- * One project's run of the event: its own state, compile, session and share of the budget. Paths in
+ * One project's run of the event: its own state, compile, session and seat at the budget. Paths in
  * its delivery are shown from the agent's cwd. A failure is this project's alone: logged in its debug
  * log, and the other projects still deliver.
  */
 async function runProject(root: string, files: string[] | null, routed: Routed): Promise<ProjectRun | null> {
   const { parsed, event, adapter, registry, io, home } = routed
+  const seat = routed.seat()
   let log: ((line: string) => void) | undefined
   try {
     const stateDir = ensureProjectState(home, root)
@@ -143,7 +197,8 @@ async function runProject(root: string, files: string[] | null, routed: Routed):
       stateDir,
       event: projectEvent,
       registry,
-      maxContextChars: adapter.maxContextChars === null ? null : Math.floor(adapter.maxContextChars / routed.count),
+      maxContextChars: adapter.maxContextChars,
+      shareBudget: seat.claim,
       restoredFiles: adapter.restoredFiles,
       stopGate: projectEvent.kind === "verify",
       recordMode: true,
@@ -157,5 +212,7 @@ async function runProject(root: string, files: string[] | null, routed: Routed):
     log?.(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
     return null
+  } finally {
+    seat.leave()
   }
 }

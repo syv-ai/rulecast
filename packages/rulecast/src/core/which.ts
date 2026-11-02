@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process"
+import { access, constants } from "node:fs/promises"
+import path from "node:path"
 import { promisify } from "node:util"
 
 const exec = promisify(execFile)
@@ -22,4 +24,32 @@ export async function onPath(command: string, signal?: AbortSignal): Promise<boo
   } catch {
     return false
   }
+}
+
+/** `dir` and its parents up to and including `top`; `dir` alone when `top` is not above it. */
+export function upTo(dir: string, top: string): string[] {
+  const relative = path.relative(top, dir)
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return [dir]
+  const dirs = [dir]
+  for (let current = dir; current !== top; ) {
+    current = path.dirname(current)
+    dirs.push(current)
+  }
+  return dirs
+}
+
+/**
+ * The project's own install of `name`: the nearest executable `node_modules/.bin/<name>` from `from`
+ * up to the repository's `top` (a package's own, a workspace's, the repository's). Null when there
+ * is none. Every detector that runs a project's tool looks for it here first.
+ */
+export async function localBin(name: string, from: string, top: string): Promise<string | null> {
+  for (const dir of upTo(from, top)) {
+    const local = path.join(dir, "node_modules", ".bin", name)
+    try {
+      await access(local, constants.X_OK)
+      return local
+    } catch {}
+  }
+  return null
 }

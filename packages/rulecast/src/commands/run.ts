@@ -37,7 +37,14 @@ import {
 import { cacheHome, ensureProjectState } from "../core/home"
 import { CorruptStoreError } from "../core/jsonl"
 import { type PipelineResult, runPipeline } from "../core/pipeline"
-import { configRootsAbove, configRootsBelow, displayPath, projectsForFiles } from "../core/projects"
+import {
+  configRootsAbove,
+  configRootsBelow,
+  dedupe,
+  displayPath,
+  projectsForFiles,
+  sessionRoots,
+} from "../core/projects"
 import { fetchingRepos } from "../core/repos/provider"
 import { recordedMode, sessionDir } from "../core/session/session"
 import type { ContentSource, Delivery } from "../core/types"
@@ -194,12 +201,25 @@ const noProject = (cwd: string) => new Error(`no ${CONFIG_FILE} in ${cwd} or its
  * Which projects a run checks, and each one's files. In a git work tree, the files are chosen as
  * `selectFiles` chooses them, from `cwd` and limited to its subtree (`--files`: as named), and every
  * config above a file judges it (core/projects.ts). The nearest config above `cwd` always runs, with
- * no files if none reached it, so "nothing staged" is said as before. A run over a session, and any run
- * outside git, is the nearest project's alone. `root`: the nearest config's directory (`findRoot`).
+ * no files if none reached it, so "nothing staged" is said as before. A run over a session checks the
+ * nearest project and every project the session's hooks ran (core/projects.ts `sessionRoots`), each
+ * over the session's own work, as its Stop does. Any other run outside git is the nearest project's
+ * alone. `root`: the nearest config's directory (`findRoot`); `cache`: the cache home.
  */
-export async function routeRun(root: string, cwd: string, run: RunArgs): Promise<RoutedRun> {
+export async function routeRun(root: string, cwd: string, run: RunArgs, cache: string): Promise<RoutedRun> {
   const nearest = hasProject(root) ? path.resolve(root) : null
-  if (run.session !== null || !(await insideWorkTree(cwd))) {
+  if (run.session !== null) {
+    const recorded = (await sessionRoots(cache, run.session)).filter(hasProject)
+    const roots = dedupe([...(nearest === null ? [] : [nearest]), ...recorded])
+    if (roots.length === 0) throw noProject(cwd)
+    return {
+      projects: await Promise.all(
+        roots.map(async (dir) => ({ root: dir, selected: await selectFiles(dir, cwd, run) })),
+      ),
+      displayFrom: path.resolve(cwd),
+    }
+  }
+  if (!(await insideWorkTree(cwd))) {
     if (nearest === null) throw noProject(cwd)
     return { projects: [{ root: nearest, selected: await selectFiles(nearest, cwd, run) }], displayFrom: undefined }
   }
@@ -515,7 +535,13 @@ export async function runCommand(root: string, args: string[], registry: Detecto
   if (run.ref !== null) throw new UsageError("--ref only applies to try-repo")
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   const ruleId = run.leading[0] ?? null
-  const { projects, displayFrom } = await compileRun(await routeRun(root, io.cwd, run), ruleId, run, registry, io)
+  const { projects, displayFrom } = await compileRun(
+    await routeRun(root, io.cwd, run, cacheHome(io.env)),
+    ruleId,
+    run,
+    registry,
+    io,
+  )
   const checks = await Promise.all(
     projects.map(async ({ project, selected }) => ({
       project,

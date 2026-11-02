@@ -169,7 +169,13 @@ function notFixable(rule: string, warnings: readonly string[]): string {
 export async function fixCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const { run, dryRun } = parseFixArgs(args)
   const ruleId = run.leading[0] ?? null
-  const { projects, displayFrom } = await compileRun(await routeRun(root, io.cwd, run), ruleId, run, registry, io)
+  const { projects, displayFrom } = await compileRun(
+    await routeRun(root, io.cwd, run, cacheHome(io.env)),
+    ruleId,
+    run,
+    registry,
+    io,
+  )
   if (
     ruleId !== null &&
     !projects.some(({ project }) => project.rules.some((rule) => rule.id === ruleId && rule.fixable))

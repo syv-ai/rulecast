@@ -4,7 +4,7 @@ import { parse } from "yaml"
 
 import { runTool } from "../../core/detection/tool"
 import { isNotFound } from "../../core/errors"
-import { onPath } from "../../core/which"
+import { localBin, onPath } from "../../core/which"
 import type { Runner } from "./framing"
 
 export const PRE_COMMIT_CONFIG = ".pre-commit-config.yaml"
@@ -43,13 +43,9 @@ export async function findPreCommitHook(root: string, id: string): Promise<{ id:
   return null
 }
 
-/** The project's node_modules/.bin, then the repository's, then PATH. */
+/** node_modules/.bin from the project up to the repository's top (core/which.ts `localBin`), then PATH. */
 async function locate(name: string, root: string, top: string, signal?: AbortSignal): Promise<string | null> {
-  for (const dir of new Set([root, top])) {
-    const local = path.join(dir, "node_modules", ".bin", name)
-    if (await onPath(local, signal)) return local
-  }
-  return (await onPath(name, signal)) ? name : null
+  return (await localBin(name, root, top)) ?? ((await onPath(name, signal)) ? name : null)
 }
 
 /** prek when installed (a third of pre-commit's overhead, same config), else pre-commit. */

@@ -104,6 +104,19 @@ describe("rulecast init --yes", () => {
     expect(existsSync(path.join(top, ".claude/settings.json"))).toBe(false)
   })
 
+  test("at the top of a repository with a package config, the Stop timeout covers the package's larger verify_ms", async () => {
+    const top = await createRepo({
+      ...PROJECT,
+      "backend/.rulecast-config.yaml": "repos: []\ntimeouts:\n  verify_ms: 300000\n",
+    })
+    const result = await runCli(top, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.stderr).toBe("")
+    expect(result.code).toBe(0)
+    const settings = JSON.parse(await read(top, ".claude/settings.json"))
+    expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(310)
+    expect(settings.hooks.SubagentStop[0].hooks[0].timeout).toBe(310)
+  })
+
   test("says so when nothing in the catalog matches, rather than only 'no rules yet'", async () => {
     const root = await createRepo({ "src/index.ts": "export const x = 1\n", "AGENTS.md": "# Agents\n" })
     const result = await runCli(root, ["init", "--yes"], "", env)

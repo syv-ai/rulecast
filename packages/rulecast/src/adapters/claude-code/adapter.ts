@@ -11,8 +11,8 @@ export const CONTEXT_LIMIT = 10_000
 const CONTEXT_BUDGET = 9_000
 
 /**
- * How a preamble names the rules: the config file for one project, every contributing config for
- * several (Delivery.configs). `source` opens a sentence; `files` is what the agent must not change.
+ * How a preamble names the rules: the config file for one project, the configs with something for
+ * the agent when several ran (Delivery.configs). `source` opens a sentence; `files` is what the agent must not change.
  */
 interface Configs {
   source: string
@@ -21,7 +21,9 @@ interface Configs {
 
 function configsOf(delivery: Delivery): Configs {
   const configs = delivery.configs ?? []
-  if (configs.length <= 1) return { source: "rulecast rules (.rulecast-config.yaml)", files: ".rulecast-config.yaml" }
+  // One of several had something to say: named as the agent would reach it, which may not be its cwd's.
+  if (configs.length === 1) return { source: `rulecast rules (${configs[0]})`, files: configs[0]! }
+  if (configs.length === 0) return { source: "rulecast rules (.rulecast-config.yaml)", files: ".rulecast-config.yaml" }
   return { source: `rulecast rules (these configs: ${configs.join(", ")})`, files: "these configs" }
 }
 

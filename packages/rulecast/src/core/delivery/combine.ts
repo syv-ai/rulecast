@@ -27,7 +27,9 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  * - `stop`: the strongest (STOPS). `unattended` and `via: "shell"`: set if any part sets them.
  * - `warnings` and `notices`: concatenated, each prefixed with its config's path relative to
  *   `displayFrom`. `agentNotices` are about the session, not a config: unprefixed, said once.
- * - `configs`: each part's config, relative to `displayFrom`, in part order.
+ * - `configs`: the config of each part with something for the agent (`forAgent`), relative to
+ *   `displayFrom`, in part order: a preamble names the configs whose rules it is about, not every
+ *   config the event ran.
  * - `omitted`: `findings` merged per rule and per swept/not swept (the renderer finds an entry by
  *   both), counts and files summed, `inFiles` joined; `rules` and `preexisting` summed.
  */
@@ -51,7 +53,7 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     templates: {},
     omitted: { findings: [], rules: 0, preexisting: 0 },
     overflowPaths: [],
-    configs: parts.map(({ root }) => configLabel(root)),
+    configs: parts.filter(({ delivery }) => forAgent(delivery)).map(({ root }) => configLabel(root)),
   }
   const firstTemplate = new Map<string, string>()
   const agentNotices = new Set<string>()
@@ -101,6 +103,24 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
 
   if (agentNotices.size > 0) combined.agentNotices = [...agentNotices]
   return combined
+}
+
+/** The delivery puts something before the agent: a finding, a section, a stop to act on, a refused or swept file. */
+function forAgent(delivery: Delivery): boolean {
+  return (
+    delivery.findings.length > 0 ||
+    delivery.preexistingSummary.length > 0 ||
+    delivery.references.length > 0 ||
+    delivery.touches.length > 0 ||
+    (delivery.stop !== null && delivery.stop !== "allow") ||
+    (delivery.refused ?? []).length > 0 ||
+    (delivery.swept ?? []).length > 0 ||
+    (delivery.disabled ?? []).length > 0 ||
+    delivery.omitted.findings.length > 0 ||
+    delivery.omitted.rules > 0 ||
+    delivery.omitted.preexisting > 0 ||
+    delivery.overflowPaths.length > 0
+  )
 }
 
 function addReference(references: DeliveredReference[], reference: DeliveredReference): void {

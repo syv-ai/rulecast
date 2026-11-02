@@ -26,7 +26,7 @@ import { draftPrompt } from "../init/draft-prompt"
 import { detectHooks, hookRule, type LocalRule } from "../init/hooks"
 import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { Cancelled, type Choice, type Prompter } from "../init/prompts"
-import { settingsDir } from "./install"
+import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
 
@@ -420,11 +420,14 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   const hooks = await chooseHooks(root, config, flags, ui)
   const agents = await chooseAgents(detection, flags, ui)
 
+  // The hooks serve every config a session started here reaches, as rulecast install's do.
+  const own = config ?? defaultConfig()
+  const reached = await hookConfigs(root, "init", own)
   const changes = await planInit(
     { catalog: catalog === null ? null : { url: catalog.url, rev: catalog.rev }, rules: selections, agents, hooks },
     {
       configText,
-      verifyMs: (config ?? defaultConfig()).timeouts.verifyMs,
+      verifyMs: reached.verifyMs,
       local: existsSync(path.join(root, "node_modules", ".bin", "rulecast")),
       readText: (file) => readSourceFile(root, file),
     },
@@ -448,6 +451,11 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   }
 
   const errors = await validate(root, home, registry, ui)
+  // validate fetched this config's repos; hooks never fetch, so the other configs' are fetched here.
+  const fetched = await fetchHookRepos(
+    reached.configs.filter((each) => each !== own),
+    io,
+  )
 
   const prompt = draftPrompt(catalog?.rev ?? `v${VERSION}`, detection.primaryDoc)
   const toCommit = changes.filter((change) => change.commit).map((change) => change.file)
@@ -462,7 +470,7 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
     ui.say(prompt, "Work out your conventions with your coding agent, then draft rules for them. Paste this into it:")
     io.stdout(`${closing}\n`)
   }
-  return errors > 0 ? 2 : 0
+  return errors > 0 || !fetched ? 2 : 0
 }
 
 /** rulecast init (spec §12): detect, choose, review, write, validate, hand over the drafting prompt. */

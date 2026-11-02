@@ -82,7 +82,14 @@ function agent(repo: string, launch = ".", cwd = launch) {
     const { stdout } = await hook("pre-tool-use.write", file)
     return stdout === "" ? null : (JSON.parse(stdout).hookSpecificOutput?.permissionDecision ?? null)
   }
-  return { hook, edit, stop, guard }
+  /** Runs `write` as the agent's shell command between its pre and post hooks: what the agent was told, or "". */
+  const shell = async (write: () => Promise<void>): Promise<string> => {
+    await hook("pre-tool-use.bash")
+    await write()
+    const { stdout } = await hook("post-tool-use.bash")
+    return stdout === "" ? "" : JSON.parse(stdout).hookSpecificOutput.additionalContext
+  }
+  return { sessionId, env, hook, edit, stop, guard, shell }
 }
 
 describe("rulecast hook claude-code: configs anywhere", () => {
@@ -168,6 +175,62 @@ describe("rulecast hook claude-code: configs anywhere", () => {
     expect(told).toContain("--- backend/conventions/code.md#topic-1 ---\n## Topic 1\n\nThe backend way.")
     expect(told).toContain("…and 1 more in 1 file")
     expect(told).not.toContain("in 0 files")
+  })
+
+  test("with six configs and findings in one, that one gets the whole budget and is the only config named", async () => {
+    // A section longer than a sixth of the budget: delivered in full only if the share is not split six ways.
+    const body = Array.from({ length: 40 }, (_, i) => `Rule of thumb ${i}: keep the handler thin.`).join(" ")
+    const packages = ["a", "b", "c", "d", "e"]
+    const files: Record<string, string> = {
+      ...BASE,
+      ".rulecast-config.yaml": FRONTEND,
+      "pkg/c/conventions/code.md": `# Code\n\n## Handlers\n\n${body}\n`,
+    }
+    for (const name of packages) {
+      files[`pkg/${name}/.rulecast-config.yaml`] = localConfig([
+        {
+          id: `${name}/no-todo`,
+          name: "No TODO",
+          files: "\\.py$",
+          detect: { regex: { pattern: "TODO" } },
+          message: "{{file}}:{{line}} has a TODO.",
+          ...(name === "c" ? { context: ["@conventions/code.md#handlers"] } : {}),
+        },
+      ])
+      files[`pkg/${name}/x.py`] = "x = 1\n"
+    }
+    const repo = await createRepo(files)
+    const session = agent(repo)
+    await session.hook("session-start.startup")
+    const told = await session.shell(() => writeFile(path.join(repo, "pkg/c/x.py"), "x = 1  # TODO\n"))
+    expect(told).toContain("pkg/c/x.py:1 has a TODO.")
+    expect(told).toContain(body)
+    const stop = await session.stop()
+    expect(stop.decision).toBe("block")
+    expect(stop.reason).toMatch(/^rulecast rules \(pkg\/c\/\.rulecast-config\.yaml\) found problems/)
+  })
+
+  test("run --session checks every project the session ran, from where it is run", async () => {
+    const repo = await createRepo({
+      ...BASE,
+      "backend/.rulecast-config.yaml": BACKEND,
+      "frontend/.rulecast-config.yaml": FRONTEND,
+    })
+    const session = agent(repo, "frontend")
+    await session.hook("session-start.startup")
+    await session.edit("../backend/app/x.py", "x = 1  # TODO\n")
+    await session.edit("a.ts", "export const a: any = 1\n")
+    const run = await runCli(
+      path.join(repo, "frontend"),
+      ["run", "--session", session.sessionId, "--format", "json"],
+      "",
+      session.env,
+    )
+    expect(run.code).toBe(1)
+    const found = JSON.parse(run.stdout).findings.map(
+      (finding: { rule: string; file: string }) => `${finding.rule} ${finding.file}`,
+    )
+    expect(found.sort()).toEqual(["backend/no-todo ../backend/app/x.py", "frontend/no-any a.ts"])
   })
 
   test("a single-project repository gets exactly what one pipeline run delivers", async () => {

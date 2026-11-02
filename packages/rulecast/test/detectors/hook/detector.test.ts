@@ -226,6 +226,15 @@ describe("hook detector: a project below the repository's top", () => {
     expect(result.findings.map((f) => [f.match.file, f.match.line])).toEqual([["s.sh", 4]])
   })
 
+  test("the runner is found in a node_modules/.bin between the project and the repository's top", async () => {
+    const top = await createRepo({ ".pre-commit-config.yaml": CONFIG, "packages/sub/s.sh": SCRIPT })
+    const workspace = path.join(top, "packages")
+    await stubRunner(workspace, "prek", "printf 'sc....Passed\\n'\nexit 0")
+    const result = await run(path.join(workspace, "sub"), [ruleFor("shell", { "pre-commit": "sc" }, ["s.sh"])])
+    expect(result.errors).toEqual([])
+    expect(await calls(workspace, "prek")).toEqual(["run sc --files packages/sub/s.sh"])
+  })
+
   test("a lefthook job's root is relative to the repository's top", async () => {
     const top = await createRepo({ "sub/web/a.ts": "x\n" })
     const dump = JSON.stringify({

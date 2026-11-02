@@ -143,7 +143,8 @@ function realPath(dir: string): string {
   }
 }
 
-function dedupe(roots: readonly string[]): string[] {
+/** `roots` without repeats by real path, the first seen kept. */
+export function dedupe(roots: readonly string[]): string[] {
   const seen = new Set<string>()
   const kept: string[] = []
   for (const root of roots) {

@@ -379,8 +379,9 @@ export interface Delivery {
    */
   overflowPaths: string[]
   /**
-   * Combined from several projects (delivery/combine.ts): each one's config, relative to where the
-   * agent is, nearest first. Absent: one project, whose config the adapter need not name.
+   * Combined from several projects (delivery/combine.ts): the config of each one with something for
+   * the agent, relative to where the agent is, nearest first. Absent: one project, whose config the
+   * adapter need not name.
    */
   configs?: string[]
   /** The findings are in files the agent's shell command changed: the title says so. Absent: an edit tool. */

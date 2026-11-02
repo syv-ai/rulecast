@@ -227,6 +227,43 @@ export function configLabel(from: string, root: string): string {
   return displayPath(root, from)(".")
 }
 
+/**
+ * What hooks installed in `dir` must serve: every config a session started there reaches
+ * (reachableConfigs), loaded, and the Stop timeout they need. Every project runs in parallel on Stop,
+ * so the slowest one's verify budget is the one to wait for. One owner for install and init. `own`:
+ * the config `dir` will have, when the caller is about to write it (init); it stands in for one there.
+ */
+export async function hookConfigs(
+  dir: string,
+  command: string,
+  own?: Config,
+): Promise<{ roots: string[]; configs: Config[]; verifyMs: number }> {
+  const found = await reachableConfigs(dir)
+  const roots = own === undefined || found.includes(dir) ? found : [dir, ...found]
+  const configs: Config[] = []
+  for (const root of roots) {
+    if (own !== undefined && root === dir) {
+      configs.push(own)
+      continue
+    }
+    try {
+      configs.push(await loadProjectConfig(root, command))
+    } catch (error) {
+      if (root === dir) throw error
+      throw new Error(`${path.join(configLabel(dir, root), CONFIG_FILE)}: ${errorMessage(error)}`)
+    }
+  }
+  const verifyMs = Math.max(...configs.map((config) => config.timeouts.verifyMs))
+  return { roots, configs, verifyMs }
+}
+
+/** Hooks never fetch: each config's missing repos, fetched now. False when a fetch failed. */
+export async function fetchHookRepos(configs: readonly Config[], io: CliIo): Promise<boolean> {
+  let fetched = true
+  for (const config of configs) fetched = (await fetchMissingRepos(config, io)) && fetched
+  return fetched
+}
+
 export async function installCommand(args: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args,
@@ -238,31 +275,18 @@ export async function installCommand(args: string[], io: CliIo): Promise<number>
   }
   const adapters = selectAdapters(values.agent)
   const dir = settingsDir(io.cwd)
-  const roots = await reachableConfigs(dir)
+  const { roots, configs, verifyMs } = await hookConfigs(dir, "install")
   if (roots.length === 0) {
     throw new Error(`no ${CONFIG_FILE} in ${io.cwd}, its parents or below it (run rulecast init)`)
-  }
-  const configs: Config[] = []
-  for (const root of roots) {
-    try {
-      configs.push(await loadProjectConfig(root, "install"))
-    } catch (error) {
-      if (root === dir) throw error
-      throw new Error(`${path.join(configLabel(dir, root), CONFIG_FILE)}: ${errorMessage(error)}`)
-    }
   }
   if (roots.length > 1 || roots[0] !== dir) {
     io.stdout(`configs: ${roots.map((root) => path.join(configLabel(dir, root), CONFIG_FILE)).join(", ")}\n`)
   }
-  // Every project runs in parallel on Stop, so the slowest one's verify budget is the one to wait for.
-  const verifyMs = Math.max(...configs.map((config) => config.timeouts.verifyMs))
   for (const adapter of adapters) {
     printInstall(io, adapter, await installHooks(dir, adapter, scope, verifyMs))
   }
-  // Hooks never fetch: a config whose repos are missing here would have its rules disabled.
-  let fetched = true
-  for (const config of configs) fetched = (await fetchMissingRepos(config, io)) && fetched
-  return fetched ? 0 : 2
+  // A config whose repos are missing here would have its rules disabled.
+  return (await fetchHookRepos(configs, io)) ? 0 : 2
 }
 
 export async function uninstallCommand(args: string[], io: CliIo): Promise<number> {

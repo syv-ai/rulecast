@@ -1,7 +1,7 @@
 import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
-import { onPath } from "../../core/which"
+import { localBin, onPath, upTo } from "../../core/which"
 import type { ToolName } from "./schema"
 import { TOOLS } from "./tools"
 
@@ -21,18 +21,6 @@ async function reachable(file: string, mode: number): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** `dir` and its parents up to and including `top`; `dir` alone when `top` is not above it. */
-function upTo(dir: string, top: string): string[] {
-  const relative = path.relative(top, dir)
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return [dir]
-  const dirs = [dir]
-  for (let current = dir; current !== top; ) {
-    current = path.dirname(current)
-    dirs.push(current)
-  }
-  return dirs
 }
 
 /**
@@ -83,10 +71,8 @@ export async function resolveTool(
   available: (command: string) => boolean | Promise<boolean> = onPath,
   top: string = dir,
 ): Promise<ResolvedTool> {
-  for (const from of upTo(dir, top)) {
-    const local = path.join(from, "node_modules", ".bin", tool)
-    if (await reachable(local, constants.X_OK)) return { command: local, prefix: [] }
-  }
+  const local = await localBin(tool, dir, top)
+  if (local !== null) return { command: local, prefix: [] }
   if (
     PYTHON_TOOLS.has(tool) &&
     (await reachable(path.join(dir, "pyproject.toml"), constants.F_OK)) &&
