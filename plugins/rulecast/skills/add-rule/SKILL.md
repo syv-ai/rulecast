@@ -16,12 +16,16 @@ Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/ruleca
 
 ## 1. Name the convention
 
-- **If the developer named one above,** that is the convention.
-- **If they named nothing,** look back over this session for what should not happen again: a correction the developer made, an edit they asked you to undo, a review comment, a mistake you or they caught. Take the most recent one. If there are several, list them and let the developer pick.
+Never start drafting until the developer has confirmed which rule to add. Always ask with a recommendation.
 
-Write it as one sentence about the code, the way the project's docs would state it: "Services raise domain exceptions, never `HTTPException`", not "don't do what I did in `users.py`". Ask the developer whether that sentence is right, and wait.
+- **If the developer named one above,** recommend a wording of it.
+- **If they named nothing,** look back over this session for what should not happen again: a correction the developer made, an edit they asked you to undo, a review comment, a mistake you or they caught.
+  - **One candidate:** recommend it.
+  - **Several:** list them, recommend the one you would add first and say why (the most recent, the one most likely to recur, the one code shows most clearly), and ask which.
 
-A convention says what should hold from now on. If what happened was a one-off bug, say so and stop: a test is the right fix, not a rule.
+Write each candidate as one sentence about the code, the way the project's docs would state it: "Services raise domain exceptions, never `HTTPException`", not "don't do what I did in `users.py`". For the one you recommend, add a line on what the rule would catch and where. Then ask the developer to confirm or correct it, and wait.
+
+A convention says what should hold from now on. If what happened was a one-off bug, say so and recommend a test instead of a rule; add a rule only if the developer still wants one.
 
 ## 2. Check that rulecast is set up, and find the config
 
