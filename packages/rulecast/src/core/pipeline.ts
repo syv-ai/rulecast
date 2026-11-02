@@ -1,36 +1,27 @@
-import { createHash } from "node:crypto"
 import path from "node:path"
 
-import { isNew } from "./baseline/baseline"
-import { classify } from "./baseline/classify"
-import { baselineHas, type CommittedBaseline } from "./baseline/committed"
-import { foreignCommits, type HeadMove, linesFromCommits } from "./baseline/foreign"
-import { removedFindings } from "./baseline/removed"
-import { type BaselineInput, changesFor, startRecords, touchRecords } from "./baseline/stage"
+import type { CommittedBaseline } from "./baseline/committed"
+import type { HeadMove } from "./baseline/foreign"
+import { type BaselineInput, startRecords, touchRecords } from "./baseline/stage"
 import { appendBaseline, type BaselineState, readBaseline, startRecord } from "./baseline/store"
-import { type CompiledProject, type Diagnostic, diagnosticText } from "./compile/project"
+import type { CompiledProject, Diagnostic } from "./compile/project"
 import type { CompiledRule } from "./compile/rule"
-import { contentReader, WORKTREE } from "./content"
 import { agentDir, copyIntoProject, writeOverflow } from "./delivery/persist"
-import { createReferenceResolver } from "./delivery/resolve"
-import { applyFileBudget, applySizeCeiling } from "./detection/budget"
-import { detectionFor } from "./detection/context"
-import { runDetectionFrom } from "./detection/materialise"
-import { fileBytes } from "./detection/per-rule"
+import { createReferenceResolver, type ReferenceResolver } from "./delivery/resolve"
+import { type DetectionContext, detectionFor } from "./detection/context"
 import type { DetectorRegistry } from "./detection/registry"
-import { selectDetectorRules, selectTouchRules } from "./detection/select"
-import { type DisabledGroup, disabledRules } from "./disabled"
-import { findingIds } from "./finding-id"
+import { selectTouchRules } from "./detection/select"
 import { headCommit } from "./git"
 import { guardWrite } from "./guard"
+import { type Detected, detectStage } from "./pipeline-detect"
+import { compileWarnings, type Warning } from "./pipeline-warnings"
 import { displayPath } from "./projects"
 import { appendActivity, duringCall, readActivity } from "./session/activity"
 import { type ClassifiedFinding, type DecideInput, type Decision, decide, delivers, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
-import { configHash, type Notice, notices } from "./session/oversight"
+import { configHash } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
 import {
-  dirtyAtStart,
   editedBy,
   emptyContext,
   emptyWork,
@@ -45,8 +36,8 @@ import {
 } from "./session/state"
 import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
-import { type IgnoredFinding, sourceLines } from "./suppress"
-import { type Delivery, type Event, emptyDelivery, type Match } from "./types"
+import type { IgnoredFinding } from "./suppress"
+import { type Delivery, type Event, emptyDelivery } from "./types"
 
 export interface PipelineOptions {
   /** Compiled by the caller: hooks never fetch rule repos, the CLI does (spec §4). */
@@ -126,17 +117,15 @@ export interface PipelineResult {
   ran?: Map<string, string[]>
 }
 
-type Warning = { key: string; text: string }
-
 /** Said once: without a working tree to compare, shell edits are seen only after the session. */
 const TREE_UNAVAILABLE =
   "rulecast cannot see the working tree here; edits made with Bash are checked only by git hooks and CI"
 
-/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
 /** Logged, not warned: a missed snapshot is a shell call left unjudged, like a missed edit deadline. */
 const TREE_GAVE_UP =
   "working tree state unavailable: git failed or took longer than its timeout; this shell call is not judged"
 
+/** Said once to an agent whose shell call ran alongside another agent's in this working tree. */
 const SHARED_TREE =
   "rulecast: another agent ran a shell command in this working tree while yours ran. rulecast holds a " +
   "command to every file that changed while it ran, so findings here and at your stop may be another " +
@@ -144,239 +133,455 @@ const SHARED_TREE =
   "`isolation: worktree`)."
 
 /**
- * Above this many warnings of one kind, they collapse into one carrying a count and an example.
- *
- * An agent mid-session cannot act on eighty individual compile errors, and the detail is in
- * `rulecast validate` and the debug log either way. Stress testing measured 80 broken rules as
- * 13,500 characters against a 9,000 character budget, with the one rule that fired dropped whole.
+ * What every step of one invocation shares. Set once by `startRun`; the accumulators (`warnings`,
+ * `deadlineMissed`, `movedNow`) are the only parts a step changes, and only by adding to them.
  */
-const SUMMARY_THRESHOLD = 3
+export interface Run {
+  options: PipelineOptions
+  project: CompiledProject
+  root: string
+  config: CompiledProject["config"]
+  stateDir: string
+  registry: DetectorRegistry
+  log: (line: string) => void
+  /**
+   * How a root-relative path is shown. Applied by decide (and the guard) to the delivery before the
+   * budget, and here to the paths written after it; undefined leaves every path as it is stored.
+   */
+  display: ((file: string) => string) | undefined
+  shown: (file: string) => string
+  /** Compile errors: warnings (a branch-like rev) are for rulecast validate; only errors disable rules. */
+  errors: Diagnostic[]
+  /**
+   * `rulecast run RULE_ID` is incomplete only over what could have changed that rule's result: its
+   * own diagnostics, a failed repos entry that configures it, a config that did not load, or a
+   * diagnostic that names no rule and no entry.
+   */
+  concernsRun: (diagnostic: Diagnostic) => boolean
+  session: { dir: string; agent: string } | null
+  sessionId: string | undefined
+  /** The files any rule matches. */
+  relevant: (files: readonly string[]) => string[]
+  /** A record for the project-wide activity log (session/activity.ts), stamped now. */
+  activityOf: (agent: string) => { at: number; s: string; a: string }
+  warnings: Warning[]
+  deadlineMissed: string[]
+  /** Git operations seen by this invocation, not yet in the store it read (baseline/foreign.ts). */
+  movedNow: HeadMove[]
+}
 
-const DEFAULT_HINT = "rulecast validate"
+function startRun(options: PipelineOptions): Run {
+  const { project } = options
+  const { root } = project
+  const display = options.displayFrom === undefined ? undefined : displayPath(root, options.displayFrom)
+  const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
+  const only = options.onlyRules
+  const event = options.event
+  return {
+    options,
+    project,
+    root,
+    config: project.config,
+    stateDir: options.stateDir,
+    registry: options.registry,
+    log: options.log ?? (() => {}),
+    display,
+    shown: display ?? ((file: string) => file),
+    errors,
+    concernsRun: (diagnostic) =>
+      only === undefined ||
+      diagnostic.fatal === true ||
+      (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.rules?.some((id) => only.has(id)) ?? true)),
+    session: event.session
+      ? { dir: sessionDir(options.stateDir, event.session.id), agent: event.session.agentId ?? MAIN_AGENT }
+      : null,
+    sessionId: event.session?.id,
+    relevant: (files) => files.filter((file) => project.rules.some((rule) => rule.matches(file))),
+    activityOf: (agent) => ({ at: Date.now(), s: event.session?.id ?? "", a: agent }),
+    warnings: compileWarnings(errors),
+    deadlineMissed: [],
+    movedNow: [],
+  }
+}
 
-/** The warnings for what `disabledRules` lists: compile errors and detector failures, one or summed. */
-const DISABLED_WARNING = /^(diagnostics?|detector):/
+const empty = (): SessionView => ({ work: emptyWork(), context: emptyContext() })
 
-/**
- * The key a summary is delivered under.
- *
- * Warnings are announced once per agent context (`decide.ts`), so a single fixed key would silence
- * a rule that breaks *later* in the session. Keying on the set of rules means a set that changes
- * re-announces and a set that does not stays quiet.
- */
-function summaryKey(prefix: string, ids: readonly string[]): string {
-  const digest = createHash("sha256")
-    .update([...ids].sort().join("\n"))
-    .digest("hex")
-    .slice(0, 16)
-  return `${prefix}:${digest}`
+/** A git operation's record, kept for this invocation too: the store it read does not have it yet. */
+function headRecords(run: Run, move: HeadMove | null): WorkRecord[] {
+  if (move === null) return []
+  run.movedNow.push(move)
+  return [{ t: "head", ...move }]
 }
 
 /**
- * One warning per failed rule, or — above the threshold — one for all of them.
- *
- * A rule repo pinned to a rev that has moved, or a `minimum_rulecast_version` bump, invalidates
- * many rules at once, and that is exactly the moment the rules that still work matter most.
+ * What changed since the agent's latest recorded state that no tool call explains: not a file any
+ * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
+ * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
  */
-function compileWarnings(errors: readonly Diagnostic[]): Warning[] {
-  if (errors.length <= SUMMARY_THRESHOLD) {
-    return errors.map((diagnostic) => ({
-      key: `diagnostic:${diagnostic.source}:${diagnostic.rule ?? ""}:${diagnostic.message}`,
-      text: `${diagnosticText(diagnostic)} (run ${diagnostic.hint ?? DEFAULT_HINT})`,
-    }))
-  }
-  // A missing repo says "rulecast install" and a bad rule says "rulecast validate"; a mixed set has
-  // no one lever, and validate is the command that lists them all.
-  const hints = new Set(errors.map((diagnostic) => diagnostic.hint ?? DEFAULT_HINT))
-  const hint = hints.size === 1 ? [...hints][0] : DEFAULT_HINT
-  return [
-    {
-      key: summaryKey(
-        "diagnostics",
-        errors.map((diagnostic) => diagnostic.rule ?? diagnostic.source),
-      ),
-      text: `${errors.length} rules failed to compile and were skipped — run ${hint}.\nFirst: ${diagnosticText(errors[0]!)}`,
-    },
-  ]
+function between(run: Run, work: WorkState, agent: string, now: TreeState): { files: string[]; moved: WorkRecord[] } {
+  if (!hasOwnTree(work, agent)) return { files: [], moved: [] }
+  const reference = referenceState(work, agent)
+  const gap = reference === null ? null : treeChanges(reference, now)
+  if (gap === null) return { files: [], moved: [] }
+  if (gap.gitOperation) return { files: [], moved: headRecords(run, gap.move) }
+  const edited = new Set(work.edited)
+  return { files: run.relevant(gap.files.filter((file) => !edited.has(file))), moved: [] }
 }
 
 /**
- * Detector errors, collapsed per kind above the threshold: one detector that fails disables every
- * rule that uses it, and a dozen copies of the same sentence tell the agent nothing the count does not.
+ * Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
+ * agent's last recorded state happened between its calls — the user's editor, a formatter, a job it
+ * left running — and is swept, so it is never folded into this call. No output: swept findings are
+ * reported at Stop, and this hook runs before every shell command.
  */
-function detectorWarnings(
-  errors: readonly { kind: string; rules: string[]; message: string }[],
-  /** Whether a session will remember the disable. A CLI run has none, so it says what it did. */
-  scope: "session" | "run",
-): Warning[] {
-  const outcome = scope === "session" ? "Disabled for this session." : "Skipped for this run."
-  const text = (error: { kind: string; rules: string[]; message: string }) =>
-    `${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}. ${outcome}`
-  const byKind = new Map<string, { kind: string; rules: string[]; message: string }[]>()
-  for (const error of errors) {
-    const group = byKind.get(error.kind)
-    if (group === undefined) byKind.set(error.kind, [error])
-    else group.push(error)
+async function shellBefore(run: Run, event: Extract<Event, { kind: "shell-before" }>): Promise<void> {
+  const { session } = run
+  if (!session) return
+  const now = await treeState(run.root)
+  if (now === null) {
+    run.log(TREE_GAVE_UP)
+    return
   }
-  const summarised: Warning[] = []
-  for (const [kind, group] of byKind) {
-    if (group.length <= SUMMARY_THRESHOLD) {
-      summarised.push(
-        ...group.map((error) => ({
-          key: `detector:${kind}:${error.rules.join(",")}:${error.message}`,
-          text: text(error),
-        })),
-      )
-      continue
-    }
-    const ids = group.flatMap((error) => error.rules)
-    summarised.push({
-      key: summaryKey(`detector:${kind}`, ids),
-      text: `${ids.length} ${kind} rules ${scope === "session" ? "were disabled this session" : "were skipped in this run"} — see debug.log.\nFirst: ${text(group[0]!)}`,
-    })
-  }
-  return summarised
+  const { work } = await openSession(session.dir, session.agent)
+  const gap = between(run, work, session.agent, now)
+  const swept = gap.files.filter((file) => !isGone(now, file))
+  const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
+  await appendWork(session.dir, [
+    ...swept.map((file) => ({ t: "swept" as const, file, agent: session.agent })),
+    ...gap.moved,
+    treeRecord(work, { phase: "before", agent: session.agent, ...id }, now),
+  ])
+  await appendActivity(run.stateDir, { ...run.activityOf(session.agent), ev: "shell-before", tu: event.toolUseId })
+}
+
+/** A shell call that changed files the rules match: checked from here as the edit of those files. */
+interface ShellEdit {
+  files: string[]
+  /** Another agent's shell call ran during this one, so what it changed may be partly theirs. */
+  sharedCall: boolean
+  /** Said to the agent at this call, once per session (Delivery.agentNotices). */
+  agentNotices: string[]
 }
 
 /**
- * Whether a match lies wholly on lines that commits from elsewhere brought in during the session (a
- * pull, a merge): those are not the agent's, though the file's baseline predates them. Only asked
- * when there is a git operation and a new finding; each git call in it is bounded.
+ * What changed during the call, against the state recorded before it. A moved HEAD is git's doing,
+ * not an edit; no reference at all is a session that began before these hooks existed. Either way
+ * the new state is recorded, so the next call has something to compare with. Null: nothing to check.
  */
-async function pulledInLines(
-  root: string,
-  moves: readonly HeadMove[],
-  findings: readonly { match: Match }[],
-): Promise<(match: Match) => boolean> {
-  if (moves.length === 0 || findings.length === 0) return () => false
-  const commits = await foreignCommits(root, moves)
-  if (commits.size === 0) return () => false
-  const files = [...new Set(findings.map(({ match }) => match.file))]
-  const byFile = new Map(
-    await Promise.all(files.map(async (file) => [file, await linesFromCommits(root, file, commits)] as const)),
+async function shellAfter(
+  run: Run,
+  event: Extract<Event, { kind: "shell-after" }>,
+  view: SessionView,
+): Promise<ShellEdit | null> {
+  const { session } = run
+  if (!session) return null
+  const now = await treeState(run.root)
+  if (now === null) {
+    run.log(TREE_GAVE_UP)
+    return null
+  }
+  const reference = referenceState(view.work, session.agent, event.toolUseId)
+  const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
+  const call = reference === null ? null : treeChanges(reference, now)
+  // What other agents did meanwhile, in this session or another in this working tree: a file their
+  // Edit/Write changed is theirs, not this command's (abide #26).
+  const others = duringCall(await readActivity(run.stateDir), {
+    session: run.activityOf(session.agent).s,
+    agent: session.agent,
+    toolUseId: event.toolUseId,
+  })
+  await appendActivity(run.stateDir, { ...run.activityOf(session.agent), ev: "shell-after", tu: event.toolUseId })
+  const files =
+    call === null || call.gitOperation
+      ? []
+      : run.relevant(call.files.filter((file) => !isGone(now, file) && !others.edits.has(file)))
+  // Another agent's shell call ran during this one, and this one is held to files: those may be the
+  // other's writes (README, Agents). With no files there is nothing to misattribute. Told once per agent.
+  const sharedCall = files.length > 0 && (others.sharedShell || sharedShell(view.work, session.agent, event.toolUseId))
+  const sharedKey = `shared-tree:${session.agent}`
+  const shared = sharedCall && !view.work.noticed.has(sharedKey)
+  await appendWork(session.dir, [
+    ...(call?.gitOperation === true ? headRecords(run, call.move) : []),
+    treeRecord(view.work, { phase: "after", agent: session.agent, ...id }, now),
+    ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
+  ])
+  if (files.length === 0) return null
+  return { files, sharedCall, agentNotices: shared ? [SHARED_TREE] : [] }
+}
+
+/**
+ * At a stop: what changed since the agent's latest recorded state that no call of its explains — a
+ * job it left running, a formatter, the user's own edits — joined with what earlier comparisons of
+ * this agent's swept (every agent's, at the main agent's stop). A git operation in between sweeps
+ * nothing.
+ */
+async function sweep(run: Run, view: SessionView, session: { dir: string; agent: string }): Promise<string[]> {
+  const now = await treeState(run.root)
+  const work = view.work
+  let found: string[] = []
+  if (now !== null && hasOwnTree(work, session.agent)) {
+    const gap = between(run, work, session.agent, now)
+    found = gap.files
+    await appendWork(session.dir, [
+      ...found.map((file) => ({ t: "swept" as const, file, agent: session.agent })),
+      ...gap.moved,
+      treeRecord(work, { phase: "stop", agent: session.agent }, now),
+    ])
+  }
+  const edited = new Set(work.edited)
+  const all = [...new Set([...run.relevant(sweptFor(work, session.agent)), ...found])].filter(
+    (file) => !edited.has(file),
   )
-  return (match) => {
-    const lines = byFile.get(match.file)
-    if (lines === undefined || lines.size === 0) return false
-    for (let line = match.line; line <= match.endLine; line++) if (!lines.has(line)) return false
-    return true
+  return now === null ? all : all.filter((file) => !isGone(now, file))
+}
+
+/** The context budget this pipeline applies: its share, when it shares one (PipelineOptions.shareBudget). */
+interface Budget {
+  chars: number | null
+  claim(delivers: boolean): Promise<void>
+}
+
+function budgetFor(options: PipelineOptions): Budget {
+  const budget: Budget = {
+    chars: options.maxContextChars,
+    claim: async (delivers) => {
+      if (options.shareBudget !== undefined) budget.chars = await options.shareBudget(delivers)
+    },
   }
+  return budget
+}
+
+async function guardEvent(
+  run: Run,
+  event: Extract<Event, { kind: "guard" }>,
+  view: SessionView,
+  context: { detection: DetectionContext; disabled: ReadonlySet<string>; resolver: ReferenceResolver; budget: Budget },
+): Promise<Delivery> {
+  const { session, stateDir, log } = run
+  await context.budget.claim(run.relevant(event.files).length > 0)
+  const sessionId = run.sessionId
+  return guardWrite({
+    detection: context.detection,
+    config: run.config,
+    event,
+    rules: run.project.rules,
+    disabled: context.disabled,
+    mode: run.project.mode.mode,
+    work: view.work,
+    resolver: context.resolver,
+    maxContextChars: context.budget.chars,
+    log,
+    ...(run.display === undefined ? {} : { display: run.display }),
+    record: session ? (records) => appendWork(session.dir, records) : async () => {},
+    recordContext: session ? (records) => appendContext(session.dir, session.agent, records) : async () => {},
+    ...(session && sessionId !== undefined
+      ? {
+          recordFindings: (refusing) =>
+            appendFindingsLog(
+              stateDir,
+              findingsRecord({
+                session: sessionId,
+                agent: session.agent,
+                ev: "guard",
+                at: new Date(),
+                findings: refusing.map((finding) => ({ ...finding, outcome: "refused" as const })),
+                ignored: [],
+                ran: new Map(),
+              }),
+              log,
+            ),
+        }
+      : {}),
+  })
+}
+
+/** The baseline the session measures from, started on its first event that takes snapshots. */
+async function sessionBaseline(run: Run, kind: Event["kind"]): Promise<BaselineState> {
+  const { session } = run
+  // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
+  // takes snapshots, and neither starts the session.
+  if (!session || kind === "reset" || kind === "guard") {
+    return { started: false, startCommit: null, snapshots: new Map(), containers: new Map() }
+  }
+  const baseline = await readBaseline(session.dir)
+  if (baseline.started) return baseline
+  await appendBaseline(session.dir, [startRecord(await headCommit(run.root), await configHash(run.root))])
+  // Re-read: with concurrent first events, the first start record wins.
+  return readBaseline(session.dir)
+}
+
+/** What the delivery is decided from, besides the run and the session view. */
+interface Outcome {
+  event: Event
+  resolver: ReferenceResolver
+  budget: Budget
+  touches: CompiledRule[]
+  agentRead: string | null
+  via: "shell" | undefined
+  /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
+  swept: string[]
+  detected: Detected | null
+  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
+  agentNotices: string[]
+}
+
+/** Decide what to deliver, record it in the session, write what the delivery points at, and log findings. */
+async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boolean): Promise<PipelineResult> {
+  const { options, project, config, root, session, stateDir, warnings } = run
+  const { event, detected, swept, via } = outcome
+  const findings = detected?.findings ?? []
+  const refused = detected?.refused ?? []
+  const disabledGroups = detected?.disabledGroups ?? []
+  const told = detected?.told ?? []
+
+  const inputFor = (state: SessionView): DecideInput => ({
+    agent: session?.agent ?? MAIN_AGENT,
+    findings,
+    touches: outcome.touches.filter((rule) => !state.context.touched.has(rule.id)),
+    agentRead: outcome.agentRead,
+    warnings,
+    work: state.work,
+    context: state.context,
+    resolver: outcome.resolver,
+    maxBytes: config.context.maxBytes,
+    maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
+    mode: project.mode.mode,
+    maxContextChars: outcome.budget.chars,
+    maxMatchesPerRule: config.maxMatchesPerRule,
+    stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
+    ...(options.listPreexisting === true ? { listPreexisting: true } : {}),
+    ...(via === undefined ? {} : { via }),
+    ...(swept.length === 0 ? {} : { swept }),
+    ...(refused.length === 0 ? {} : { refused }),
+    ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
+    ...(run.display === undefined ? {} : { display: run.display }),
+  })
+
+  // A delivery the budget had to cut rules out of is written whole, and the message says where.
+  // Files the agent is pointed at live inside the project, where it may read them (delivery/persist.ts).
+  const home = path.dirname(path.dirname(stateDir))
+  const persisted = (decision: Decision): Delivery => {
+    if (decision.overflow !== null) {
+      let written: string | null = null
+      try {
+        written = writeOverflow(path.join(agentDir(root), "deliveries"), run.sessionId ?? null, decision.overflow)
+      } catch {
+        written = null
+      }
+      decision.delivery.overflowPaths =
+        written === null ? [] : [run.shown(path.relative(root, written).split(path.sep).join("/"))]
+    }
+    for (const reference of decision.delivery.references) {
+      if (reference.location === undefined || !path.isAbsolute(reference.location)) continue
+      const copied = copyIntoProject(root, home, reference.location)
+      if (copied !== null) reference.location = run.shown(copied)
+    }
+    // After the budget: notices are for the user and never priced into agent context.
+    if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
+    if (outcome.agentNotices.length > 0) decision.delivery.agentNotices = outcome.agentNotices
+    return decision.delivery
+  }
+
+  const result = (decision: Decision): PipelineResult => ({
+    delivery: persisted(decision),
+    failed,
+    deadlineMissed: run.deadlineMissed,
+    ...(detected === null
+      ? { ignored: [], findings: [] }
+      : { ignored: detected.ignored, findings: detected.findings, ran: detected.ran }),
+  })
+
+  // Whether decide will put anything before the agent, by its own measure (session/decide.ts).
+  await outcome.budget.claim(delivers(inputFor(view)))
+  if (!session) return result(await decide(inputFor(view)))
+
+  await appendWork(session.dir, detected?.workRecords ?? [])
+  let decision: Decision
+  try {
+    decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
+  } catch (error) {
+    // §14's "run without session state" row: a lock nobody released. A damaged line in a store is
+    // skipped when it is read (core/jsonl.ts), so it no longer surfaces here.
+    if (error instanceof LockTimeoutError) {
+      warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
+    } else throw error
+    decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
+  }
+  await logFindings(run, outcome, session.agent, decision)
+  return result(decision)
+}
+
+/**
+ * The findings log (core/stats/log.ts), for an agent's own checks only: an edit, or its stop. A CLI
+ * run has no session, and `run --session` replays a stop that was already logged. After the
+ * decision, so a stop knows whether it blocked, and outside the session lock.
+ */
+async function logFindings(run: Run, outcome: Outcome, agent: string, decision: Decision): Promise<void> {
+  const { event, detected, swept, via } = outcome
+  const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && run.options.stopGate === true ? "stop" : null
+  if (ev === null || detected === null || run.sessionId === undefined) return
+  // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
+  const theirs = new Set(swept)
+  const protectedKeys = new Set(detected.refused.map(({ rule, file }) => `${rule} ${file}`))
+  const outcomeOf = (finding: ClassifiedFinding): WriteOutcome => {
+    // The gate's own verdict (session/decide.ts): a block or an unattended report, and only the
+    // findings it rests on, so not one past the repeat limit that merely rides along.
+    if (ev === "stop") return decision.blocking?.has(findingKey(finding)) === true ? "blocked" : "delivered"
+    return protectedKeys.has(`${finding.rule.id} ${finding.match.file}`) ? "refused" : "delivered"
+  }
+  const checked = new Map<string, string[]>()
+  for (const [rule, files] of detected.ran) {
+    const own = files.filter((file) => !theirs.has(file))
+    if (own.length > 0) checked.set(rule, own)
+  }
+  const mine = ({ match }: { match: { file: string } }) => !theirs.has(match.file)
+  await appendFindingsLog(
+    run.stateDir,
+    findingsRecord({
+      session: run.sessionId,
+      agent,
+      ev,
+      ...(via === undefined ? {} : { via }),
+      at: new Date(),
+      findings: detected.findings
+        .filter((finding) => finding.status === "new" && mine(finding))
+        .map((finding) => ({ ...finding, outcome: outcomeOf(finding) })),
+      ignored: detected.ignored.filter(mine),
+      tried: detected.tried.filter(mine),
+      ran: checked,
+    }),
+    run.log,
+  )
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-  const { project, stateDir, registry } = options
-  // Reassigned once: a shell call that changed files continues as the edit event for them.
-  let event = options.event
-  const { root, config } = project
-  const log = options.log ?? (() => {})
-  // How a root-relative path is shown. Applied by decide (and the guard) to the delivery before the
-  // budget, and here to the paths written after it; undefined leaves every path as it is stored.
-  const display = options.displayFrom === undefined ? undefined : displayPath(root, options.displayFrom)
-  const shown = display ?? ((file: string) => file)
-  // Warnings (a branch-like rev) are for rulecast validate; only errors disable rules.
-  const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
-  const warnings: Warning[] = compileWarnings(errors)
-  // `rulecast run RULE_ID` is incomplete only over what could have changed that rule's result: its
-  // own diagnostics, a failed repos entry that configures it, a config that did not load, or a
-  // diagnostic that names no rule and no entry.
-  const only = options.onlyRules
-  const concernsRun = (diagnostic: Diagnostic) =>
-    only === undefined ||
-    diagnostic.fatal === true ||
-    (diagnostic.rule !== null ? only.has(diagnostic.rule) : (diagnostic.rules?.some((id) => only.has(id)) ?? true))
-  let failed = errors.some(concernsRun)
-  const deadlineMissed: string[] = []
-  const session = event.session
-    ? { dir: sessionDir(stateDir, event.session.id), agent: event.session.agentId ?? MAIN_AGENT }
-    : null
-
-  /** A record for the project-wide activity log (session/activity.ts), stamped now. */
-  const activityOf = (agent: string) => ({ at: Date.now(), s: event.session?.id ?? "", a: agent })
+  const run = startRun(options)
+  const { project, root, session, warnings, log } = run
+  const original = options.event
+  const failedAtStart = run.errors.some(run.concernsRun)
+  const nothing = (delivery = emptyDelivery()): PipelineResult => ({
+    delivery,
+    failed: failedAtStart,
+    deadlineMissed: run.deadlineMissed,
+  })
   const restoredFiles = options.restoredFiles ?? 0
-  if (event.kind === "prompt") {
+
+  if (original.kind === "prompt") {
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
-    return { delivery: emptyDelivery(), failed, deadlineMissed }
+    return nothing()
   }
-  const empty = (): SessionView => ({ work: emptyWork(), context: emptyContext() })
-  const relevant = (files: readonly string[]) =>
-    files.filter((file) => project.rules.some((rule) => rule.matches(file)))
-
-  /** Git operations seen by this invocation, not yet in the store it read (baseline/foreign.ts). */
-  const movedNow: HeadMove[] = []
-  const headRecords = (move: HeadMove | null): WorkRecord[] => {
-    if (move === null) return []
-    movedNow.push(move)
-    return [{ t: "head", ...move }]
+  if (original.kind === "shell-before") {
+    await shellBefore(run, original)
+    return nothing()
   }
-  /**
-   * What changed since the agent's latest recorded state that no tool call explains: not a file any
-   * agent edited. A subagent with no state of its own sweeps nothing — the session's latest may be a
-   * sibling's, taken before that sibling's command wrote — and leaves it to the main agent's stop.
-   */
-  function between(work: WorkState, agent: string, now: TreeState): { files: string[]; moved: WorkRecord[] } {
-    if (!hasOwnTree(work, agent)) return { files: [], moved: [] }
-    const reference = referenceState(work, agent)
-    const gap = reference === null ? null : treeChanges(reference, now)
-    if (gap === null) return { files: [], moved: [] }
-    if (gap.gitOperation) return { files: [], moved: headRecords(gap.move) }
-    const edited = new Set(work.edited)
-    return { files: relevant(gap.files.filter((file) => !edited.has(file))), moved: [] }
-  }
-
-  if (event.kind === "shell-before") {
-    // Spec §9, Shell edits: the state this call's changes are measured from. What changed since the
-    // agent's last recorded state happened between its calls — the user's editor, a formatter, a
-    // job it left running — and is swept, so it is never folded into this call. No output: swept
-    // findings are reported at Stop, and this hook runs before every shell command.
-    const open = session
-    const now = open ? await treeState(root) : null
-    if (open && now === null) log(TREE_GAVE_UP)
-    if (open && now !== null) {
-      const { work } = await openSession(open.dir, open.agent)
-      const gap = between(work, open.agent, now)
-      const swept = gap.files.filter((file) => !isGone(now, file))
-      const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-      if (session !== null) {
-        await appendWork(open.dir, [
-          ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
-          ...gap.moved,
-          treeRecord(work, { phase: "before", agent: open.agent, ...id }, now),
-        ])
-        await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-before", tu: event.toolUseId })
-      }
-    }
-    return { delivery: emptyDelivery(), failed, deadlineMissed }
-  }
-  if (event.kind === "reset") {
+  if (original.kind === "reset") {
     if (session) await appendContext(session.dir, session.agent, [{ t: "reset" }])
     // Without re-attached files there is nothing to re-deliver (§9 reset).
-    if (!session || restoredFiles === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
+    if (!session || restoredFiles === 0) return nothing()
   }
 
-  let baseline: BaselineState = {
-    started: false,
-    startCommit: null,
-    snapshots: new Map(),
-    containers: new Map(),
-  }
-  // A reset only delivers touch context, and a guard judges a file that does not exist yet: neither
-  // takes snapshots, and neither starts the session.
-  if (session && event.kind !== "reset" && event.kind !== "guard") {
-    const dir = session.dir
-    baseline = await readBaseline(dir)
-    if (session && !baseline.started) {
-      await appendBaseline(dir, [startRecord(await headCommit(root), await configHash(root))])
-      // Re-read: with concurrent first events, the first start record wins.
-      baseline = await readBaseline(dir)
-    }
-  }
-
-  /** The budget this pipeline applies: its share, when it shares one (PipelineOptions.shareBudget). */
-  let maxContextChars = options.maxContextChars
-  const claimBudget = async (delivers: boolean) => {
-    if (options.shareBudget !== undefined) maxContextChars = await options.shareBudget(delivers)
-  }
-
+  const baseline = await sessionBaseline(run, original.kind)
+  const budget = budgetFor(options)
   const view: SessionView = session ? await openSession(session.dir, session.agent) : empty()
   if (session && options.recordMode === true) {
     const { mode, source, detail } = project.mode
@@ -388,122 +593,33 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const disabled = new Set(view.work.disabled.keys())
   const resolver = createReferenceResolver(root)
   // Assembled once: every detector run in this pipeline shares it (detection/context.ts).
-  const detection = detectionFor(project, registry, stateDir, resolver)
-  const workRecords: WorkRecord[] = []
-  let via: "shell" | undefined
-  /** This shell call ran alongside another agent's, so what it changed may be partly theirs. */
-  let sharedCall = false
-  /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
-  let swept: string[] = []
-  const refused: NonNullable<Delivery["refused"]> = []
-  /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
-  const agentNotices: string[] = []
-  const withAgentNotices = (): Pick<Delivery, "agentNotices"> => (agentNotices.length === 0 ? {} : { agentNotices })
+  const detection = detectionFor(project, options.registry, run.stateDir, resolver)
 
-  if (event.kind === "shell-after") {
-    // What changed during the call, against the state recorded before it. A moved HEAD is git's
-    // doing, not an edit; no reference at all is a session that began before these hooks existed.
-    // Either way the new state is recorded, so the next call has something to compare with.
-    const open = session
-    const now = open ? await treeState(root) : null
-    if (open && now === null) log(TREE_GAVE_UP)
-    if (!open || now === null) return { delivery: emptyDelivery(), failed, deadlineMissed }
-    const reference = referenceState(view.work, open.agent, event.toolUseId)
-    const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
-    const call = reference === null ? null : treeChanges(reference, now)
-    // What other agents did meanwhile, in this session or another in this working tree: a file their
-    // Edit/Write changed is theirs, not this command's (abide #26).
-    const others = duringCall(await readActivity(stateDir), {
-      session: activityOf(open.agent).s,
-      agent: open.agent,
-      toolUseId: event.toolUseId,
-    })
-    await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-after", tu: event.toolUseId })
-    const files =
-      call === null || call.gitOperation
-        ? []
-        : relevant(call.files.filter((file) => !isGone(now, file) && !others.edits.has(file)))
-    // Another agent's shell call ran during this one, and this one is held to files: those may be the
-    // other's writes (README, Agents). With no files there is nothing to misattribute. Told once per agent.
-    sharedCall = files.length > 0 && (others.sharedShell || sharedShell(view.work, open.agent, event.toolUseId))
-    const sharedKey = `shared-tree:${open.agent}`
-    const shared = sharedCall && !view.work.noticed.has(sharedKey)
-    if (shared) agentNotices.push(SHARED_TREE)
-    await appendWork(open.dir, [
-      ...(call?.gitOperation === true ? headRecords(call.move) : []),
-      treeRecord(view.work, { phase: "after", agent: open.agent, ...id }, now),
-      ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
-    ])
-    if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
-    // From here it is the edit event for those files, exactly as an Edit tool's would be.
-    via = "shell"
-    event = { ...event, kind: "edit", files }
+  // A shell call that changed files continues as the edit event for them, exactly as an Edit
+  // tool's would be.
+  let shell: ShellEdit | null = null
+  if (original.kind === "shell-after") {
+    shell = await shellAfter(run, original, view)
+    if (shell === null) return nothing()
   }
+  const event: Event = shell === null ? original : { ...original, kind: "edit", files: shell.files }
+  const via = shell === null ? undefined : ("shell" as const)
 
   if (event.kind === "guard") {
-    const open = session
-    await claimBudget(relevant(event.files).length > 0)
-    const delivery = await guardWrite({
-      detection,
-      config,
-      event,
-      rules: project.rules,
-      disabled,
-      mode: project.mode.mode,
-      work: view.work,
-      resolver,
-      maxContextChars,
-      log,
-      ...(display === undefined ? {} : { display }),
-      record: open ? (records) => appendWork(open.dir, records) : async () => {},
-      recordContext: open ? (records) => appendContext(open.dir, open.agent, records) : async () => {},
-      ...(open && event.session
-        ? {
-            recordFindings: (refusing) =>
-              appendFindingsLog(
-                stateDir,
-                findingsRecord({
-                  session: event.session!.id,
-                  agent: open.agent,
-                  ev: "guard",
-                  at: new Date(),
-                  findings: refusing.map((finding) => ({ ...finding, outcome: "refused" as const })),
-                  ignored: [],
-                  ran: new Map(),
-                }),
-                log,
-              ),
-          }
-        : {}),
-    })
-    return { delivery, failed, deadlineMissed }
+    return nothing(await guardEvent(run, event, view, { detection, disabled, resolver, budget }))
   }
 
   let touches: CompiledRule[] = []
-  let findings: ClassifiedFinding[] = []
-  let ignored: IgnoredFinding[] = []
-  /**
-   * Unattended: ignores the agent added or changed, on findings they did not silence (D49). The
-   * findings log keeps them as the agent's attempts; an unchanged comment over changed code is none.
-   */
-  let tried: IgnoredFinding[] = []
-  let ran: Map<string, string[]> | undefined
-  let told: Notice[] = []
-  let agentRead: string | null = null
-  let disabledGroups: DisabledGroup[] = []
-
   if (event.kind === "touch" || event.kind === "edit") {
     touches = selectTouchRules(project.rules, event.files, view.context.touched, disabled)
-    const open = session
-    if (open) {
+    if (session) {
       // Every file counts, not only files rules match: the agent's harness picks re-attached files from all of them.
       await appendWork(
-        open.dir,
-        event.files.map((file) => ({ t: "accessed" as const, agent: open.agent, file })),
+        session.dir,
+        event.files.map((file) => ({ t: "accessed" as const, agent: session.agent, file })),
       )
     }
   }
-
   if (event.kind === "reset" && session) {
     // view.context is empty: the reset record was appended above. Newest first, as the harness re-attaches them.
     const recent = (view.work.accessed.get(session.agent) ?? []).slice(-restoredFiles).reverse()
@@ -516,18 +632,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     rules: project.rules,
     disabled,
     limits: {
-      editDeadlineMs: config.timeouts.editDeadlineMs,
-      verifyMs: config.timeouts.verifyMs,
-      maxFileBytes: config.maxFileBytes,
+      editDeadlineMs: run.config.timeouts.editDeadlineMs,
+      verifyMs: run.config.timeouts.verifyMs,
+      maxFileBytes: run.config.maxFileBytes,
     },
   }
 
+  let agentRead: string | null = null
   if (event.kind === "touch") {
     if (event.completeRead) agentRead = event.files[0] ?? null
     // One append, snapshots before the container ranges taken from them (baseline/stage.ts).
     if (session) {
       const changed = new Set([...view.work.edited, ...view.work.swept])
-      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, relevant(event.files), changed))
+      await appendBaseline(session.dir, await touchRecords(baselineInput, baseline, run.relevant(event.files), changed))
     }
   }
 
@@ -538,7 +655,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (tree === null) warnings.push({ key: "tree-unavailable", text: TREE_UNAVAILABLE })
     else {
       await appendWork(session.dir, [treeRecord(view.work, { phase: "start", agent: session.agent }, tree)])
-      const start = await startRecords(baselineInput, baseline, relevant(Object.keys(tree.entries).sort()))
+      const start = await startRecords(baselineInput, baseline, run.relevant(Object.keys(tree.entries).sort()))
       if (start.records.length > 0) await appendBaseline(session.dir, start.records)
       if (start.skipped > 0) {
         log(`session start: ${start.skipped} dirty files past the snapshot limits; their baseline is the start commit`)
@@ -546,8 +663,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   }
 
+  let swept: string[] = []
+  let detected: Detected | null = null
   if (event.kind === "edit" || event.kind === "verify") {
-    let requested = relevant(event.files)
+    let requested = run.relevant(event.files)
     if (event.kind === "edit" && session) {
       const agent = session.agent
       await appendWork(
@@ -557,400 +676,49 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
           file,
           agent,
           ...(via === undefined ? {} : { via }),
-          ...(sharedCall ? { shared: true as const } : {}),
+          ...(shell?.sharedCall === true ? { shared: true as const } : {}),
         })),
       )
       if (via === undefined && requested.length > 0) {
-        await appendActivity(stateDir, { ...activityOf(agent), ev: "edit", f: requested })
+        await appendActivity(run.stateDir, { ...run.activityOf(agent), ev: "edit", f: requested })
       }
     }
     if (event.kind === "verify" && event.files.length === 0 && session) {
       // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
       // edited is never swept: it was changed by a tool call, only not by this agent's.
-      requested = relevant(editedBy(view.work, session.agent))
+      requested = run.relevant(editedBy(view.work, session.agent))
       if (options.stopGate === true) {
-        swept = await sweep(session)
+        swept = await sweep(run, view, session)
         requested = [...requested, ...swept]
       }
     }
-
-    // One budget for the whole verify: measuring baselines below and the detectors after it share
-    // verify_ms, so a stop ends inside the hook's timeout (verify_ms plus a margin) and is not killed.
-    const verifyEnds = Date.now() + config.timeouts.verifyMs
-    // One reader for the baseline diff and the detectors, so they agree on what "the file" is.
-    const read = contentReader(root, event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE)
-    const stage = await changesFor(
+    detected = await detectStage(run, {
+      event,
+      view,
+      baseline,
       baselineInput,
-      event.kind === "verify" ? { kind: "verify", baseCommit: event.baseCommit } : { kind: "edit" },
-      session ? baseline : null,
+      detection,
+      disabled,
       requested,
-      read,
-    )
-    const { files, changes: baselineChanges, containers } = stage
-    const changes = baselineChanges.sets
-    // Persisted so the next event in the session reuses them rather than measuring again.
-    if (session && stage.records.length > 0) await appendBaseline(session.dir, stage.records)
-
-    const skip = options.skipDetectorKinds ?? new Set<string>()
-    // A `scope: removed` rule is judged only at a verify: an edit may be the first half of a move,
-    // the assertion cut here and pasted by the next edit. Its baseline count is still taken at touch.
-    const wanted = (rule: { id: string; scope: string; detector: { kind: string } }) =>
-      !skip.has(rule.detector.kind) &&
-      (options.onlyRules?.has(rule.id) ?? true) &&
-      (event.kind === "verify" || rule.scope !== "removed")
-    let selections = selectDetectorRules(project.rules, event.kind, files, disabled).filter(({ rule }) => wanted(rule))
-    // `rulecast run --session`: a rule the session disabled that would have run here did not, which
-    // makes the run incomplete. It is named under `disabled` below, once; one that would not have
-    // run here changes nothing about this run, and is not named.
-    const skippedHere = new Set(
-      options.reportDisabled === true && disabled.size > 0
-        ? selectDetectorRules(project.rules, event.kind, files, new Set())
-            .map(({ rule }) => rule)
-            .filter((rule) => disabled.has(rule.id) && wanted(rule))
-            .map((rule) => rule.id)
-        : [],
-    )
-    if (skippedHere.size > 0) failed = true
-    // Spec §6: a detector that declares a file budget is given at most that many files per verify,
-    // most recently edited first. work.edited is least recently edited first, so it is reversed.
-    const overBudget: { kind: string; max: number; setting: string; skipped: string[] }[] = []
-    if (event.kind === "verify" && options.ignoreFileBudgets !== true) {
-      const recent = [...editedBy(view.work, session?.agent ?? MAIN_AGENT)].reverse()
-      for (const kind of new Set(selections.map((selection) => selection.rule.detector.kind))) {
-        const budget = registry.get(kind)?.fileBudget?.(detection.settings)
-        if (budget === undefined) continue
-        const budgeted = applyFileBudget(kind, selections, budget.max, recent)
-        selections = budgeted.selections
-        if (budgeted.skipped.length > 0) overBudget.push({ kind, ...budget, skipped: budgeted.skipped })
-      }
-    }
-    // Spec §13: an edit has 350 ms and an agent waiting on it, so a file too large for an
-    // in-process detector to finish inside that is not given to one. A verify has seconds.
-    if (event.kind === "edit") {
-      const ceiling = await applySizeCeiling(
-        selections,
-        config.maxFileBytes,
-        (kind) => registry.get(kind)?.guards === true,
-        (file) => fileBytes(root, file),
-      )
-      selections = ceiling.selections
-      // Logged, not warned about: staying inside a ceiling the project set is normal operation,
-      // like a missed edit deadline, and must not change the exit code.
-      if (ceiling.skipped.length > 0) {
-        log(`over max_file_bytes (${config.maxFileBytes}), not checked on this edit: ${ceiling.skipped.join(", ")}`)
-      }
-    }
-    const lines = sourceLines(read)
-    const detected = await runDetectionFrom(
-      {
-        detection,
-        event: event.kind,
-        selections,
-        changes,
-        read,
-        lines,
-        timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : Math.max(1, verifyEnds - Date.now()),
-      },
-      event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE,
-    )
-
-    // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
-    const removed = await removedFindings(selections, detected, baselineChanges, containers, read)
-    const output = removed.output
-    // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
-    // From the lines suppression read through `read`, the content detection judged: staged in a
-    // staged run, not the working tree. No file is read again.
-    const ids = await findingIds(
-      [...output.findings, ...output.ignored, ...removed.findings],
-      (kind) => registry.get(kind),
-      lines,
-    )
-    // Only fills in: without a session or a base commit `classify` has nothing to compare and says new.
-    const committed =
-      event.kind === "verify" && event.session === undefined && event.baseCommit === undefined
-        ? options.committedBaseline
-        : undefined
-    const classifiedStatus = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] =>
-      committed === undefined
-        ? classify(match, rule.scope, rule.id, baselineChanges, containers)
-        : baselineHas(committed, rule.id, match.file, id)
-          ? "preexisting"
-          : "new"
-    const removedFrom = output.findings.length + output.ignored.length
-    const pulledIn = await pulledInLines(root, [...view.work.headMoves, ...movedNow], output.findings)
-    const statusOf = (rule: CompiledRule, match: Match, id: string): ClassifiedFinding["status"] => {
-      const status = classifiedStatus(rule, match, id)
-      return status === "new" && pulledIn(match) ? "preexisting" : status
-    }
-    findings = [
-      ...output.findings.map(({ rule, match }, index) => {
-        const id = ids[index]!
-        return { id, rule, match, status: statusOf(rule, match, id) }
-      }),
-      // The drop is the change's by construction: always new.
-      ...removed.findings.map(({ rule, match }, index) => ({
-        id: ids[removedFrom + index]!,
-        rule,
-        match,
-        status: "new" as const,
-      })),
-    ]
-    const classifiedIgnores = output.ignored.map((item, index) => {
-      const id = ids[output.findings.length + index]!
-      return { ...item, id, status: statusOf(item.rule, item.match, id) }
+      via,
+      sharedCall: shell?.sharedCall === true,
     })
-    // Unattended, an ignore does not silence a finding on a line changed this session, whoever wrote
-    // the comment: nobody is there to agree to it, so the finding takes the unattended path and is
-    // reported if it keeps blocking. Ignores on code the run did not touch keep working.
-    const unsilenced =
-      project.mode.mode === "unattended" ? classifiedIgnores.filter(({ status }) => status === "new") : []
-    for (const { id, rule, match, status } of unsilenced) findings.push({ id, rule, match, status })
-    for (const error of output.errors) {
-      failed = true
-      log(`${error.kind} detector failed for ${error.rules.join(", ")}: ${error.message}`)
-      for (const rule of error.rules) workRecords.push({ t: "disabled", rule, reason: error.message })
-    }
-    // Every one of them is in the debug log above, which is where the summary points.
-    warnings.push(...detectorWarnings(output.errors, session === null ? "run" : "session"))
-    const kept = new Set(unsilenced.map(({ match }) => match))
-    // An attempt only when the comment's own line changed this session: the agent wrote or edited
-    // the ignore. Over code the agent changed under a comment it left alone, the finding is not
-    // silenced, but no ignore was tried.
-    const commentChanged = ({ match, ignoreLine }: IgnoredFinding) =>
-      isNew({ ...match, line: ignoreLine, endLine: ignoreLine }, changes)
-    tried = unsilenced.filter(commentChanged).map(({ status: _, ...item }) => item)
-    ignored = classifiedIgnores.filter(({ match }) => !kept.has(match)).map(({ status: _, ...item }) => item)
-    const incomplete = new Set([
-      ...output.errors.flatMap((error) => error.rules),
-      ...output.timedOut.flatMap((timeout) => timeout.rules),
-      ...output.skipped,
-    ])
-    ran = new Map(
-      selections
-        .filter((selection) => !incomplete.has(selection.rule.id))
-        .map((selection) => [selection.rule.id, selection.files]),
-    )
-    // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
-    // what to undo, because nothing could refuse the write before it happened.
-    const shellEdited = (file: string) =>
-      via === "shell" ? requested.includes(file) : view.work.editedVia.get(file) === "shell"
-    const seen = new Set<string>()
-    for (const { rule, match, status } of findings) {
-      if (status !== "new" || !rule.refuseWrite || !shellEdited(match.file)) continue
-      if (seen.has(`${rule.id} ${match.file}`)) continue
-      seen.add(`${rule.id} ${match.file}`)
-      const shared = sharedCall || view.work.sharedEdits.has(match.file)
-      refused.push({
-        file: match.file,
-        rule: rule.id,
-        dirtyAtStart: dirtyAtStart(view.work, match.file),
-        ...(shared ? { shared: true as const } : {}),
-      })
-    }
-    const atStop = options.stopGate === true && event.kind === "verify" && session !== null
-    if (session !== null && (atStop || refused.length > 0)) {
-      told = notices({
-        startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
-        currentConfigHash: atStop ? await configHash(root) : null,
-        ignored: atStop
-          ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
-          : [],
-        told: view.work.noticed,
-        refused,
-        ...(display === undefined ? {} : { display }),
-      })
-      // Recorded now: a notice is for the user, and the user sees it whatever the gate decides.
-      for (const notice of told) for (const key of notice.key.split("\n")) workRecords.push({ t: "noticed", key })
-    }
-    // Every time, not once per context: a loop nobody watches must not read "no findings" as
-    // "checked". The session's earlier disables are named too, since they are skipped above unsaid.
-    if (
-      event.kind === "verify" &&
-      (options.reportDisabled === true || (atStop && project.mode.mode === "unattended"))
-    ) {
-      const kinds = new Map(project.rules.map((rule) => [rule.id, rule.detector?.kind ?? "detector"]))
-      // `rulecast run` names what kept this run from being complete, and so nothing it did not
-      // count: not another rule's compile error under RULE_ID, nor a disable that would not have run.
-      const scoped = options.reportDisabled === true
-      const earlier = [...view.work.disabled]
-        .filter(([rule]) => !scoped || skippedHere.has(rule))
-        .map(([rule, message]) => ({ kind: kinds.get(rule) ?? "detector", rules: [rule], message }))
-      disabledGroups = disabledRules({
-        diagnostics: scoped ? errors.filter(concernsRun) : errors,
-        detectorErrors: [...output.errors, ...earlier],
-      })
-      // `disabled` and `complete` agree: a run that lists a rule that did not run is incomplete.
-      if (scoped && disabledGroups.length > 0) failed = true
-      // `rulecast run` lists them under "did not run"; its problems are the rest. A hook keeps them:
-      // there the warning is the once-per-context word to the user, the list the agent's every stop.
-      if (options.reportDisabled === true) {
-        const kept = warnings.filter((warning) => !DISABLED_WARNING.test(warning.key))
-        warnings.splice(0, warnings.length, ...kept)
-      }
-    }
-    // An ignore without a reason is the author's mistake, said once per site; a whole-project rule
-    // skipped in a staged run says which files kept it from running (detection/materialise.ts).
-    for (const text of output.warnings) warnings.push({ key: `detection:${text}`, text })
-    // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
-    // failure, so it must not change the exit code.
-    for (const { kind, max, setting, skipped } of overBudget) {
-      warnings.push({
-        key: `${kind}-budget:${skipped.join(",")}`,
-        text: `${kind} rules checked ${max} files; ${skipped.length} were not checked: ${skipped.map(shown).join(", ")}. Raise ${setting}, or run rulecast run --files on them.`,
-      })
-    }
-    const hintFor = (kind: string) => {
-      const hint = registry.get(kind)?.timeoutHint
-      return hint === undefined ? "" : ` (${hint})`
-    }
-    for (const timeout of output.timedOut) {
-      if (event.kind === "edit") {
-        log(`edit deadline passed for ${timeout.kind}: ${timeout.rules.join(", ")}`)
-        deadlineMissed.push(timeout.kind)
-      } else {
-        failed = true
-        warnings.push({
-          key: `timeout:${timeout.kind}:${timeout.rules.join(",")}`,
-          // Naming the lever matters: a field trial measured a single haiku call on a 135-line file
-          // at 89 s against a 60 s default, and "timed out" alone leaves nobody knowing what to do.
-          text:
-            `${timeout.kind} detector timed out after ${config.timeouts.verifyMs} ms for ${timeout.rules.join(", ")}. ` +
-            `Raise timeouts.verify_ms${hintFor(timeout.kind)}.`,
-        })
-      }
-    }
   }
 
-  /**
-   * At a stop: what changed since the agent's latest recorded state that no call of its explains —
-   * a job it left running, a formatter, the user's own edits — joined with what earlier comparisons
-   * of this agent's swept (every agent's, at the main agent's stop). A git operation in between
-   * sweeps nothing.
-   */
-  async function sweep(open: { dir: string; agent: string }): Promise<string[]> {
-    const now = await treeState(root)
-    const work = view.work
-    let found: string[] = []
-    if (now !== null && hasOwnTree(work, open.agent)) {
-      const gap = between(work, open.agent, now)
-      found = gap.files
-      await appendWork(open.dir, [
-        ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
-        ...gap.moved,
-        treeRecord(work, { phase: "stop", agent: open.agent }, now),
-      ])
-    }
-    const edited = new Set(work.edited)
-    const all = [...new Set([...relevant(sweptFor(work, open.agent)), ...found])].filter((file) => !edited.has(file))
-    return now === null ? all : all.filter((file) => !isGone(now, file))
-  }
-
-  const inputFor = (state: SessionView): DecideInput => ({
-    agent: session?.agent ?? MAIN_AGENT,
-    findings,
-    touches: touches.filter((rule) => !state.context.touched.has(rule.id)),
-    agentRead,
-    warnings,
-    work: state.work,
-    context: state.context,
-    resolver,
-    maxBytes: config.context.maxBytes,
-    maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
-    mode: project.mode.mode,
-    maxContextChars,
-    maxMatchesPerRule: config.maxMatchesPerRule,
-    stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
-    ...(options.listPreexisting === true ? { listPreexisting: true } : {}),
-    ...(via === undefined ? {} : { via }),
-    ...(swept.length === 0 ? {} : { swept }),
-    ...(refused.length === 0 ? {} : { refused }),
-    ...(disabledGroups.length === 0 ? {} : { disabled: disabledGroups }),
-    ...(display === undefined ? {} : { display }),
-  })
-
-  // A delivery the budget had to cut rules out of is written whole, and the message says where.
-  // Files the agent is pointed at live inside the project, where it may read them (delivery/persist.ts).
-  const home = path.dirname(path.dirname(stateDir))
-  const persisted = (decision: Decision): Delivery => {
-    if (decision.overflow !== null) {
-      let written: string | null = null
-      try {
-        written = writeOverflow(path.join(agentDir(root), "deliveries"), event.session?.id ?? null, decision.overflow)
-      } catch {
-        written = null
-      }
-      decision.delivery.overflowPaths =
-        written === null ? [] : [shown(path.relative(root, written).split(path.sep).join("/"))]
-    }
-    for (const reference of decision.delivery.references) {
-      if (reference.location === undefined || !path.isAbsolute(reference.location)) continue
-      const copied = copyIntoProject(root, home, reference.location)
-      if (copied !== null) reference.location = shown(copied)
-    }
-    // After the budget: notices are for the user and never priced into agent context.
-    if (told.length > 0) decision.delivery.notices = told.map((notice) => notice.text)
-    Object.assign(decision.delivery, withAgentNotices())
-    return decision.delivery
-  }
-
-  /**
-   * The findings log (core/stats/log.ts), for an agent's own checks only: an edit, or its stop. A
-   * CLI run has no session, and `run --session` replays a stop that was already logged. After the
-   * decision, so a stop knows whether it blocked, and outside the session lock.
-   */
-  async function logFindings(agent: string, decision: Decision): Promise<void> {
-    const ev = event.kind === "edit" ? "edit" : event.kind === "verify" && options.stopGate === true ? "stop" : null
-    if (ev === null || ran === undefined || event.session === undefined) return
-    // Swept files hold the user's edits: neither their findings nor their checks are the agent's.
-    const theirs = new Set(swept)
-    const protectedKeys = new Set(refused.map(({ rule, file }) => `${rule} ${file}`))
-    const outcome = (finding: ClassifiedFinding): WriteOutcome => {
-      // The gate's own verdict (session/decide.ts): a block or an unattended report, and only the
-      // findings it rests on, so not one past the repeat limit that merely rides along.
-      if (ev === "stop") return decision.blocking?.has(findingKey(finding)) === true ? "blocked" : "delivered"
-      return protectedKeys.has(`${finding.rule.id} ${finding.match.file}`) ? "refused" : "delivered"
-    }
-    const checked = new Map<string, string[]>()
-    for (const [rule, files] of ran) {
-      const own = files.filter((file) => !theirs.has(file))
-      if (own.length > 0) checked.set(rule, own)
-    }
-    await appendFindingsLog(
-      stateDir,
-      findingsRecord({
-        session: event.session.id,
-        agent,
-        ev,
-        ...(via === undefined ? {} : { via }),
-        at: new Date(),
-        findings: findings
-          .filter(({ status, match }) => status === "new" && !theirs.has(match.file))
-          .map((finding) => ({ ...finding, outcome: outcome(finding) })),
-        ignored: ignored.filter(({ match }) => !theirs.has(match.file)),
-        tried: tried.filter(({ match }) => !theirs.has(match.file)),
-        ran: checked,
-      }),
-      log,
-    )
-  }
-
-  const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
-  // Whether decide will put anything before the agent, by its own measure (session/decide.ts).
-  await claimBudget(delivers(inputFor(view)))
-  if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
-
-  await appendWork(session.dir, workRecords)
-  let decision: Decision
-  try {
-    decision = await commitSession(session.dir, session.agent, (state) => decide(inputFor(state)))
-  } catch (error) {
-    // §14's "run without session state" row: a lock nobody released. A damaged line in a store is
-    // skipped when it is read (core/jsonl.ts), so it no longer surfaces here.
-    if (error instanceof LockTimeoutError) {
-      warnings.push({ key: "lock", text: "session state was locked; delivered without session memory" })
-    } else throw error
-    decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
-  }
-  await logFindings(session.agent, decision)
-  return { delivery: persisted(decision), failed, deadlineMissed, ...detected }
+  return finish(
+    run,
+    view,
+    {
+      event,
+      resolver,
+      budget,
+      touches,
+      agentRead,
+      via,
+      swept,
+      detected,
+      agentNotices: shell?.agentNotices ?? [],
+    },
+    failedAtStart || detected?.failed === true,
+  )
 }

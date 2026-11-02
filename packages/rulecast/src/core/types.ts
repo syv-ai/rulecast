@@ -73,7 +73,8 @@ export type Event = EventBase &
         /** From the CLI: where current content is read from. Absent: the working tree. */
         content?: ContentSource
       }
-    | ({ kind: "shell-before" | "shell-after" } & ShellCall)
+    | ({ kind: "shell-before" } & ShellCall)
+    | ({ kind: "shell-after" } & ShellCall)
     | { kind: "prompt" | "reset" | "start" }
   )
 
