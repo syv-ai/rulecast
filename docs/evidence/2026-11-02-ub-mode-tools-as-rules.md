@@ -84,5 +84,5 @@ file and the score are lost; its `--edn` output would keep them, through a wrapp
 - dryer is usable as is, if losing the partner location is acceptable.
 - Thresholds such as CRAP < 10 are one author's defaults. Following plan 18, a threshold is a question for
   the conventions interview, not a catalog default.
-- Item 1 is rulecast's own limit, and worth noting in the `command` section of `detectors.md` whatever
-  happens to these tools.
+- Item 1 is rulecast's own limit. `agents/reference/detectors.md` now says that a rule whose tool runs
+  the tests needs `scope: project`.
