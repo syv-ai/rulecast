@@ -1,22 +1,38 @@
 ---
 /**
- * The landing page. The name and the Claude Code plugin's install command; what rulecast is, in plain words; a convention
- * becoming a rule becoming what the agent hears; where it runs; and the
- * prompt that has an agent set it up, which is the README's own (read at build time).
+ * The landing page. The name and the two Claude Code commands that set rulecast up; what it is, in
+ * plain words; a convention becoming a rule becoming what the agent hears; what setup is like and
+ * the two ways to start it; where it runs. The prompt for other agents is the README's own (read at
+ * build time).
  */
-import { Icon } from "@astrojs/starlight/components"
 import { routeUrl } from "../../scripts/links"
 import { agentPrompt } from "../../scripts/sources"
 import ConventionFlow from "./ConventionFlow.astro"
 import HookFlow from "./HookFlow.astro"
 
 const install = "/plugin install rulecast --marketplace syv-ai/rulecast"
+const setup = "/rulecast:setup"
+const commands = `${install}\n${setup}`
 const prompt = agentPrompt()
+const steps = [
+  {
+    title: "It reads the repository first",
+    text: "Then it asks what it can't tell: who works on it, where configs go, where your conventions live, and which of your git hooks to run as rules.",
+  },
+  {
+    title: "It shows you one page",
+    text: "Everything you agreed, and every file it would change. Nothing is written until you approve.",
+  },
+  {
+    title: "It installs rulecast and runs init",
+    text: "As a devDependency, or globally where there is no package.json. You review the changes and commit them.",
+  },
+]
 const next = [
   { title: "Getting started", text: "Your agent sets it up with you.", route: "getting-started" },
   { title: "Writing rules", text: "A check, a message, a doc section.", route: "guides/writing-rules" },
   { title: "Git hooks and CI", text: "The same rules, everywhere.", route: "guides/git-hooks-ci" },
-  { title: "Agent loops", text: "For /goal, headless and CI runs.", route: "guides/agent-loops" },
+  { title: "Claude Code plugin", text: "Add one rule at a time.", route: "guides/claude-code-plugin" },
 ]
 ---
 
@@ -24,15 +40,21 @@ const next = [
   <header class="rc-hero">
     <h1>rulecast</h1>
     <p class="rc-hero-tagline">Your project's conventions, checked while your coding agent works.</p>
-    <div class="rc-hero-actions">
-      <button class="rc-install" type="button" data-copy={install} aria-label={`Copy ${install}`}>
-        <span class="rc-install-prompt" aria-hidden="true">&gt;</span>
-        <code>{install}</code>
-        <span class="rc-copy-state" aria-live="polite">Copy</span>
-      </button>
+    <p class="rc-hero-where">In Claude Code:</p>
+    <div class="rc-hero-commands">
+      {
+        [install, setup].map((command) => (
+          <button class="rc-install" type="button" data-copy={command} aria-label={`Copy ${command}`}>
+            <span class="rc-install-prompt" aria-hidden="true">&gt;</span>
+            <code>{command}</code>
+            <span class="rc-copy-state" aria-live="polite">Copy</span>
+          </button>
+        ))
+      }
     </div>
+    <p class="rc-hero-needs">Claude Code is the supported agent today. Needs Node 20.12 or later, on macOS or Linux.</p>
     <div class="rc-hero-links">
-      <a class="rc-link" href="#agent-setup">Copy setup prompt <span aria-hidden="true">↓</span></a>
+      <a class="rc-link" href="#agent-setup">Another agent <span aria-hidden="true">↓</span></a>
       <a class="rc-link" href={routeUrl("getting-started")}>Read the guide <span aria-hidden="true">→</span></a>
     </div>
   </header>
@@ -42,42 +64,57 @@ const next = [
       rulecast runs as your coding agent's hooks. When an edit breaks one of your project's rules, the agent is told in
       the same turn, along with the part of your docs the rule comes from, so it can fix the code before it moves on.
     </p>
-    <p>
-      A rule is a check, such as a regex, an ast-grep pattern, a linter or a command, together with a message and a
-      section of your docs. The same rules run in git hooks and CI.
-    </p>
-    <p>
-      It also works when nobody is watching, in a <code>/goal</code> run, under <code>claude -p</code> or in CI. There
-      rulecast holds the agent at each stop, up to a limit, until its findings are fixed or written into its final
-      report. <code>rulecast run</code> also gives the loop an exit code to stop on. You still decide which conventions
-      become rules. <a class="rc-link" href={routeUrl("guides/agent-loops")}>Agent loops guide <span aria-hidden="true">→</span></a>
-    </p>
-    <p>
-      <a class="rc-quiet-link" href="#agent-setup">
-        Ask your agent about Rulecast today.<Icon name="link" size="0.95em" class="rc-quiet-link-icon" />
-      </a>
-    </p>
   </section>
 
   <section>
+    <h2 class="rc-h2-gap">A rule cites your docs.</h2>
     <ConventionFlow />
+  </section>
+
+  <section id="agent-setup">
+    <h2>Set it up with your agent.</h2>
+    <p class="rc-lede">A short conversation, in the repository you want rules in. Nothing is written until you approve.</p>
+    <ol class="rc-steps">
+      {
+        steps.map((step) => (
+          <li>
+            <strong>{step.title}</strong>
+            <span>{step.text}</span>
+          </li>
+        ))
+      }
+    </ol>
+    <div class="rc-setup-cols">
+      <div class="rc-start">
+        <p class="rc-col-label">Start it in Claude Code</p>
+        <pre>{commands}</pre>
+        <button class="rc-prompt-copy" type="button" data-copy={commands} aria-label="Copy the two commands">
+          <span class="rc-copy-state" aria-live="polite">Copy</span>
+        </button>
+        <p class="rc-col-note">Run them one after the other.</p>
+      </div>
+      <div class="rc-start">
+        <p class="rc-col-label">Start it in another agent</p>
+        <pre>{prompt}</pre>
+        <button class="rc-prompt-copy" type="button" data-copy={prompt} aria-label="Copy the prompt">
+          <span class="rc-copy-state" aria-live="polite">Copy</span>
+        </button>
+        <p class="rc-col-note">
+          rulecast delivers rules to Claude Code only, for now. Another agent can still set up the same rules for your
+          git hooks and CI.
+        </p>
+      </div>
+    </div>
+    <p class="rc-after">
+      Most rules come later, one at a time. When the agent makes a mistake that should not happen again, run
+      <code>/rulecast:add-rule</code>.
+    </p>
   </section>
 
   <section>
     <h2>Around the tools it already uses.</h2>
-    <p class="rc-lede">rulecast runs as your agent's hooks. Nothing to start, no daemon.</p>
+    <p class="rc-lede">rulecast runs as your agent's hooks, with nothing to start. The same rules run in git hooks and CI.</p>
     <HookFlow />
-  </section>
-
-  <section id="agent-setup">
-    <h2>Let your agent set it up.</h2>
-    <p class="rc-lede">Paste this into your coding agent. It sets rulecast up with you, and writes nothing until you approve.</p>
-    <div class="rc-prompt">
-      <pre>{prompt}</pre>
-      <button class="rc-prompt-copy" type="button" data-copy={prompt} aria-label="Copy the prompt">
-        <span class="rc-copy-state" aria-live="polite">Copy</span>
-      </button>
-    </div>
   </section>
 
   <nav class="rc-next" aria-label="Read on">
@@ -153,11 +190,6 @@ const next = [
     line-height: 1.55;
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
-  }
-  .rc-hero-actions {
-    display: flex;
-    justify-content: center;
-    margin-top: 2.5rem;
   }
   .rc-hero-links {
     display: flex;
@@ -247,47 +279,13 @@ const next = [
     color: var(--sl-color-gray-2);
     text-wrap: pretty;
   }
-  .rc-why code {
-    font-size: 0.88em;
-  }
 
-  /* A link in the prose's own colour: the underline and the icon say it is one. */
-  .rc-quiet-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4em;
-    color: inherit;
-    text-decoration: underline;
-    text-decoration-color: var(--sl-color-gray-4);
-    text-underline-offset: 0.2em;
-    transition: text-decoration-color 150ms ease;
-  }
-  .rc-quiet-link :global(.rc-quiet-link-icon) {
-    color: var(--sl-color-gray-3);
-  }
 
   /* Landing under the fixed header, not behind it. */
   #agent-setup {
     scroll-margin-top: calc(var(--sl-nav-height) + 2rem);
   }
 
-  .rc-prompt {
-    position: relative;
-    border-radius: 1rem;
-    background: var(--sl-color-gray-6);
-  }
-  .rc-prompt pre {
-    margin: 0;
-    padding: 1.4rem 1.5rem;
-    padding-right: 6rem;
-    font-family: var(--__sl-font-mono);
-    font-size: 0.85rem;
-    line-height: 1.7;
-    color: var(--sl-color-gray-1);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    background: none;
-  }
   .rc-prompt-copy {
     position: absolute;
     top: 0.9rem;
@@ -347,9 +345,6 @@ const next = [
     .rc-link:hover {
       text-decoration: underline;
     }
-    .rc-quiet-link:hover {
-      text-decoration-color: currentColor;
-    }
   }
 
   @media (max-width: 30rem) {
@@ -362,4 +357,105 @@ const next = [
     }
   }
 
+
+  .rc-hero-where {
+    margin: 2.5rem 0 0.75rem;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .rc-hero-commands {
+    display: inline-grid;
+    gap: 0.5rem;
+  }
+  .rc-hero-commands .rc-install code {
+    flex: 1;
+    text-align: left;
+  }
+  .rc-hero-needs {
+    margin: 1.25rem auto 0;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .rc-h2-gap {
+    margin-bottom: 2.25rem !important;
+  }
+  .rc-steps {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+  .rc-steps li {
+    display: grid;
+    gap: 0.3rem;
+    padding: 1.1rem 1.25rem 1.1rem 3.25rem;
+    position: relative;
+    border-radius: 0.875rem;
+    background: var(--sl-color-gray-6);
+    counter-increment: step;
+  }
+  .rc-steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 1.2rem;
+    top: 1.15rem;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 50%;
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+    font-size: 0.75rem;
+    display: grid;
+    place-items: center;
+  }
+  .rc-steps strong {
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+  .rc-steps span {
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+  .rc-after {
+    margin: 1.5rem 0 0;
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+  .rc-setup-cols {
+    margin-top: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    align-items: start;
+  }
+  .rc-start {
+    position: relative;
+    padding: 1.1rem 1.25rem;
+    border-radius: 0.875rem;
+    background: var(--sl-color-gray-6);
+  }
+  .rc-start pre {
+    margin: 0;
+    padding: 0 4.5rem 0 0;
+    background: none;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.8rem;
+    line-height: 1.7;
+    color: var(--sl-color-gray-1);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .rc-col-label {
+    margin: 0 0 0.75rem;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .rc-col-note {
+    margin: 1rem 0 0;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+    line-height: 1.6;
+  }
 </style>

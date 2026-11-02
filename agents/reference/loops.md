@@ -1,6 +1,6 @@
 # rulecast in agent loops
 
-An agent loop runs until something tells it to stop. rulecast can be that something: `rulecast run` exits 0 only when every rule ran and nothing new breaks one, and a loop can read an exit code without a model judging a transcript. These recipes use only `rulecast run`, `fix`, `baseline`, `stats`, `test` and `doctor`, with the flags `rulecast <command> --help` lists and the output in [output.md](output.md).
+An agent loop runs until something tells it to stop. rulecast can be that something: `rulecast run` exits 0 only when every rule ran and nothing new of error severity was found, and a loop can read an exit code without a model judging a transcript. These recipes use only `rulecast run`, `add`, `fix`, `baseline`, `stats`, `test` and `doctor`, with the flags `rulecast <command> --help` lists and the output in [output.md](output.md).
 
 Each recipe was run once, on small scratch repositories. What happened, where the runs differed from the commands shown here, and what was not measured, is in [`docs/evidence/2026-10-16-loop-recipes.md`](../../docs/evidence/2026-10-16-loop-recipes.md).
 
@@ -131,8 +131,8 @@ This takes two steps, and only the first runs unattended:
    jq -r '(.rules[] | select((.noisy | length) > 0 or .repeated > 0 or .suppressed > 0)
        | "- \(.rule): fired \(.fired), repeated \(.repeated), suppressed \(.suppressed), fixed \(.fixed)"
          + (if (.noisy | length) > 0 then ", noisy (\(.noisy | join(", ")))" else "" end)),
-     (.neverRan[] | "- \(.): never ran"),
-     (.neverFired[] as $r | select(.runs[$r] > 0) | "- \($r): ran \(.runs[$r]) times, never fired")' stats.json > rule-review.md
+     ((.neverRan // [])[] | "- \(.): never ran"),
+     ((.neverFired // [])[] as $r | select(.runs[$r] > 0) | "- \($r): ran \(.runs[$r]) times, never fired")' stats.json > rule-review.md
    ```
 
    The loop stops there. It can put the summary in an issue or a message for the developer. The keys are in [output.md](output.md#rulecast-stats).

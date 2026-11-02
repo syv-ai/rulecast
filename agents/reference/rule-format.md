@@ -42,7 +42,7 @@ repos:
 | `max_matches_per_rule` | `10` | Findings shown per rule |
 | `max_file_bytes` | `1048576` | A larger file is skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and guard, where an agent is waiting. `verify` always runs |
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
-| `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install`: the stop hooks' timeout follows it |
+| `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install` where sessions start: the stop hooks' timeout follows the largest `verify_ms` of the configs they serve |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
 | `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
 | `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
@@ -233,7 +233,7 @@ once, with how to revert it (`git checkout -- <file>`, or "undo only your change
 uncommitted work before the session). Stop is blocked while the finding is new, whatever the rule's
 severity, and the developer is told which file the agent changed.
 
-`refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`.
+`refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`, and `edit` among the rule's stages.
 `linter`, `command` and `llm` hand a path to another program, which would read the file as it still
 is, so `rulecast validate` rejects them.
 

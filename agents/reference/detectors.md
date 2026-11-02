@@ -134,7 +134,7 @@ detect:
 - Leave `rules` out to take every finding the tool reports under the project's own config. Such rules get a run of their own, so the rules other rules turn on never reach them.
 - One process per tool and directory per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
 - Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
-- In a staged run or with `--to-ref`, `ruff` and `eslint` are handed each file's staged content on stdin under its real path, one process per file, so path-keyed configuration (`per-file-ignores`, eslint `files:` globs) applies as usual. `oxlint` has no stdin mode and gets a scratch copy, which such configuration does not match.
+- In a staged run or with `--to-ref`, `ruff` and `eslint` are handed each file's staged content on stdin under its real path, one process per file, so path-keyed configuration (`per-file-ignores`, eslint `files:` globs) applies as usual. `gitleaks` reads it on stdin too, under no file name. `oxlint` has no stdin mode and gets a scratch copy, which such configuration does not match.
 - Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**, because it is slow enough to be felt on every edit. Write `stages: [edit, verify]` if you want it anyway.
 
 ## `llm`
@@ -149,7 +149,7 @@ detect:
     grounding: true
 ```
 
-- `model`: optional. Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which every provider maps to its own name, or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. Without it the rule runs on the config's `llm.model`. That key is set when the developer agrees to llm rules, so a config without it has no llm rules: don't propose one there, and a rule with no model of its own fails `rulecast validate`.
+- `model`: optional. Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which `claude-code`, `anthropic` and `opencode` map to their own names (`openai-compatible` has no aliases: name its exact model), or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. Without it the rule runs on the config's `llm.model`. That key is set when the developer agrees to llm rules, so a config without it has no llm rules: don't propose one there, and a rule with no model of its own fails `rulecast validate`.
 - `question`: what the model is asked about the file. Ask for specific lines — "Report each offending line" — or you get an essay instead of findings.
 - `grounding`: defaults to `true`. Sends the rule's `context` references with the question, whatever their delivery mode, so the model judges against your conventions rather than its own taste. Set it to `false` when the question stands alone.
 - One call per file **and model**, covering every llm rule that selected that file. Three llm rules on one file all using `haiku` cost one call; a fourth using `sonnet` costs a second.
@@ -167,7 +167,7 @@ detect:
   | `anthropic` | `llm.api_key_env` (default `ANTHROPIC_API_KEY`) | the origin, e.g. `https://api.anthropic.com`; rulecast appends `/v1/messages` |
   | `openai-compatible` | `llm.api_key_env` | includes the version prefix, e.g. `http://localhost:11434/v1` for Ollama; rulecast appends `/chat/completions` |
 
-  Each `base_url` follows its own ecosystem's SDK convention, so a URL copied from your provider's docs works as written. **Azure OpenAI is not supported in 0.1**: it needs a per-deployment path with an `api-version` query string and an `api-key` header, which no `base_url` can express.
+  Each `base_url` follows its own ecosystem's SDK convention, so a URL copied from your provider's docs works as written. **Azure OpenAI is not supported**: it needs a per-deployment path with an `api-version` query string and an `api-key` header, which no `base_url` can express.
 
 ### Writing the question
 

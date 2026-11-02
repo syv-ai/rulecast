@@ -32,7 +32,7 @@ Paths in the output are relative to the directory `run` was started in, with `/`
 
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
-Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example or a rule over `--max-rate` ([below](#rulecast-test)).
+Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example or a rule over `--max-rate` ([below](#rulecast-test)), and `baseline` 3 when a rule could not run (without `--prune` it then writes nothing). `rulecast init --format json` is for setup agents, not a contract: its shape may change in any release.
 
 ## JSON
 
@@ -258,10 +258,10 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `passed` | `true` exactly when the exit code is 0. |
 | `rules` | One entry per rule tested: every detector rule, or the one named. |
 | `rules[].rule`, `detector`, `scope` | The rule's id, its detector kind (`null` for a touch rule) and its `scope`. |
-| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money; or, under `--against`, a `scope: removed` rule, whose matches are what a file keeps and which has no baseline there to count a drop against); `touch` (a named touch rule: nothing to test). |
+| `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money; or, under `--against` or `--history`, a `scope: removed` rule, whose matches are what a file keeps and which has no baseline there to count a drop against); `touch` (a named touch rule: nothing to test). |
 | `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
 | `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
-| `rules[].history` | Only with `--history`: what the rule found in recent commits (below), or `null` when it was not run. |
+| `rules[].history` | Only with `--history`: what the rule found in recent commits (below), or `null` when it was not run (such as a `scope: removed` rule). |
 | `rules[].estimate` | Only with `--history`, for a rule that costs money per file (`llm`) run without `--yes`: `{ "commits", "calls" }`, one model call per file per commit. Nothing was run, and `status` is `not-run`. |
 
 ### An outcome

@@ -33,7 +33,7 @@ Your coding agent sets rulecast up with you. In Claude Code, install the plugin 
 
 With another agent, paste the prompt under [Agents](README.md#agents).
 
-The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it runs `rulecast init` with your answers.
+The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it installs rulecast (as a devDependency, or globally where there is no `package.json`) and runs `rulecast init` with your answers. You review the changes and commit them.
 
 Most rules come later, one at a time. When an agent makes a mistake that should not happen again, run `/rulecast:add-rule`, or accept when the agent offers it. If you would rather work out your conventions up front, say so during setup.
 
@@ -71,12 +71,12 @@ The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-
 | `regex` | A pattern in the file's text | every edit |
 | `path` | The file's path alone — "never edit `src/client/`" | every edit |
 | `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
-| `command` | Whatever a tool or your own script reports: SARIF, JSON, checkstyle, code-quality JSON or `file:line:` lines. Type checkers, dead-code finders and scanners [by config](agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
+| `command` | Whatever a tool or your own script reports: SARIF, JSON, checkstyle, code-quality JSON, rdjson or `file:line:` lines. Type checkers, dead-code finders and scanners [by config](agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
 | `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | verify |
 | `linter` | ruff, oxlint, eslint or gitleaks findings, narrowed to the rules you care about | edit (eslint: verify) |
-| `llm` | Conventions nothing mechanical expresses, judged by a model | verify only |
+| `llm` | Conventions nothing mechanical expresses, judged by a model | verify |
 
-`llm` rules are opt-in, name their own model, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
+`llm` rules are opt-in, use the rule's model or the config's `llm.model`, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
 
 ## Refusing a write
 
@@ -84,6 +84,7 @@ Some rules are not advice. `refuse_write: true` refuses the edit before it happe
 
 ```yaml
 - id: codegen/no-edit-client
+  name: The generated client is not edited by hand
   files: '^src/client/'
   detect:
     path: {}
@@ -93,7 +94,7 @@ Some rules are not advice. `refuse_write: true` refuses the edit before it happe
 
 A refusal only ever rests on the text the agent is writing, never on a reconstruction rulecast is unsure of, and it happens once per file per session — so a rule can stop a mistake without trapping the agent. Generated code, vendored directories, files that must not change. Everything else is better reported after the write, which is what the other rules do.
 
-That covers the edit tools. A write through Bash cannot be refused before it runs, because nothing knows what a command will write, so rulecast catches it right after: the agent is told the file is protected and how to revert it, it cannot stop until it has, and you are told which file it changed.
+That covers the edit tools. A write through Bash cannot be refused before it runs, because nothing knows what a command will write, so rulecast catches it right after: the agent is told the file is protected and how to revert it, its stop is held until it has (up to the stop limit: once per prompt by default), and you are told which file it changed.
 
 ## Commands
 
@@ -130,7 +131,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
 | `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
 
-On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](agents/reference/output.md).
+On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. `rulecast test` exits `1` when an example fails, and `rulecast baseline` exits `3` when a rule could not run. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](agents/reference/output.md).
 
 ## Git hooks and CI
 
@@ -195,7 +196,7 @@ jobs:
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
-`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
+`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies, and `gitleaks` gets it on stdin too. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
 
 ### Fresh environments
 
@@ -290,8 +291,9 @@ and follow it.
 ```
 
 If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through
-what it found with you, and run `init` with the flags you agree on (`rulecast init --help` lists
-them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
+what it found with you, install rulecast (`@syv-ai/rulecast` as a devDependency, or globally where
+there is no `package.json`), and run `rulecast init` with the flags you agree on (`rulecast init --help`
+lists them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
 
 Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md)
 with the one convention you want checked.
@@ -351,21 +353,19 @@ pnpm add -D @syv-ai/rulecast     # or npm / yarn
 
 A project without a `package.json`, such as a Python service, can use a global install instead (`npm install -g @syv-ai/rulecast`). The agent hooks run the project's own rulecast when there is one, else the one on the PATH, and otherwise only say once per session that it is not installed.
 
-Then set it up with your agent, as [Getting started](#getting-started) describes.
+Setup does this for you.
 
 **Standalone binary — use this for CI and one-off runs.** Download it from [Releases](https://github.com/syv-ai/rulecast/releases). It needs no Node installation.
 
-Prefer the npm install for hooks. The binary extracts and loads its embedded ast-grep parser on every run, which costs about 260 ms: a `rulecast run` that takes ~110 ms under Node takes ~370 ms as a binary (measured on an Apple M3 Pro). That is invisible in CI and too slow for a hook that fires on every file an agent writes.
+Prefer the npm install for hooks. The binary unpacks and loads its embedded ast-grep parser on every run. That does not matter in CI, but it is too slow for a hook that fires on every file an agent writes.
 
 Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 ## Performance
 
-The edit hook is budgeted to finish in under 500 ms at p95 — measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. `pnpm perf` replays 50 edit events and checks it. The last measurement, on an Apple M3 Pro with all six detectors configured, was p50 170 ms and p95 187 ms.
+The edit hook is budgeted to finish in under 500 ms at p95, measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The hook before every Bash call only records the working tree, and is held to 150 ms over a hook that does nothing. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget. `pnpm perf` checks both budgets.
 
-The hook before every Bash call only records the working tree: it is held to 150 ms over a hook that does nothing, and adds 135–150 ms at p95 on a 20,000-file repository (`microsoft/vscode`), nearly all of it git finding untracked files. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget.
-
-A new worktree's first edit hook took p50 477 ms and p95 490 ms, against 252 ms for a warm edit in the same project (10 worktrees, report only). A new session in an existing checkout costs nothing extra (253 ms), and neither does an empty per-project detector cache (477 ms). The fixture pins no rule repos, so this says nothing about a missing one: hooks never fetch, and its rules do not run until `rulecast install` (see [Fresh environments](#fresh-environments)). The difference is macOS checking each executable the first time it runs from a new path: the project's own `command` script and the `node_modules/.bin` linter shim each took about 200 ms on their first run and 10–60 ms after that. Run them once beforehand and the first edit costs the same as a warm one. SessionStart in a new worktree takes 174 ms. A worktree needs no preparation.
+A new worktree, a new session or an empty per-project detector cache needs no preparation. Hooks never fetch, so rules from a rule repo that is not in the cache do not run until `rulecast install` (see [Fresh environments](#fresh-environments)). On macOS, the first edit in a new worktree is slower than later ones: macOS checks each executable the first time it runs from a new path, such as the project's own `command` script or a `node_modules/.bin` linter shim. Run them once beforehand and the first edit costs the same as later ones.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 

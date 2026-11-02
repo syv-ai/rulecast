@@ -193,7 +193,7 @@ details.sk pre { margin-top: 10px; font-size: 12px; }
   "decisions": [
     { "decision": "Who and where", "found": "4 committers, pre-commit, Claude in CI", "said": "Team, shared. Sessions and pre-commit. No unattended loops.", "lands": "`--scope shared`, pre-commit entry",
       "why": ["Four people committed in the last six months, so the hooks go in the shared settings file and the config is committed: everyone's agent gets the same rules.", "pre-commit already runs on every commit, so rulecast joins it there. Claude runs in `agent.yml`, but I don't edit CI; the footer says what to add."],
-      "detail": { "label": "What changes", "code": "# .claude/settings.json: rulecast install --scope shared\n# .pre-commit-config.yaml, appended\n+ - repo: https://github.com/syv-ai/rulecast\n+   rev: v0.7.0\n+   hooks:\n+     - id: rulecast" } },
+      "detail": { "label": "What changes", "code": "# .claude/settings.json: rulecast install --scope shared\n# .pre-commit-config.yaml, appended\n+ - repo: https://github.com/syv-ai/rulecast\n+   rev: v0.8.0\n+   hooks:\n+     - id: rulecast" } },
     { "decision": "Configs and sessions", "found": "Python `api/`, TypeScript `web/`", "said": "Top and `api/`. `web/` later.", "lands": "two configs",
       "why": ["Each config applies to the files below it, on its own; nothing is merged. Rules for the whole repository go in the top config, Python-only ones in `api/`.", "Sessions start at the top, so one hook install reaches both configs."],
       "detail": { "label": "Files", "code": "# new\n.rulecast-config.yaml\napi/.rulecast-config.yaml" } },
