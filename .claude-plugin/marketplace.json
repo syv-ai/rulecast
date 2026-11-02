@@ -1,0 +1,11 @@
+{
+  "name": "rulecast",
+  "owner": { "name": "syv.ai" },
+  "plugins": [
+    {
+      "name": "rulecast",
+      "source": "./plugins/rulecast",
+      "description": "Skills for working with rulecast: add-rule turns a convention into a rulecast rule, with the developer deciding."
+    }
+  ]
+}

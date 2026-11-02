@@ -1,0 +1,11 @@
+{
+  "name": "rulecast",
+  "version": "0.6.0",
+  "description": "Skills for working with rulecast, which delivers a project's conventions to coding agents while they work.",
+  "author": {
+    "name": "syv.ai"
+  },
+  "homepage": "https://github.com/syv-ai/rulecast",
+  "repository": "https://github.com/syv-ai/rulecast",
+  "license": "MIT"
+}

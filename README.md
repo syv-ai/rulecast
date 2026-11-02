@@ -293,6 +293,17 @@ If your agent cannot fetch a URL, this is the whole of it: run
 Once it is set up, ask the same agent to work out your project's conventions with you, then draft
 rules for them; `init` prints the prompt to paste.
 
+In Claude Code, the rulecast plugin adds one rule at a time:
+
+```text
+/plugin install rulecast --marketplace syv-ai/rulecast
+```
+
+Then `/rulecast:add-rule` turns the mistake the session just showed into a rule, and
+`/rulecast:add-rule services never raise HTTPException` turns the convention you name into one. Either
+way, the agent states the convention back, writes it into your docs if it isn't there, drafts and
+measures the rule, and asks you before keeping anything.
+
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for conventions that aren't written down yet. It reads the code, then interviews you one question at a time about what matters in this kind of project, recommending from named design principles and practice. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.

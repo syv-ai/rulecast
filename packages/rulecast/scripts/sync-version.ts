@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -32,8 +32,35 @@ export async function generateVersionFile(): Promise<{ target: string; source: s
   return { target, source: withVersion(await readFile(target, "utf8"), await packageVersion()) }
 }
 
+/** The Claude Code plugin's manifest: its `version` is how the marketplace tells users there is an update. */
+export async function generatePluginManifest(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, "plugins/rulecast/.claude-plugin/plugin.json")
+  const manifest = JSON.parse(await readFile(target, "utf8")) as Record<string, unknown>
+  return { target, source: `${JSON.stringify({ ...manifest, version: await packageVersion() }, null, 2)}\n` }
+}
+
+/**
+ * Links from the plugin's skills to agents/ docs are pinned to a tag, as every link to them is: the
+ * docs on main may describe a CLI the user does not have yet. The tag is this version's.
+ */
+const PINNED_DOC = /(https:\/\/raw\.githubusercontent\.com\/syv-ai\/rulecast\/)v\d+\.\d+\.\d+(\/agents\/)/g
+
+export function withPinnedDocs(source: string, version: string): string {
+  return source.replace(PINNED_DOC, `$1v${version}$2`)
+}
+
+export async function generateSkillFiles(): Promise<{ target: string; source: string }[]> {
+  const skills = path.join(repoRoot, "plugins/rulecast/skills")
+  const version = await packageVersion()
+  const entries = await readdir(skills, { recursive: true })
+  const targets = entries.filter((entry) => entry.endsWith(".md")).map((entry) => path.join(skills, entry))
+  return Promise.all(
+    targets.sort().map(async (target) => ({ target, source: withPinnedDocs(await readFile(target, "utf8"), version) })),
+  )
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const files = [await generateVersionFile()]
+  const files = [await generateVersionFile(), await generatePluginManifest(), ...(await generateSkillFiles())]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {
       if ((await readFile(target, "utf8")) !== source) {
@@ -43,6 +70,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
   } else {
     for (const { target, source } of files) await writeFile(target, source)
-    process.stdout.write("wrote src/core/version.ts\n")
+    process.stdout.write(`wrote ${files.map(({ target }) => path.relative(repoRoot, target)).join(", ")}\n`)
   }
 }
