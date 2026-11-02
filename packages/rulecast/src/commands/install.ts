@@ -5,7 +5,7 @@ import { parseArgs } from "node:util"
 
 import { ADAPTERS, adapterByName } from "../adapters"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
-import type { Config } from "../core/config/schema"
+import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
 import { cacheHome, type Env } from "../core/home"
 import { type HookState, inFile, installOf, planHooks, projectRulecast, ScopeError } from "../core/hook-plan"
@@ -230,7 +230,10 @@ export async function hookConfigs(
       skip(problem)
     }
   }
-  const verifyMs = Math.max(...configs.map((config) => config.timeouts.verifyMs))
+  // Every config skipped (doctor): the default's, rather than Math.max() of nothing, -Infinity.
+  const verifyMs = Math.max(
+    ...[...configs, ...(configs.length === 0 ? [defaultConfig()] : [])].map((config) => config.timeouts.verifyMs),
+  )
   return { roots, configs, verifyMs }
 }
 

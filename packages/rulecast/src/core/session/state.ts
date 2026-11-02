@@ -197,18 +197,20 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
       case "tree": {
         const tree = resolveTree(state, record)
-        // Its base is gone (a damaged line was skipped): what it recorded cannot be known.
-        if (tree === null) break
-        if (record.key === undefined) state.latestTreeKey.delete(record.agent)
-        else {
-          state.treeEntries.set(record.key, tree.entries)
-          state.latestTreeKey.set(record.agent, record.key)
+        // Its base is gone (a damaged line was skipped): what it recorded cannot be known, but the
+        // shell call it opens or closes still happened.
+        if (tree !== null) {
+          if (record.key === undefined) state.latestTreeKey.delete(record.agent)
+          else {
+            state.treeEntries.set(record.key, tree.entries)
+            state.latestTreeKey.set(record.agent, record.key)
+          }
+          state.latestTree.set(record.agent, tree)
+          state.sessionLatestTree = tree
+          if (record.phase === "before" && record.toolUseId !== undefined) state.beforeTrees.set(record.toolUseId, tree)
+          // A resumed session records another start; what was dirty is what was dirty at the first.
+          if (record.phase === "start" && state.startTree === null) state.startTree = tree
         }
-        state.latestTree.set(record.agent, tree)
-        state.sessionLatestTree = tree
-        if (record.phase === "before" && record.toolUseId !== undefined) state.beforeTrees.set(record.toolUseId, tree)
-        // A resumed session records another start; what was dirty is what was dirty at the first.
-        if (record.phase === "start" && state.startTree === null) state.startTree = tree
         if (record.phase === "before") openShell(state, record.agent, record.toolUseId ?? `#${index}`)
         else if (record.phase === "after") closeShell(state, shellCallOf(state, record.agent, record.toolUseId))
         else if (record.phase === "stop") closeShells(state, record.agent)
@@ -306,7 +308,7 @@ export function treeRecord(
     for (const [file, entry] of Object.entries(entries)) {
       if (JSON.stringify(last[file]) !== JSON.stringify(entry)) set[file] = entry
     }
-    const unset = Object.keys(last).filter((file) => !(file in entries))
+    const unset = Object.keys(last).filter((file) => !Object.hasOwn(entries, file))
     if (Object.keys(set).length + unset.length < Object.keys(entries).length) {
       return {
         ...head,

@@ -70,4 +70,24 @@ describe("tree records", () => {
     const folded = foldWork([{ t: "tree", phase: "start", agent: "main", state: old }])
     expect(folded.startTree).toEqual(old)
   })
+
+  test("a file named like an Object member is removed like any other (plan 21 review)", () => {
+    const records: WorkRecord[] = []
+    append(records, "start", state({ ...many(3), toString: [1, 1, "t"] as [number, number, string] }))
+    append(records, "before", state(many(3)), "t1")
+    expect(Object.hasOwn(foldWork(records).latestTree.get("main")!.entries, "toString")).toBe(false)
+  })
+
+  test("a record whose base is gone still opens and closes its shell call", () => {
+    // Otherwise the call stays open all session, and every other agent's shell call is marked shared.
+    const folded = foldWork([
+      { t: "tree", phase: "before", agent: "main", toolUseId: "t1", state: { head: "a" }, key: "k1", base: "gone" },
+    ])
+    expect(folded.openShells.has("t1")).toBe(true)
+    const closed = foldWork([
+      { t: "tree", phase: "before", agent: "main", toolUseId: "t1", state: state(many(1)) },
+      { t: "tree", phase: "after", agent: "main", toolUseId: "t1", state: { head: "a" }, key: "k2", base: "gone" },
+    ])
+    expect(closed.openShells.size).toBe(0)
+  })
 })

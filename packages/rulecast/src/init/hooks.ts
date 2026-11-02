@@ -53,39 +53,78 @@ const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".le
 /** Names that say "I rewrite files": the hook is a formatter or a fixer. */
 const FIXER_NAME =
   /format|fmt|fix|prettier|black|isort|autopep8|yapf|trailing-whitespace|end-of-file|mixed-line-ending|pretty/i
-/** Flags that turn a checker into a fixer. */
-const FIXER_FLAG = /(^|\s)(--fix\b|--write\b|-w\b|--in-place\b|format\b)/
-
-/** `npm run lint`, `pnpm check`, `yarn test`: a package manager and what it runs. */
-const PACKAGE_RUN = /(?:^|[\s;&|(])(npm|pnpm|yarn|bun)\s+(run(?:-script)?\s+)?([^\s;&|()-][^\s;&|()]*)/
-/** Package-manager commands that are not scripts. */
-const NOT_A_SCRIPT = new Set(["install", "i", "ci", "add", "exec", "dlx", "x", "remove", "update"])
+/** Flags that turn a checker into a fixer. `format` only as a word: `format:check` is a script name. */
+const FIXER_FLAG = /(^|\s)(--fix\b|--write\b|-w\b|--in-place\b|--apply(-unsafe)?\b|format(?=\s|$))/
+/** In a package script `-w` is as often jest's workers as a write flag: only the long forms count there. */
+const FIXER_FLAG_IN_SCRIPT = /(^|\s)(--fix\b|--write\b|--in-place\b|--apply(-unsafe)?\b|format(?=\s|$))/
+/** Tools that rewrite files unless told to check. */
+const WRITES_BY_DEFAULT = /(^|[\s;&|(])(black|isort|autopep8|yapf|ruff\s+format|cargo\s+fmt|go\s+fmt)(?=\s|$)/
+const CHECK_ONLY = /(^|\s)(--check|--diff)\b/
+/** Task runners whose tasks init does not read: what they run is unknown. */
+const OTHER_RUNNER = /(^|[\s;&|(])(turbo|nx|lerna|npm-run-all|run-s|run-p|concurrently)(?=\s|$)/
 /** A script file run directly or by an interpreter: `./scripts/gen.sh`, `uv run python scripts/x.py`. */
 const SCRIPT_FILE =
   /(?:^|[;&|(]\s*|\b(?:bash|sh|zsh|python3?|node|tsx|ts-node|ruby|perl|bun|deno\s+run)\s+)((?:\.{0,2}\/)?[\w./-]+\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl))(?=$|[\s;&|)])/
 
+const MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"])
+/** Package-manager commands that are not scripts. */
+const NOT_A_SCRIPT = new Set(["install", "i", "ci", "add", "exec", "dlx", "x", "remove", "update"])
+/** Package-manager flags that take a value: `--filter web`, `--prefix web`, `-C dir`. */
+const FLAG_WITH_VALUE = new Set(["--filter", "-F", "--prefix", "-C", "--dir", "--cwd", "--workspace", "-w"])
+
+/**
+ * The script a package-manager command runs: `npm run lint`, `pnpm --filter web lint`,
+ * `yarn workspace web lint`, `pnpm run --silent lint`. `explicit`: it said `run`.
+ */
+function packageRun(command: string): { manager: string; name: string; explicit: boolean } | null {
+  for (const segment of command.split(/[;&|()]+/)) {
+    const tokens = segment.trim().split(/\s+/)
+    const manager = tokens[0]!
+    if (!MANAGERS.has(manager)) continue
+    let explicit = false
+    let i = 1
+    while (i < tokens.length) {
+      const token = tokens[i]!
+      if (token === "run" || token === "run-script") {
+        explicit = true
+        i++
+      } else if (manager === "yarn" && token === "workspace") i += 2
+      else if (FLAG_WITH_VALUE.has(token)) i += 2
+      else if (token.startsWith("-")) i++
+      else break
+    }
+    const name = tokens[i]
+    if (name !== undefined && !NOT_A_SCRIPT.has(name)) return { manager, name, explicit }
+  }
+  return null
+}
+
 /** The project's package.json scripts, by name. */
 export type PackageScripts = Readonly<Record<string, string>>
 
+const writesByItself = (command: string) => WRITES_BY_DEFAULT.test(command) && !CHECK_ONLY.test(command)
+
 /**
  * Whether a hook's command changes files. A package script is looked up one level, in the
- * package.json at the git top, where the hook runs; past that, and for a script file, init cannot
- * tell, and says what it runs instead of calling it read-only (plan 21, #5).
+ * package.json at the git top, where the hook runs; past that, and for a script file or another
+ * task runner, init cannot tell, and says what it runs instead of calling it read-only (plan 21, #5).
  */
 function writes(command: string, scripts: PackageScripts): Pick<DetectedHook, "modifies" | "runs"> {
-  if (FIXER_FLAG.test(` ${command}`)) return { modifies: true }
+  if (FIXER_FLAG.test(` ${command}`) || writesByItself(command)) return { modifies: true }
   const file = SCRIPT_FILE.exec(command)
   if (file) return { modifies: null, runs: file[1]! }
-  const run = PACKAGE_RUN.exec(command)
-  if (!run || NOT_A_SCRIPT.has(run[3]!)) return { modifies: false }
-  const [, manager, explicit, name] = run as unknown as [string, string, string | undefined, string]
-  const body = Object.hasOwn(scripts, name) ? scripts[name] : undefined
+  const runner = OTHER_RUNNER.exec(command)
+  if (runner) return { modifies: null, runs: command.trim() }
+  const run = packageRun(command)
+  if (run === null) return { modifies: false }
+  const body = Object.hasOwn(scripts, run.name) ? scripts[run.name] : undefined
   // `pnpm eslint`: a binary when no script has that name. `npm lint` is not a thing npm runs.
-  if (body === undefined && explicit === undefined && manager !== "npm") return { modifies: false }
-  const runs = `${manager} run ${name}`
+  if (body === undefined && !run.explicit && run.manager !== "npm") return { modifies: false }
+  const runs = `${run.manager} run ${run.name}`
   if (body === undefined) return { modifies: null, runs }
-  if (FIXER_FLAG.test(` ${body}`)) return { modifies: true }
-  return PACKAGE_RUN.test(body) || SCRIPT_FILE.test(body) ? { modifies: null, runs } : { modifies: false }
+  if (FIXER_FLAG_IN_SCRIPT.test(` ${body}`) || writesByItself(body)) return { modifies: true }
+  const indirect = packageRun(body) !== null || SCRIPT_FILE.test(body) || OTHER_RUNNER.test(body)
+  return indirect ? { modifies: null, runs } : { modifies: false }
 }
 
 type JsonObject = Record<string, unknown>

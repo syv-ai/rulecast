@@ -171,6 +171,52 @@ describe("detectHooks", () => {
     ])
   })
 
+  test("script lookup sees past flags and workspace selectors, other runners and fixer names (plan 21 review)", async () => {
+    const lefthook = `pre-commit:
+  jobs:
+    - name: a
+      run: pnpm run --silent lint
+    - name: b
+      run: pnpm --filter web lint
+    - name: c
+      run: npm --prefix web run lint
+    - name: d
+      run: yarn workspace web lint
+    - name: e
+      run: npm run lintall
+    - name: f
+      run: npm run py
+    - name: g
+      run: npm run biome
+    - name: h
+      run: npm test
+    - name: i
+      run: npm run format:check
+`
+    const packageJson = JSON.stringify({
+      scripts: {
+        lint: "eslint --fix .",
+        lintall: "turbo run lint",
+        py: "black . && isort .",
+        biome: "biome check --apply .",
+        test: "jest -w 2",
+        "format:check": "prettier --check .",
+      },
+    })
+    const hooks = await detectHooks(files({ "lefthook.yml": lefthook, "package.json": packageJson }))
+    expect(hooks.map((hook) => [hook.name, hook.modifies])).toEqual([
+      ["a", true],
+      ["b", true],
+      ["c", true],
+      ["d", true],
+      ["e", null],
+      ["f", true],
+      ["g", true],
+      ["h", false],
+      ["i", false],
+    ])
+  })
+
   test("one pre-commit id listed twice is offered once: one rule runs every entry with that id", async () => {
     const config = `repos:
   - repo: https://github.com/pre-commit/mirrors-mypy

@@ -4,7 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { claudeCodeAdapter, HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
-import { hooksInstalled } from "../../src/commands/install"
+import { hookConfigs, hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
@@ -172,6 +172,14 @@ describe("rulecast install", () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain(`could not fetch ${repoLabel("/nonexistent/rules.git", "v1.0.0")}`)
     expect(existsSync(path.join(root, SHARED))).toBe(true)
+  })
+
+  test("hookConfigs with every config skipped sizes the hooks for the default verify_ms, not -Infinity", async () => {
+    const top = await createRepo({ "pkg/.rulecast-config.yaml": "repos: [\n" })
+    const skipped: string[] = []
+    const reached = await hookConfigs(top, "doctor", undefined, (problem) => skipped.push(problem))
+    expect(skipped).toHaveLength(1)
+    expect(reached.verifyMs).toBe(60_000)
   })
 
   test("doctor judges the hooks by every config they serve, as install sizes them", async () => {
