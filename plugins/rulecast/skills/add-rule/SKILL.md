@@ -1,8 +1,7 @@
 ---
 name: add-rule
-description: Turns one convention into a rulecast rule, with the developer deciding at each step. The convention is the one the developer names, or, with nothing named, the one the session just showed: a correction they made, or a mistake that should not happen again. Use when the developer asks to add a rulecast rule, to make rulecast catch something, or to stop a mistake from recurring.
+description: Turns one convention into a rulecast rule, with the developer approving every change. The convention is the one the developer names, or, with nothing named, the one the session just showed: a correction they made, or a mistake that should not happen again. Use when the developer asks to add a rulecast rule, to make rulecast catch something, or to stop a mistake from recurring, and in a rulecast project when the developer corrects a mistake that code could show and that should not happen again.
 argument-hint: "[the convention, or nothing for what just happened]"
-disable-model-invocation: true
 ---
 
 # Add a rulecast rule
@@ -10,6 +9,8 @@ disable-model-invocation: true
 Turn one convention into a rulecast rule. The developer decides what the convention is, where it is written down, and whether the rule stays. Ask at each step below, and wait for the answer.
 
 The developer asked for: $ARGUMENTS
+
+If you started this yourself, without the developer asking, say so before anything else: name the mistake or correction that made you think a rule would help, and ask whether they want one. Stop if they don't.
 
 Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
 
@@ -53,6 +54,6 @@ Tell the developer, briefly:
 
 ## Never
 
-- Never add a rule, or change a doc, that the developer has not agreed to.
+- Never change `.rulecast-config.yaml`, a rule or a doc without the developer's approval of that change, shown to them first. This holds whoever started the skill.
 - Never weaken another rule, or add a `rulecast-ignore`, to make the new one pass.
 - Never commit. The developer reviews and commits.

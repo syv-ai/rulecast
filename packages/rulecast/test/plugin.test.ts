@@ -33,9 +33,10 @@ describe("the Claude Code plugin", () => {
     }
   })
 
-  test("the skill takes the developer's words as its argument and is only run when asked for", () => {
+  test("the skill takes the developer's words as its argument, and the model may start it", () => {
     const skill = read(SKILL)
     expect(skill).toContain("$ARGUMENTS")
-    expect(skill).toMatch(/^disable-model-invocation: true$/m)
+    // The model may suggest a rule; changing one is the developer's call, which the skill asks for.
+    expect(skill).not.toMatch(/^disable-model-invocation: true$/m)
   })
 })
