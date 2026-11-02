@@ -14,7 +14,7 @@ The steps ask the developer to decide several things, and the developer is there
 ## 1. Read
 
 1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer. If the doc has no conventions, only commands and architecture, stop: work them out with the developer first, through [CONVENTIONS.md](CONVENTIONS.md).
-2. Read `.rulecast-config.yaml`. If it is missing, stop and ask the developer to run `npx @syv-ai/rulecast init`. Then run `rulecast list`. It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
+2. Read `.rulecast-config.yaml`. If it is missing, stop and set rulecast up with the developer first ([SETUP.md](SETUP.md)). Then run `rulecast list`. Its first line says where new conventions are written (the config's `conventions`). It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
 ## 2. Sort the conventions
@@ -43,11 +43,13 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
            - "@AGENTS.md#errors"
    ```
 
-2. **Does the project want this check?** The catalog holds only language- and tool-level checks ([SETUP.md](SETUP.md), step 2). Read the section the rule cites with `rulecast list <rule-id>`, and compare what it checks (its `detects` line) with the doc and with the files it matches:
+2. **Does the project want this check?** The catalog holds only language- and tool-level checks. Read the section the rule cites with `rulecast list <rule-id>`, and compare what it checks (its `detects` line) with the doc and with the files it matches:
    - **It fits:** nothing more to do. A convention it already enforces needs no local rule.
    - **It looks in the wrong place**: it misses files the convention covers, or matches files the project treats differently, such as generated code kept where `generated-code` does not look. Tell the developer what it misses or wrongly matches, and propose a way to cover it: `files` or `exclude` on its entry, or a local rule. The developer decides.
    - **It contradicts the doc**: its cited section says the opposite of the doc, or the developer does not want it. Leave it unchanged, tell the developer why, and propose `enabled: false` on its entry. Add it only if they agree.
    - **You can't tell**: treat it as a contradiction and propose. Proposing costs nothing, because the developer decides; staying silent hides the question.
+
+**Before drafting a checkable convention, look in the catalog.** `rulecast list --catalog` lists its rules, with what each detects and how many of the project's files it matches; `rulecast list --catalog <id>` shows one in full. If one enforces the convention, offer it to the developer instead of a new rule, and with their agreement run `rulecast add <id>` in the config's directory, then point its `context` at the project's section (question 1 above).
 
 For checkable conventions, use `path` when the file itself is the break. Otherwise use the first of these that can see the break:
 
@@ -59,6 +61,8 @@ For checkable conventions, use `path` when the file itself is the break. Otherwi
 Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
 **Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
+
+**An `llm` rule needs the developer's agreement first.** `llm.model` in the config you draft into says they gave it. Without it, never draft an `llm` rule. When a convention needs one, say so, and ask whether to allow llm rules (it costs money per file, and the file goes to the model's provider). With a yes, add `llm:` with `model: haiku` (or the model they choose) to that config; otherwise make the convention a touch rule. A drafted `llm` rule leaves out `model`, so it runs on `llm.model`, unless the developer wants another model for it.
 
 ## 3. Draft one rule at a time
 
@@ -132,7 +136,7 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
    - A `baseline` example whose old violation comes out `new` means the rule reports code the edit did not touch: a pattern that spans more lines than the violation, or a rule that needs `scope: container`.
    - A `regex` pattern also matches inside comments and strings. If the only hits it finds in the code are prose — a comment that names `process.env` — that is a slip: use `ast-grep`, which matches code, not text.
    - A slip is not a revision: a typo, a missing escape, or `\s` crossing a line break (`rulecast test` shows what a failing example matched, and says when it crossed a line). Fix slips as often as you find them.
-   - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector, write its question as [reference/detectors.md](reference/detectors.md#writing-the-question) says, and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
+   - Revise what the pattern *means* — what it accepts and refuses — **once**. If it still fails, move the rule to an `llm` detector (if the developer allows llm rules, as step 2 says), write its question as [reference/detectors.md](reference/detectors.md#writing-the-question) says, and say in its `description` that a pattern was tried. Do not keep tightening a regex past one attempt: that is how a rule ends up fitting its examples and nothing else.
 6. Run `rulecast test <id> --against . --max-rate 0.5 --format json` (without the id it measures every rule, for checking a whole config at once). The rule's own `files` and `exclude` decide which files count, so `.` is right for every rule.
    - **Exit 1, `against.exceeded: true`**: the rule flags more than half the files it matches. Do not propose it as written. Tell the developer it may describe the code as it is rather than a convention, and propose a narrower `files`, or a touch rule instead.
    - **`against.smallSample: true`**: under 25 matching files, the rate is not applied, because a share of a handful of files says nothing. Report the counts and judge the rule by its doc.

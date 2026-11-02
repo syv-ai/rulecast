@@ -10,7 +10,7 @@ A loop usually starts somewhere fresh: a CI job, a cloud session, a new containe
 
 - **Unattended mode.** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`. The stop gate then blocks up to `unattended.max_blocks` (10) stops per prompt instead of one, a finding that has blocked twice is reported instead of retried, and the agent is held once more at the end to report what is left. See [Unattended mode](rule-format.md#unattended-mode). `/goal` sends one prompt for the whole run, so there the 10 blocks are a budget for the run.
 - **`npx rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
-- **The `loop-safety` pack:** `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
+- **The `loop-safety` pack:** `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
 
 Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Agents](../../README.md#agents)).
 

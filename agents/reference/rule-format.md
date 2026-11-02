@@ -72,7 +72,7 @@ A repository can hold any number of `.rulecast-config.yaml` files: one at the to
 | `id` | yes | `[a-z0-9-]+(/[a-z0-9-]+)*`, unique within its repo |
 | `alias` | no | A second name, unique across the config, so one repo rule can be selected twice with different overrides. Findings use it |
 | `name` | for `local` and published rules | Short title |
-| `description` | no | Longer text, shown by `rulecast init` |
+| `description` | no | Longer text, shown by `rulecast list --catalog` |
 | `files` | no, default `""` | Regex searched in the repo-relative path (forward slashes, not anchored: add `^` and `$` yourself) |
 | `exclude` | no, default `^$` | Regex: matching files are skipped |
 | `types` | no, default `[file]` | The file has every one of these type tags |

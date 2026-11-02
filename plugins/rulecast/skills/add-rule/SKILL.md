@@ -19,7 +19,7 @@ Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/ruleca
 Never start drafting until the developer has confirmed which rule to add. Always ask with a recommendation.
 
 - **If the developer named one above,** recommend a wording of it.
-- **If they named nothing,** look back over this session for what should not happen again: a correction the developer made, an edit they asked you to undo, a review comment, a mistake you or they caught.
+- **If they named nothing,** look back over this session for what should not happen again: a correction the developer made, an edit they asked you to undo, a review comment, a mistake you or they caught. If the session shows nothing clear, look briefly in your memory of this project, if you keep one, for corrections the developer made before.
   - **One candidate:** recommend it.
   - **Several:** list them, recommend the one you would add first and say why (the most recent, the one most likely to recur, the one code shows most clearly), and ask which.
 
@@ -29,16 +29,17 @@ A convention says what should hold from now on. If what happened was a one-off b
 
 ## 2. Check that rulecast is set up, and find the config
 
-1. Find the `.rulecast-config.yaml` files above the files the convention is about. A repository can have one at the top, one per package, or both, and every config above a file applies to it. If there is none, stop and follow [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.6.0/agents/SETUP.md) with the developer first.
+1. Find the `.rulecast-config.yaml` files above the files the convention is about. A repository can have one at the top, one per package, or both, and every config above a file applies to it. If there is none, stop: rulecast is not set up yet. Offer `/rulecast:setup`, which follows [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.6.0/agents/SETUP.md) with the developer.
 2. Choose the config with the developer. A convention about one package goes in that package's config; one for the whole repository goes in the top config.
 3. In that config's directory, run `rulecast list`. If a rule already enforces the convention and should have caught what happened, the work is to fix that rule rather than add one. Show the developer what it checks and why it missed, and continue from step 4 with that rule.
+4. Run `rulecast list --catalog`. If a catalog rule enforces the convention, recommend adopting it over drafting a new one: show what it checks and how many of the project's files it matches (`rulecast list --catalog <id>`), and with the developer's agreement run `rulecast add <id>` in that config's directory. It still cites the convention's section (step 3), as a `context` override on its entry; then go to step 5.
 
 ## 3. Find where the convention is written
 
 Every rule cites the doc section that states its convention, so the agent that breaks it reads why.
 
 - Look in the project's docs (`AGENTS.md`, `CLAUDE.md` and the docs they point to) for a section that states the convention. A section about the same area is not enough: it has to state this rule.
-- If no section does, propose one: the sentence from step 1, a line on why if the developer gave a reason, and where it goes, next to related conventions. Show it, and write it only after the developer agrees to the wording and the place.
+- If no section does, propose one: the sentence from step 1, and a line on why if the developer gave a reason. It goes where the first line of `rulecast list` says new conventions go. If that is a folder, propose the file: the existing area it belongs to, or a new one. If nothing is set, propose a place next to related conventions. The developer can name another place and has the final say. Show it, and write it only after the developer agrees to the wording and the place.
 
 ## 4. Draft, measure and confirm the rule
 
