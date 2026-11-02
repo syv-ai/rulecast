@@ -12,7 +12,13 @@ function request(cwd: string, overrides: Partial<LlmRequest> = {}): LlmRequest {
   return {
     model: "anthropic/claude-haiku-4-5-20251001",
     prompt: PROMPT,
-    settings: { provider: "opencode", baseUrl: null, apiKeyEnv: "ANTHROPIC_API_KEY", maxFilesPerVerify: 10 },
+    settings: {
+      provider: "opencode",
+      model: null,
+      baseUrl: null,
+      apiKeyEnv: "ANTHROPIC_API_KEY",
+      maxFilesPerVerify: 10,
+    },
     env: process.env,
     cwd,
     signal: new AbortController().signal,

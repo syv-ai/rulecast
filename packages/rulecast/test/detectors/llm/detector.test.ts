@@ -16,15 +16,20 @@ import { createProject, fromDisk } from "../../helpers/project"
 
 const PY = "def get(id):\n    print('fetching', id)\n    return id\n"
 
-const config = (model = "haiku", extra: Partial<LlmConfig> = {}): LlmConfig => ({
-  model,
+/** null: a rule that names no model and runs on the config's llm.model. */
+const config = (model: string | null = "haiku", extra: Partial<LlmConfig> = {}): LlmConfig => ({
+  ...(model === null ? {} : { model }),
   question: "Does this file print instead of logging?",
   grounding: true,
   ...extra,
 })
 
-const rule = (id: string, files: string[], model = "haiku", context: { ref: string; content: string }[] = []) =>
-  ({ id, config: config(model), files, context }) as DetectorRuleInput<LlmConfig>
+const rule = (
+  id: string,
+  files: string[],
+  model: string | null = "haiku",
+  context: { ref: string; content: string }[] = [],
+) => ({ id, config: config(model), files, context }) as DetectorRuleInput<LlmConfig>
 
 function run(
   cwd: string,
@@ -183,6 +188,32 @@ describe("llm detector", () => {
     const result = await run(root, [rule("bad", ["app/a.py"], "broken-model"), rule("good", ["app/a.py"])])
     expect(result.errors.map((e) => e.rule)).toEqual(["bad"])
     expect(result.findings.map((f) => f.rule)).toEqual(["good"])
+  })
+
+  test("a rule without a model runs on the config's llm.model, and a rule's own model wins", async () => {
+    const root = await project()
+    const result = await run(root, [rule("r1", ["app/a.py"], null), rule("r2", ["app/a.py"], "sonnet")], {
+      llm: { model: "haiku" },
+    })
+    expect(result.errors).toEqual([])
+    const argv = await stubArgv(root, "claude")
+    expect(argv).toHaveLength(2)
+    expect(argv.some((args) => args.includes("--model haiku"))).toBe(true)
+    expect(argv.some((args) => args.includes("--model sonnet"))).toBe(true)
+  })
+
+  test("cost names the rule's model, or says it comes from llm.model", () => {
+    expect(llmDetector.cost!(config("sonnet"))).toContain("sonnet")
+    expect(llmDetector.cost!(config(null))).toContain("llm.model")
+  })
+
+  test("a rule without a model is a settings problem only when the config sets no llm.model", () => {
+    const settings = defaultDetectorSettings()
+    expect(llmDetector.settingsProblem!(config(null), settings)).toBe(
+      "names no model: add model to the rule, or llm.model to the config",
+    )
+    expect(llmDetector.settingsProblem!(config(null), { llm: { ...settings.llm, model: "haiku" } })).toBeNull()
+    expect(llmDetector.settingsProblem!(config("haiku"), settings)).toBeNull()
   })
 
   test("a model alias the provider cannot express is a per-rule error naming both", async () => {

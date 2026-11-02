@@ -118,6 +118,8 @@ export type LlmProviderName = (typeof LLM_PROVIDERS)[number]
 /** Project-level `llm` settings from .rulecast-config.yaml (spec §6, §12). */
 export interface LlmSettings {
   provider: LlmProviderName
+  /** The model for llm rules that name none; null when the developer has not agreed to llm rules. */
+  model: string | null
   /** Overrides the provider's own endpoint; the only way to reach Azure OpenAI or Ollama. */
   baseUrl: string | null
   apiKeyEnv: string
@@ -130,7 +132,9 @@ export interface DetectorSettings {
 }
 
 export function defaultDetectorSettings(): DetectorSettings {
-  return { llm: { provider: "claude-code", baseUrl: null, apiKeyEnv: "ANTHROPIC_API_KEY", maxFilesPerVerify: 10 } }
+  return {
+    llm: { provider: "claude-code", model: null, baseUrl: null, apiKeyEnv: "ANTHROPIC_API_KEY", maxFilesPerVerify: 10 },
+  }
 }
 
 export interface DetectorRuleInput<Config> {
@@ -250,8 +254,13 @@ export interface Detector<Config> {
    * detector needs no edit to the core.
    */
   metered?: boolean
-  /** For `init`'s consent line: what one rule of this kind costs and where the file goes. */
+  /** For the catalog's consent line: what one rule of this kind costs and where the file goes. */
   cost?(config: Config): string
+  /**
+   * Why this rule cannot run with the project's settings, or null. Asked once per rule at compile,
+   * so `validate` says it rather than a hook failing later; a problem disables the rule.
+   */
+  settingsProblem?(config: Config, settings: DetectorSettings): string | null
   /**
    * Most files this detector is given in one verify; the most recently edited are kept (§6).
    * `setting` names the config key that raises it, because a warning that does not name its lever

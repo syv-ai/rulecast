@@ -47,6 +47,17 @@ describe("rulecast validate", () => {
     })
   })
 
+  test("an llm rule with no model, in a config without llm.model, is an error naming both fixes", async () => {
+    const llmRule = { id: "thin", name: "Thin", detect: { llm: { question: "Is it thin?" } }, message: "m" }
+    const root = await createProject({ ".rulecast-config.yaml": localConfig([llmRule]) })
+    expect(await validate(root)).toMatchObject({
+      code: 2,
+      stdout: ".rulecast-config.yaml (thin): names no model: add model to the rule, or llm.model to the config\n",
+    })
+    await writeFile(path.join(root, ".rulecast-config.yaml"), `llm:\n  model: haiku\n${localConfig([llmRule])}`)
+    expect(await validate(root)).toMatchObject({ code: 0 })
+  })
+
   test("validates a rule repo's manifest, resolving references against its directory", async () => {
     const root = await createProject({ ".rulecast-rules.yaml": MANIFEST, "docs/http.md": HTTP_DOC })
     expect(await validate(root)).toMatchObject({ code: 0, stdout: ".rulecast-rules.yaml: 1 rule valid\n" })

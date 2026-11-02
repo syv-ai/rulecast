@@ -47,7 +47,7 @@ repos:
 | `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
 | `unattended.escalate` | `[]` | Ids of `warning` rules that are `error` in unattended mode |
 | `refuse_gate.max_refusals` | `1` | Writes a `refuse_write` rule may refuse per file per session |
-| `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible`. There is no `llm.model`: every llm rule names its own |
+| `llm.model`, `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `null`, `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `model` is the model for llm rules that name none, and is set only when the developer has agreed to llm rules. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible` |
 
 ## Several configs
 

@@ -256,11 +256,21 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
   }
 
-  const rules = uniqueRules(
+  const unique = uniqueRules(
     compiled,
     diagnostics,
     (id) => `rule "${id}" is configured more than once: give one an alias`,
   )
+  // A rule that cannot run with this project's settings is said here, in validate, not in a hook.
+  const settings = { llm: config.llm }
+  const rules = unique.filter((rule) => {
+    if (rule.detector === null) return true
+    const problem = options.registry.get(rule.detector.kind)?.settingsProblem?.(rule.detector.config, settings) ?? null
+    if (problem === null) return true
+    const source = compiled.find((entry) => entry.rule === rule)?.source ?? CONFIG_FILE
+    diagnostics.push({ source, rule: rule.id, message: problem, level: "error" })
+    return false
+  })
   // Said in every mode, so `rulecast validate` catches a typo before the unattended run that needs it.
   for (const id of config.unattended.escalate) {
     if (rules.some((rule) => rule.id === id)) continue

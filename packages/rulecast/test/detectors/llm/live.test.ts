@@ -109,6 +109,7 @@ describe.runIf(process.env.RULECAST_LLM === "1")("live llm providers", () => {
         prompt: PROMPT,
         settings: {
           provider: live.name,
+          model: null,
           baseUrl: live.baseUrl,
           apiKeyEnv: live.apiKeyEnv,
           maxFilesPerVerify: 10,

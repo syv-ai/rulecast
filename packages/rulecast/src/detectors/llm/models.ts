@@ -1,4 +1,5 @@
-import type { LlmProviderName } from "../../core/types"
+import type { LlmProviderName, LlmSettings } from "../../core/types"
+import type { LlmConfig } from "./schema"
 
 /**
  * Short names so one rule's `model` works whichever provider a project configured (plan 6a,
@@ -31,4 +32,9 @@ export function resolveModel(model: string, provider: LlmProviderName): string |
   const alias = ALIASES[model]
   if (alias === undefined) return model
   return alias[provider] ?? null
+}
+
+/** The model a rule runs on: its own, else the config's `llm.model`; null when neither names one. */
+export function ruleModel(config: Pick<LlmConfig, "model">, settings: Pick<LlmSettings, "model">): string | null {
+  return config.model ?? settings.model
 }

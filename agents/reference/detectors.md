@@ -149,7 +149,7 @@ detect:
     grounding: true
 ```
 
-- `model`: **required, no default.** Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which every provider maps to its own name, or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. There is no project-wide default on purpose: the cost of a rule is chosen by whoever writes it.
+- `model`: optional. Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which every provider maps to its own name, or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. Without it the rule runs on the config's `llm.model`. That key is set when the developer agrees to llm rules, so a config without it has no llm rules: don't propose one there, and a rule with no model of its own fails `rulecast validate`.
 - `question`: what the model is asked about the file. Ask for specific lines — "Report each offending line" — or you get an essay instead of findings.
 - `grounding`: defaults to `true`. Sends the rule's `context` references with the question, whatever their delivery mode, so the model judges against your conventions rather than its own taste. Set it to `false` when the question stands alone.
 - One call per file **and model**, covering every llm rule that selected that file. Three llm rules on one file all using `haiku` cost one call; a fourth using `sonnet` costs a second.

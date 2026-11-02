@@ -192,7 +192,11 @@ export const configSchema = z
       .default({}),
     llm: z
       .object({
-        // No `model`: every llm rule names its own (plan 6a, Decision 1).
+        /**
+         * The model llm rules run on when they name none (plan 20). Set only when the developer
+         * agreed to llm rules: without it, agents never propose one.
+         */
+        model: z.string().trim().min(1).nullable().default(null),
         provider: z.enum(LLM_PROVIDERS).default("claude-code"),
         base_url: z.string().nullable().default(null),
         api_key_env: z.string().default("ANTHROPIC_API_KEY"),
@@ -218,6 +222,7 @@ export const configSchema = z
     unattended: { maxBlocks: input.unattended.max_blocks, escalate: input.unattended.escalate },
     llm: {
       provider: input.llm.provider,
+      model: input.llm.model,
       baseUrl: input.llm.base_url,
       apiKeyEnv: input.llm.api_key_env,
       maxFilesPerVerify: input.llm.max_files_per_verify,

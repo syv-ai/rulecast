@@ -19,7 +19,7 @@ function request(baseUrl: string | null, env: NodeJS.ProcessEnv = { KEY: "sk-tes
   return {
     model: "claude-haiku-4-5-20251001",
     prompt: PROMPT,
-    settings: { provider: "anthropic", baseUrl, apiKeyEnv: "KEY", maxFilesPerVerify: 10 },
+    settings: { provider: "anthropic", model: null, baseUrl, apiKeyEnv: "KEY", maxFilesPerVerify: 10 },
     env,
     cwd: "/project",
     signal: new AbortController().signal,

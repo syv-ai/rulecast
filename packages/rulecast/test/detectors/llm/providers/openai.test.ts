@@ -19,7 +19,7 @@ function request(baseUrl: string | null, env: NodeJS.ProcessEnv = { KEY: "sk-tes
   return {
     model: "gpt-5-mini",
     prompt: PROMPT,
-    settings: { provider: "openai-compatible", baseUrl, apiKeyEnv: "KEY", maxFilesPerVerify: 10 },
+    settings: { provider: "openai-compatible", model: null, baseUrl, apiKeyEnv: "KEY", maxFilesPerVerify: 10 },
     env,
     cwd: "/project",
     signal: new AbortController().signal,

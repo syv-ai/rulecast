@@ -11,7 +11,13 @@ function request(cwd: string, overrides: Partial<LlmRequest> = {}): LlmRequest {
   return {
     model: "haiku",
     prompt: PROMPT,
-    settings: { provider: "claude-code", baseUrl: null, apiKeyEnv: "ANTHROPIC_API_KEY", maxFilesPerVerify: 10 },
+    settings: {
+      provider: "claude-code",
+      model: null,
+      baseUrl: null,
+      apiKeyEnv: "ANTHROPIC_API_KEY",
+      maxFilesPerVerify: 10,
+    },
     // A PATH with the shell's own tools but no claude, so a machine that has Claude Code
     // installed (it lives in ~/.local/bin) cannot make one of these tests pass for real.
     env: { ...process.env, PATH: "/usr/bin:/bin" },

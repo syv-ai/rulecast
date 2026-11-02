@@ -10,7 +10,7 @@ import type {
   Match,
 } from "../../core/types"
 import { askCached, callKey } from "./call"
-import { MODEL_ALIASES, resolveModel } from "./models"
+import { MODEL_ALIASES, resolveModel, ruleModel } from "./models"
 import { buildPrompt, type PromptRule } from "./prompt"
 import { providerByName } from "./providers/index"
 import { type LlmFinding, type LlmProvider, LlmUnavailableError } from "./providers/types"
@@ -41,18 +41,22 @@ async function groupCalls(
   rules: DetectorRuleInput<LlmConfig>[],
   changes: ReadonlyMap<string, ChangeSet>,
   read: (file: string) => Promise<string | null>,
+  settings: LlmSettings,
 ): Promise<Call[]> {
   const calls = new Map<string, Call>()
   for (const rule of rules) {
+    // Compile disables a rule with no model (settingsProblem), so null only reaches here from a caller that skipped it.
+    const model = ruleModel(rule.config, settings)
+    if (model === null) continue
     for (const file of rule.files) {
       const changedLines = changedLinesOf(changes, file)
       if (changedLines === "skip") continue
       const source = await read(file)
       if (source === null || isBinary(source)) continue
-      const key = `${file}\u0000${rule.config.model}`
+      const key = `${file}\u0000${model}`
       const call = calls.get(key)
       if (call) call.rules.push(rule)
-      else calls.set(key, { file, source, changedLines, model: rule.config.model, rules: [rule] })
+      else calls.set(key, { file, source, changedLines, model, rules: [rule] })
     }
   }
   return [...calls.values()]
@@ -154,7 +158,11 @@ export const llmDetector: Detector<LlmConfig> = {
   // Spec §6, Consent: an llm rule sends file contents to a third party and costs money per file.
   // Everything the core does differently for it follows from these, not from the name "llm".
   metered: true,
-  cost: (config) => `llm · ${config.model} · sends file contents to your provider`,
+  cost: (config) => `llm · ${config.model ?? "the model in llm.model"} · sends file contents to your provider`,
+  settingsProblem: (config, settings) =>
+    ruleModel(config, settings.llm) === null
+      ? "names no model: add model to the rule, or llm.model to the config"
+      : null,
   fileBudget: (settings) => ({ max: settings.llm.maxFilesPerVerify, setting: "llm.max_files_per_verify" }),
   // A field trial measured a single haiku call on a 135-line file at 89 s against a 60 s default.
   timeoutHint: "an llm rule on a large file can need 120000 or more",
@@ -171,7 +179,7 @@ export const llmDetector: Detector<LlmConfig> = {
 
     // A model is handed text, never a path: content that is not on disk comes through `read`.
     const read = input.fromDisk === false ? input.read : sourceReader(input.cwd)
-    const calls = await groupCalls(input.rules, input.changes, read)
+    const calls = await groupCalls(input.rules, input.changes, read, settings)
     const outcomes = await Promise.all(
       calls.map(async (call) => {
         try {
@@ -233,9 +241,11 @@ export const llmDetector: Detector<LlmConfig> = {
     // One result per distinct model, in first-use order: every rule naming it shares its fate.
     const byModel = new Map<string, string[]>()
     for (const rule of input.rules) {
-      const group = byModel.get(rule.config.model)
+      const model = ruleModel(rule.config, settings)
+      if (model === null) continue
+      const group = byModel.get(model)
       if (group) group.push(rule.id)
-      else byModel.set(rule.config.model, [rule.id])
+      else byModel.set(model, [rule.id])
     }
     for (const [model, rules] of byModel) {
       const resolved = resolveModel(model, settings.provider)

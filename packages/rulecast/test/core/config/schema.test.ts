@@ -18,6 +18,7 @@ const DEFAULTS = {
   unattended: { maxBlocks: 10, escalate: [] },
   llm: {
     provider: "claude-code",
+    model: null,
     baseUrl: null,
     apiKeyEnv: "ANTHROPIC_API_KEY",
     maxFilesPerVerify: 10,
@@ -45,6 +46,7 @@ describe("configSchema", () => {
       unattended: { max_blocks: 4, escalate: ["a/rule"] },
       llm: {
         provider: "openai-compatible",
+        model: "llama3",
         base_url: "http://localhost:11434/v1",
         api_key_env: "KEY",
         max_files_per_verify: 4,
@@ -73,6 +75,7 @@ describe("configSchema", () => {
       unattended: { maxBlocks: 4, escalate: ["a/rule"] },
       llm: {
         provider: "openai-compatible",
+        model: "llama3",
         baseUrl: "http://localhost:11434/v1",
         apiKeyEnv: "KEY",
         maxFilesPerVerify: 4,
@@ -98,13 +101,15 @@ describe("configSchema", () => {
     expect(configSchema.safeParse({ repos: [], unattended: { escalate: ["Not An Id"] } }).success).toBe(false)
   })
 
-  test("llm names the four providers and has no project-wide model", () => {
+  test("llm names the four providers, and llm.model is the default for rules that name none", () => {
     for (const provider of ["claude-code", "opencode", "anthropic", "openai-compatible"]) {
       expect(configSchema.parse({ repos: [], llm: { provider } }).llm.provider).toBe(provider)
     }
     expect(configSchema.safeParse({ repos: [], llm: { provider: "gemini" } }).success).toBe(false)
-    // Every llm rule names its own model (plan 6a, Decision 1); a project-wide default is gone.
-    expect(configSchema.safeParse({ repos: [], llm: { model: "haiku" } }).success).toBe(false)
+    // Plan 20: llm.model is the developer's consent to llm rules and the model they run on.
+    expect(configSchema.parse({ repos: [], llm: { model: "haiku" } }).llm.model).toBe("haiku")
+    expect(configSchema.parse({ repos: [] }).llm.model).toBeNull()
+    expect(configSchema.safeParse({ repos: [], llm: { model: " " } }).success).toBe(false)
   })
 
   test("repo entries keep their rules unparsed; rev rules are left to compile", () => {

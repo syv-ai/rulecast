@@ -53,7 +53,13 @@ describe("runDetection", () => {
       return { findings: [], errors: [] }
     })
     const settings = {
-      llm: { provider: "opencode" as const, baseUrl: "http://x.test", apiKeyEnv: "KEY", maxFilesPerVerify: 3 },
+      llm: {
+        provider: "opencode" as const,
+        model: null,
+        baseUrl: "http://x.test",
+        apiKeyEnv: "KEY",
+        maxFilesPerVerify: 3,
+      },
     }
     const base = input([{ rule: detectorRule("r1", "a"), files: ["x.ts"] }], [a])
     await runDetection({ ...base, detection: { ...base.detection, settings } })

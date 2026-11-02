@@ -7,6 +7,7 @@ import type { LlmFinding, LlmProvider, LlmRequest } from "../../../src/detectors
 
 const SETTINGS: LlmSettings = {
   provider: "claude-code",
+  model: null,
   baseUrl: null,
   apiKeyEnv: "ANTHROPIC_API_KEY",
   maxFilesPerVerify: 10,
