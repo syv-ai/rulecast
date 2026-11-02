@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
@@ -7,6 +9,23 @@ import { createRepo } from "../helpers/git"
 import { createProject } from "../helpers/project"
 
 describe("rulecast list", () => {
+  test("says where new conventions go, and which config says so", async () => {
+    const rule = { id: "a", name: "A", detect: { regex: { pattern: "x" } }, message: "m" }
+    const root = await createRepo({ ".rulecast-config.yaml": `conventions: docs/conventions/\n${localConfig([rule])}` })
+    await mkdir(path.join(root, "pkg"))
+    await writeFile(path.join(root, "pkg", ".rulecast-config.yaml"), localConfig([rule]))
+    expect((await runCli(root, ["list"])).stdout).toMatch(
+      /^Conventions: docs\/conventions\/ \(from \.rulecast-config\.yaml\)\n\n/,
+    )
+    expect((await runCli(path.join(root, "pkg"), ["list"])).stdout).toMatch(
+      /^Conventions: docs\/conventions\/ \(from \.rulecast-config\.yaml\)\n/,
+    )
+    const bare = await createRepo({ ".rulecast-config.yaml": localConfig([rule]) })
+    expect((await runCli(bare, ["list"])).stdout).toMatch(/^Conventions: not set\n/)
+    // The JSON shape is unchanged: one entry per rule.
+    expect(Array.isArray(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout))).toBe(true)
+  })
+
   test("a disabled rule is listed and says so", async () => {
     const rules = fixtureRules.map((rule) =>
       rule.id === "frontend/no-generated-edits" ? { ...rule, enabled: false } : rule,

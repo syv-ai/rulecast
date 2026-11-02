@@ -36,6 +36,7 @@ repos:
 | `files` | `""` | Regex every rule's files must also match |
 | `exclude` | `^$` | Regex no rule's files may match |
 | `default_stages` | none | Stages for rules without `stages` |
+| `conventions` | none | Where new conventions are written: a file, or a folder of files by area, relative to this config. A config without one uses the nearest config above that names one; `rulecast list` shows which. It may not exist yet (a warning) |
 | `context.mode` | `inject` | Default reference mode: `inject` or `read` |
 | `context.max_bytes` | `32768` | A larger reference is delivered as `read` |
 | `max_matches_per_rule` | `10` | Findings shown per rule |

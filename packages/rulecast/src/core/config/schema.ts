@@ -1,3 +1,4 @@
+import path from "node:path"
 import { z } from "zod"
 
 import { referenceInputSchema } from "../references"
@@ -144,6 +145,18 @@ export const configSchema = z
     files: z.string().default(""),
     exclude: z.string().default("^$"),
     default_stages: stagesSchema.optional(),
+    /**
+     * Where new conventions are written: a file, or a folder of files by area (plan 20). Relative to
+     * this config's directory. A config without one uses the nearest config above that names one
+     * (core/config/conventions.ts), the one key that is inherited.
+     */
+    conventions: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((value) => !path.isAbsolute(value), "must be relative to the config's directory")
+      .nullable()
+      .default(null),
     context: z
       .object({
         mode: z.enum(["inject", "read"]).default("inject"),
@@ -212,6 +225,7 @@ export const configSchema = z
     files: input.files,
     exclude: input.exclude,
     defaultStages: input.default_stages ?? null,
+    conventions: input.conventions,
     context: { mode: input.context.mode, maxBytes: input.context.max_bytes },
     maxMatchesPerRule: input.max_matches_per_rule,
     maxFileBytes: input.max_file_bytes,

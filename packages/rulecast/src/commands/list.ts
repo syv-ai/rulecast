@@ -3,6 +3,7 @@ import { stringify } from "yaml"
 
 import { compile, diagnosticText } from "../core/compile/project"
 import type { CompiledRule } from "../core/compile/rule"
+import { conventionsFor } from "../core/config/conventions"
 import { CONFIG_FILE } from "../core/config/load"
 import { createReferenceResolver } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
@@ -124,6 +125,11 @@ export async function listCommand(
   }
 
   const out: string[] = []
+  // Where a new convention's section goes (plan 20): add-rule and DRAFT-RULES.md read it here.
+  if (ruleId === null) {
+    const target = await conventionsFor(root)
+    out.push(target === null ? "Conventions: not set" : `Conventions: ${target.path} (from ${target.from})`, "")
+  }
   for (const rule of rules) {
     const what = rule.detector === null ? "touch" : `${rule.detector} · ${rule.stages.join(", ")} · ${rule.severity}`
     out.push(`${rule.id}${rule.enabled ? "" : "  (disabled)"}  ${what}  [${rule.source}]`)

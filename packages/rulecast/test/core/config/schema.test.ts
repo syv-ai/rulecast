@@ -8,6 +8,7 @@ const DEFAULTS = {
   files: "",
   exclude: "^$",
   defaultStages: null,
+  conventions: null,
   context: { mode: "inject", maxBytes: 32768 },
   maxMatchesPerRule: 10,
   maxFileBytes: 1048576,
@@ -65,6 +66,7 @@ describe("configSchema", () => {
       files: "^src/",
       exclude: "^vendor/",
       defaultStages: ["edit", "verify"],
+      conventions: null,
       context: { mode: "read", maxBytes: 1000 },
       maxMatchesPerRule: 3,
       maxFileBytes: 2048,
@@ -110,6 +112,14 @@ describe("configSchema", () => {
     expect(configSchema.parse({ repos: [], llm: { model: "haiku" } }).llm.model).toBe("haiku")
     expect(configSchema.parse({ repos: [] }).llm.model).toBeNull()
     expect(configSchema.safeParse({ repos: [], llm: { model: " " } }).success).toBe(false)
+  })
+
+  test("conventions names a file or a folder, relative to the config; absolute paths are rejected", () => {
+    expect(configSchema.parse({ repos: [] }).conventions).toBeNull()
+    expect(configSchema.parse({ repos: [], conventions: "docs/conventions/" }).conventions).toBe("docs/conventions/")
+    expect(configSchema.parse({ repos: [], conventions: "../docs/a.md" }).conventions).toBe("../docs/a.md")
+    expect(configSchema.safeParse({ repos: [], conventions: "/abs/docs" }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], conventions: "" }).success).toBe(false)
   })
 
   test("repo entries keep their rules unparsed; rev rules are left to compile", () => {

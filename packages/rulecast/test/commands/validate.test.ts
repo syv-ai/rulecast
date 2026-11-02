@@ -58,6 +58,13 @@ describe("rulecast validate", () => {
     expect(await validate(root)).toMatchObject({ code: 0 })
   })
 
+  test("a conventions path that does not exist yet is a warning, not an error", async () => {
+    const root = await createProject({ ".rulecast-config.yaml": `conventions: docs/conventions/\n${localConfig([])}` })
+    const result = await validate(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("warning: .rulecast-config.yaml: conventions: docs/conventions/ does not exist yet")
+  })
+
   test("validates a rule repo's manifest, resolving references against its directory", async () => {
     const root = await createProject({ ".rulecast-rules.yaml": MANIFEST, "docs/http.md": HTTP_DOC })
     expect(await validate(root)).toMatchObject({ code: 0, stdout: ".rulecast-rules.yaml: 1 rule valid\n" })

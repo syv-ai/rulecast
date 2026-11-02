@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
@@ -152,6 +153,15 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
 
   const mode = modeOf(config, options)
   const diagnostics: Diagnostic[] = []
+  // Said rather than refused: setup names the conventions folder before the first convention is in it.
+  if (config.conventions !== null && !existsSync(path.resolve(root, config.conventions))) {
+    diagnostics.push({
+      source: CONFIG_FILE,
+      rule: null,
+      message: `conventions: ${config.conventions} does not exist yet`,
+      level: "warning",
+    })
+  }
   const compiled: Compiled[] = []
   const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }
   const project: ReferenceRoot = { dir: root, label: null }
