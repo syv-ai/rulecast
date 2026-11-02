@@ -1,5 +1,5 @@
 ---
-"@syv-ai/rulecast": patch
+"@syv-ai/rulecast": minor
 ---
 
 Fixes from an end-to-end review of setup.
