@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import type { HeadMove } from "../baseline/foreign"
 import type { ActiveMode } from "../config/mode"
 import type { TreeState } from "./tree"
@@ -28,8 +30,12 @@ export type WorkRecord =
   | { t: "noticed"; key: string }
   /** `HEAD` moved between two tree states: a git operation, whose commits from elsewhere are not the agent's (baseline/foreign.ts). */
   | ({ t: "head" } & HeadMove)
-  /** The working tree at session start, before and after a shell call, and at a stop (session/tree.ts). */
-  | { t: "tree"; phase: "start" | "before" | "after" | "stop"; agent: string; toolUseId?: string; state: TreeState }
+  /**
+   * The working tree at session start, before and after a shell call, and at a stop (session/tree.ts).
+   * `key` names its entries. With `base`, `state` holds no entries: they are the entries the store
+   * recorded under `base`, with `set` and `unset` applied (treeRecord). Without `key`: an older store.
+   */
+  | ({ t: "tree"; phase: TreePhase; agent: string; toolUseId?: string } & TreeEncoding)
   /**
    * Changed outside any of the agent's tool calls, found by comparing tree states: reported, never
    * blocking. `agent`: whose comparison found it; absent in stores written before it was recorded.
@@ -37,6 +43,14 @@ export type WorkRecord =
   | { t: "swept"; file: string; agent?: string }
   /** The mode the hooks ran this session in, so `rulecast run --session` judges as they did. */
   | { t: "mode"; mode: ActiveMode["mode"]; source: ActiveMode["source"]; detail: string }
+
+export type TreePhase = "start" | "before" | "after" | "stop"
+
+type TreeHeader = Omit<TreeState, "entries">
+
+type TreeEncoding =
+  | { state: TreeState; key?: string; base?: undefined }
+  | { state: TreeHeader; key: string; base: string; set?: TreeState["entries"]; unset?: string[] }
 
 export type ContextRecord =
   | { t: "reset" }
@@ -80,6 +94,10 @@ export interface WorkState {
   sessionLatestTree: TreeState | null
   /** The state recorded before each shell call, by its tool use id. */
   beforeTrees: Map<string, TreeState>
+  /** Every tree state's entries the store holds, by key: what a later record may name as its base. */
+  treeEntries: Map<string, TreeState["entries"]>
+  /** Each agent's last recorded tree state's key, which its next state is encoded against. */
+  latestTreeKey: Map<string, string>
   /** The tree at session start: what was already dirty then. */
   startTree: TreeState | null
   /**
@@ -131,6 +149,8 @@ export function emptyWork(): WorkState {
     latestTree: new Map(),
     sessionLatestTree: null,
     beforeTrees: new Map(),
+    treeEntries: new Map(),
+    latestTreeKey: new Map(),
     startTree: null,
     openShells: new Map(),
     mode: null,
@@ -141,39 +161,63 @@ export function emptyContext(): ContextState {
   return { delivered: [], touched: new Set(), preexisting: new Set(), warned: new Set() }
 }
 
+/** Moves `item` to the end of an insertion-ordered set: least recently touched first. */
+function touch<T>(set: Set<T>, item: T): void {
+  set.delete(item)
+  set.add(item)
+}
+
+function addTo<K, V>(map: Map<K, Set<V>>, key: K, value: V): void {
+  const set = map.get(key)
+  if (set) set.add(value)
+  else map.set(key, new Set([value]))
+}
+
 export function foldWork(records: readonly WorkRecord[]): WorkState {
   const state = emptyWork()
+  // Ordered sets while folding, arrays once done: moving a file to the end of an array on every
+  // record made a long session's fold quadratic (plan 21).
+  const edited = new Set<string>()
+  const swept = new Set<string>()
+  const accessed = new Map<string, Set<string>>()
   for (const [index, record] of records.entries()) {
     switch (record.t) {
       case "edited": {
-        state.edited = [...state.edited.filter((file) => file !== record.file), record.file]
+        touch(edited, record.file)
         state.editedVia.set(record.file, record.via ?? "tool")
         if (record.shared === true) state.sharedEdits.add(record.file)
-        state.swept = state.swept.filter((file) => file !== record.file)
+        swept.delete(record.file)
         state.sweptBy.delete(record.file)
-        const agent = record.agent ?? ANY_AGENT
-        state.editors.set(record.file, new Set([...(state.editors.get(record.file) ?? []), agent]))
+        addTo(state.editors, record.file, record.agent ?? ANY_AGENT)
         break
       }
       case "swept":
-        state.swept = [...state.swept.filter((file) => file !== record.file), record.file]
-        state.sweptBy.set(record.file, new Set([...(state.sweptBy.get(record.file) ?? []), record.agent ?? ANY_AGENT]))
+        touch(swept, record.file)
+        addTo(state.sweptBy, record.file, record.agent ?? ANY_AGENT)
         break
-      case "tree":
-        state.latestTree.set(record.agent, record.state)
-        state.sessionLatestTree = record.state
-        if (record.phase === "before" && record.toolUseId !== undefined) {
-          state.beforeTrees.set(record.toolUseId, record.state)
+      case "tree": {
+        const tree = resolveTree(state, record)
+        // Its base is gone (a damaged line was skipped): what it recorded cannot be known.
+        if (tree === null) break
+        if (record.key === undefined) state.latestTreeKey.delete(record.agent)
+        else {
+          state.treeEntries.set(record.key, tree.entries)
+          state.latestTreeKey.set(record.agent, record.key)
         }
+        state.latestTree.set(record.agent, tree)
+        state.sessionLatestTree = tree
+        if (record.phase === "before" && record.toolUseId !== undefined) state.beforeTrees.set(record.toolUseId, tree)
         // A resumed session records another start; what was dirty is what was dirty at the first.
-        if (record.phase === "start" && state.startTree === null) state.startTree = record.state
+        if (record.phase === "start" && state.startTree === null) state.startTree = tree
         if (record.phase === "before") openShell(state, record.agent, record.toolUseId ?? `#${index}`)
         else if (record.phase === "after") closeShell(state, shellCallOf(state, record.agent, record.toolUseId))
         else if (record.phase === "stop") closeShells(state, record.agent)
         break
+      }
       case "accessed": {
-        const files = state.accessed.get(record.agent) ?? []
-        state.accessed.set(record.agent, [...files.filter((file) => file !== record.file), record.file])
+        const files = accessed.get(record.agent) ?? new Set<string>()
+        accessed.set(record.agent, files)
+        touch(files, record.file)
         break
       }
       case "stopBlock":
@@ -214,7 +258,67 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         break
     }
   }
+  state.edited = [...edited]
+  state.swept = [...swept]
+  for (const [agent, files] of accessed) state.accessed.set(agent, [...files])
   return state
+}
+
+/** A tree record's state, its entries taken from its base when it names one; null when that is gone. */
+function resolveTree(state: WorkState, record: Extract<WorkRecord, { t: "tree" }>): TreeState | null {
+  if (record.base === undefined) return record.state
+  const base = state.treeEntries.get(record.base)
+  if (base === undefined) return null
+  let entries = base
+  if (record.set !== undefined || record.unset !== undefined) {
+    entries = { ...base, ...record.set }
+    for (const file of record.unset ?? []) delete entries[file]
+  }
+  return { ...record.state, entries }
+}
+
+function treeKey(entries: TreeState["entries"]): string {
+  const sorted = Object.keys(entries)
+    .sort()
+    .map((file) => [file, entries[file]])
+  return createHash("sha1").update(JSON.stringify(sorted)).digest("base64url")
+}
+
+/**
+ * The record for a tree state, encoded against what `work` (the store as last read) holds: a state
+ * the store already has is named by its key, and any other is written as its change from the agent's
+ * last state when that is smaller. A session that wrote every state in full grew by the dirty tree
+ * twice per shell call (plan 21).
+ */
+export function treeRecord(
+  work: WorkState,
+  record: { phase: TreePhase; agent: string; toolUseId?: string },
+  now: TreeState,
+): WorkRecord {
+  const key = treeKey(now.entries)
+  const { entries, ...header } = now
+  const head = { t: "tree" as const, ...record }
+  if (work.treeEntries.has(key)) return { ...head, state: header, key, base: key }
+  const lastKey = work.latestTreeKey.get(record.agent)
+  const last = lastKey === undefined ? undefined : work.treeEntries.get(lastKey)
+  if (lastKey !== undefined && last !== undefined) {
+    const set: TreeState["entries"] = {}
+    for (const [file, entry] of Object.entries(entries)) {
+      if (JSON.stringify(last[file]) !== JSON.stringify(entry)) set[file] = entry
+    }
+    const unset = Object.keys(last).filter((file) => !(file in entries))
+    if (Object.keys(set).length + unset.length < Object.keys(entries).length) {
+      return {
+        ...head,
+        state: header,
+        key,
+        base: lastKey,
+        ...(Object.keys(set).length > 0 ? { set } : {}),
+        ...(unset.length > 0 ? { unset } : {}),
+      }
+    }
+  }
+  return { ...head, state: now, key }
 }
 
 /** A shell call starts: it and every other agent's open call now ran alongside each other. */

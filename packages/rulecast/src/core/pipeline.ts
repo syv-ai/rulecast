@@ -39,6 +39,7 @@ import {
   referenceState,
   sharedShell,
   sweptFor,
+  treeRecord,
   type WorkRecord,
   type WorkState,
 } from "./session/state"
@@ -339,7 +340,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         await appendWork(open.dir, [
           ...swept.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
           ...gap.moved,
-          { t: "tree", phase: "before", agent: open.agent, ...id, state: now },
+          treeRecord(work, { phase: "before", agent: open.agent, ...id }, now),
         ])
         await appendActivity(stateDir, { ...activityOf(open.agent), ev: "shell-before", tu: event.toolUseId })
       }
@@ -430,7 +431,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (shared) agentNotices.push(SHARED_TREE)
     await appendWork(open.dir, [
       ...(call?.gitOperation === true ? headRecords(call.move) : []),
-      { t: "tree", phase: "after", agent: open.agent, ...id, state: now },
+      treeRecord(view.work, { phase: "after", agent: open.agent, ...id }, now),
       ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
     ])
     if (files.length === 0) return { delivery: emptyDelivery(), failed, deadlineMissed }
@@ -538,7 +539,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const tree = await treeState(root)
     if (tree === null) warnings.push({ key: "tree-unavailable", text: TREE_UNAVAILABLE })
     else {
-      await appendWork(session.dir, [{ t: "tree", phase: "start", agent: session.agent, state: tree }])
+      await appendWork(session.dir, [treeRecord(view.work, { phase: "start", agent: session.agent }, tree)])
       const start = await startRecords(baselineInput, baseline, relevant(Object.keys(tree.entries).sort()))
       if (start.records.length > 0) await appendBaseline(session.dir, start.records)
       if (start.skipped > 0) {
@@ -838,7 +839,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       await appendWork(open.dir, [
         ...found.map((file) => ({ t: "swept" as const, file, agent: open.agent })),
         ...gap.moved,
-        { t: "tree", phase: "stop", agent: open.agent, state: now },
+        treeRecord(work, { phase: "stop", agent: open.agent }, now),
       ])
     }
     const edited = new Set(work.edited)
