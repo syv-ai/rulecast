@@ -26,7 +26,7 @@ describe("setup page", () => {
     expect(count(html, '<details class="row"')).toBe(6)
     expect(count(html, '<p class="t">')).toBe(3)
     expect(count(html, '<details class="row" open>')).toBe(1)
-    expect(html).toContain('<div class="go">Say <b>go ahead</b>')
+    expect(html).toContain('<div class="cell go">Say <b>go ahead</b>')
     expect(html).toContain("├─ ")
     expect(html).toContain("└─ ")
     expect(html).toContain('<span class="none">nothing to find</span>')

@@ -148,14 +148,14 @@ details.sk > summary::before { content: "+ "; color: var(--faint); }
 details.sk[open] > summary::before { content: "− "; }
 details.sk pre { margin-top: 10px; font-size: 12px; }
 
-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; border-radius: 14px; overflow: hidden; }
-footer > div { background: var(--tone-1); padding: 22px 26px; font-size: 14px; color: var(--muted); }
-footer > div.go { background: var(--tone-2); color: var(--ink); font-size: 15px; }
-footer b { font-weight: 500; color: var(--ink); }
+.foot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; border-radius: 14px; overflow: hidden; }
+.foot .cell { background: var(--tone-1); padding: 22px 26px; font-size: 14px; color: var(--muted); }
+.foot .cell.go { background: var(--tone-2); color: var(--ink); font-size: 15px; }
+.foot .go b { font-weight: 500; color: var(--ink); }
 
 @media (prefers-reduced-motion: reduce) { details.row > summary::after { transition: none; } }
 @media (max-width: 860px) {
-  .map, footer { grid-template-columns: 1fr; }
+  .map, .foot { grid-template-columns: 1fr; }
   .head { display: none; }
   .cols { grid-template-columns: 24px 1fr 16px; gap: 6px 14px; }
   .cols > :nth-child(n+3):not(:last-child) { grid-column: 2; }
@@ -221,7 +221,7 @@ footer b { font-weight: 500; color: var(--ink); }
 
 <script id="render">
 /** Text as HTML: every string from the data goes through here, so a file name cannot be markup. */
-function escape(value) {
+function asText(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -232,7 +232,7 @@ function escape(value) {
 
 /** Escaped text with `backticks` as code, and (where asked) **double asterisks** as bold. */
 function inline(value, bold = false) {
-  let html = escape(value).replace(/`([^`]+)`/g, "<code>$1</code>")
+  let html = asText(value).replace(/`([^`]+)`/g, "<code>$1</code>")
   if (bold) html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
   return html
 }
@@ -240,9 +240,9 @@ function inline(value, bold = false) {
 /** A code block: lines starting with # are comments, lines starting with "+ " are additions. */
 function code(text) {
   const lines = String(text ?? "").split("\n").map((line) => {
-    if (/^\s*#/.test(line)) return `<span class="c">${escape(line)}</span>`
-    if (line.startsWith("+ ")) return `<span class="add">${escape(line.slice(2))}</span>`
-    return escape(line)
+    if (/^\s*#/.test(line)) return `<span class="c">${asText(line)}</span>`
+    if (line.startsWith("+ ")) return `<span class="add">${asText(line.slice(2))}</span>`
+    return asText(line)
   })
   return `<pre>${lines.join("\n")}</pre>`
 }
@@ -267,10 +267,10 @@ function treeRows(rows) {
       if (depth > 0) guide += last ? "└─ " : "├─ "
       open[depth] = !last
       const marks = (row.marks ?? [])
-        .map((mark) => `<span class="a ${["session", "config", "conventions"].includes(mark.kind) ? mark.kind : "note"}">${escape(mark.text)}</span>`)
+        .map((mark) => `<span class="a ${["session", "config", "conventions"].includes(mark.kind) ? mark.kind : "note"}">${asText(mark.text)}</span>`)
         .join("")
       const classes = ["r", row.highlight ? "hi" : "", row.dim ? "dim" : ""].filter(Boolean).join(" ")
-      return `<div class="${classes}"><span class="g">${escape(guide)}</span><span class="n">${escape(row.name)}</span>${marks}</div>`
+      return `<div class="${classes}"><span class="g">${asText(guide)}</span><span class="n">${asText(row.name)}</span>${marks}</div>`
     })
     .join("")
 }
@@ -278,8 +278,8 @@ function treeRows(rows) {
 function render(data) {
   const out = []
   out.push(
-    `<header><span class="state">${escape(data.state ?? "Nothing written yet")}</span>`,
-    `<h1>rulecast for <b>${escape(data.project)}</b></h1>`,
+    `<header><span class="state">${asText(data.state ?? "Nothing written yet")}</span>`,
+    `<h1>rulecast for <b>${asText(data.project)}</b></h1>`,
     data.lead ? `<p class="lead">${inline(data.lead)}</p>` : "",
     data.key === false
       ? ""
@@ -290,7 +290,7 @@ function render(data) {
   const rules = data.rules ?? []
   if (data.tree?.length || rules.length) {
     const side = rules.length
-      ? `<div class="side">${rules.map((rule) => `<div class="rule"><div class="t"><b>${escape(rule.name)}</b><span>${escape(rule.source)}</span></div><p>${inline(rule.text)}</p></div>`).join("")}</div>`
+      ? `<div class="side">${rules.map((rule) => `<div class="rule"><div class="t"><b>${asText(rule.name)}</b><span>${asText(rule.source)}</span></div><p>${inline(rule.text)}</p></div>`).join("")}</div>`
       : ""
     const tree = data.tree?.length ? `<div class="tree" aria-label="Repository map">${treeRows(data.tree)}</div>` : ""
     out.push(`<section><h2>${data.tree?.length ? "The repository" : "Rules"}</h2><div class="map${tree && side ? "" : " solo"}">${tree}${side}</div></section>`)
@@ -299,11 +299,11 @@ function render(data) {
   const decisions = data.decisions ?? []
   if (decisions.length) {
     const columns = data.columns ?? ["Decision", "Found", "You said", "Lands in"]
-    const head = `<div class="cols head"><span></span>${columns.map((column) => `<span>${escape(column)}</span>`).join("")}<span></span></div>`
+    const head = `<div class="cols head"><span></span>${columns.map((column) => `<span>${asText(column)}</span>`).join("")}<span></span></div>`
     const rows = decisions.map((row, index) => {
       const found = row.found == null ? `<span class="none">nothing to find</span>` : `<span class="f">${inline(row.found)}</span>`
       const why = (row.why ?? []).map((paragraph) => `<p>${inline(paragraph)}</p>`).join("")
-      const detail = row.detail ? `<div><span class="lab">${escape(row.detail.label)}</span>${code(row.detail.code)}</div>` : "<div></div>"
+      const detail = row.detail ? `<div><span class="lab">${asText(row.detail.label)}</span>${code(row.detail.code)}</div>` : "<div></div>"
       return (
         `<details class="row"${row.open ? " open" : ""}><summary class="cols"><span class="i">${index + 1}</span>` +
         `<span class="d">${inline(row.decision)}</span>${found}<span class="s">${inline(row.said)}</span>` +
@@ -311,7 +311,7 @@ function render(data) {
         `<div class="more"><div><span class="lab">Why</span>${why}</div>${detail}</div></details>`
       )
     })
-    out.push(`<section><h2>${escape(data.decisionsTitle ?? "What we agreed")}</h2><div class="ledger">${head}${rows.join("")}</div></section>`)
+    out.push(`<section><h2>${asText(data.decisionsTitle ?? "What we agreed")}</h2><div class="ledger">${head}${rows.join("")}</div></section>`)
   }
 
   const candidates = data.candidates ?? []
@@ -319,14 +319,14 @@ function render(data) {
     const cards = candidates.map((card) => {
       const source = [card.recommended ? "Recommended" : "", card.source ?? ""].filter(Boolean).join(" · ")
       const sketch = card.sketch ? `<details class="sk"><summary>Sketch of the rule</summary>${code(card.sketch)}</details>` : ""
-      return `<div class="cand${card.recommended ? " rec" : ""}"><span class="src">${escape(source)}</span><p class="t">${inline(card.text)}</p>${card.note ? `<p class="m">${inline(card.note)}</p>` : ""}${sketch}</div>`
+      return `<div class="cand${card.recommended ? " rec" : ""}"><span class="src">${asText(source)}</span><p class="t">${inline(card.text)}</p>${card.note ? `<p class="m">${inline(card.note)}</p>` : ""}${sketch}</div>`
     })
-    out.push(`<section><h2>${escape(data.candidatesTitle ?? "First rule, if you want one")}</h2><div class="cands">${cards.join("")}</div></section>`)
+    out.push(`<section><h2>${asText(data.candidatesTitle ?? "First rule, if you want one")}</h2><div class="cands">${cards.join("")}</div></section>`)
   }
 
   if (data.footer) {
     out.push(
-      `<footer><div class="go">${inline(data.footer.go, true)}</div>${data.footer.aside ? `<div>${inline(data.footer.aside)}</div>` : ""}</footer>`,
+      `<footer class="foot"><div class="cell go">${inline(data.footer.go, true)}</div>${data.footer.aside ? `<div class="cell">${inline(data.footer.aside)}</div>` : ""}</footer>`,
     )
   }
   return out.join("")

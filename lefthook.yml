@@ -9,7 +9,7 @@ pre-commit:
         piped: true
         jobs:
           - name: biome
-            glob: "*.{js,mjs,cjs,ts,json,jsonc}"
+            glob: "*.{js,mjs,cjs,ts,json,jsonc,html}"
             run: pnpm exec biome check --write --error-on-warnings --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
             stage_fixed: true
           # rulecast on rulecast, from source: node_modules/.bin/rulecast runs dist/, which can be
