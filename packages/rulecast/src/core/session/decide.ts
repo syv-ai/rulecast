@@ -260,6 +260,40 @@ export interface Assembled {
   refLabels: ReadonlyMap<string, string>
 }
 
+/** Pre-existing findings whose file's summary this context has not been given yet. */
+function unsummarised(findings: readonly ClassifiedFinding[], state: ContextState): ClassifiedFinding[] {
+  return findings.filter(
+    ({ rule, match, status }) =>
+      status === "preexisting" && !state.preexisting.has(preexistingKey(rule.id, match.file)),
+  )
+}
+
+/** Warnings not yet given in this context. */
+function unwarnedOf<W extends { key: string }>(warnings: readonly W[], state: ContextState): W[] {
+  return warnings.filter((warning) => !state.warned.has(warning.key))
+}
+
+/**
+ * Whether `decide` would put anything in front of the agent: new findings (and with them their
+ * doc sections and any swept file they are in), pre-existing summaries this context has not had,
+ * warnings it has not had, touch rules, refused writes and rules that did not run. Built from the
+ * same parts `assemble` uses, so the two cannot disagree. A pipeline claims its share of a shared
+ * budget by it (PipelineOptions.shareBudget). Swept files without findings, and pre-existing
+ * findings already summarised, deliver nothing.
+ */
+export function delivers(
+  input: Pick<DecideInput, "findings" | "touches" | "warnings" | "context" | "refused" | "disabled">,
+): boolean {
+  return (
+    input.findings.some((finding) => finding.status === "new") ||
+    unsummarised(input.findings, input.context).length > 0 ||
+    unwarnedOf(input.warnings, input.context).length > 0 ||
+    input.touches.length > 0 ||
+    (input.refused ?? []).length > 0 ||
+    (input.disabled ?? []).length > 0
+  )
+}
+
 export async function assemble(input: AssembleInput): Promise<Assembled> {
   const delivery = emptyDelivery()
   if (input.via !== undefined) delivery.via = input.via
@@ -287,10 +321,8 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   for (const { rule } of fresh) if (rule.message !== null) delivery.templates[rule.id] = rule.message
   const summaries = new Map<string, { rule: string; file: string; count: number }>()
   const summaryFiles = new Map<Delivery["preexistingSummary"][number], string>()
-  for (const { rule, match, status } of input.findings) {
-    if (status !== "preexisting") continue
+  for (const { rule, match } of unsummarised(input.findings, state)) {
     const key = preexistingKey(rule.id, match.file)
-    if (state.preexisting.has(key)) continue
     let summary = summaries.get(key)
     if (summary === undefined) {
       summary = { rule: rule.id, file: display(match.file), count: 0 }
@@ -303,7 +335,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
 
   // Warnings, once per context. Which of them are kept — and so which are recorded as warned — is
   // decided by the budget, after the floor.
-  const unwarned = (input.warnings ?? []).filter((warning) => !state.warned.has(warning.key))
+  const unwarned = unwarnedOf(input.warnings ?? [], state)
   delivery.warnings = unwarned.map((warning) => warning.text)
 
   // Touches.

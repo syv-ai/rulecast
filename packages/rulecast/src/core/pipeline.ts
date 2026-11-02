@@ -26,7 +26,7 @@ import { guardWrite } from "./guard"
 import { CorruptStoreError } from "./jsonl"
 import { displayPath } from "./projects"
 import { appendActivity, duringCall, readActivity } from "./session/activity"
-import { type ClassifiedFinding, type DecideInput, type Decision, decide, findingKey } from "./session/decide"
+import { type ClassifiedFinding, type DecideInput, type Decision, decide, delivers, findingKey } from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash, type Notice, notices } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -960,14 +960,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   const detected = { ignored, findings, ...(ran === undefined ? {} : { ran }) }
-  // What decide could put before the agent; touch rules already in its context it would not.
-  await claimBudget(
-    findings.length > 0 ||
-      touches.some((rule) => !view.context.touched.has(rule.id)) ||
-      swept.length > 0 ||
-      refused.length > 0 ||
-      disabledGroups.length > 0,
-  )
+  // Whether decide will put anything before the agent, by its own measure (session/decide.ts).
+  await claimBudget(delivers(inputFor(view)))
   if (!session) return { delivery: persisted(await decide(inputFor(view))), failed, deadlineMissed, ...detected }
 
   await appendWork(session.dir, workRecords)

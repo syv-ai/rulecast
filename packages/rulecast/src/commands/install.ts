@@ -232,11 +232,14 @@ export function configLabel(from: string, root: string): string {
  * (reachableConfigs), loaded, and the Stop timeout they need. Every project runs in parallel on Stop,
  * so the slowest one's verify budget is the one to wait for. One owner for install and init. `own`:
  * the config `dir` will have, when the caller is about to write it (init); it stands in for one there.
+ * A config that does not load fails the call, unless `skip` is given (init): then another config's
+ * failure is passed to it, and that config is left out of `configs` and `verifyMs`.
  */
 export async function hookConfigs(
   dir: string,
   command: string,
   own?: Config,
+  skip?: (problem: string) => void,
 ): Promise<{ roots: string[]; configs: Config[]; verifyMs: number }> {
   const found = await reachableConfigs(dir)
   const roots = own === undefined || found.includes(dir) ? found : [dir, ...found]
@@ -250,7 +253,9 @@ export async function hookConfigs(
       configs.push(await loadProjectConfig(root, command))
     } catch (error) {
       if (root === dir) throw error
-      throw new Error(`${path.join(configLabel(dir, root), CONFIG_FILE)}: ${errorMessage(error)}`)
+      const problem = `${path.join(configLabel(dir, root), CONFIG_FILE)}: ${errorMessage(error)}`
+      if (skip === undefined) throw new Error(problem)
+      skip(problem)
     }
   }
   const verifyMs = Math.max(...configs.map((config) => config.timeouts.verifyMs))

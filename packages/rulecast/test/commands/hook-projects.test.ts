@@ -210,6 +210,35 @@ describe("rulecast hook claude-code: configs anywhere", () => {
     expect(stop.reason).toMatch(/^rulecast rules \(pkg\/c\/\.rulecast-config\.yaml\) found problems/)
   })
 
+  test("a config whose pre-existing findings are already summarised does not take a share of the budget", async () => {
+    // A section longer than half the budget: delivered in full only if the top config does not claim half.
+    const body = Array.from({ length: 130 }, (_, i) => `Rule of thumb ${i}: keep the handler thin.`).join(" ")
+    const repo = await createRepo({
+      ...BASE,
+      "backend/app/x.py": "print('x')\n",
+      ".rulecast-config.yaml": TOP,
+      "backend/.rulecast-config.yaml": localConfig([
+        {
+          id: "backend/no-todo",
+          name: "No TODO",
+          files: "\\.py$",
+          detect: { regex: { pattern: "TODO" } },
+          message: "{{file}}:{{line}} has a TODO.",
+          context: ["@conventions/code.md#handlers"],
+        },
+      ]),
+      "backend/conventions/code.md": `# Code\n\n## Handlers\n\n${body}\n`,
+    })
+    const session = agent(repo)
+    await session.hook("session-start.startup")
+    // The first edit gives the top config's pre-existing print its summary.
+    expect(await session.edit("backend/app/x.py", "print('x')\ny = 2\n")).toContain("top/no-print")
+    const told = await session.edit("backend/app/x.py", "print('x')\ny = 2  # TODO\n")
+    expect(told).toContain("backend/app/x.py:2 has a TODO.")
+    expect(told).not.toContain("top/no-print")
+    expect(told).toContain(body)
+  })
+
   test("run --session checks every project the session ran, from where it is run", async () => {
     const repo = await createRepo({
       ...BASE,

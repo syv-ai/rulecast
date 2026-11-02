@@ -422,7 +422,10 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
 
   // The hooks serve every config a session started here reaches, as rulecast install's do.
   const own = config ?? defaultConfig()
-  const reached = await hookConfigs(root, "init", own)
+  // Another config that does not load is not this one's to fix: said, and left out of the hooks' timeout.
+  const reached = await hookConfigs(root, "init", own, (problem) =>
+    ui.say(`${problem}\nLeft out of the hooks' timeout and repo fetch.`, "Warning"),
+  )
   const changes = await planInit(
     { catalog: catalog === null ? null : { url: catalog.url, rev: catalog.rev }, rules: selections, agents, hooks },
     {

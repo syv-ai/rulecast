@@ -195,6 +195,17 @@ describe("rulecast install", () => {
     expect((await runCli(top, ["doctor"])).stdout).toContain("other configs\n  backend/.rulecast-config.yaml\n")
   })
 
+  test("another reachable config that does not load fails the install, naming it", async () => {
+    const top = await createRepo({
+      ".rulecast-config.yaml": "repos: []\n",
+      "backend/.rulecast-config.yaml": "repos: 7\n",
+    })
+    const result = await runCli(top, ["install"])
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toContain("backend/.rulecast-config.yaml: ")
+    expect(existsSync(path.join(top, SHARED))).toBe(false)
+  })
+
   test("errors: unparseable settings, unknown agents and scopes, no project", async () => {
     const root = await createFixture()
     const broken = await createProject({ ".rulecast-config.yaml": "repos: []\n", [SHARED]: "{ nope" })

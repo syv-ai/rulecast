@@ -117,6 +117,20 @@ describe("rulecast init --yes", () => {
     expect(settings.hooks.SubagentStop[0].hooks[0].timeout).toBe(310)
   })
 
+  test("another config that does not load is warned about and left out of the hooks' timeout", async () => {
+    const top = await createRepo({
+      ...PROJECT,
+      "backend/.rulecast-config.yaml": "repos: 7\ntimeouts:\n  verify_ms: 300000\n",
+    })
+    const result = await runCli(top, ["init", "--yes", "--no-rules"], "", env)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("backend/.rulecast-config.yaml: ")
+    expect(result.stdout).toContain("Left out of the hooks' timeout and repo fetch.")
+    expect(existsSync(path.join(top, CONFIG_FILE))).toBe(true)
+    const settings = JSON.parse(await read(top, ".claude/settings.json"))
+    expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(70)
+  })
+
   test("says so when nothing in the catalog matches, rather than only 'no rules yet'", async () => {
     const root = await createRepo({ "src/index.ts": "export const x = 1\n", "AGENTS.md": "# Agents\n" })
     const result = await runCli(root, ["init", "--yes"], "", env)
