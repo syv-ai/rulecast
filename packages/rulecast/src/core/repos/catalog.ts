@@ -28,12 +28,15 @@ export function catalogEntry<Entry extends { repo: string; rev?: string }>(
   env: Env,
 ): { url: string; entry: Entry | null } {
   const url = catalogUrl(env)
-  // The whole URL, host included, with only `.git` and trailing slashes dropped.
-  const plain = (value: string) =>
-    value
+  // The whole URL, host included, with only `.git` and trailing slashes dropped. A URL compares
+  // case-insensitively, as GitHub's owners and repositories do (Syv-AI/rulecast); a path does not.
+  const plain = (value: string) => {
+    const trimmed = value
       .replace(/\/+$/, "")
-      .replace(/\.git$/, "")
+      .replace(/\.git$/i, "")
       .replace(/\/+$/, "")
+    return /^https?:\/\//i.test(trimmed) ? trimmed.toLowerCase() : trimmed
+  }
   const same = (other: string) => plain(other) === plain(url)
   const entry = repos.find((repo) => repo.repo !== "local" && same(repo.repo)) ?? null
   return { url: entry?.repo ?? url, entry }

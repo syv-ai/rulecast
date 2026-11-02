@@ -139,7 +139,13 @@ describe("rulecast add", () => {
 
 test("catalogEntry finds the catalog however its URL is spelled, and keeps the config's spelling", () => {
   const env = { RULECAST_CATALOG: "https://github.com/syv-ai/rulecast" }
-  for (const repo of ["https://github.com/syv-ai/rulecast.git", "https://github.com/syv-ai/rulecast/"]) {
+  // GitHub owners and repositories are case-insensitive: Syv-AI/rulecast is the catalog (plan 21, #8).
+  for (const repo of [
+    "https://github.com/syv-ai/rulecast.git",
+    "https://github.com/syv-ai/rulecast/",
+    "https://github.com/Syv-AI/rulecast",
+    "HTTPS://GitHub.com/syv-ai/RuleCast.git",
+  ]) {
     const found = catalogEntry([{ repo: "local" }, { repo, rev: "v1" }], env)
     expect(found).toEqual({ url: repo, entry: { repo, rev: "v1" } })
   }
@@ -157,6 +163,7 @@ describe("rulecast list --catalog", () => {
     await runCli(root, ["add", "python/no-silent-except"], "", env)
     const json = JSON.parse((await runCli(root, ["list", "--catalog", "--format", "json"], "", env)).stdout) as {
       id: string
+      source: string
       installed: boolean
       pack: string | null
       cost: string | null
@@ -169,6 +176,10 @@ describe("rulecast list --catalog", () => {
     expect(byId.get("fixture/thin-handlers")!.matchingFiles).toBe(1)
     const terminal = (await runCli(root, ["list", "--catalog"], "", env)).stdout
     expect(terminal).toMatch(/^Catalog: \S+@v0\.2\.0\n/)
+    // Catalog rules come from the catalog, not from this project's local rules (plan 21, #9).
+    const label = terminal.slice("Catalog: ".length, terminal.indexOf("\n"))
+    expect(terminal).not.toContain("[local]")
+    expect(new Set(json.map((entry) => entry.source))).toEqual(new Set([label]))
     expect(terminal).toContain("python/no-silent-except")
     expect(terminal).toContain("(configured)")
     expect(terminal).toContain("Pack loop-safety: For agents that run with nobody watching")

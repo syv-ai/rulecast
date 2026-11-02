@@ -50,7 +50,7 @@ Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and 
 - `decisions`: one row per question in step 3. `found` is what step 2 showed, or null. `said` is the developer's answer, close to their words. `why` says what the choice means here. `detail` shows exactly what changes: take the file contents from the dry run's `changes[].content`, run again with the agreed flags, and for hook rules show the rules.
 - `candidates`: on the as-you-go path, the first-rule candidates from step 6, each with a rough `sketch` of its rule.
 
-In Claude Code, publish the page as a private artifact. Otherwise write it outside the repository and tell the developer to open it. Then ask in the chat whether to go ahead. If they change something, go back to that question, and show the page again.
+If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Then ask in the chat whether to go ahead. If they change something, go back to that question, and show the page again.
 
 ## 5. Write
 

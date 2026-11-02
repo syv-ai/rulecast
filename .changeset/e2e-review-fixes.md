@@ -10,3 +10,6 @@ Fixes from an end-to-end review of setup.
 - SETUP.md adds rulecast as a devDependency (or a global install, without a `package.json`) before `init`.
 - `install` raises the Stop and SubagentStop hooks' timeout when `timeouts.verify_ms` grows, and `doctor` reports hooks with a timeout too short as out of date. Before, a raised `verify_ms` left Claude Code killing the stop check at 70 s.
 - SETUP.md no longer says hook rules run after every edit: they run when the agent stops.
+- `add` and `list --catalog` find the catalog however its GitHub URL is cased (`Syv-AI/rulecast`), rather than add a second entry that fails validation. `list --catalog` labels catalog rules with the catalog, not `local`.
+- The README's pre-commit `rev` and Status follow the version (`pnpm sync-version`). They said 0.4.
+- SETUP.md and CONVENTIONS.md publish the page as an artifact only where the agent has a tool for it.

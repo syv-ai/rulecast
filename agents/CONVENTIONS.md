@@ -67,7 +67,7 @@ Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its 
 - one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `said` what the developer said, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`);
 - no `tree`, `rules` or `candidates`.
 
-In Claude Code, publish it as a private artifact. Otherwise write it outside the repository and tell the developer to open it. Ask in the chat what to change, apply it, and show the page again until the developer is satisfied.
+If you have a tool that publishes private artifacts, publish it there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Ask in the chat what to change, apply it, and show the page again until the developer is satisfied.
 
 ## 6. Leave
 

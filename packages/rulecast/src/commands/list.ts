@@ -227,6 +227,8 @@ async function listCatalog(
     const group = groupOf(rule.id)
     return {
       ...listed(rule, files),
+      // Compiled from the catalog's checkout, a rule's own source says "local".
+      source: catalog.label,
       description: rule.description,
       pack: group in PACKS ? group : null,
       installed: installed.has(rule.id),

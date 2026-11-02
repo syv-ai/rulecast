@@ -59,8 +59,37 @@ export async function generateSkillFiles(): Promise<{ target: string; source: st
   )
 }
 
+const README_REV = /(- repo: https:\/\/github\.com\/syv-ai\/rulecast\n\s+rev: )v\d+\.\d+\.\d+/g
+const README_STATUS = /^\d+\.\d+\.( Everything above works)/gm
+
+/**
+ * The README's pre-commit snippet pins this repository by tag, and its Status names the minor
+ * version: both said 0.4 at 0.7.0. Throws when either is not there, rather than go stale quietly.
+ */
+export function withReadmeVersion(source: string, version: string): string {
+  const [major, minor] = version.split(".")
+  for (const [name, pattern] of [
+    ["the pre-commit snippet's rev", README_REV],
+    ["the Status line", README_STATUS],
+  ] as const) {
+    if ((source.match(pattern) ?? []).length !== 1) throw new Error(`README.md: expected one match for ${name}`)
+  }
+  return source.replace(README_REV, `$1v${version}`).replace(README_STATUS, `${major}.${minor}.$1`)
+}
+
+/** The root README; `pnpm readme` mirrors it into the package afterwards. */
+export async function generateReadme(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, "README.md")
+  return { target, source: withReadmeVersion(await readFile(target, "utf8"), await packageVersion()) }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const files = [await generateVersionFile(), await generatePluginManifest(), ...(await generateSkillFiles())]
+  const files = [
+    await generateVersionFile(),
+    await generatePluginManifest(),
+    ...(await generateSkillFiles()),
+    await generateReadme(),
+  ]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {
       if ((await readFile(target, "utf8")) !== source) {

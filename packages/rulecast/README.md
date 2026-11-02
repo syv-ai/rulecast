@@ -151,7 +151,7 @@ rulecast installs no git hooks itself: lefthook, husky and pre-commit already ow
 minimum_pre_commit_version: "3.2.0"
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.4.0
+    rev: v0.7.0
     hooks:
       - id: rulecast
       - id: rulecast-push
@@ -373,7 +373,7 @@ The budget is what shapes the design: one detector run per kind per event, kinds
 
 ## Status
 
-0.4. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
+0.7. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
 
 Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 

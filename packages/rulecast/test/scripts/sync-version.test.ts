@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
-import { generateVersionFile, withVersion } from "../../scripts/sync-version"
+import { generateReadme, generateVersionFile, withReadmeVersion, withVersion } from "../../scripts/sync-version"
 import { run } from "../helpers/script"
 
 const packageDir = fileURLToPath(new URL("../../", import.meta.url))
@@ -33,6 +33,32 @@ describe("sync-version", () => {
 
   test("a file with two VERSION lines is an error too", () => {
     expect(() => withVersion(`${SOURCE}\n${SOURCE}`, "1.2.3")).toThrow(/found 2/)
+  })
+
+  test("the README's pre-commit rev and status follow the version (plan 21, #7)", () => {
+    // Both said 0.4 at 0.7.0: nothing kept them in step.
+    const readme = [
+      "repos:",
+      "  - repo: https://github.com/syv-ai/rulecast",
+      "    rev: v0.4.0",
+      "  - repo: https://github.com/other/tool",
+      "    rev: v0.4.0",
+      "",
+      "## Status",
+      "",
+      "0.4. Everything above works and is tested.",
+      "",
+    ].join("\n")
+    const result = withReadmeVersion(readme, "1.2.3")
+    expect(result).toContain("  - repo: https://github.com/syv-ai/rulecast\n    rev: v1.2.3\n")
+    expect(result).toContain("  - repo: https://github.com/other/tool\n    rev: v0.4.0\n")
+    expect(result).toContain("\n1.2. Everything above works and is tested.\n")
+    expect(() => withReadmeVersion("# no snippet\n", "1.2.3")).toThrow(/rev/)
+  })
+
+  test("the committed README already matches package.json", async () => {
+    const { target, source } = await generateReadme()
+    expect(await readFile(target, "utf8"), "README.md is stale: run pnpm sync-version").toBe(source)
   })
 
   test("the committed version.ts already matches package.json", async () => {
