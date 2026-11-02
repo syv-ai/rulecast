@@ -13,7 +13,7 @@ export class RepoFetchError extends Error {}
 export const NO_PROMPT = { GIT_TERMINAL_PROMPT: "0" }
 
 /** Another process may be fetching a big repo; a lock older than any fetch could take is abandoned. */
-const FETCH_LOCK = { waitMs: 120_000, staleMs: 5 * 60_000, retryMs: 50 }
+const FETCH_LOCK = { waitMs: 120_000, staleMs: 5 * 60_000, retryMs: 50, refresh: false }
 
 async function run(cwd: string, args: string[]): Promise<void> {
   const result = await git(cwd, args, NO_PROMPT)

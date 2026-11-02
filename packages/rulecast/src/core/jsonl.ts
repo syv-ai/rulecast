@@ -123,8 +123,8 @@ const SETTLED_MS = 2000
 const SETTLE_POLL_MS = 25
 
 /**
- * A crash mid-append leaves a partial last line; appending after it would make it non-final and so a store
- * error. Truncates it away once the file has settled; until then another writer may be mid-record, and
+ * A crash mid-append leaves a partial last line; appending after it would glue the next record to it,
+ * and both would be skipped on read. Truncates it away once the file has settled; until then another writer may be mid-record, and
  * this waits for it. Two writers healing the same crash at once can lose one of their records.
  */
 async function dropPartialRecord(handle: FileHandle): Promise<void> {

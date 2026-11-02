@@ -110,6 +110,34 @@ describe("the committed hook command", () => {
     expect(readFileSync(seen, "utf8")).toBe(`hook claude-code\n${JSON.stringify(payload)}`)
   })
 
+  test("a rulecast on the PATH that cannot run, such as a version-manager shim, is treated as not installed", async () => {
+    // asdf, mise and nodenv shims are found by command -v and then fail when the project's Node has
+    // no rulecast: without this, every hook would fail again (plan 21 review).
+    const root = await createProject({})
+    const shims = path.join(root, "shims")
+    mkdirSync(shims, { recursive: true })
+    writeFileSync(path.join(shims, "rulecast"), "#!/usr/bin/env no-such-node\n")
+    chmodSync(path.join(shims, "rulecast"), 0o755)
+    const env = { PATH: `${shims}:/usr/bin:/bin` }
+    expect(hook(root, { hook_event_name: "PostToolUse" }, env)).toMatchObject({ code: 0, stdout: "" })
+    const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, env)
+    expect(start.code).toBe(0)
+    expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  test("a rulecast on the PATH keeps its own exit code and output", async () => {
+    const root = await createProject({})
+    const global = path.join(root, "global-bin")
+    mkdirSync(global, { recursive: true })
+    writeFileSync(
+      path.join(global, "rulecast"),
+      "#!/bin/sh\ncat > /dev/null\necho '{\"x\":1}'\necho blocked >&2\nexit 2\n",
+    )
+    chmodSync(path.join(global, "rulecast"), 0o755)
+    const result = hook(root, { hook_event_name: "Stop" }, { PATH: `${global}:/usr/bin:/bin` })
+    expect(result).toEqual({ code: 2, stdout: '{"x":1}\n', stderr: "blocked\n" })
+  })
+
   test("the project's own rulecast wins over one on the PATH", async () => {
     const root = await createProject({})
     stub(path.join(root, "node_modules", ".bin"), path.join(root, "local.txt"), '{"local":true}')

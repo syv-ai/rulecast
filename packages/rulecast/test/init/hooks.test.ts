@@ -113,6 +113,19 @@ describe("detectHooks", () => {
     for (const hook of hooks) expect(hook.id).toMatch(RULE_ID)
   })
 
+  test("one pre-commit id listed twice is offered once: one rule runs every entry with that id", async () => {
+    const config = `repos:
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.0
+    hooks:
+      - id: mypy
+      - id: mypy
+        args: [--strict]
+`
+    const hooks = await detectHooks(files({ ".pre-commit-config.yaml": config }))
+    expect(hooks.map((hook) => [hook.id, hook.detect])).toEqual([["hook/mypy", { "pre-commit": "mypy" }]])
+  })
+
   test("no hook config is no hooks, and a config that does not parse is no hooks", async () => {
     expect(await detectHooks(files({}))).toEqual([])
     expect(await detectHooks(files({ ".pre-commit-config.yaml": "repos: [" }))).toEqual([])

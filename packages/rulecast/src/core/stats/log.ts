@@ -174,7 +174,7 @@ export interface FindingsLog {
   rotated: boolean
 }
 
-/** Unlike `readRecords`, a bad line anywhere is skipped and counted: a statistic is not worth a failure. */
+/** Like `readRecords`, a bad line anywhere is skipped; here it is also counted. */
 export async function readFindingsLog(stateDir: string): Promise<FindingsLog> {
   const result: FindingsLog = { records: [], skipped: 0, rotated: false }
   for (const name of [FINDINGS_LOG_ROTATED, FINDINGS_LOG]) {

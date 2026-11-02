@@ -26,7 +26,7 @@ export interface WarmResult {
 }
 
 /** Never wait for another warm-up; a lock is abandoned only after a warm-up could have finished. */
-const WARM_LOCK = { waitMs: 0, staleMs: 10 * 60_000, retryMs: 20 }
+const WARM_LOCK = { waitMs: 0, staleMs: 10 * 60_000, retryMs: 20, refresh: false }
 
 /** Detector kinds used by the project's rules whose detector has warm-up work. */
 export function warmableKinds(project: CompiledProject, registry: DetectorRegistry): string[] {

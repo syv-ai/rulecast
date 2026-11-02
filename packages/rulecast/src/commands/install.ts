@@ -63,7 +63,7 @@ function inFile<T>(file: string, transform: () => T): T {
  * neither has hooks that are installed and run no rules — which `doctor` exists to catch, and did
  * not until a self-install on this repository walked into it.
  *
- * `env`'s PATH, without the temporary bins of `npx` and `pnpm dlx`: the setup docs run doctor as
+ * `env`'s PATH, without the bins of package runners (TEMPORARY_BIN): the setup docs run doctor as
  * `npx @syv-ai/rulecast doctor`, which puts its own rulecast on the PATH it runs doctor with, and
  * the hooks never run under npx (plan 21).
  */
@@ -74,8 +74,12 @@ export async function hookCommandResolves(root: string, env: Env, signal?: Abort
   return onPath("rulecast", signal, PATH)
 }
 
-/** Where `npx` and `pnpm dlx` put the packages they run for one command. */
-const TEMPORARY_BIN = /[\\/](_npx|dlx)[\\/]/
+/**
+ * PATH entries a package runner adds for one command: the temporary installs of `npx`, `pnpm dlx`,
+ * `yarn dlx` and `bunx`, and any `node_modules/.bin`, which `npm run` and `pnpm exec` put first.
+ * The hook looks for the project's own node_modules itself.
+ */
+const TEMPORARY_BIN = /[\\/](_npx|dlx(-\d+)?|bunx-[^\\/]*)[\\/]|[\\/]node_modules[\\/]\.bin[\\/]?$/
 
 /**
  * The adapter's settings file its hooks are already in, or null. A hook counts wherever it is

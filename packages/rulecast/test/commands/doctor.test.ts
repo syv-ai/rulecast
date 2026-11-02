@@ -307,6 +307,19 @@ describe("rulecast doctor", () => {
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const npx = { ...testEnv, PATH: `${path.join(root, "npm-cache/_npx/0123abcd/node_modules/.bin")}:/usr/bin:/bin` }
     expect((await runCli(root, ["doctor"], "", npx)).stdout).toContain("so no rules run")
+    // bunx, yarn dlx, and the node_modules/.bin a runner such as pnpm exec puts first: the hook
+    // looks only in the project's own node_modules, so none of them counts either.
+    for (const bin of [
+      "tmp/bunx-501-rulecast/node_modules/.bin",
+      "tmp/xfs-1a2b/dlx-4242/node_modules/.bin",
+      "node_modules/.bin",
+    ]) {
+      await mkdir(path.join(root, "elsewhere", bin), { recursive: true })
+      await writeFile(path.join(root, "elsewhere", bin, "rulecast"), "#!/bin/sh\nexit 0\n")
+      await chmod(path.join(root, "elsewhere", bin, "rulecast"), 0o755)
+      const runner = { ...testEnv, PATH: `${path.join(root, "elsewhere", bin)}:/usr/bin:/bin` }
+      expect((await runCli(root, ["doctor"], "", runner)).stdout, bin).toContain("so no rules run")
+    }
     const global = { ...testEnv, PATH: `${path.join(root, "global/bin")}:/usr/bin:/bin` }
     expect((await runCli(root, ["doctor"], "", global)).stdout).toContain(
       "ok       Claude Code — .claude/settings.json",

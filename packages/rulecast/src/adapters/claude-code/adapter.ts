@@ -91,18 +91,23 @@ const SHELL_UNATTENDED =
  * The hook command, guarded, wherever it is installed. A command naming a rulecast that is not
  * there exits 127, which Claude Code shows as a hook error on every Read and Edit (recorded in
  * test/payloads/claude-code/README.md): a clone before `npm install`, or a setup run through npx
- * with nothing installed (plan 21). Guarded, it runs the project's own rulecast, else one on the
- * PATH (a global install, as a project without a package.json has), and otherwise exits 0, after
+ * with nothing installed (plan 21).
+ *
+ * Guarded, it runs the project's own rulecast, else one on the PATH (a global install, as a project
+ * without a package.json has). A PATH rulecast that cannot execute (126 or 127, such as a
+ * version-manager shim with no rulecast behind it) counts as none. With none, it exits 0, after
  * telling the user on `SessionStart`, and — unattended — at every stop. Never a block: without
- * session state it could not hold the agent only once per prompt. stdin is read only on that
- * branch; `exec` hands it to rulecast untouched. One string for every event, and it still contains
+ * session state it could not hold the agent only once per prompt.
+ *
+ * The project's own rulecast gets stdin through `exec`, untouched; past that the payload is read
+ * once and piped to the PATH's. One string for every event, and it still contains
  * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
  */
 export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
-  "command -v rulecast >/dev/null 2>&1 && exec rulecast hook claude-code; " +
-  SHELL_UNATTENDED +
   "P=$(cat); " +
+  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; [ "$R" -lt 126 ] && exit "$R"; fi; ` +
+  SHELL_UNATTENDED +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
   `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`
 

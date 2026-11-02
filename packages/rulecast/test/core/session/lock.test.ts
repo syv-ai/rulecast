@@ -68,6 +68,41 @@ describe("withLock", () => {
     expect(existsSync(lock)).toBe(true)
   })
 
+  test("two waiters that judged one lock stale never let a third in alongside the first (plan 21 review)", async () => {
+    // W1 and W2 both see a dead holder's lock. W1 takes it over and holds a fresh lock; W2's
+    // takeover must not remove W1's lock, or W3 gets in beside W1.
+    const lock = path.join(await createProject({}), "lock")
+    await mkdir(lock)
+    const old = new Date(Date.now() - 60_000)
+    await utimes(lock, old, old)
+    let inside = 0
+    let most = 0
+    const holder = () =>
+      withLockAt(
+        lock,
+        async () => {
+          most = Math.max(most, ++inside)
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          inside--
+        },
+        { waitMs: 5000, staleMs: 1000, retryMs: 1 },
+      )
+    await Promise.all(Array.from({ length: 8 }, holder))
+    expect(most).toBe(1)
+  })
+
+  test("refresh: false leaves a hung holder's lock to go stale, so a waiter can take over", async () => {
+    // Repo fetches and warm-ups lock for minutes and rely on staleness to get past a hung holder.
+    const lock = path.join(await createProject({}), "lock")
+    const options = { waitMs: 2000, staleMs: 60, retryMs: 5, refresh: false }
+    let release: () => void = () => {}
+    const hung = withLockAt(lock, () => new Promise<void>((resolve) => (release = resolve)), options)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(await withLockAt(lock, async () => "took over", options)).toBe("took over")
+    release()
+    await hung
+  })
+
   test("times out on a fresh lock held too long", async () => {
     const dir = path.join(await createProject({}), "session")
     await mkdir(path.join(dir, ".lock"), { recursive: true })

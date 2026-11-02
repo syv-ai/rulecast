@@ -142,6 +142,19 @@ describe("Claude Code settings: hook timeouts", () => {
     expect(raised.updated).toEqual(["Stop", "SubagentStop"])
   })
 
+  test("a stop hook with no timeout, or one that is not a number, gets the one it needs", () => {
+    // Without a timeout Claude Code applies its own default, which knows nothing of verify_ms.
+    const installed = mergeHooks({}, HOOK_COMMAND, 300_000).settings as {
+      hooks: Record<string, { hooks: Record<string, unknown>[] }[]>
+    }
+    delete installed.hooks.Stop?.[0]?.hooks[0]?.timeout
+    const subagent = installed.hooks.SubagentStop?.[0]?.hooks[0]
+    if (subagent) subagent.timeout = "70"
+    const merged = mergeHooks(installed, HOOK_COMMAND, 300_000)
+    expect(stopTimeouts(merged.settings)).toEqual([310, 310])
+    expect(merged.updated).toEqual(["Stop", "SubagentStop"])
+  })
+
   test("a timeout above what is needed is kept: install sizes it for the largest verify_ms of every config", () => {
     const installed = mergeHooks({}, HOOK_COMMAND, 300_000).settings
     const lowered = mergeHooks(installed, HOOK_COMMAND, 60_000)

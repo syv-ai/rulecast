@@ -85,7 +85,7 @@ export function mergeHooks(
             // Claude Code kills a hook at its timeout. One lower than the stop check's budget skips
             // that check silently; a higher one is kept, since install sizes it for every config.
             const old = (hook as JsonObject).timeout
-            const tooShort = typeof old === "number" && old < timeout
+            const tooShort = typeof old !== "number" || old < timeout
             if (currentCommand && !tooShort) return hook
             changed = true
             const local = keep !== undefined && PROJECT_RULECAST.test(current as string)

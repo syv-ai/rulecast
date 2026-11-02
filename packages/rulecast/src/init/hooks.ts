@@ -257,15 +257,24 @@ function idSegment(name: string): string {
   return segment === "" ? "hook" : segment
 }
 
-/** Two names that make the same id: the later ones get -2, -3. */
+/**
+ * Two names that make the same id: the later ones get -2, -3. The same hook listed twice (one
+ * pre-commit id in two entries) is offered once, since its rule runs every entry with that id.
+ */
 function distinctIds(hooks: DetectedHook[]): DetectedHook[] {
   const seen = new Set<string>()
-  return hooks.map((hook) => {
+  const detects = new Set<string>()
+  const out: DetectedHook[] = []
+  for (const hook of hooks) {
+    const detect = JSON.stringify(hook.detect)
+    if (detects.has(detect)) continue
+    detects.add(detect)
     let id = hook.id
     for (let n = 2; seen.has(id); n++) id = `${hook.id}-${n}`
     seen.add(id)
-    return id === hook.id ? hook : { ...hook, id }
-  })
+    out.push(id === hook.id ? hook : { ...hook, id })
+  }
+  return out
 }
 
 /** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
