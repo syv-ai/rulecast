@@ -127,6 +127,13 @@ export const PAGES: Page[] = [
     source: { readme: ["Agents"] },
   },
   {
+    route: "guides/claude-code-plugin",
+    title: "Claude Code plugin",
+    description: "Add one rule at a time from inside a Claude Code session.",
+    group: "Guides",
+    source: { readme: ["Claude Code plugin"] },
+  },
+  {
     route: "reference/commands",
     title: "Commands",
     description: "Every rulecast command.",

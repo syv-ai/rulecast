@@ -293,17 +293,6 @@ If your agent cannot fetch a URL, this is the whole of it: run
 Once it is set up, ask the same agent to work out your project's conventions with you, then draft
 rules for them; `init` prints the prompt to paste.
 
-In Claude Code, the rulecast plugin adds one rule at a time:
-
-```text
-/plugin install rulecast --marketplace syv-ai/rulecast
-```
-
-Then `/rulecast:add-rule` turns the mistake the session just showed into a rule, and
-`/rulecast:add-rule services never raise HTTPException` turns the convention you name into one. Either
-way, the agent states the convention back, writes it into your docs if it isn't there, drafts and
-measures the rule, and asks you before keeping anything.
-
 - [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
 - [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for conventions that aren't written down yet. It reads the code, then interviews you one question at a time about what matters in this kind of project, recommending from named design principles and practice. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
@@ -332,6 +321,21 @@ If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude 
 As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
+
+## Claude Code plugin
+
+The rulecast plugin adds one rule at a time, from inside a session:
+
+```text
+/plugin install rulecast --marketplace syv-ai/rulecast
+```
+
+- `/rulecast:add-rule` with nothing after it looks back over the session for a correction or a mistake that should not happen again.
+- `/rulecast:add-rule services never raise HTTPException` starts from the convention you name.
+
+Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. It writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) describes, and changes nothing without your approval. The agent may also offer the skill itself after you correct a mistake; it says why and asks first.
+
+The plugin's version follows the CLI's, so each release reaches you as a plugin update.
 
 ## Install
 
