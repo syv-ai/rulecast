@@ -5,6 +5,7 @@ import type { Env } from "../core/home"
 import { VERSION } from "../core/version"
 import { builtinDetectors } from "../detectors"
 import type { Prompter } from "../init/prompts"
+import { addCommand } from "./add"
 import { autoupdateCommand } from "./autoupdate"
 import { baselineCommand } from "./baseline"
 import { cleanCommand } from "./clean"
@@ -81,6 +82,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await fixCommand(root, args, registry, io)
       case "list":
         return await listCommand(root, args, registry, io)
+      case "add":
+        return await addCommand(root, args, registry, io)
       case "autoupdate":
         return await autoupdateCommand(root, args, io)
       case "try-repo":

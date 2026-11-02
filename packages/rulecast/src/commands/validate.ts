@@ -118,3 +118,22 @@ export async function validateCommand(
   }
   return failed ? 2 : 0
 }
+
+/**
+ * What `rulecast validate` would print for the config at `root`, for commands that write a config
+ * (init, add) and then check what they wrote. Fetches rule repos missing from the cache.
+ */
+export async function validationReport(
+  root: string,
+  home: string,
+  registry: DetectorRegistry,
+): Promise<{ errors: number; lines: string[] }> {
+  const project = await compile({ root, registry, repos: fetchingRepos(home) })
+  const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error").length
+  const lines = project.diagnostics.map(formatDiagnostic)
+  if (errors === 0) {
+    const count = project.rules.length
+    lines.push(`rulecast validate: ${count} ${count === 1 ? "rule" : "rules"} valid`)
+  }
+  return { errors, lines }
+}

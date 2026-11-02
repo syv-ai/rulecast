@@ -9,6 +9,7 @@ import { createReferenceResolver } from "../core/delivery/resolve"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { allFiles } from "../core/git"
 import { cacheHome } from "../core/home"
+import { catalogUrl, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { fetchingRepos } from "../core/repos/provider"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
@@ -93,7 +94,7 @@ export async function listCommand(
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { format: { type: "string", default: "terminal" } },
+    options: { format: { type: "string", default: "terminal" }, catalog: { type: "boolean", default: false } },
   })
   if (positionals.length > 1) throw new UsageError(`unexpected arguments: ${positionals.slice(1).join(" ")}`)
   if (values.format !== "terminal" && values.format !== "json") {
@@ -101,6 +102,7 @@ export async function listCommand(
   }
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const ruleId = positionals[0] ?? null
+  if (values.catalog) return listCatalog(root, ruleId, values.format, registry, io)
   const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
   const compiled = project.rules.filter((rule) => ruleId === null || rule.id === ruleId)
   if (ruleId !== null && compiled.length === 0) throw new UsageError(`no rule "${ruleId}" (see rulecast validate)`)
@@ -130,35 +132,7 @@ export async function listCommand(
     const target = await conventionsFor(root)
     out.push(target === null ? "Conventions: not set" : `Conventions: ${target.path} (from ${target.from})`, "")
   }
-  for (const rule of rules) {
-    const what = rule.detector === null ? "touch" : `${rule.detector} · ${rule.stages.join(", ")} · ${rule.severity}`
-    out.push(`${rule.id}${rule.enabled ? "" : "  (disabled)"}  ${what}  [${rule.source}]`)
-    out.push(`  ${rule.name}`)
-    const scope = `files ${rule.files === "" ? "(all)" : rule.files}${rule.exclude === "^$" ? "" : `, exclude ${rule.exclude}`}`
-    out.push(`  ${scope}${matchingText(rule.matchingFiles)}`)
-    // YAML, as rules are written: JSON doubled every backslash in a pattern.
-    if (rule.config !== null) {
-      out.push(
-        "  detects:",
-        ...stringify(rule.config)
-          .trimEnd()
-          .split("\n")
-          .map((line) => `    ${line}`),
-      )
-    }
-    if (rule.matching !== undefined && rule.matching.length > 0) {
-      const shown = rule.matching.slice(0, MATCHING_SHOWN)
-      const more = rule.matching.length - shown.length
-      out.push(`  matching ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`)
-    }
-    if (rule.message !== undefined && rule.message !== null) out.push(`  message ${rule.message}`)
-    if (rule.context.length > 0) out.push(`  cites ${rule.context.join(", ")}`)
-    out.push("")
-    for (const section of rule.sections ?? []) {
-      if (section.content === null) out.push(`--- ${section.ref} --- not found`, "")
-      else out.push(`--- ${section.ref} ---`, section.content, "")
-    }
-  }
+  for (const rule of rules) out.push(...ruleLines(rule))
   if (ruleId === null) {
     const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
     for (const diagnostic of errors) out.push(`not compiled: ${diagnosticText(diagnostic)}`)
@@ -167,6 +141,118 @@ export async function listCommand(
       "",
     )
     out.push("rulecast list <rule-id> shows one rule with the text of the sections it cites.")
+  }
+  io.stdout(`${out.join("\n").trimEnd()}\n`)
+  return 0
+}
+
+/** One rule as `rulecast list` prints it, ending in a blank line. */
+function ruleLines(rule: ListedRule): string[] {
+  const out: string[] = []
+  const what = rule.detector === null ? "touch" : `${rule.detector} · ${rule.stages.join(", ")} · ${rule.severity}`
+  out.push(`${rule.id}${rule.enabled ? "" : "  (disabled)"}  ${what}  [${rule.source}]`)
+  out.push(`  ${rule.name}`)
+  const scope = `files ${rule.files === "" ? "(all)" : rule.files}${rule.exclude === "^$" ? "" : `, exclude ${rule.exclude}`}`
+  out.push(`  ${scope}${matchingText(rule.matchingFiles)}`)
+  // YAML, as rules are written: JSON doubled every backslash in a pattern.
+  if (rule.config !== null) {
+    out.push(
+      "  detects:",
+      ...stringify(rule.config)
+        .trimEnd()
+        .split("\n")
+        .map((line) => `    ${line}`),
+    )
+  }
+  if (rule.matching !== undefined && rule.matching.length > 0) {
+    const shown = rule.matching.slice(0, MATCHING_SHOWN)
+    const more = rule.matching.length - shown.length
+    out.push(`  matching ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`)
+  }
+  if (rule.message !== undefined && rule.message !== null) out.push(`  message ${rule.message}`)
+  if (rule.context.length > 0) out.push(`  cites ${rule.context.join(", ")}`)
+  out.push("")
+  for (const section of rule.sections ?? []) {
+    if (section.content === null) out.push(`--- ${section.ref} --- not found`, "")
+    else out.push(`--- ${section.ref} ---`, section.content, "")
+  }
+  return out
+}
+
+/** What `rulecast list --catalog --format json` publishes for one catalog rule. */
+export interface CatalogEntry extends ListedRule {
+  description: string | null
+  /** The pack it belongs to, when it is in one: `rulecast add <pack>` adopts the whole of it. */
+  pack: string | null
+  /** Already in this project's config. */
+  installed: boolean
+  /** For a metered rule, what it costs and where the file goes; null otherwise. */
+  cost: string | null
+}
+
+/**
+ * `rulecast list --catalog [RULE_ID]`: the catalog's rules, for an agent deciding whether a convention
+ * is already a catalog rule before drafting one (plan 20), and `rulecast add` adopts it.
+ */
+async function listCatalog(
+  root: string,
+  ruleId: string | null,
+  format: string | undefined,
+  registry: DetectorRegistry,
+  io: CliIo,
+): Promise<number> {
+  const config = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
+  const url = catalogUrl(io.env)
+  const entry = config.config.repos.find((repo) => repo.repo === url)
+  const catalog = await loadCatalog(url, entry?.rev, cacheHome(io.env), registry)
+  if (typeof catalog === "string") throw new Error(`the catalog could not be loaded: ${catalog}`)
+  const compiled = catalog.rules.filter((rule) => ruleId === null || rule.id === ruleId)
+  if (ruleId !== null && compiled.length === 0) throw new UsageError(`no rule "${ruleId}" in ${catalog.label}`)
+  const installed = new Set(config.rules.filter((rule) => rule.source === catalog.label).map((rule) => rule.id))
+  const files = await projectFiles(root)
+  const entries: CatalogEntry[] = compiled.map((rule) => {
+    const kind = rule.detector === null ? undefined : registry.get(rule.detector.kind)
+    const group = groupOf(rule.id)
+    return {
+      ...listed(rule, files),
+      description: rule.description,
+      pack: group in PACKS ? group : null,
+      installed: installed.has(rule.id),
+      cost: kind?.metered && rule.detector !== null ? (kind.cost?.(rule.detector.config) ?? null) : null,
+    }
+  })
+  if (ruleId !== null) {
+    const rule = compiled[0]!
+    const resolver = createReferenceResolver(root)
+    entries[0]!.matching = (files ?? []).filter((file) => rule.matches(file))
+    entries[0]!.message = rule.message
+    entries[0]!.sections = await Promise.all(
+      rule.context.map(async (spec) => {
+        const resolved = await resolver.resolve(spec)
+        return { ref: spec.ref, content: resolved.found ? resolved.content : null }
+      }),
+    )
+  }
+  if (format === "json") {
+    io.stdout(`${JSON.stringify(entries, null, 2)}\n`)
+    return 0
+  }
+  const out: string[] = [`Catalog: ${catalog.label}`, ""]
+  for (const entry of entries) {
+    const lines = ruleLines(entry)
+    lines[0] = `${lines[0]}${entry.installed ? "  (configured)" : ""}`
+    if (entry.description !== null) lines.splice(2, 0, `  ${entry.description}`)
+    if (entry.cost !== null) lines.splice(2, 0, `  ${entry.cost}`)
+    out.push(...lines)
+  }
+  if (ruleId === null) {
+    for (const [name, pack] of Object.entries(PACKS)) {
+      if (!entries.some((entry) => entry.pack === name)) continue
+      out.push(`Pack ${name}: ${pack.note}`, "")
+    }
+    out.push(
+      "rulecast add <id|pack> adds rules to this project's config; rulecast list --catalog <id> shows one in full.",
+    )
   }
   io.stdout(`${out.join("\n").trimEnd()}\n`)
   return 0

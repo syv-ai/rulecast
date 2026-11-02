@@ -121,12 +121,20 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "list",
-    synopsis: "rulecast list [RULE_ID] [--format terminal|json]",
+    synopsis: "rulecast list [RULE_ID] [--catalog] [--format terminal|json]",
     summary: "Show every configured rule: where it comes from, what it matches, what it cites",
     flags: [
       ["RULE_ID", "Only this rule, with its message and the text of the sections it cites"],
+      ["--catalog", "The catalog's rules and packs instead, marking the ones already configured"],
       ["--format", "terminal or json"],
     ],
+  },
+  {
+    name: "add",
+    synopsis: "rulecast add <id|pack>...",
+    summary: "Add catalog rules or packs, such as loop-safety, to the nearest config",
+    flags: [["id|pack", "A catalog rule id, or a pack's name for all of its rules"]],
+    notes: ["Rules already configured are skipped. The config is validated after writing."],
   },
   {
     name: "test",

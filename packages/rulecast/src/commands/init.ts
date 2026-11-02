@@ -5,7 +5,7 @@ import { parseArgs } from "node:util"
 import { parse } from "yaml"
 
 import { ADAPTERS, adapterByName } from "../adapters"
-import { compile, compileManifest } from "../core/compile/project"
+import { compile } from "../core/compile/project"
 import type { CompiledRule } from "../core/compile/rule"
 import { CONFIG_FILE, parseConfig } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
@@ -14,13 +14,11 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import { allFiles, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
-import { ensureRepo } from "../core/repos/fetch"
-import { repoLabel } from "../core/repos/layout"
+import { type Catalog, catalogUrl, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { fetchingRepos } from "../core/repos/provider"
-import { latestTag, remoteTags } from "../core/repos/tags"
 import type { Adapter, InstallScope } from "../core/types"
 import { VERSION } from "../core/version"
-import type { CatalogRef, RuleSelection } from "../init/config-text"
+import type { RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, docChoices, markerExists, matchHeading } from "../init/detect"
 import { draftPrompt } from "../init/draft-prompt"
 import { hookRule, type LocalRule, notOfferedLines, scanHooks } from "../init/hooks"
@@ -32,8 +30,6 @@ import { UsageError } from "./usage"
 
 /** The rule catalog: the rulecast repository itself (spec §4, Rule repos). RULECAST_CATALOG overrides it. */
 const NO_HOOKS = "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>."
-
-export const DEFAULT_CATALOG = "https://github.com/syv-ai/rulecast"
 
 const SCOPES: readonly InstallScope[] = ["shared", "personal"]
 
@@ -48,11 +44,6 @@ interface Flags {
   noHooks: boolean
   scope: InstallScope | null
   yes: boolean
-}
-
-interface Catalog extends CatalogRef {
-  label: string
-  rules: CompiledRule[]
 }
 
 /** Where init writes to: the output channel differs between prompting and plain runs. */
@@ -123,50 +114,9 @@ async function readConfig(root: string): Promise<{ text: string | null; config: 
   return { text, config: parsed.value }
 }
 
-/** The catalog at the configured rev, else at its latest tag; a message when it cannot be loaded. */
-async function loadCatalog(
-  url: string,
-  rev: string | undefined,
-  home: string,
-  registry: DetectorRegistry,
-): Promise<Catalog | string> {
-  try {
-    let pinned = rev
-    if (pinned === undefined) {
-      const tag = latestTag(await remoteTags(url))
-      if (tag === null) return `${url} has no version tags`
-      pinned = tag.name
-    }
-    const dir = await ensureRepo(home, url, pinned)
-    const { rules } = await compileManifest(dir, registry)
-    return { url, rev: pinned, label: repoLabel(url, pinned), rules }
-  } catch (error) {
-    return errorMessage(error)
-  }
-}
-
 const idOf = (entry: unknown): string | null => {
   const id = (entry as { id?: unknown } | null)?.id
   return typeof id === "string" ? id : null
-}
-
-const groupOf = (id: string) => (id.includes("/") ? id.slice(0, id.indexOf("/")) : "general")
-
-/**
- * Packs that are offered but not ticked for someone, with the note that says who they are for.
- * loop-safety matches the test files of almost every project, and it is for people who run agents
- * with nobody watching; a config that already says `mode: unattended` is that reader.
- */
-const OPT_IN_PACKS: Record<string, { title: string; note: string }> = {
-  "loop-safety": {
-    title: "Loop safety",
-    note:
-      "For agents that run with nobody watching. It catches the shortcuts a loop takes to make tests " +
-      "pass: skipped or focused tests, deleted assertions, new lint, type and coverage suppressions in " +
-      "the code or in checker config, changed coverage thresholds, and edits to CI, git hooks or rulecast's own config. Warnings while you watch; errors, " +
-      "and refused edits to that config, in unattended mode (set RULECAST_MODE=unattended or " +
-      "`mode: unattended` for /goal, claude -p and scheduled runs; on by itself in CI).",
-  },
 }
 
 async function chooseRules(
@@ -179,7 +129,7 @@ async function chooseRules(
   unattended: boolean,
 ): Promise<CompiledRule[]> {
   const metered = (rule: CompiledRule) => rule.detector !== null && registry.get(rule.detector.kind)?.metered === true
-  const optIn = (rule: CompiledRule) => !unattended && groupOf(rule.id) in OPT_IN_PACKS
+  const optIn = (rule: CompiledRule) => !unattended && groupOf(rule.id) in PACKS
   const available = catalog.rules.filter((rule) => !installed.has(rule.id))
   if (flags.noRules) return []
   if (flags.rules !== null) {
@@ -198,7 +148,7 @@ async function chooseRules(
   const preselected = available
     .filter((rule) => !metered(rule) && !optIn(rule) && files.some((file) => rule.matches(file)))
     .map((rule) => rule.id)
-  const packs = Object.entries(OPT_IN_PACKS).filter(([group]) => available.some((rule) => groupOf(rule.id) === group))
+  const packs = Object.entries(PACKS).filter(([group]) => available.some((rule) => groupOf(rule.id) === group))
   if (ui.prompter === null) {
     // An empty config otherwise reads as a dead one: say the catalog was consulted and why it gave nothing.
     if (available.length > 0 && preselected.length === 0) {
@@ -408,7 +358,7 @@ async function run(root: string, flags: Flags, registry: DetectorRegistry, io: C
   })
   ui.say(detectionSummary(detection), "Detected")
 
-  const url = io.env.RULECAST_CATALOG || DEFAULT_CATALOG
+  const url = catalogUrl(io.env)
   const configured = config?.repos.find((repo) => repo.repo === url)
   const loaded = await loadCatalog(url, configured?.rev, home, registry)
   const catalog = typeof loaded === "string" ? null : loaded
