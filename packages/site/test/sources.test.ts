@@ -56,7 +56,7 @@ describe("pageBody", () => {
     const body = pageBody(page("getting-started"), sections)
     expect(body).not.toMatch(/^## Getting started/m)
     expect(body).toMatch(/^## Install$/m)
-    expect(body).toContain("npx @syv-ai/rulecast init")
+    expect(body).toContain("/rulecast:setup")
   })
 
   it("follows README sections with the agents/ file, whose title is dropped", () => {
@@ -85,7 +85,7 @@ describe("exampleBinding", () => {
 
 describe("agentPrompt", () => {
   it("is the README's paste-this prompt, pointing at the SETUP.md this site serves", () => {
-    expect(agentPrompt()).toMatch(/^Set up rulecast in this project\./)
+    expect(agentPrompt()).toMatch(/^Set up rulecast in this project with me\./)
     expect(agentPrompt()).toContain(agentDocUrl("agents/SETUP.md"))
   })
 })

@@ -24,15 +24,18 @@ A file the agent rewrites with `sed -i` or a script is checked like one it chang
 
 ## Getting started
 
-```sh
-npx @syv-ai/rulecast init
+Your coding agent sets rulecast up with you. In Claude Code, install the plugin and run its setup:
+
+```text
+/plugin install rulecast --marketplace syv-ai/rulecast
+/rulecast:setup
 ```
 
-`init` reads your project — languages, docs, which agents you use — offers a small catalog of language- and tool-level rules, installs the hooks for your agent, and validates what it wrote. It shows you every file it will create or change before writing anything.
+With another agent, paste the prompt under [Agents](README.md#agents).
 
-A repository can have one config at the top, one per package, or both. Every config above a file applies to it. Run `init` in each config's directory, and `rulecast install` wherever you start agent sessions.
+The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it runs `rulecast init` with your answers.
 
-Then, in your agent, ask it to draft rules for the conventions in your own docs. `init` prints the prompt to paste.
+Most rules come later, one at a time. When an agent makes a mistake that should not happen again, run `/rulecast:add-rule`, or accept when the agent offers it. If you would rather work out your conventions up front, say so during setup.
 
 ## A rule
 
@@ -281,21 +284,20 @@ rulecast ships docs written for coding agents, not for people. Paste this to you
 rulecast up itself:
 
 ```text
-Set up rulecast in this project. Read
+Set up rulecast in this project with me. Read
 https://syv-ai.github.io/rulecast/agents/SETUP.md
-and follow it. Show me every file it creates or changes before I commit anything.
+and follow it.
 ```
 
-If your agent cannot fetch a URL, this is the whole of it: run
-`npx @syv-ai/rulecast init --yes --agent <your agent, e.g. claude-code>`, then show me
-`.rulecast-config.yaml` and the other files it listed. Never edit hook settings by hand —
-`rulecast install` and `rulecast uninstall` own them.
+If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through
+what it found with you, and run `init` with the flags you agree on (`rulecast init --help` lists
+them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
 
-Once it is set up, ask the same agent to work out your project's conventions with you, then draft
-rules for them; `init` prints the prompt to paste.
+Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md)
+with the one convention you want checked.
 
-- [`agents/SETUP.md`](agents/SETUP.md) — give this to your agent and it will set rulecast up itself.
-- [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for conventions that aren't written down yet. It reads the code, then interviews you one question at a time about what matters in this kind of project, recommending from named design principles and practice. You review the result on one page, and nothing goes into your docs that you didn't choose.
+- [`agents/SETUP.md`](agents/SETUP.md) — your agent sets rulecast up with you: it asks what the repository can't tell it, shows you the agreed setup on one page, and writes it when you approve.
+- [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for working out your conventions up front. It reads the code, then interviews you one question at a time about what matters in this kind of project. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
 With subagents, each one's stop checks only the files it edited, so it is never asked to fix
@@ -317,7 +319,7 @@ as long as their commits were made before the operation. The agent's own commits
 gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only
 as a git operation, so files it alone changed are not checked.
 
-If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast init --rules loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
+If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
 
 As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
 
@@ -325,16 +327,17 @@ Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; r
 
 ## Claude Code plugin
 
-The rulecast plugin adds one rule at a time, from inside a session:
+The rulecast plugin sets rulecast up and adds one rule at a time, from inside a session:
 
 ```text
 /plugin install rulecast --marketplace syv-ai/rulecast
 ```
 
+- `/rulecast:setup` sets rulecast up with you, as [Getting started](README.md#getting-started) describes.
 - `/rulecast:add-rule` with nothing after it looks back over the session for a correction or a mistake that should not happen again.
 - `/rulecast:add-rule services never raise HTTPException` starts from the convention you name.
 
-Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. It writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) describes, and changes nothing without your approval. The agent may also offer the skill itself after you correct a mistake; it says why and asks first.
+Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. If a catalog rule already checks it, the agent offers that one. Otherwise it writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) describes, and changes nothing without your approval. The agent may also offer the skill itself after you correct a mistake; it says why and asks first.
 
 The plugin's version follows the CLI's, so each release reaches you as a plugin update.
 
@@ -344,8 +347,9 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
-npx @syv-ai/rulecast init
 ```
+
+Then set it up with your agent, as [Getting started](#getting-started) describes.
 
 **Standalone binary — use this for CI and one-off runs.** Download it from [Releases](https://github.com/syv-ai/rulecast/releases). It needs no Node installation.
 
