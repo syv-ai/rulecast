@@ -28,7 +28,7 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
-import { configLabel, hookCommandResolves, hookState, reachableConfigs, settingsDir } from "./install"
+import { configLabel, hookCommandResolves, hookConfigs, hookState, reachableConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -194,9 +194,14 @@ export async function doctorCommand(
   io.stdout(dir === root ? "\nhooks\n" : `\nhooks in ${dir}\n`)
   // Asked once, not per adapter: every adapter's hook runs the same rulecast.
   const runs = await hookCommandResolves(dir, io.env)
+  // The timeout the hooks here need, as install sizes it: the largest of every config they serve.
+  // A config that does not load is reported where it is compiled, not here.
+  const verifyMs =
+    (await hookConfigs(dir, "doctor", undefined, () => {}).catch(() => null))?.verifyMs ??
+    project.config.timeouts.verifyMs
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
-    const state = await hookState(dir, adapter, project.config.timeouts.verifyMs)
+    const state = await hookState(dir, adapter, verifyMs)
     const file = state?.file ?? null
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither

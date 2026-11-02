@@ -174,6 +174,19 @@ describe("rulecast install", () => {
     expect(existsSync(path.join(root, SHARED))).toBe(true)
   })
 
+  test("doctor judges the hooks by every config they serve, as install sizes them", async () => {
+    // doctor used its own config's verify_ms, install the largest of every config a session there
+    // reaches: a package needing 300 s went unnoticed from the top (plan 21, #11).
+    const top = await createRepo({ ".rulecast-config.yaml": "repos: []\n" })
+    await runCli(top, ["install"])
+    await mkdir(path.join(top, "backend"), { recursive: true })
+    await writeFile(path.join(top, "backend/.rulecast-config.yaml"), "repos: []\ntimeouts:\n  verify_ms: 300000\n")
+    expect((await runCli(top, ["doctor"])).stdout).toContain("the hooks are out of date; run rulecast install")
+    await runCli(top, ["install"])
+    expect((await runCli(top, ["doctor"])).stdout).not.toContain("out of date")
+    expect((await settingsOf(top)).hooks.Stop[0].hooks[0].timeout).toBe(310)
+  })
+
   test("raising verify_ms after install: doctor says the hooks are out of date, install raises the stop timeout", async () => {
     const root = await createProject({ ".rulecast-config.yaml": "repos: []\n" })
     await runCli(root, ["install"])

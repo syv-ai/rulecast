@@ -37,6 +37,20 @@ const localIds = (text: string) =>
     .rules.map((rule) => rule.id)
 
 describe("rulecast init", () => {
+  test("a partial install in the personal settings is completed there, as install does (plan 21, #11)", async () => {
+    // init used to skip a file holding only some hooks and write the full set into the shared
+    // settings, so the hooks it had were in two files.
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await runCli(root, ["install", "--scope", "personal"])).code).toBe(0)
+    const personal = JSON.parse(await read(root, ".claude/settings.local.json"))
+    delete personal.hooks.PostToolUseFailure
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
+    const result = await init(root, "--agent", "claude-code")
+    expect(result.code).toBe(0)
+    expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)
+    expect(JSON.parse(await read(root, ".claude/settings.local.json")).hooks.PostToolUseFailure).toHaveLength(1)
+  })
+
   test("a config that fails validation is not called ready to commit", async () => {
     // init wrote a config validate refused, exited 2, and still said "Commit …" (plan 21, #3).
     const root = await createRepo({

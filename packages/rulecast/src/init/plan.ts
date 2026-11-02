@@ -1,5 +1,6 @@
 import { CONFIG_FILE } from "../core/config/load"
 import { errorMessage } from "../core/errors"
+import { planHooks } from "../core/hook-plan"
 import type { Adapter, InstallScope } from "../core/types"
 import { addLocalRules, type ConfigSettings, newConfigText, type SettingChange, setSettings } from "./config-text"
 import type { LocalRule } from "./hooks"
@@ -77,44 +78,36 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
   return { file: CONFIG_FILE, content, created: false, summary, commit: true }
 }
 
+/**
+ * The agent's hooks, planned exactly as `rulecast install` plans them (core/hook-plan.ts): hooks
+ * already anywhere count, and are upgraded where they are, a partial install included.
+ */
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange | null> {
   const install = choice.adapter.install
   if (install === null) return null
-  const command = install.command(context.local)
-  const merge = (settings: unknown, file: string) => {
-    try {
-      return install.merge(settings, command, context.verifyMs)
-    } catch (error) {
-      throw new PlanError(`${file}: ${errorMessage(error)}`)
-    }
-  }
-  // Hooks already in any of the agent's settings files count as installed, as for rulecast install;
-  // installed by an older rulecast, they are rewritten where they are.
-  for (const { file } of install.scopes) {
+  const read = async (file: string) => {
     const text = await context.readText(file)
-    if (text === null) continue
-    const merged = merge(parseSettings(text, file), file)
-    if (merged.added.length > 0) continue
-    const updated = merged.updated ?? []
-    if (updated.length === 0) return null
-    return {
-      file,
-      content: `${JSON.stringify(merged.settings, null, 2)}\n`,
-      created: false,
-      summary: `~${plural(updated.length, "hook")} updated (${choice.adapter.label})`,
-      commit: install.scopes.find((entry) => entry.file === file)?.scope === "shared",
-    }
+    return text === null ? null : { value: parseSettings(text, file) }
   }
-  const target = install.scopes.find((entry) => entry.scope === choice.scope)
-  if (target === undefined) throw new PlanError(`${choice.adapter.label} has no ${choice.scope} settings`)
-  const text = await context.readText(target.file)
-  const merged = merge(text === null ? {} : parseSettings(text, target.file), target.file)
+  let plan: Awaited<ReturnType<typeof planHooks>>
+  try {
+    plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs, context.local)
+  } catch (error) {
+    throw error instanceof PlanError ? error : new PlanError(errorMessage(error))
+  }
+  const write = plan.write
+  if (write === null) return null
+  const label = choice.adapter.label
+  const parts = [
+    ...(write.added.length > 0 ? [`+${plural(write.added.length, "hook")}`] : []),
+    ...(write.updated.length > 0 ? [`~${plural(write.updated.length, "hook")} updated`] : []),
+  ]
   return {
-    file: target.file,
-    content: `${JSON.stringify(merged.settings, null, 2)}\n`,
-    created: text === null,
-    summary: `+${plural(merged.added.length, "hook")} (${choice.adapter.label})`,
-    commit: choice.scope === "shared",
+    file: write.file,
+    content: `${JSON.stringify(write.settings, null, 2)}\n`,
+    created: write.created,
+    summary: `${parts.join(", ")} (${label})`,
+    commit: install.scopes.find((entry) => entry.file === write.file)?.scope === "shared",
   }
 }
 

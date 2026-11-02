@@ -8,10 +8,11 @@ import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import type { Config } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
 import { cacheHome, type Env } from "../core/home"
+import { type HookState, inFile, installOf, planHooks, projectRulecast, ScopeError } from "../core/hook-plan"
 import { configRootsAbove, configRootsBelow, displayPath } from "../core/projects"
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
-import type { Adapter, AdapterInstall, InstallScope } from "../core/types"
+import type { Adapter, InstallScope } from "../core/types"
 import { onPath } from "../core/which"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
@@ -40,20 +41,6 @@ async function writeSettings(root: string, file: string, settings: unknown): Pro
 
 function isEmptyObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
-}
-
-function installOf(adapter: Adapter): AdapterInstall {
-  if (!adapter.install) throw new UsageError(`${adapter.name} has no hooks to install`)
-  return adapter.install
-}
-
-/** Runs an adapter's settings transform, naming the file when the settings have the wrong shape. */
-function inFile<T>(file: string, transform: () => T): T {
-  try {
-    return transform()
-  } catch (error) {
-    throw new Error(`${file}: ${errorMessage(error)}`)
-  }
 }
 
 /**
@@ -89,31 +76,11 @@ export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: n
   return (await hookState(root, adapter, verifyMs))?.file ?? null
 }
 
-export interface HookState {
-  file: string
-  stale: string[]
-  missing: string[]
-}
+/** Where the adapter's hooks are and whether they are current: planHooks, for doctor. */
+export type { HookState }
 
-/**
- * Where the adapter's hooks are and whether they are current. `stale`: installed by an older
- * rulecast with another command; `missing`: installed before rulecast needed every hook it needs
- * now (plan 11's Bash hooks). Either way `install` upgrades that file in place and `doctor` says so.
- * A file with every hook wins over one with only some.
- */
 export async function hookState(root: string, adapter: Adapter, verifyMs: number): Promise<HookState | null> {
-  const install = installOf(adapter)
-  const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
-  let partial: HookState | null = null
-  for (const { file } of install.scopes) {
-    const current = await readSettings(root, file)
-    if (current === null) continue
-    const merged = inFile(file, () => install.merge(current.value, command, verifyMs))
-    if (merged.added.length === 0) return { file, stale: merged.updated ?? [], missing: [] }
-    const ours = inFile(file, () => install.remove(current.value)).removed.length > 0
-    if (ours && partial === null) partial = { file, stale: merged.updated ?? [], missing: merged.added }
-  }
-  return partial
+  return (await planHooks((file) => readSettings(root, file), adapter, "shared", verifyMs, projectRulecast(root))).state
 }
 
 /**
@@ -126,25 +93,20 @@ export async function installHooks(
   scope: InstallScope,
   verifyMs: number,
 ): Promise<{ file: string; added: string[]; updated?: string[] }> {
-  const install = installOf(adapter)
-  const command = install.command(existsSync(path.join(root, "node_modules", ".bin", "rulecast")))
-  const already = await hookState(root, adapter, verifyMs)
-  if (already !== null && already.stale.length === 0 && already.missing.length === 0) {
-    return { file: already.file, added: [] }
-  }
-  if (already !== null) {
-    // Installed by an older rulecast: rewrite its entries and add the missing ones where they are.
-    const current = (await readSettings(root, already.file))?.value ?? {}
-    const merged = inFile(already.file, () => install.merge(current, command, verifyMs))
-    await writeSettings(root, already.file, merged.settings)
-    return { file: already.file, added: merged.added, updated: merged.updated ?? [] }
-  }
-  const target = install.scopes.find((candidate) => candidate.scope === scope)
-  if (!target) throw new UsageError(`${adapter.name} has no ${scope} settings`)
-  const current = (await readSettings(root, target.file))?.value ?? {}
-  const merged = inFile(target.file, () => install.merge(current, command, verifyMs))
-  await writeSettings(root, target.file, merged.settings)
-  return { file: target.file, added: merged.added }
+  const plan = await planHooks(
+    (file) => readSettings(root, file),
+    adapter,
+    scope,
+    verifyMs,
+    projectRulecast(root),
+  ).catch((error: unknown) => {
+    throw error instanceof ScopeError ? new UsageError(error.message) : error
+  })
+  if (plan.write === null) return { file: plan.state!.file, added: [] }
+  await writeSettings(root, plan.write.file, plan.write.settings)
+  return plan.state === null
+    ? { file: plan.write.file, added: plan.write.added }
+    : { file: plan.write.file, added: plan.write.added, updated: plan.write.updated }
 }
 
 /** Removes the adapter's hooks from every settings file of it that exists. */
