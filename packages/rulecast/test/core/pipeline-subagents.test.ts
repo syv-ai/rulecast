@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { openSession, sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
 import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
@@ -14,7 +14,7 @@ const ORDERS = "app/services/orders.py"
 
 async function scenario() {
   const root = await createFixture()
-  const send = async (event: Omit<Event, "cwd" | "session"> & { agentId?: string }) => {
+  const send = async (event: DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }) => {
     const { agentId, ...rest } = event
     return (await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } }, { stopGate: true })).delivery
   }

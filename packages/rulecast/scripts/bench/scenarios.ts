@@ -1,4 +1,4 @@
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../../test/helpers/config"
 
 /**
@@ -9,7 +9,7 @@ import { localConfig } from "../../test/helpers/config"
  * list of events over a static tree.
  */
 export interface Step {
-  event: Omit<Event, "cwd" | "session">
+  event: DistributiveOmit<Event, "cwd" | "session">
   /** Repo-relative file contents to put in place before this event. */
   write?: Record<string, string>
   /** What the agent was doing, for the report. */

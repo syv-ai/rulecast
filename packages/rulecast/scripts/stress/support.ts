@@ -9,7 +9,7 @@ import { createRegistry } from "../../src/core/detection/registry"
 import { projectStateDir } from "../../src/core/home"
 import { type PipelineOptions, type PipelineResult, runPipeline } from "../../src/core/pipeline"
 import { cachedRepos } from "../../src/core/repos/provider"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { builtinDetectors } from "../../src/detectors"
 import { localConfig } from "../../test/helpers/config"
 import { createRepo } from "../../test/helpers/git"
@@ -74,7 +74,7 @@ export interface Run {
  */
 export async function runEvent(
   root: string,
-  event: Omit<Event, "cwd">,
+  event: DistributiveOmit<Event, "cwd">,
   options: Partial<Omit<PipelineOptions, "project" | "stateDir" | "event" | "registry">> = {},
 ): Promise<Run> {
   const project = await compile({ root, registry, repos: cachedRepos(homeFor()) })

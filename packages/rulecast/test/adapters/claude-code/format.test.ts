@@ -5,7 +5,8 @@ import { renderAgentText } from "../../../src/core/delivery/render-agent"
 import { type Delivery, type Event, type EventKind, emptyDelivery, type Finding } from "../../../src/core/types"
 
 const options = { maxMatchesPerRule: 10 }
-const event = (kind: EventKind): Event => ({ kind, files: [], cwd: "/project", session: { id: "s1" } })
+// Only the kind matters to formatting; a guard's intent is not read here.
+const event = (kind: EventKind): Event => ({ kind, files: [], cwd: "/project", session: { id: "s1" } }) as Event
 const finding = (overrides: Partial<Finding> = {}): Finding => ({
   rule: "backend/no-httpexception",
   severity: "error",

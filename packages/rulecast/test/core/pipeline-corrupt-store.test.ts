@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { createFixture } from "../helpers/fixture"
 import { stateDirFor } from "../helpers/home"
 import { pipelineAt } from "../helpers/pipeline"
@@ -24,7 +24,7 @@ async function corrupt(root: string, file: string): Promise<void> {
   await writeFile(store, `${text.trimEnd()}\n{"t":"edited","fi\n{"t":"prompt","agent":"main"}\n`)
 }
 
-const send = (root: string, event: Omit<Event, "cwd" | "session">) =>
+const send = (root: string, event: DistributiveOmit<Event, "cwd" | "session">) =>
   pipelineAt(root, { ...event, cwd: root, session: { id: SESSION } }, { stopGate: true })
 
 describe("pipeline with a damaged session store", () => {

@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { pipelineAt } from "../helpers/pipeline"
@@ -43,7 +43,7 @@ async function repoWith(rules: Record<string, unknown>[]): Promise<string> {
   return root
 }
 
-const send = (root: string, event: Omit<Event, "cwd">) => pipelineAt(root, { ...event, cwd: root })
+const send = (root: string, event: DistributiveOmit<Event, "cwd">) => pipelineAt(root, { ...event, cwd: root })
 
 const edit = (root: string, session: string) =>
   send(root, { kind: "edit", files: ["src/app.ts"], session: { id: session } })

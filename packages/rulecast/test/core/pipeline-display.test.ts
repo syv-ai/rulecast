@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest"
 
 import { renderAgentText } from "../../src/core/delivery/render-agent"
 import { openSession, sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
@@ -30,7 +30,7 @@ async function createNested(): Promise<{ repo: string; root: string }> {
   return { repo, root: path.join(repo, "backend") }
 }
 
-type Send = Omit<Event, "cwd" | "session">
+type Send = DistributiveOmit<Event, "cwd" | "session">
 
 function sessionAt(root: string, displayFrom: string | undefined, id = "s1", env?: Record<string, string>) {
   let calls = 0

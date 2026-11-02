@@ -135,12 +135,14 @@ describe("pipeline findings and ran", () => {
 describe("the committed baseline only fills in", () => {
   test("it decides a verify with no other baseline, and nothing with a base commit or a session", async () => {
     const root = await createFixture()
-    const event: Event = { kind: "verify", files: [USERS], cwd: root }
+    const event: Extract<Event, { kind: "verify" }> = { kind: "verify", files: [USERS], cwd: root }
     const id = (await pipelineAt(root, event)).findings![0]!.id
     const listed = buildBaseline([{ id, rule: "backend/no-httpexception", file: USERS }])
     const empty = buildBaseline([])
-    const status = async (options: Parameters<typeof pipelineAt>[2], extra: Partial<Event> = {}) =>
-      (await pipelineAt(root, { ...event, ...extra }, options)).findings?.map((finding) => finding.status)
+    const status = async (
+      options: Parameters<typeof pipelineAt>[2],
+      extra: Partial<Extract<Event, { kind: "verify" }>> = {},
+    ) => (await pipelineAt(root, { ...event, ...extra }, options)).findings?.map((finding) => finding.status)
 
     expect(await status({ committedBaseline: listed })).toEqual(["preexisting"])
     expect(await status({ committedBaseline: empty })).toEqual(["new"])

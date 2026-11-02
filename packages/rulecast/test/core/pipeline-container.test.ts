@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest"
 import { readBaseline } from "../../src/core/baseline/store"
 import { headCommit } from "../../src/core/git"
 import { sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { stateDirFor } from "../helpers/home"
@@ -42,7 +42,7 @@ const route = (name: string, options: { crud: boolean; filler: number }) =>
 
 async function scenario(rules: Record<string, unknown>[], content: string) {
   const root = await createRepo({ ".rulecast-config.yaml": localConfig(rules), [ROUTES]: `${content}\n` })
-  const send = async (event: Omit<Event, "cwd" | "session">) =>
+  const send = async (event: DistributiveOmit<Event, "cwd" | "session">) =>
     (await pipelineAt(root, { ...event, cwd: root, session: { id: "s1" } })).delivery
   const write = (text: string) => writeFile(path.join(root, ROUTES), `${text}\n`)
   const baseline = () => readBaseline(sessionDir(stateDirFor(root), "s1"))

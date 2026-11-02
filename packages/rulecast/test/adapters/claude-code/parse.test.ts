@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { parseClaudeCode } from "../../../src/adapters/claude-code/parse"
-import type { EventKind } from "../../../src/core/types"
+import type { Event, EventKind } from "../../../src/core/types"
 import { claudeCodePayload } from "../../helpers/payloads"
 
 const parse = (name: string) => {
@@ -55,7 +55,8 @@ describe("Claude Code adapter: parse", () => {
   test("pre-tool-use.write → guard carrying the whole file", () => {
     const { parsed } = parse("pre-tool-use.write")
     expect(parsed?.event?.kind).toBe("guard")
-    expect(parsed?.event?.intent).toEqual({ content: "export const added = 1\n" })
+    const event = parsed?.event
+    expect(event?.kind === "guard" ? event.intent : null).toEqual({ content: "export const added = 1\n" })
   })
 
   test("a PreToolUse for a tool that is neither a write nor the shell has no event", () => {
@@ -91,9 +92,10 @@ describe("Claude Code adapter: parse", () => {
   })
 
   test("Pre and Post of one Bash call carry the same tool use id", () => {
-    expect(parse("pre-tool-use.bash").parsed?.event?.toolUseId).toBe(
-      parse("post-tool-use.bash").parsed?.event?.toolUseId,
-    )
+    const toolUseId = (event: Event | null | undefined) => (event && "toolUseId" in event ? event.toolUseId : undefined)
+    const before = toolUseId(parse("pre-tool-use.bash").parsed?.event)
+    expect(before).toBeDefined()
+    expect(before).toBe(toolUseId(parse("post-tool-use.bash").parsed?.event))
   })
 
   test("post-tool-use.bash.subagent carries the subagent's agent id", () => {

@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { notices } from "../../../src/core/session/oversight"
-import type { Event, Match } from "../../../src/core/types"
+import type { DistributiveOmit, Event, Match } from "../../../src/core/types"
 import { createFixture } from "../../helpers/fixture"
 import { pipelineAt } from "../../helpers/pipeline"
 
@@ -74,7 +74,7 @@ describe("oversight in a session", () => {
   test("a config edit that silences a finding passes the gate, and the user is told", async () => {
     const root = await createFixture()
     const session = { id: "g1" }
-    const send = (event: Omit<Event, "cwd">, stopGate = false) =>
+    const send = (event: DistributiveOmit<Event, "cwd">, stopGate = false) =>
       pipelineAt(root, { ...event, cwd: root }, { stopGate })
 
     await send({ kind: "touch", files: [USERS], session, completeRead: true })
@@ -103,7 +103,7 @@ describe("oversight in a session", () => {
   test("an ignore the agent adds is told at the Stop", async () => {
     const root = await createFixture()
     const session = { id: "ign" }
-    const send = (event: Omit<Event, "cwd">, stopGate = false) =>
+    const send = (event: DistributiveOmit<Event, "cwd">, stopGate = false) =>
       pipelineAt(root, { ...event, cwd: root }, { stopGate })
     await send({ kind: "touch", files: [USERS], session, completeRead: true })
     await writeFile(

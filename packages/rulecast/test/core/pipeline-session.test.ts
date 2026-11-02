@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { createFixture } from "../helpers/fixture"
 import { pipelineAt } from "../helpers/pipeline"
 
@@ -10,7 +10,7 @@ const USERS = "app/services/users.py"
 
 async function scenario() {
   const root = await createFixture()
-  const send = async (event: Omit<Event, "cwd" | "session"> & { agentId?: string }) => {
+  const send = async (event: DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }) => {
     const { agentId, ...rest } = event
     const result = await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } }, { stopGate: true })
     return result.delivery

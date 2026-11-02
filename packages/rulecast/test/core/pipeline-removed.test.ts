@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest"
 
 import { headCommit } from "../../src/core/git"
 import { sessionDir } from "../../src/core/session/session"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { stateDirFor } from "../helpers/home"
@@ -35,7 +35,7 @@ const BEFORE = [
 
 async function scenario(content = BEFORE, rules: Record<string, unknown>[] = [keepAssertions()]) {
   const root = await createRepo({ ".rulecast-config.yaml": localConfig(rules), [TEST]: content })
-  const send = async (event: Omit<Event, "cwd" | "session">, session: string | null = "s1") =>
+  const send = async (event: DistributiveOmit<Event, "cwd" | "session">, session: string | null = "s1") =>
     (
       await pipelineAt(
         root,

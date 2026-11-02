@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest"
 import { readBaseline } from "../../src/core/baseline/store"
 import { renderAgentText } from "../../src/core/delivery/render-agent"
 import { openSession, sessionDir } from "../../src/core/session/session"
-import { type Event, emptyDelivery } from "../../src/core/types"
+import { type DistributiveOmit, type Event, emptyDelivery } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
@@ -16,7 +16,7 @@ import { createProject } from "../helpers/project"
 const USERS = "app/services/users.py"
 const API = "src/client/api.ts"
 
-type Send = Omit<Event, "cwd" | "session"> & { agentId?: string }
+type Send = DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }
 
 function sessionAt(root: string, id = "s1") {
   const send = async (event: Send) => {

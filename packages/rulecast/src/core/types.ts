@@ -39,22 +39,9 @@ export interface WriteIntent {
  */
 export type ContentSource = { kind: "worktree" } | { kind: "index" } | { kind: "commit"; ref: string }
 
-export interface Event {
-  kind: EventKind
+interface EventBase {
   /** Repo-relative paths (adapters may give absolute ones; the hook command converts them). Empty for prompt, reset, start and shell events. */
   files: string[]
-  /** shell events: pairs a call's before and after states when the agent's payloads carry an id. */
-  toolUseId?: string
-  /** shell-after: the command exited non-zero. It may still have written files; an adapter may answer it differently. */
-  failed?: boolean
-  /** guard only: what the agent is about to write to `files[0]`. */
-  intent?: WriteIntent
-  /** touch from a read: the whole file was read. */
-  completeRead?: boolean
-  /** verify from the CLI: the commit the baseline is read from (the merge base for --from-ref). */
-  baseCommit?: string
-  /** verify from the CLI: where current content is read from. Absent: the working tree. */
-  content?: ContentSource
   session?: { id: string; agentId?: string }
   cwd: string
   /**
@@ -63,6 +50,35 @@ export interface Event {
    */
   launchDir?: string
 }
+
+/** A shell call, as its before and after events (and the edit an after becomes) carry it. */
+interface ShellCall {
+  /** Pairs a call's before and after states when the agent's payloads carry an id. */
+  toolUseId?: string
+  /** After: the command exited non-zero. It may still have written files; an adapter may answer it differently. */
+  failed?: boolean
+}
+
+/** One variant per kind, so each carries only what its kind has (plan 21, #11). */
+export type Event = EventBase &
+  (
+    | { kind: "guard" /** What the agent is about to write to `files[0]`. */; intent: WriteIntent }
+    | { kind: "touch" /** From a read: the whole file was read. */; completeRead?: boolean }
+    /** An edit tool's, or a shell call's after that changed files: then it keeps the call's fields. */
+    | ({ kind: "edit" } & ShellCall)
+    | {
+        kind: "verify"
+        /** From the CLI: the commit the baseline is read from (the merge base for --from-ref). */
+        baseCommit?: string
+        /** From the CLI: where current content is read from. Absent: the working tree. */
+        content?: ContentSource
+      }
+    | ({ kind: "shell-before" | "shell-after" } & ShellCall)
+    | { kind: "prompt" | "reset" | "start" }
+  )
+
+/** `Omit` over each variant of a union, which plain `Omit` collapses into one. */
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 export interface Match {
   file: string

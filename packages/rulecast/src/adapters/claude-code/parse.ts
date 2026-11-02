@@ -52,10 +52,18 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
     tool_use_id: toolUseId,
   } = head.data
   const session = agentId === undefined ? { id } : { id, agentId }
-  const result = (kind: EventKind | null, files: string[] = [], completeRead?: boolean): AdapterInput => ({
+  const result = (
+    kind: Exclude<EventKind, "guard" | "shell-before" | "shell-after"> | null,
+    files: string[] = [],
+    completeRead?: boolean,
+  ): AdapterInput => ({
     cwd,
     event:
-      kind === null ? null : { kind, files, cwd, session, ...(completeRead === undefined ? {} : { completeRead }) },
+      kind === null
+        ? null
+        : kind === "touch"
+          ? { kind, files, cwd, session, ...(completeRead === undefined ? {} : { completeRead }) }
+          : { kind, files, cwd, session },
     warmup: false,
   })
   // Before the file tools: a Bash payload has no file_path, which their schema requires. A command
@@ -103,7 +111,7 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
             : null
       // A shape rulecast does not recognise is not a shape it may refuse.
       if (intent === null) return result(null)
-      return { ...result("guard", [file]), event: { kind: "guard", files: [file], cwd, session, intent } }
+      return { cwd, event: { kind: "guard", files: [file], cwd, session, intent }, warmup: false }
     }
     case "PostToolUse": {
       const tool = fileTool.safeParse(input)

@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { stubAgentCli, stubArgv, stubStdin } from "../helpers/llm"
@@ -27,7 +27,7 @@ async function scenario(settings: Record<string, unknown> = {}) {
   for (const file of FILES) files[file] = "def get(id):\n    return id\n"
   const root = await createRepo(files)
   await stubAgentCli(root, "claude")
-  const send = (event: Omit<Event, "cwd">) => pipelineAt(root, { ...event, cwd: root })
+  const send = (event: DistributiveOmit<Event, "cwd">) => pipelineAt(root, { ...event, cwd: root })
   return { root, send }
 }
 

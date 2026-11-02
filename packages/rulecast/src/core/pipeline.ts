@@ -441,8 +441,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   if (event.kind === "guard") {
-    // Bound to a const: `session` is cleared when a store turns out to be unreadable, so a closure
-    // that reads it later would not have the value this branch checked.
     const open = session
     await claimBudget(relevant(event.files).length > 0)
     const delivery = await guardWrite({
@@ -583,7 +581,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     const read = contentReader(root, event.kind === "verify" ? (event.content ?? WORKTREE) : WORKTREE)
     const stage = await changesFor(
       baselineInput,
-      { kind: event.kind, baseCommit: event.baseCommit },
+      event.kind === "verify" ? { kind: "verify", baseCommit: event.baseCommit } : { kind: "edit" },
       session ? baseline : null,
       requested,
       read,

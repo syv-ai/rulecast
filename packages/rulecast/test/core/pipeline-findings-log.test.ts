@@ -4,7 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { FINDINGS_LOG, readFindingsLog } from "../../src/core/stats/log"
-import type { Event } from "../../src/core/types"
+import type { DistributiveOmit, Event } from "../../src/core/types"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
@@ -20,7 +20,7 @@ const USERS = "app/services/users.py"
 const API = "src/client/api.ts"
 const VIOLATION = `${fixtureFiles[USERS]}    raise HTTPException(500)\n`
 
-type Send = Omit<Event, "cwd" | "session"> & { agentId?: string }
+type Send = DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }
 
 function sessionAt(root: string, id = "s1", env?: Record<string, string>) {
   const send = async (event: Send) => {

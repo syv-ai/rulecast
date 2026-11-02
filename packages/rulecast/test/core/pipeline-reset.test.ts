@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import type { Delivery, EventKind } from "../../src/core/types"
+import type { Delivery, Event, EventKind } from "../../src/core/types"
 import { emptyDelivery } from "../../src/core/types"
 import { createFixture } from "../helpers/fixture"
 import { pipelineAt } from "../helpers/pipeline"
@@ -17,7 +17,7 @@ async function scenario(restoredFiles = 5) {
   const send = async (kind: EventKind, files: string[] = [], agentId?: string): Promise<Delivery> => {
     const session = agentId === undefined ? { id: "s1" } : { id: "s1", agentId }
     const extra = kind === "touch" ? { completeRead: true } : {}
-    const result = await pipelineAt(root, { kind, files, cwd: root, session, ...extra }, { restoredFiles })
+    const result = await pipelineAt(root, { kind, files, cwd: root, session, ...extra } as Event, { restoredFiles })
     return result.delivery
   }
   return { root, send }

@@ -18,7 +18,7 @@ export interface GuardInput {
   /** The project's detection context (detection/context.ts). */
   detection: DetectionContext
   config: Config
-  event: Event
+  event: Extract<Event, { kind: "guard" }>
   rules: readonly CompiledRule[]
   disabled: ReadonlySet<string>
   /** Unattended, an ignore does not silence a finding on a line the write changes, as in the pipeline. */

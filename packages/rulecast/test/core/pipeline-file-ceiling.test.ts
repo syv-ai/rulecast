@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import type { Event, WriteIntent } from "../../src/core/types"
+import type { DistributiveOmit, Event, WriteIntent } from "../../src/core/types"
 import { localConfig } from "../helpers/config"
 import { createRepo } from "../helpers/git"
 import { pipelineAt } from "../helpers/pipeline"
@@ -39,7 +39,7 @@ async function repo(settings: Record<string, unknown> = {}): Promise<string> {
   return root
 }
 
-const send = (root: string, event: Omit<Event, "cwd">, log?: (line: string) => void) =>
+const send = (root: string, event: DistributiveOmit<Event, "cwd">, log?: (line: string) => void) =>
   pipelineAt(root, { ...event, cwd: root }, { log })
 
 describe("pipeline: the file-size ceiling on edit", () => {

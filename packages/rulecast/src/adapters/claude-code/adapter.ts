@@ -208,7 +208,7 @@ export const claudeCodeAdapter: Adapter = {
           withNotices({
             hookSpecificOutput: {
               // A command that failed fired PostToolUseFailure, which takes context only under its own name.
-              hookEventName: event.failed === true ? "PostToolUseFailure" : "PostToolUse",
+              hookEventName: event.kind !== "touch" && event.failed === true ? "PostToolUseFailure" : "PostToolUse",
               additionalContext: withinLimit(text, delivery, event),
             },
           }),
