@@ -1,6 +1,11 @@
 {
   "name": "rulecast",
-  "owner": { "name": "syv.ai" },
+  "owner": {
+    "name": "syv.ai"
+  },
+  "metadata": {
+    "description": "The rulecast plugin for Claude Code."
+  },
   "plugins": [
     {
       "name": "rulecast",
