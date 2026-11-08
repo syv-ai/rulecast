@@ -7,6 +7,7 @@ import { builtinDetectors } from "../detectors"
 import { addCommand } from "./add"
 import { autoupdateCommand } from "./autoupdate"
 import { baselineCommand } from "./baseline"
+import { binaryCommand } from "./binary"
 import { cleanCommand } from "./clean"
 import { doctorCommand } from "./doctor"
 import { fixCommand } from "./fix"
@@ -95,6 +96,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await hookCommand(args, registry, io)
       case "warm":
         return await warmCommand(root, args, registry, io)
+      case "binary":
+        return await binaryCommand(args, io)
       case "doctor":
         return await doctorCommand(root, args, registry, io)
       case undefined:

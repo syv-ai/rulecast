@@ -3,7 +3,16 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
-import { generateReadme, generateVersionFile, withReadmeVersion, withVersion } from "../../scripts/sync-version"
+import {
+  generatePreCommitHooks,
+  generateReadme,
+  generateSetup,
+  generateVersionFile,
+  withInstallVersion,
+  withReadmeVersion,
+  withVersion,
+} from "../../scripts/sync-version"
+import { installOneLiner } from "../../src/core/binary-home"
 import { run } from "../helpers/script"
 
 const packageDir = fileURLToPath(new URL("../../", import.meta.url))
@@ -19,6 +28,28 @@ const SOURCE = [
 ].join("\n")
 
 describe("sync-version", () => {
+  test("withInstallVersion pins the one-liner and throws without exactly one", () => {
+    const doc = `Install:\n\n\`\`\`sh\n${installOneLiner("0.1.0")}\n\`\`\`\n`
+    expect(withInstallVersion(doc, "1.2.3")).toBe(`Install:\n\n\`\`\`sh\n${installOneLiner("1.2.3")}\n\`\`\`\n`)
+    expect(() => withInstallVersion("no one-liner\n", "1.2.3")).toThrow(/found 0/)
+    expect(() => withInstallVersion(`${doc}${doc}`, "1.2.3")).toThrow(/found 2/)
+  })
+
+  test("the committed .pre-commit-hooks.yaml is generated from gitHookCommand", async () => {
+    const { target, source } = await generatePreCommitHooks()
+    expect(await readFile(target, "utf8")).toBe(source)
+  })
+
+  test("withInstallVersion also rewrites an older text of the one-liner", () => {
+    const old = `sh -c 'case "$(uname -s)-$(uname -m)" in x) T=x;; esac; ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'`
+    expect(withInstallVersion(`a\n${old}\nb\n`, "1.2.3")).toBe(`a\n${installOneLiner("1.2.3")}\nb\n`)
+  })
+
+  test("the committed SETUP.md already matches package.json", async () => {
+    const { target, source } = await generateSetup()
+    expect(await readFile(target, "utf8")).toBe(source)
+  })
+
   test("replaces only the VERSION line", () => {
     const result = withVersion(SOURCE, "1.2.3")
     expect(result).toContain('export const VERSION = "1.2.3"')

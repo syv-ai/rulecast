@@ -1,7 +1,8 @@
 import type { SgRoot } from "@ast-grep/napi"
 
+import { markOwnEnv, unmarkOwnEnv } from "../../core/child-env"
 import { errorMessage } from "../../core/errors"
-import { embeddedLanguage, unpack } from "./embedded"
+import { embeddedLanguage, embeddedNapi, unpack } from "./embedded"
 import { LANGUAGES, type Language, napiLanguage } from "./languages"
 
 export interface Parser {
@@ -51,9 +52,36 @@ async function registration(name: string, load: () => Promise<unknown>): Promise
   }
 }
 
+/**
+ * In the binary, napi-rs's loader is pointed at a copy of the embedded module unpacked once into
+ * the cache home: it reads NAPI_RS_NATIVE_LIBRARY_PATH before anything else. With nowhere to
+ * unpack, it gets the embedded path itself, which bun writes to a fresh temp file per run: slow,
+ * but every rule still runs.
+ *
+ * The variable is ours only while the module loads: it is put back as it was right after, and any
+ * process started meanwhile gets an environment without it (core/child-env.ts). Every napi-rs tool
+ * a project runs reads the same variable.
+ */
+async function importNapi(): Promise<typeof import("@ast-grep/napi")> {
+  const embedded = embeddedNapi()
+  if (embedded === undefined) return import("@ast-grep/napi")
+  const VAR = "NAPI_RS_NATIVE_LIBRARY_PATH"
+  const previous = process.env[VAR]
+  const path = await unpack(embedded, "napi", process.env).catch(() => embedded)
+  process.env[VAR] = path
+  markOwnEnv(VAR, path)
+  try {
+    return await import("@ast-grep/napi")
+  } finally {
+    if (previous === undefined) delete process.env[VAR]
+    else process.env[VAR] = previous
+    unmarkOwnEnv(VAR)
+  }
+}
+
 async function load(): Promise<Loaded> {
   loading ??= (async () => {
-    const napi = await import("@ast-grep/napi")
+    const napi = await importNapi()
     const dynamic: Record<string, Registration> = {}
     const failed = new Map<string, unknown>()
     for (const [name, entry] of Object.entries(LANGUAGES)) {

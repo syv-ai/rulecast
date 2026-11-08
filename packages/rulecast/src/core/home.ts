@@ -5,11 +5,14 @@ import path from "node:path"
 
 export type Env = Readonly<Record<string, string | undefined>>
 
-/** $RULECAST_HOME, else $XDG_CACHE_HOME/rulecast, else ~/.cache/rulecast. Empty values count as unset. */
+/**
+ * $RULECAST_HOME, else $XDG_CACHE_HOME/rulecast, else $HOME/.cache/rulecast. Empty values count as
+ * unset. `CACHE_HOME_SH` (core/binary-home.ts) is the same rule in shell, for the hook commands.
+ */
 export function cacheHome(env: Env): string {
   if (env.RULECAST_HOME) return path.resolve(env.RULECAST_HOME)
   if (env.XDG_CACHE_HOME) return path.join(path.resolve(env.XDG_CACHE_HOME), "rulecast")
-  return path.join(homedir(), ".cache", "rulecast")
+  return path.join(env.HOME || homedir(), ".cache", "rulecast")
 }
 
 /**

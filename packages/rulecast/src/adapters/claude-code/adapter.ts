@@ -1,3 +1,4 @@
+import { CACHE_HOME_SH, exitUnlessUnrunnable, runInstalledBinarySh } from "../../core/binary-home"
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
@@ -69,14 +70,14 @@ const DENY_PREAMBLE = ({ source }: Configs) =>
  * installed yet — a fresh clone before `npm install`. Every other event says nothing.
  */
 export const NOT_INSTALLED =
-  "rulecast is configured in this project but not installed. Run npm install (or pnpm install), or install @syv-ai/rulecast globally, then rulecast doctor."
+  "rulecast is configured in this project but not installed. Install the standalone binary (README, Install), add @syv-ai/rulecast to the project (pnpm add -D) or install it globally, then run rulecast doctor."
 
 /**
  * What every stop says when rulecast is not installed and the run is unattended as the shell can
  * see it (#29): nobody reads the SessionStart message in a loop, and "no findings" is not "checked".
  */
 export const NOT_INSTALLED_UNATTENDED =
-  "rulecast is configured in this project but not installed: no rules ran this session. Run npm ci (or pnpm install) before starting the agent."
+  "rulecast is configured in this project but not installed: no rules ran this session. Install rulecast before starting the agent: npm ci (or pnpm install), or the standalone binary (README, Install)."
 
 /**
  * Unattended as the shell sees it: RULECAST_MODE, else CI or GITHUB_ACTIONS set and not false or 0,
@@ -93,20 +94,24 @@ const SHELL_UNATTENDED =
  * test/payloads/claude-code/README.md): a clone before `npm install`, or a setup run through npx
  * with nothing installed (plan 21).
  *
- * Guarded, it runs the project's own rulecast, else one on the PATH (a global install, as a project
- * without a package.json has). A PATH rulecast that cannot execute (126 or 127, such as a
- * version-manager shim with no rulecast behind it) counts as none. With none, it exits 0, after
- * telling the user on `SessionStart`, and — unattended — at every stop. Never a block: without
- * session state it could not hold the agent only once per prompt.
+ * Guarded, it runs the project's own rulecast, else the standalone binary installed in the cache
+ * home (`rulecast binary install`, core/binary-home.ts), else one on the PATH (a global install). A
+ * devDependency is a version the project committed to, so it wins for everyone. The command only
+ * looks: it never downloads or installs anything. An installed binary or a PATH rulecast that
+ * cannot execute (126 or 127: a binary built for another machine, or a version-manager shim with no
+ * rulecast behind it) counts as none. With none, it exits 0, after telling the user on
+ * `SessionStart`, and — unattended — at every stop. Never a block: without session state it could
+ * not hold the agent only once per prompt.
  *
  * The project's own rulecast gets stdin through `exec`, untouched; past that the payload is read
- * once and piped to the PATH's. One string for every event, and it still contains
+ * once and piped to the installed binary, then to the PATH's. One string for every event, and it still contains
  * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
  */
 export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
   "P=$(cat); " +
-  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; [ "$R" -lt 126 ] && exit "$R"; fi; ` +
+  `${CACHE_HOME_SH}; ${runInstalledBinarySh("hook claude-code", '"$P"')}; ` +
+  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
   SHELL_UNATTENDED +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
   `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`

@@ -236,14 +236,28 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "clean",
     synopsis: "rulecast clean [--project]",
-    summary: "Delete the cache",
+    summary: "Delete the cache; the installed binary stays",
     flags: [["--project", "Only this project's directory"]],
+    notes: [
+      "Without --project, everything in the cache home goes except bin/ (the installed binary) and the",
+      "native files this version loads. To remove the installed binary, delete <cache home>/bin.",
+    ],
   },
   {
     name: "warm",
     synopsis: "rulecast warm [--detector <kind>]...",
     summary: "Build detector caches ahead of time",
     flags: [["--detector <kind>", "Only this detector kind; repeatable"]],
+  },
+  {
+    name: "binary",
+    synopsis: "rulecast binary install | rulecast binary path",
+    summary: "Put this standalone binary where the agent hooks and git hooks find it",
+    flags: [],
+    notes: [
+      "install copies the running binary into the cache home and makes it the current one; path prints",
+      "the current one and its version, or none. Under node, install prints the command that installs it.",
+    ],
   },
   {
     name: "hook",

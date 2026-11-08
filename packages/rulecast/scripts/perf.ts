@@ -1,11 +1,14 @@
 import {
   BUDGET_MS,
+  type InstallMeasurement,
   type Measurement,
   measureEditHook,
+  measureFirstEditAfterInstall,
   measureNestedConfigs,
   measureNewWorktree,
   measureShellHooks,
   type NestedMeasurement,
+  PERF_BINARY,
   SHELL_BEFORE_ADDED_MS,
   type ShellMeasurement,
   type WorktreeMeasurement,
@@ -115,6 +118,23 @@ function worktreeReport(result: WorktreeMeasurement, warm: Measurement): string 
   ].join("\n")
 }
 
+/** Report only: the binary's first edit after `binary install`, and on a fresh home without one. */
+function installReport(result: InstallMeasurement, warm: Measurement): string {
+  const row = (name: string, m: Measurement) => `  ${name.padEnd(28)}${ms(m.p50)}  ${ms(m.p95)}  ${ms(m.max)}`
+  return [
+    `${bold("rulecast binary install")} ${dim(`· ${result.afterInstall.events} fresh cache homes · report only`)}`,
+    "",
+    dim("                                  p50      p95      max"),
+    row("first edit after binary install", result.afterInstall),
+    row("first edit, no install", result.withoutInstall),
+    row("warm edit", warm),
+    "",
+  ].join("\n")
+}
+
+process.stdout.write(
+  `${bold("rulecast perf")} ${dim(`· ${PERF_BINARY === null ? "node dist/cli.js" : `(standalone binary) ${PERF_BINARY}`} · ${process.platform}-${process.arch}`)}\n`,
+)
 const result = await measureEditHook()
 process.stdout.write(report(result))
 const shell = shellReport(await measureShellHooks())
@@ -122,4 +142,5 @@ process.stdout.write(`\n${shell.text}`)
 process.stdout.write(`\n${worktreeReport(await measureNewWorktree(), result)}`)
 const nested = nestedReport(await measureNestedConfigs())
 process.stdout.write(`\n${nested.text}`)
+if (PERF_BINARY !== null) process.stdout.write(`\n${installReport(await measureFirstEditAfterInstall(), result)}`)
 process.exitCode = result.p95 < BUDGET_MS && shell.pass && nested.pass ? 0 : 1

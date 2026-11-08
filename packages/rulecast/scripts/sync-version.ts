@@ -2,6 +2,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { gitHookCommand, installOneLiner } from "../src/core/binary-home"
+
 /**
  * `VERSION` is a literal because it has to survive bundling into dist/ and into a
  * `bun build --compile` binary, so it cannot read package.json at run time. changesets writes only
@@ -77,10 +79,71 @@ export function withReadmeVersion(source: string, version: string): string {
   return source.replace(README_REV, `$1v${version}`).replace(README_STATUS, `${major}.${minor}.$1`)
 }
 
+/**
+ * Any copy of the install one-liner, of any version and any older text: it starts with the target
+ * case and ends with `binary install` and the cleanup. installOneLiner is its one owner; the docs
+ * hold a generated copy.
+ */
+const INSTALL_ONE_LINER = /sh -c 'case "\$\(uname[^\n]*?binary install; R=\$\?; cd \/ && rm -rf "\$D"; exit \$R'/g
+
+/**
+ * README.md and agents/SETUP.md show the install one-liner for this version. Throws unless each
+ * holds it exactly once, so it cannot go stale or be edited out of step with installOneLiner.
+ */
+export function withInstallVersion(source: string, version: string): string {
+  const found = (source.match(INSTALL_ONE_LINER) ?? []).length
+  if (found !== 1) throw new Error(`expected the install one-liner exactly once, found ${found}`)
+  return source.replace(INSTALL_ONE_LINER, () => installOneLiner(version))
+}
+
+/** The git-hook commands' arguments, by where they appear. */
+export const GIT_HOOK_ARGS = {
+  preCommit: "run",
+  prePush: 'run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"',
+  lefthookPush: 'run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD',
+} as const
+
+/** Rewrites each `<prefix>sh -c '…' --` line in `source` with the next of `commands`. Throws on a count mismatch. */
+function withCommandLines(source: string, prefix: string, commands: string[], what: string): string {
+  const pattern = new RegExp(`^(${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})sh -c '.*' --$`, "gm")
+  const found = (source.match(pattern) ?? []).length
+  if (found !== commands.length)
+    throw new Error(`${what}: expected ${commands.length} git-hook commands, found ${found}`)
+  let next = 0
+  return source.replace(pattern, (_, start: string) => `${start}${commands[next++]}`)
+}
+
+/** The README's lefthook snippet runs gitHookCommand, the order the agent hooks use. */
+export function withLefthookCommands(source: string): string {
+  return withCommandLines(
+    source,
+    "      run: ",
+    [gitHookCommand(GIT_HOOK_ARGS.preCommit), gitHookCommand(GIT_HOOK_ARGS.lefthookPush)],
+    "README.md",
+  )
+}
+
+/** .pre-commit-hooks.yaml's two entries are gitHookCommand. */
+export async function generatePreCommitHooks(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, ".pre-commit-hooks.yaml")
+  const commands = [gitHookCommand(GIT_HOOK_ARGS.preCommit), gitHookCommand(GIT_HOOK_ARGS.prePush)]
+  return {
+    target,
+    source: withCommandLines(await readFile(target, "utf8"), "  entry: ", commands, ".pre-commit-hooks.yaml"),
+  }
+}
+
 /** The root README; `pnpm readme` mirrors it into the package afterwards. */
 export async function generateReadme(): Promise<{ target: string; source: string }> {
   const target = path.join(repoRoot, "README.md")
-  return { target, source: withReadmeVersion(await readFile(target, "utf8"), await packageVersion()) }
+  const version = await packageVersion()
+  const source = withReadmeVersion(await readFile(target, "utf8"), version)
+  return { target, source: withLefthookCommands(withInstallVersion(source, version)) }
+}
+
+export async function generateSetup(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, "agents/SETUP.md")
+  return { target, source: withInstallVersion(await readFile(target, "utf8"), await packageVersion()) }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -89,6 +152,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generatePluginManifest(),
     ...(await generateSkillFiles()),
     await generateReadme(),
+    await generateSetup(),
+    await generatePreCommitHooks(),
   ]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {

@@ -102,7 +102,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm binary
-      # The one check that matters: it runs where no node_modules can be resolved.
       - run: pnpm vitest run test/binary.test.ts
         working-directory: packages/rulecast
         env:

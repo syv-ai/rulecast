@@ -5,6 +5,26 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { sectionRange } from "../src/core/anchors"
+import { gitHookCommand, installOneLiner } from "../src/core/binary-home"
+import { VERSION } from "../src/core/version"
+
+describe("the install docs", () => {
+  test("README and SETUP.md show the install one-liner for this version", async () => {
+    for (const file of ["README.md", "agents/SETUP.md"]) {
+      expect(await readFile(path.join(repoRoot, file), "utf8"), file).toContain(installOneLiner(VERSION))
+    }
+  })
+
+  test("the README's lefthook snippet runs rulecast as the agent hooks find it", async () => {
+    const readme = await readFile(path.join(repoRoot, "README.md"), "utf8")
+    const lefthook = readme.slice(readme.indexOf("**lefthook**"), readme.indexOf("**GitHub Actions:**"))
+    expect(lefthook).toContain(`run: ${gitHookCommand("run")}\n`)
+    expect(lefthook).toContain(
+      `run: ${gitHookCommand('run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD')}\n`,
+    )
+    expect(readme).not.toContain("npx --no-install")
+  })
+})
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url))
 

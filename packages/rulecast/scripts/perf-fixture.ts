@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -9,9 +9,24 @@ import { localConfig } from "../test/helpers/config"
 import { createRepo } from "../test/helpers/git"
 import { linkTool } from "../test/helpers/linters"
 import { claudeCodePayload } from "../test/helpers/payloads"
+import { buildBinary, hostTarget } from "./build-binary"
 
 const packageDir = fileURLToPath(new URL("../", import.meta.url))
 const cli = path.join(packageDir, "dist/cli.js")
+
+/** The standalone binary to measure instead of node and dist/cli.js, or null. */
+function binaryUnderTest(): string | null {
+  if (process.env.RULECAST_PERF_BINARY) return path.resolve(process.env.RULECAST_PERF_BINARY)
+  if (process.argv.includes("--binary")) return path.join(packageDir, "binaries", `rulecast-${hostTarget()}`)
+  return null
+}
+
+export const PERF_BINARY = binaryUnderTest()
+
+/** The command every measured hook runs: node and the built CLI, or the standalone binary alone. */
+export function hookCommand(): [string, ...string[]] {
+  return PERF_BINARY === null ? [process.execPath, cli] : [PERF_BINARY]
+}
 
 /** Its own cache home, so a measurement never depends on, or disturbs, a real one. */
 const HOME = mkdtempSync(path.join(tmpdir(), "rulecast-perf-"))
@@ -131,8 +146,9 @@ function runHook(
   home = HOME,
   env: NodeJS.ProcessEnv = process.env,
 ): { ms: number; stdout: string } {
+  const [command, ...args] = hookCommand()
   const started = performance.now()
-  const result = spawnSync(process.execPath, [cli, "hook", "claude-code"], {
+  const result = spawnSync(command, [...args, "hook", "claude-code"], {
     cwd: root,
     env: { ...env, RULECAST_HOME: home },
     input: JSON.stringify(payload),
@@ -162,13 +178,19 @@ function percentiles(times: number[], rules = RULES): Measurement {
 /** The fixture as a committed repository, built and ready for hooks. `dirty` files are left changed. */
 let built = false
 
-function build(): void {
-  if (!built) execFileSync("pnpm", ["build"], { cwd: packageDir, stdio: "ignore" })
+async function build(): Promise<void> {
+  if (built) return
   built = true
+  if (PERF_BINARY === null) execFileSync("pnpm", ["build"], { cwd: packageDir, stdio: "ignore" })
+  else if (!existsSync(PERF_BINARY)) {
+    if (process.env.RULECAST_PERF_BINARY)
+      throw new Error(`RULECAST_PERF_BINARY is ${PERF_BINARY}, which does not exist`)
+    await buildBinary(PERF_BINARY)
+  }
 }
 
 async function preparedProject(dirty = 0): Promise<string> {
-  build()
+  await build()
   const project = perfProject()
   for (let i = 0; i < dirty; i++) project[`src/dirty/file${i}.ts`] = `export const dirty${i} = ${i}\n`
   const root = await createRepo(project)
@@ -262,6 +284,52 @@ export interface WorktreeMeasurement {
   /** The first edit with the worktree's node_modules missing: how many rules it said did not run. */
   depsMissing: string
   worktrees: number
+}
+
+export interface InstallMeasurement {
+  /** The first edit on a fresh cache home right after `binary install`, which unpacked the native files. */
+  afterInstall: Measurement
+  /** The same first edit on a fresh cache home with no install before it: the edit pays the unpacking. */
+  withoutInstall: Measurement
+}
+
+const INSTALLS = 5
+
+/**
+ * The binary only: `binary install` unpacks and loads ast-grep's native files, so the first edit
+ * after it costs what a warm one does. Each of INSTALLS runs takes a cache home nothing has used.
+ * Report only.
+ */
+export async function measureFirstEditAfterInstall(): Promise<InstallMeasurement> {
+  if (PERF_BINARY === null) throw new Error("measureFirstEditAfterInstall measures the standalone binary")
+  await build()
+  const root = await preparedProject()
+  const original = readFileSync(path.join(root, FILE), "utf8")
+  const homes: string[] = []
+  const firstEdit = (home: string, sessionId: string) => {
+    writeFileSync(path.join(root, FILE), original)
+    const payload = (name: string) => claudeCodePayload(name, { root, file: FILE, sessionId })
+    runHook(root, payload("post-tool-use.read.complete"), home)
+    appendFileSync(path.join(root, FILE), "export const first = forbidden0(42)\n")
+    const edit = runHook(root, payload("post-tool-use.edit"), home)
+    if (!edit.stdout.includes("forbidden0(42)")) throw new Error("the first edit delivered no finding")
+    return edit.ms
+  }
+  const after: number[] = []
+  const without: number[] = []
+  try {
+    for (let i = 0; i < INSTALLS; i++) {
+      const installed = mkdtempSync(path.join(tmpdir(), "rulecast-perf-install-"))
+      const fresh = mkdtempSync(path.join(tmpdir(), "rulecast-perf-install-"))
+      homes.push(installed, fresh)
+      execFileSync(PERF_BINARY, ["binary", "install"], { env: { ...process.env, RULECAST_HOME: installed } })
+      after.push(firstEdit(installed, `perf-install-${i}`))
+      without.push(firstEdit(fresh, `perf-fresh-${i}`))
+    }
+    return { afterInstall: percentiles(after), withoutInstall: percentiles(without) }
+  } finally {
+    for (const home of homes) rmSync(home, { recursive: true, force: true })
+  }
 }
 
 const WORKTREES = 10
@@ -401,7 +469,7 @@ export interface NestedMeasurement {
  * config.
  */
 export async function measureNestedConfigs(): Promise<NestedMeasurement> {
-  build()
+  await build()
   const project = nestedProject(DIRTY)
   const root = await createRepo(project)
   await chmod(path.join(root, PACKAGE, "perf-check.sh"), 0o755)

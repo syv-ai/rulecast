@@ -3,6 +3,8 @@ import { access, constants } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
+import { childEnv } from "./child-env"
+
 const exec = promisify(execFile)
 
 /**
@@ -20,12 +22,17 @@ const exec = promisify(execFile)
  * `command -v` block forever, and doctor's checks have no other way to give up.
  */
 export async function onPath(command: string, signal?: AbortSignal, PATH?: string): Promise<boolean> {
+  return (await commandPath(command, signal, PATH)) !== null
+}
+
+/** What `command -v` says `command` is (a path, or a builtin's name), as onPath asks it; null when nothing. */
+export async function commandPath(command: string, signal?: AbortSignal, PATH?: string): Promise<string | null> {
   try {
-    const env = PATH === undefined ? undefined : { ...process.env, PATH }
-    await exec("/bin/sh", ["-c", 'command -v "$1" > /dev/null', "sh", command], { signal, env })
-    return true
+    const env = PATH === undefined ? childEnv() : { ...childEnv(), PATH }
+    const { stdout } = await exec("/bin/sh", ["-c", 'command -v "$1"', "sh", command], { signal, env })
+    return stdout.trim() || null
   } catch {
-    return false
+    return null
   }
 }
 

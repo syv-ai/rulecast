@@ -12,7 +12,7 @@ The developer asked for: $ARGUMENTS
 
 If you started this yourself, without the developer asking, say so before anything else: name the mistake or correction that made you think a rule would help, and ask whether they want one. Stop if they don't.
 
-Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
+Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
 
 ## 1. Name the convention
 

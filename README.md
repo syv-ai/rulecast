@@ -33,7 +33,7 @@ Your coding agent sets rulecast up with you. In Claude Code, install the plugin 
 
 With another agent, paste the prompt under [Agents](README.md#agents).
 
-The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it installs rulecast (as a devDependency, or globally where there is no `package.json`) and runs `rulecast init` with your answers. You review the changes and commit them.
+The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it installs rulecast the way you agreed (the standalone binary, or a devDependency) and runs `rulecast init` with your answers. You review the changes and commit them.
 
 Most rules come later, one at a time. When an agent makes a mistake that should not happen again, run `/rulecast:add-rule`, or accept when the agent offers it. If you would rather work out your conventions up front, say so during setup.
 
@@ -114,8 +114,9 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
-| `rulecast clean` | Delete the cache |
+| `rulecast clean` | Delete the cache; the installed binary stays |
 | `rulecast warm` | Build detector caches ahead of time |
+| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
 | `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
 `rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.
@@ -142,7 +143,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 - `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
 - **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse. Recipes for `/goal`, `/loop` and scheduled sweeps: [`agents/reference/loops.md`](agents/reference/loops.md).
 
-rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Add `@syv-ai/rulecast` to the project's devDependencies (the agent hooks use it from there too), and wire it into the one you use.
+rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Wire it into the one you use. Git hooks run the rulecast the agent hooks run: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](#install)).
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
@@ -162,11 +163,11 @@ repos:
 pre-commit:
   jobs:
     - name: rulecast
-      run: npx --no-install rulecast run
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run' --
 pre-push:
   jobs:
     - name: rulecast
-      run: npx --no-install rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
 **GitHub Actions:**
@@ -194,6 +195,8 @@ jobs:
           sarif_file: rulecast.sarif
 ```
 
+In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` (the binary for the runner's platform) where the example runs `npx rulecast`.
+
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
 `command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies, and `gitleaks` gets it on stdin too. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
@@ -202,13 +205,15 @@ A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. 
 
 A CI job, a cloud agent session or a new container starts with nothing installed. rulecast does not fail quietly there: in unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and the agent is held once per prompt to put that in its final report. `rulecast run` says `incomplete` and lists them under `disabled` in JSON. To have nothing to report:
 
-1. Install dependencies (`npm ci` or `pnpm install`) before the agent starts. Without them the agent hooks do nothing, and in unattended mode every stop says so.
+1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
 2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
-3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
+3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else the installed binary in `~/.cache/rulecast/bin/`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
 4. Check out with `fetch-depth: 0` if you use `--from-ref`.
 5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
 6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
 7. Optionally cache `~/.cache/rulecast/repos` between jobs (for example `actions/cache` keyed on `.rulecast-config.yaml`). It saves a clone per job.
+
+A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
 
 A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
 
@@ -291,8 +296,8 @@ and follow it.
 ```
 
 If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through
-what it found with you, install rulecast (`@syv-ai/rulecast` as a devDependency, or globally where
-there is no `package.json`), and run `rulecast init` with the flags you agree on (`rulecast init --help`
+what it found with you, install rulecast (the standalone binary, or `@syv-ai/rulecast` as a
+devDependency), and run `rulecast init` with the flags you agree on (`rulecast init --help`
 lists them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
 
 Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md)
@@ -345,21 +350,23 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 
 ## Install
 
-**npm — use this for agent hooks.**
+**Standalone binary (no Node).**
+
+```sh
+sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+```
+
+This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.
+
+**npm**, for a project that wants one pinned version for everyone:
 
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
 
-A project without a `package.json`, such as a Python service, can use a global install instead (`npm install -g @syv-ai/rulecast`). The agent hooks run the project's own rulecast when there is one, else the one on the PATH, and otherwise only say once per session that it is not installed.
+The agent hooks and git hooks run the project's `node_modules/.bin/rulecast` first, then the installed binary, then one on the PATH (such as `npm install -g @syv-ai/rulecast`). With none, they only say once per session that rulecast is not installed. Nothing installs rulecast by itself: setup shows you the command, and runs it only when you approve.
 
-Setup does this for you.
-
-**Standalone binary — use this for CI and one-off runs.** Download it from [Releases](https://github.com/syv-ai/rulecast/releases). It needs no Node installation.
-
-Prefer the npm install for hooks. The binary unpacks and loads its embedded ast-grep parser on every run. That does not matter in CI, but it is too slow for a hook that fires on every file an agent writes.
-
-Node ≥ 20.12. Linux and macOS; Windows is not supported.
+The npm package needs Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 ## Performance
 
