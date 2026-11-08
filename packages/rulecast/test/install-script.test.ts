@@ -17,6 +17,7 @@ import { describe, expect, test } from "vitest"
 
 import { BINARY_TARGETS, hostTarget } from "../scripts/build-binary"
 import { installDir } from "../src/core/binary-home"
+import { VERSION } from "../src/core/version"
 
 /**
  * install.sh, run as a developer runs it: `sh install.sh`, with a stub `curl` serving a fake release
@@ -348,7 +349,8 @@ describe("install.sh, asking", () => {
   test("shows what it will do, and Enter proceeds", async () => {
     const run = await install({ answers: "\n" })
     expect(run.status, run.stderr).toBe(0)
-    expect(run.stdout).toContain("rulecast 0.9.0 will be installed:")
+    // install.sh's VERSION line is synced from package.json, as version.ts is (pnpm sync-version).
+    expect(run.stdout).toContain(`rulecast ${VERSION} will be installed:`)
     expect(run.stdout).toContain("  binary   ~/.local/bin/rulecast\n")
     expect(run.stdout).toContain("  PATH     add ~/.local/bin in ~/.profile\n")
     expect(run.stdout).toContain("1) Proceed (default)\n2) Customize\n3) Cancel\n")
