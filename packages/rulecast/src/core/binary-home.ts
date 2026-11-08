@@ -10,7 +10,7 @@ import { VERSION } from "./version"
  * The standalone binary: how it is installed, and how the hooks find a rulecast. install.sh (at the
  * repository root) installs it as `<install dir>/rulecast`, on the PATH, and only when the developer
  * runs it. No hook downloads or installs. The hooks run the project's `node_modules/.bin/rulecast`,
- * else `rulecast` on the PATH.
+ * else `rulecast` on the PATH, else install.sh's in its directory.
  */
 
 /** `<version>-<platform>-<arch>`: what a binary or its native files are built for. */
@@ -49,11 +49,23 @@ export function installDir(env: Env): string {
 }
 
 /**
- * The git hooks' command: the project's own rulecast, else the PATH's, the order the agent hooks
- * use. Git hooks run from the repository's root.
+ * install.sh's rulecast as the hook commands name it: installDir's rule in shell. The hooks' last
+ * resort, after the PATH: an agent started from the Dock or an IDE may run its hooks with a PATH
+ * that never read the shell's startup files, where install.sh put the directory. No single quotes,
+ * so it can go inside `sh -c '…'`.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template.
+export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"'
+
+/**
+ * The git hooks' command: the project's own rulecast, else the PATH's, else install.sh's in its
+ * directory, the order the agent hooks use. Git hooks run from the repository's root.
  */
 export function gitHookCommand(args: string): string {
-  return `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; exec rulecast ${args}' --`
+  return (
+    `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
+    `command -v rulecast >/dev/null 2>&1 && exec rulecast ${args}; exec ${INSTALLED_SH} ${args}' --`
+  )
 }
 
 /**

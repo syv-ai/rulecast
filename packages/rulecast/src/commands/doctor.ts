@@ -1,4 +1,3 @@
-import { existsSync, realpathSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -49,7 +48,12 @@ type Level = "ok" | "warning" | "error" | "skipped" | "info"
 
 /** Which rulecast the hooks run, and its version when it printed one. */
 function runsLabel(runs: HookRulecast): string {
-  const label = runs.via === "project" ? "node_modules/.bin/rulecast" : `rulecast on the PATH (${runs.path})`
+  const label =
+    runs.via === "project"
+      ? "node_modules/.bin/rulecast"
+      : runs.via === "path"
+        ? `rulecast on the PATH (${runs.path})`
+        : `install.sh's rulecast at ${runs.path}, which is not on the PATH`
   return runs.version === null ? label : `${label} ${runs.version}`
 }
 
@@ -62,16 +66,8 @@ function runsLabel(runs: HookRulecast): string {
 function updateRemedy(runs: HookRulecast, minimum: string): string {
   if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
   const install = isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
+  if (runs.via === "installed") return `install a newer one: ${install}`
   return `install a newer one: ${install}, or update the global npm install`
-}
-
-/** Whether two paths name the same file, links followed. False when either is missing. */
-function sameFile(a: string, b: string): boolean {
-  try {
-    return realpathSync(a) === realpathSync(b)
-  } catch {
-    return false
-  }
 }
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
@@ -268,24 +264,10 @@ export async function doctorCommand(
             ? `${file} — but the hooks are out of date; run rulecast install`
             : runs
               ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
-              : `${file} — but rulecast is not in node_modules/.bin or on the PATH, so no rules run. ` +
+              : `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
                 `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     io.stdout(line(level, adapter.label, detail))
   }
-  // install.sh's rulecast, in a directory the hooks' PATH lacks: installed, and never run. The
-  // usual cause is an agent started from a GUI or IDE that did not read the shell's startup files.
-  const installed = path.join(installDir(io.env), "rulecast")
-  if (existsSync(installed) && !found.some((entry) => entry.via === "path" && sameFile(entry.path, installed))) {
-    io.stdout(
-      line(
-        "info",
-        "rulecast",
-        `${installed} is installed, but ${path.dirname(installed)} is not on the PATH the hooks run with. ` +
-          `Add it to the PATH the agent starts with (. "${path.dirname(installed)}/env" in your shell's startup file), then restart the agent.`,
-      ),
-    )
-  }
-
   io.stdout("\ncache\n")
   io.stdout(`  home       ${home}\n`)
   io.stdout(`  project    ${stateDir}\n`)

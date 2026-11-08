@@ -139,10 +139,23 @@ describe("the committed hook command", () => {
     expect(result).toEqual({ code: 2, stdout: '{"x":1}\n', stderr: "blocked\n" })
   })
 
+  test("install.sh's rulecast in ~/.local/bin is found with HOME alone, as a GUI-started agent has it", async () => {
+    const root = await createProject({})
+    const home = path.join(root, "user")
+    mkdirSync(path.join(home, ".local", "bin"), { recursive: true })
+    writeFileSync(
+      path.join(home, ".local", "bin", "rulecast"),
+      "#!/bin/sh\ncat > /dev/null\necho '{\"installed\":true}'\n",
+    )
+    chmodSync(path.join(home, ".local", "bin", "rulecast"), 0o755)
+    expect(hook(root, { hook_event_name: "Stop" }, { HOME: home }).stdout).toBe('{"installed":true}\n')
+  })
+
   test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs }) => {
     const root = await createProject({})
-    const { pathDir } = lookupSetup(places, root)
-    const result = hook(root, { hook_event_name: "Stop" }, { PATH: `${pathDir}:/usr/bin:/bin` })
+    const { pathDir, installDir } = lookupSetup(places, root)
+    const env = { PATH: `${pathDir}:/usr/bin:/bin`, RULECAST_INSTALL_DIR: installDir }
+    const result = hook(root, { hook_event_name: "Stop" }, env)
     expect(result.stdout).toBe(`{"${runs}":true}\n`)
   })
 

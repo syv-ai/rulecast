@@ -99,7 +99,7 @@ In the same turn, ask every question on the page with your question tool, severa
 
 Only after the developer approves. First, install rulecast as approved, by running exactly the command the page showed. If the developer would rather run it themselves, give them the command and wait. Never install anything the page did not show.
 
-- **The standalone binary:** this downloads the binary for this machine and its checksum from the latest release, checks them, installs it as `~/.local/bin/rulecast`, and puts that directory on the PATH. It prints every shell startup file it changed:
+- **The standalone binary:** this downloads the binary for this machine and its checksum from the latest release, checks them, installs it as `~/.local/bin/rulecast`, and puts that directory on the PATH. Run by you, with no terminal to ask through, it installs those defaults and says so; it prints every shell startup file it changed:
 
   ```sh
   curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
@@ -109,7 +109,7 @@ Only after the developer approves. First, install rulecast as approved, by runni
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
 - **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is no devDependency. Everyone whose sessions run here installs it the same way.
 
-These are the install row's three options. The hooks look for the project's `node_modules/.bin/rulecast` first, then for `rulecast` on the PATH, where the standalone binary and a global install both are. Then, in each config's directory:
+These are the install row's three options. The hooks look for the project's `node_modules/.bin/rulecast` first, then for `rulecast` on the PATH, where the standalone binary and a global install both are, then in the standalone binary's install directory. Then, in each config's directory:
 
 ```sh
 rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--linters linter/eslint,linter/ruff] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]

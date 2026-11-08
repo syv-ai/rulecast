@@ -1,4 +1,4 @@
-import { exitUnlessUnrunnable, INSTALL_COMMAND } from "../../core/binary-home"
+import { exitUnlessUnrunnable, INSTALL_COMMAND, INSTALLED_SH } from "../../core/binary-home"
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
@@ -93,7 +93,7 @@ const SHELL_UNATTENDED =
  * with nothing installed (plan 21).
  *
  * Guarded, it runs the project's own rulecast, else one on the PATH (install.sh's or a global npm
- * install). A devDependency is a version the project committed to, so it wins for everyone. The
+ * install), else install.sh's in its directory (INSTALLED_SH), for an agent whose PATH lacks it. A devDependency is a version the project committed to, so it wins for everyone. The
  * command only looks: it never downloads or installs anything. A PATH rulecast that cannot execute
  * (126 or 127: a binary built for another machine, or a version-manager shim with no rulecast
  * behind it) counts as none. With none, it exits 0, after telling the user on
@@ -101,13 +101,14 @@ const SHELL_UNATTENDED =
  * not hold the agent only once per prompt.
  *
  * The project's own rulecast gets stdin through `exec`, untouched; past that the payload is read
- * once and piped to the PATH's. One string for every event, and it still contains
+ * once and piped to the PATH's, then to install.sh's. One string for every event, and it still contains
  * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
  */
 export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
   "P=$(cat); " +
   `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
+  `L=${INSTALLED_SH}; if [ -x "$L" ]; then printf '%s' "$P" | "$L" hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
   SHELL_UNATTENDED +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
   `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`

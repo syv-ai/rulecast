@@ -2,8 +2,11 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-/** Where a rulecast can be: the project's node_modules/.bin, or the PATH (install.sh's or npm's). */
-export type Place = "project" | "path"
+/**
+ * Where a rulecast can be: the project's node_modules/.bin, the PATH (install.sh's or npm's), or
+ * install.sh's directory when the PATH lacks it.
+ */
+export type Place = "project" | "path" | "installed"
 
 /**
  * The fixtures every lookup of rulecast is held to: the agent hooks' command, the git hooks'
@@ -14,6 +17,9 @@ export const LOOKUP_FIXTURES: { name: string; places: Place[]; runs: Place }[] =
   { name: "only the project's own rulecast", places: ["project"], runs: "project" },
   { name: "only one on the PATH", places: ["path"], runs: "path" },
   { name: "the project's own rulecast wins over one on the PATH", places: ["project", "path"], runs: "project" },
+  { name: "only install.sh's, off the PATH", places: ["installed"], runs: "installed" },
+  { name: "one on the PATH wins over install.sh's", places: ["path", "installed"], runs: "path" },
+  { name: "the project's own rulecast wins over install.sh's", places: ["project", "installed"], runs: "project" },
 ]
 
 export interface LookupSetup {
@@ -21,6 +27,8 @@ export interface LookupSetup {
   home: string
   /** A PATH directory, with a rulecast in it when "path" is one of the places. */
   pathDir: string
+  /** install.sh's directory (RULECAST_INSTALL_DIR), with a rulecast in it when "installed" is one of the places. */
+  installDir: string
   /** Where each place's rulecast is. */
   file: Record<Place, string>
 }
@@ -40,7 +48,7 @@ function stub(file: string, place: Place, root: string, version: string): void {
   chmodSync(file, 0o755)
 }
 
-/** A project, a cache home and a PATH directory, with a stub rulecast in each of `places`. */
+/** A project, a cache home, a PATH directory and an install directory, with a stub rulecast in each of `places`. */
 export function lookupSetup(
   places: Place[],
   root: string,
@@ -50,15 +58,17 @@ export function lookupSetup(
   const scratch = mkdtempSync(path.join(tmpdir(), "rulecast-lookup-"))
   const home = path.join(scratch, "home")
   const pathDir = path.join(scratch, "path")
+  const installDir = path.join(scratch, "install")
   mkdirSync(pathDir, { recursive: true })
   const file: Record<Place, string> = {
     project: path.join(root, "node_modules", ".bin", "rulecast"),
     path: path.join(pathDir, "rulecast"),
+    installed: path.join(installDir, "rulecast"),
   }
   for (const place of places) {
     stub(file[place], place, root, versions[place] ?? version)
   }
-  return { root, home, pathDir, file }
+  return { root, home, pathDir, installDir, file }
 }
 
 /**

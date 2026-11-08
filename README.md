@@ -127,7 +127,7 @@ No Node needed. Installs the latest release as `~/.local/bin/rulecast` and puts 
 curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
 ```
 
-The script checks the download against its checksum and prints every shell startup file it changed. For a fixed version, use the script attached to that release: `https://github.com/syv-ai/rulecast/releases/download/vX.Y.Z/install.sh`. `RULECAST_INSTALL_DIR` picks another directory; `RULECAST_NO_MODIFY_PATH=1` changes no startup file. Run it again to update.
+In a terminal it shows what it will do and asks to proceed, customize (directory, startup files) or cancel; with no terminal it uses the defaults. It checks the download against its checksum and prints every shell startup file it changed. For a fixed version, use the script attached to that release: `https://github.com/syv-ai/rulecast/releases/download/vX.Y.Z/install.sh`. Options go after `sh -s --`: `-y` asks nothing, `--install-dir DIR` picks another directory, `--no-modify-path` changes no startup file, `--help` lists them. Run it again to update.
 
 ### npm
 
@@ -137,7 +137,7 @@ For one pinned version for everyone (needs Node ≥ 20.12):
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
 
-Hooks run the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
+Hooks run the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the script's install directory (for an agent started from the Dock or an IDE, whose PATH may lack it). Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 ## Performance
 

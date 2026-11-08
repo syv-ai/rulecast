@@ -2,13 +2,14 @@
 # minimum_pre_commit_version: "3.2.0", and the README snippet does.
 #
 # language: system, running the rulecast the agent hooks run: the project's own
-# node_modules/.bin/rulecast, else rulecast on the PATH (install.sh's, or a global npm install).
+# node_modules/.bin/rulecast, else rulecast on the PATH (install.sh's, or a global npm install), else
+# install.sh's in its directory.
 # The entries are gitHookCommand() in packages/rulecast/src/core/binary-home.ts, and a test holds
 # them to it. A mirror repository that lets pre-commit install rulecast itself is issue #61.
 - id: rulecast
   name: rulecast
   description: Check staged files against the project's rulecast rules.
-  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; exec rulecast run' --
+  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; command -v rulecast >/dev/null 2>&1 && exec rulecast run; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run' --
   language: system
   pass_filenames: false
   always_run: true
@@ -18,7 +19,7 @@
   description: Check the commits being pushed.
   # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
   # from-ref on a branch's first push, which @{upstream} does not have.
-  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; exec rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
+  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; command -v rulecast >/dev/null 2>&1 && exec rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
   language: system
   pass_filenames: false
   always_run: true

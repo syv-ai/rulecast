@@ -10,7 +10,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 
 `rulecast run --files F...` judges files whole, like `--all-files`. From a hook manager, use the hooks below instead.
 
-rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH ([Install](../README.md#install)).
+rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the install script's directory ([Install](../README.md#install)).
 
 ## pre-commit
 
@@ -34,11 +34,11 @@ In `lefthook.yml`:
 pre-commit:
   jobs:
     - name: rulecast
-      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; exec rulecast run' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; command -v rulecast >/dev/null 2>&1 && exec rulecast run; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run' --
 pre-push:
   jobs:
     - name: rulecast
-      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; command -v rulecast >/dev/null 2>&1 && exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
 ## GitHub Actions

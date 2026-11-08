@@ -3,7 +3,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { ADAPTERS, adapterByName } from "../adapters"
-import { probeRulecast } from "../core/binary-home"
+import { installDir, probeRulecast } from "../core/binary-home"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
@@ -45,16 +45,16 @@ function isEmptyObject(value: unknown): boolean {
 
 /** A rulecast the hooks can run: where it was found, its path, and what `--version` printed. */
 export interface HookRulecast {
-  via: "project" | "path"
+  via: "project" | "path" | "installed"
   path: string
   version: string | null
 }
 
 /**
  * Every rulecast the hook command would consider, in the order it tries them: the project's
- * `node_modules/.bin/rulecast`, then the PATH. Executable is enough for the project's (the hook
- * execs it); one on the PATH that cannot run (126, 127, a binary for another machine) counts as
- * none, as in the hook. A project with none has hooks that are installed and run no rules, which
+ * `node_modules/.bin/rulecast`, then the PATH, then install.sh's in its directory (installDir).
+ * Executable is enough for the project's (the hook execs it); one that cannot run (126, 127, a
+ * binary for another machine) counts as none, as in the hook. A project with none has hooks that are installed and run no rules, which
  * `doctor` exists to catch.
  *
  * `env`'s PATH, without the bins of package runners (TEMPORARY_BIN): the setup docs run doctor as
@@ -77,6 +77,11 @@ export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal
   const onPath = await commandPath("rulecast", signal, PATH)
   const probe = onPath === null ? null : await probeRulecast(onPath, signal)
   if (onPath !== null && probe !== null) found.push({ via: "path", path: onPath, version: probe.version })
+  const installed = path.join(installDir(env), "rulecast")
+  if (await executable(installed)) {
+    const probe = await probeRulecast(installed, signal)
+    if (probe !== null) found.push({ via: "installed", path: installed, version: probe.version })
+  }
   return found
 }
 

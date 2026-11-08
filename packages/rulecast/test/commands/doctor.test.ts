@@ -1,6 +1,5 @@
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import path from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -264,26 +263,26 @@ describe("rulecast doctor", () => {
     )
   })
 
-  /**
-   * doctor with a stub rulecast in each of `places`, in a cache home of its own, and install.sh's
-   * directory at `installDir` (an empty one by default, so this machine's own install stays out).
-   */
-  async function doctorWith(
-    places: Place[],
-    settings: Record<string, unknown> = {},
-    versions = {},
-    installDir = mkdtempSync(path.join(tmpdir(), "rulecast-install-dir-")),
-  ) {
+  /** doctor with a stub rulecast in each of `places`, in a cache home and an install directory of its own. */
+  async function doctorWith(places: Place[], settings: Record<string, unknown> = {}, versions = {}) {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")], settings), "src/x.ts": "" })
     const setup = lookupSetup(places, root, versions)
-    const env = { RULECAST_HOME: setup.home, RULECAST_INSTALL_DIR: installDir, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    const env = {
+      RULECAST_HOME: setup.home,
+      RULECAST_INSTALL_DIR: setup.installDir,
+      PATH: `${setup.pathDir}:/usr/bin:/bin`,
+    }
     expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
     return { ...(await runCli(root, ["doctor"], "", env)), setup }
   }
 
   test.each(LOOKUP_FIXTURES)("doctor names the rulecast the hooks run: $name", async ({ places, runs }) => {
     const { stdout, setup } = await doctorWith(places)
-    const label = { project: "node_modules/.bin/rulecast", path: `rulecast on the PATH (${setup.file.path})` }[runs]
+    const label = {
+      project: "node_modules/.bin/rulecast",
+      path: `rulecast on the PATH (${setup.file.path})`,
+      installed: `install.sh's rulecast at ${setup.file.installed}, which is not on the PATH`,
+    }[runs]
     expect(stdout).toContain(`ok       Claude Code — .claude/settings.json — runs ${label} 0.8.2\n`)
   })
 
@@ -310,30 +309,14 @@ describe("rulecast doctor", () => {
     expect(newer.stdout).toContain(
       `older than minimum_rulecast_version 99.0.0; install a newer one: ${pinnedInstallCommand("99.0.0")}, or update the global npm install\n`,
     )
+    // install.sh's, off the PATH: the install command alone.
+    const installed = await doctorWith(["installed"], { minimum_rulecast_version: "0.8.0" }, { installed: "0.1.0" })
+    expect(installed.stdout).toContain(
+      `older than minimum_rulecast_version 0.8.0; install a newer one: ${INSTALL_COMMAND}\n`,
+    )
     // A devDependency is updated where it came from.
     const local = await doctorWith(["project"], { minimum_rulecast_version: "0.8.0" }, { project: "0.1.0" })
     expect(local.stdout).toContain("older than minimum_rulecast_version 0.8.0; update @syv-ai/rulecast in package.json")
-  })
-
-  test("install.sh's rulecast in a directory the PATH lacks is named, with how to add it", async () => {
-    const installDir = mkdtempSync(path.join(tmpdir(), "rulecast-install-dir-"))
-    writeFileSync(path.join(installDir, "rulecast"), "#!/bin/sh\necho 0.8.2\n")
-    chmodSync(path.join(installDir, "rulecast"), 0o755)
-    const { stdout } = await doctorWith(["project"], {}, {}, installDir)
-    expect(stdout).toContain(
-      `info     rulecast — ${path.join(installDir, "rulecast")} is installed, but ${installDir} is not on the PATH the hooks run with. ` +
-        `Add it to the PATH the agent starts with (. "${installDir}/env" in your shell's startup file), then restart the agent.\n`,
-    )
-    // On the PATH, it is the one the hooks run: nothing to say.
-    const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]), "src/x.ts": "" })
-    const setup = lookupSetup(["path"], root)
-    const env = {
-      RULECAST_HOME: setup.home,
-      RULECAST_INSTALL_DIR: setup.pathDir,
-      PATH: `${setup.pathDir}:/usr/bin:/bin`,
-    }
-    expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
-    expect((await runCli(root, ["doctor"], "", env)).stdout).not.toContain("is not on the PATH the hooks run with")
   })
 
   test("an install from before the Bash hooks names what is missing, and install fixes it", async () => {
@@ -367,9 +350,12 @@ describe("rulecast doctor", () => {
     })
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
+    // The install directory is this machine's ~/.local/bin: the doctor here runs with the real HOME.
+    expect(result.stdout).toMatch(
+      /warning {2}Claude Code — \.claude\/settings\.json — but rulecast is not in node_modules\/\.bin, on the PATH or in \/.+\/\.local\/bin, so no rules run\. /,
+    )
     expect(result.stdout).toContain(
-      `warning  Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin or on the PATH, so no rules run. ` +
-        `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
+      `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
     )
     // A warning, not an error: the installation is wrong, not broken beyond use.
     expect(result.code).toBe(0)
