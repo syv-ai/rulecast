@@ -64,15 +64,11 @@ const byWeekAndRule = (a: { week: string; rule: string }, b: { week: string; rul
   a.week < b.week ? -1 : a.week > b.week ? 1 : a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0
 
 /**
- * Per week and rule: the records that ran it, and the finding lives first reported then. Counts
- * only records with `at > after` and lives with `firstAt > after` (`after` null: all): what is at
- * or before it is counted in the weekly summary already.
+ * Per week and rule: the records that ran it, and the finding lives first reported then. What is
+ * counted from the weekly summary instead is decided by file, never by time (log.ts): a record's
+ * time is taken before it is appended, and a clock can be wrong.
  */
-export function weekRows(
-  records: readonly FindingsRecord[],
-  lives: readonly FindingLife[],
-  after: string | null,
-): WeekRow[] {
+export function weekRows(records: readonly FindingsRecord[], lives: readonly FindingLife[]): WeekRow[] {
   const buckets = new Map<string, Bucket>()
   const bucket = (at: string, rule: string) => {
     const week = weekOf(at)
@@ -86,7 +82,6 @@ export function weekRows(
     return found
   }
   for (const record of records) {
-    if (after !== null && record.at <= after) continue
     for (const rule of rulesRun(record)) {
       const counted = bucket(record.at, rule)
       counted.runs++
@@ -94,7 +89,6 @@ export function weekRows(
     }
   }
   for (const life of lives) {
-    if (after !== null && life.firstAt <= after) continue
     const counted = bucket(life.firstAt, life.rule)
     counted.fired++
     const sessions = counted.files.get(life.file) ?? new Set()
@@ -121,7 +115,10 @@ export interface TrendWeek {
   fired: number
   /** fired * 100 / runs, one decimal; null when runs < TREND_MIN_RUNS. */
   firedPer100Runs: number | null
-  /** The data does not cover the whole week: it starts after the week's Monday, or ends before the next. */
+  /**
+   * The data does not cover the whole week: it starts after the week's Monday, ends before the next,
+   * or there is none (no rule has a row that week).
+   */
   partial: boolean
 }
 
@@ -139,7 +136,7 @@ export interface RuleTrend {
 export interface WeeklyTrend {
   /** The first instant the trend covers, or null with no data. */
   from: string | null
-  /** Records up to here are counted from the weekly summary, not the log; null when there is none. */
+  /** The newest record the weekly summary counts; null when there is none. */
   rolledUpTo: string | null
   rules: RuleTrend[]
 }
@@ -188,7 +185,11 @@ export function weeklyTrend(
   for (let week = firstWeek; week <= lastWeek; week = addWeeks(week, 1)) weekList.push(week)
 
   const fromWeek = weekOf(from)
+  // A week no rule has a row in has no data at all: the log rotated past it while nothing kept a
+  // summary, or nothing ran. Its zeros are not counts.
+  const withData = new Set(kept.map((row) => row.week))
   const partial = (week: string) =>
+    !withData.has(week) ||
     (week === fromWeek && Date.parse(from) > startOf(week)) ||
     (window.last !== null && Date.parse(window.last) < startOf(addWeeks(week, 1)))
 

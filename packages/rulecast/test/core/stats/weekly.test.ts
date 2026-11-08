@@ -60,7 +60,7 @@ describe("weekRows", () => {
       record("2026-10-06T10:00:00.000Z", { s: "s2", found: ["b"] }),
     ]
     const lives = derive(records)
-    const rows = weekRows(records, lives, null)
+    const rows = weekRows(records, lives)
     expect(rows).toEqual([
       {
         week: "2026-09-28",
@@ -84,25 +84,6 @@ describe("weekRows", () => {
     // a twice and the guard's g: the guard ran nothing, but its finding is a life.
     expect(rows[0]!.fired).toBe(3)
   })
-
-  test("weekRows leaves out records and lives at or before after", () => {
-    const records = [
-      record("2026-10-01T10:00:00.000Z", { found: ["a"] }),
-      record("2026-10-01T11:00:00.000Z", { found: ["a", "b"] }),
-    ]
-    const rows = weekRows(records, derive(records), "2026-10-01T10:00:00.000Z")
-    expect(rows).toEqual([
-      {
-        week: "2026-09-28",
-        rule: RULE,
-        runs: 1,
-        sessions: 1,
-        fired: 1,
-        files: { [FILE]: 1 },
-        first: "2026-10-01T11:00:00.000Z",
-      },
-    ])
-  })
 })
 
 describe("weeklyTrend", () => {
@@ -118,9 +99,29 @@ describe("weeklyTrend", () => {
     expect(trend.rules.map((rule) => rule.rule)).toEqual([RULE])
     expect(trend.rules[0]!.weeks).toEqual([
       { week: "2026-09-28", runs: 40, sessions: 1, fired: 3, firedPer100Runs: 7.5, partial: false },
-      { week: "2026-10-05", runs: 0, sessions: 0, fired: 0, firedPer100Runs: null, partial: false },
+      // No rule has a row in 10-05: there is no data, so its zeros are marked partial.
+      { week: "2026-10-05", runs: 0, sessions: 0, fired: 0, firedPer100Runs: null, partial: true },
       { week: "2026-10-12", runs: 19, sessions: 1, fired: 1, firedPer100Runs: null, partial: true },
     ])
+  })
+
+  test("a week another rule ran in is a real zero, not partial", () => {
+    const trend = weeklyTrend(
+      [
+        row("2026-09-28", { runs: 40, fired: 3 }),
+        row("2026-10-05", { rule: "other", runs: 25 }),
+        row("2026-10-12", { runs: 19, fired: 1 }),
+      ],
+      window("2026-10-14T00:00:00.000Z"),
+    )
+    expect(trend.rules[0]!.weeks[1]).toEqual({
+      week: "2026-10-05",
+      runs: 0,
+      sessions: 0,
+      fired: 0,
+      firedPer100Runs: null,
+      partial: false,
+    })
   })
 
   test("weeklyTrend sums rows of the same week and rule", () => {

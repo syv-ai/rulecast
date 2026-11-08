@@ -143,7 +143,11 @@ function weeklyLines(weekly: StatsDocument["weekly"]): string[] {
       out.push(`  ${rule.rule}: ${files.join(", ")}${more > 0 ? `, and ${more} more` : ""}`)
     }
   }
-  if (weekly.summary === "off" && weekly.from !== null) {
+  if (weekly.summary === "off" && weekly.rolledUpTo !== null) {
+    out.push(
+      `the weekly summary is off: weeks up to ${weekly.rolledUpTo.slice(0, 10)} come from the summary written while it was on, later ones from the log`,
+    )
+  } else if (weekly.summary === "off" && weekly.from !== null) {
     out.push(
       `the weekly summary is off: the trend covers only the log, from ${weekly.from.slice(0, 10)}. stats.weekly_summary: true in ${CONFIG_FILE} keeps ${WEEKLY_KEEP_WEEKS} weeks`,
     )
@@ -238,7 +242,8 @@ export async function statsCommand(
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const home = cacheHome(io.env)
   const stateDir = projectStateDir(home, root)
-  const { records, skipped, rotated } = await readFindingsLog(stateDir)
+  const log = await readFindingsLog(stateDir)
+  const { records, skipped, rotated } = log
   const rollup = await readWeeklyRollup(stateDir)
   if (records.length === 0 && rollup.rows.length === 0 && values.format === "terminal") {
     io.stdout("no findings recorded yet (the log fills as agent hooks run)\n")
@@ -266,8 +271,14 @@ export async function statsCommand(
   const neverFired = detectorRules.filter((rule) => !fired.has(rule)).sort()
   const runs = ruleRuns(windowed)
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
-  // What is at or before the summary's cutoff is counted from the summary only.
-  const trend = weeklyTrend([...rollup.rows, ...weekRows(records, lives, rollup.rolledUpTo)], {
+  // A log file is counted from the summary or from the log, whole, never both: `findings.1.jsonl` is
+  // in the summary only after a rotation that summarised it and then did not rename (a crash).
+  const counted =
+    log.rotatedFingerprint !== null && rollup.logs.has(log.rotatedFingerprint)
+      ? records.slice(log.rotatedRecords)
+      : null
+  const live = counted === null ? weekRows(records, lives) : weekRows(counted, derive(counted))
+  const trend = weeklyTrend([...rollup.rows, ...live], {
     since: from ?? null,
     last: lastRecord ?? rollup.rolledUpTo,
     rolledUpTo: rollup.rolledUpTo,

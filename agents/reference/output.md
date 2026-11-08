@@ -459,8 +459,8 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
 | `weekly` | Per rule, its findings by week, to see over weeks whether it fires less. Always present. See [Reading the trend](#reading-the-trend). |
 | `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
-| `weekly.rolledUpTo` | Records up to this time are counted from the weekly summary, the rest from the log. `null` when there is no summary. |
-| `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds. A summary written before it was turned off is still read. |
+| `weekly.rolledUpTo` | The newest record the weekly summary counts. `null` when there is no summary. The summary counts whole log files, the ones rotations dropped, and the trend adds the log's own files to it, so a record is counted once whatever its time. |
+| `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds, plus any summary written while it was on. |
 | `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
@@ -492,7 +492,7 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `weeks[].sessions` | Sessions with such a check that week. |
 | `weeks[].fired` | Findings of the rule first reported that week. |
 | `weeks[].firedPer100Runs` | `fired * 100 / runs`, to one decimal. `null` when the rule ran fewer than 20 times that week: below that, one finding moves the rate by more than 5. |
-| `weeks[].partial` | The data does not cover the whole week: it starts after the week's Monday, or ends before the next one. The current week is always partial. |
+| `weeks[].partial` | The data does not cover the whole week: it starts after the week's Monday, or ends before the next one. The current week is always partial. A week with no data at all (no rule has a check that week) is partial too, and its zeros mean no data, not no findings: rulecast recorded nothing, or the log rotated past that week while the summary was off. |
 | `recurringFiles` | Files the rule fired on in 3 or more sessions, most sessions first, then by path; at most 10. |
 | `recurringFileCount` | How many files are recurring, the ones past the first 10 included. |
 
@@ -514,7 +514,7 @@ To decide whether a rule is working, look at:
 
 What the trend cannot tell you:
 
-- **Why the rate changed.** There is no control group. A change of model, a new section in the agent's instructions, different work (other files, other kinds of task) or an edit to the rule itself all move the rate. The log does not record rule versions: look at the config's history for edits to the rule.
+- **Why the rate changed.** There is no control group. A change of model, a new section in the agent's instructions, different work (other files, other kinds of task) or an edit to the rule itself all move the rate. The log does not record rule versions: check `git log -p .rulecast-config.yaml` for edits to the rule.
 - **More than the log holds, unless the summary is on.** With `stats.weekly_summary` off, the trend reaches back only to the log's first record: about a week for a busy loop.
 - **Anything about rules with too few findings:** under 10 in the window (`enoughFindings: false`), or a week with under 20 checks (`firedPer100Runs: null`).
 - **Sessions on other machines or in other checkouts.** The log is per machine and per checkout. Each worktree has its own, so a loop that works in fresh worktrees leaves each week's data spread over logs that `stats` in the main checkout never reads.
@@ -526,6 +526,6 @@ The counts come from `findings.jsonl` in the project's directory of the rulecast
 
 The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. That is about a week for a loop that writes a record every 20 seconds around the clock, and weeks for a developer working by hand. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
 
-With `stats.weekly_summary: true` in the config (off by default), a hook that is about to drop the old `findings.1.jsonl` first adds that file's per-week counts to `findings-weekly.jsonl` beside it, which keeps 26 weeks. It holds rule ids, file paths, weeks and counts only. It is written once per rotation, only for the config that turned it on (configs below it do not inherit the key), and on a best-effort basis like the log. `rulecast clean` removes it too.
+With `stats.weekly_summary: true` in the config (off by default), a hook that is about to drop the old `findings.1.jsonl` first adds that file's per-week counts to `findings-weekly.jsonl` beside it, which keeps 26 weeks. It holds rule ids, file paths, weeks and counts only, and marks each log file it counted with a hash of the file's first line, so no file is counted twice. It is written once per rotation, only for the config that turned it on (configs below it do not inherit the key), and on a best-effort basis like the log. `rulecast clean` removes it too.
 
 Its format is internal and can change in any release. The `stats` JSON above is the contract.

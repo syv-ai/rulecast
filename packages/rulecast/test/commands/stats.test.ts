@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
 import { STATS_SCHEMA_VERSION } from "../../src/adapters/cli/contract"
 import { parseSince } from "../../src/commands/stats"
-import { FINDINGS_LOG, FINDINGS_WEEKLY, type FindingsRecord } from "../../src/core/stats/log"
+import { FINDINGS_LOG, FINDINGS_LOG_ROTATED, FINDINGS_WEEKLY, type FindingsRecord } from "../../src/core/stats/log"
 import type { WeekRow } from "../../src/core/stats/weekly"
 
 import { runCli } from "../helpers/cli"
@@ -49,10 +50,15 @@ async function projectWithLog(records: FindingsRecord[]): Promise<string> {
   return root
 }
 
-/** A weekly summary whose newest record was at `to`. */
-async function withSummary(root: string, to: string, rows: Partial<WeekRow>[]): Promise<void> {
+/** The weekly summary's mark for a log file: a hash of its first line (core/stats/log.ts). */
+const fingerprint = (records: FindingsRecord[]) =>
+  createHash("sha256").update(JSON.stringify(records[0])).digest("hex").slice(0, 16)
+
+/** A weekly summary counted from the log file `log` (a fingerprint), whose newest record was at `to`. */
+async function withSummary(root: string, to: string, rows: Partial<WeekRow>[], log = "an-older-file"): Promise<void> {
   const lines = rows.map((row) => ({
     v: 1,
+    log,
     to,
     rule: RULE,
     runs: 0,
@@ -298,8 +304,9 @@ describe("rulecast stats", () => {
     }
   })
 
-  test("a trend across weeks reads the summary and the live log, and counts the shared week once", async () => {
-    // One live record before the cutoff: the summary counted it already.
+  test("a trend across weeks adds the summary to the live log, which is counted whole whatever its times", async () => {
+    // A live record older than the summary's newest: the hook that won a rotation writes its record
+    // after the others (the rotation race). It is in no summarised file, so it is counted.
     const before = record("2026-09-30T11:00:00.000Z", "edit", [["z1", RULE, "delivered"]])
     const root = await projectWithLog([before, ...RECORDS])
     await withSummary(root, SUMMARY_TO, SUMMARY_ROWS)
@@ -308,11 +315,35 @@ describe("rulecast stats", () => {
     expect(document.weekly.from).toBe("2026-09-23T08:00:00.000Z")
     expect(weekOfRule(document, RULE)).toEqual([
       { week: "2026-09-21", runs: 30, sessions: 1, fired: 3, firedPer100Runs: 10, partial: true },
-      { week: "2026-09-28", runs: 9, sessions: 2, fired: 3, firedPer100Runs: null, partial: false },
+      { week: "2026-09-28", runs: 10, sessions: 2, fired: 4, firedPer100Runs: null, partial: false },
       { week: "2026-10-05", runs: 2, sessions: 1, fired: 0, firedPer100Runs: null, partial: true },
     ])
-    // The table counts the log as before: z1 is in it.
     expect(document.rules.find((rule: { rule: string }) => rule.rule === RULE).fired).toBe(2)
+  })
+
+  test("a findings.1.jsonl the summary has counted already (a crash before the rename) is not counted twice", async () => {
+    const rotated = [record("2026-09-29T10:00:00.000Z", "edit", [["r1", RULE, "delivered"]], "s0")]
+    const root = await projectWithLog(RECORDS)
+    await writeFile(
+      path.join(stateDirFor(root), FINDINGS_LOG_ROTATED),
+      rotated.map((item) => `${JSON.stringify(item)}\n`).join(""),
+    )
+    await withSummary(root, rotated[0]!.at, [{ week: "2026-09-28", runs: 1, fired: 1 }], fingerprint(rotated))
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    // The summary's 1 run, and the current file's 4 in that week; not .1's run a second time.
+    expect(weekOfRule(document, RULE)?.[0]).toMatchObject({ week: "2026-09-28", runs: 5, fired: 2 })
+    // The table still reads the whole log.
+    expect(document.rules.find((rule: { rule: string }) => rule.rule === RULE).fired).toBe(2)
+  })
+
+  test("with the summary off but one written while it was on, stats says where the weeks come from", async () => {
+    const root = await projectWithLog(RECORDS)
+    await withSummary(root, SUMMARY_TO, SUMMARY_ROWS)
+    const terminal = (await runCli(root, ["stats"])).stdout
+    expect(terminal).toContain(
+      "the weekly summary is off: weeks up to 2026-09-30 come from the summary written while it was on, later ones from the log",
+    )
+    expect(terminal).not.toContain("covers only the log")
   })
 
   test("with the summary on, stats says nothing about it and reports summary: on", async () => {

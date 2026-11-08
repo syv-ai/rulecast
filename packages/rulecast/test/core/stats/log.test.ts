@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -42,9 +43,14 @@ const OLD_ROTATED: FindingsRecord[] = [
   record("2026-09-24T11:00:00.000Z"),
   { ...record("2026-09-29T10:00:00.000Z"), s: "s2" },
 ]
+/** The summary's mark for a log file: a hash of its first line. */
+const fingerprint = (records: FindingsRecord[]) =>
+  createHash("sha256").update(JSON.stringify(records[0])).digest("hex").slice(0, 16)
+const OLD_LOG = fingerprint(OLD_ROTATED)
 const OLD_ROWS = [
   {
     v: 1,
+    log: OLD_LOG,
     to: "2026-09-29T10:00:00.000Z",
     week: "2026-09-21",
     rule: "rule",
@@ -56,6 +62,7 @@ const OLD_ROWS = [
   },
   {
     v: 1,
+    log: OLD_LOG,
     to: "2026-09-29T10:00:00.000Z",
     week: "2026-09-28",
     rule: "rule",
@@ -173,7 +180,13 @@ describe("findings log", () => {
   })
 
   test("no log is no records", async () => {
-    expect(await readFindingsLog(await dir())).toEqual({ records: [], skipped: 0, rotated: false })
+    expect(await readFindingsLog(await dir())).toEqual({
+      records: [],
+      skipped: 0,
+      rotated: false,
+      rotatedFingerprint: null,
+      rotatedRecords: 0,
+    })
   })
 
   test.skipIf(process.getuid?.() === 0)(
@@ -252,8 +265,9 @@ describe("the weekly summary", () => {
     const rotated = await readFile(path.join(stateDir, FINDINGS_LOG_ROTATED), "utf8")
     expect(rotated).toBe(line(record("2026-10-01T00:00:00.000Z")).repeat(full))
     expect(await readWeeklyRollup(stateDir)).toEqual({
-      rows: OLD_ROWS.map(({ v: _, to: __, ...row }) => row),
+      rows: OLD_ROWS.map(({ v: _, log: __, to: ___, ...row }) => row),
       rolledUpTo: "2026-09-29T10:00:00.000Z",
+      logs: new Set([OLD_LOG]),
       skipped: 0,
     })
   })
@@ -284,23 +298,53 @@ describe("the weekly summary", () => {
     expect(await summaryLines(stateDir)).toEqual(OLD_ROWS)
   })
 
-  test("weeks older than 26 are pruned", async () => {
+  test("weeks more than 26 before now are pruned", async () => {
     const stateDir = await dir()
     const old = (week: string) => ({
       ...OLD_ROWS[1]!,
+      log: `old-${week}`,
       to: `${week}T01:00:00.000Z`,
       week,
       first: `${week}T01:00:00.000Z`,
     })
-    // 27 and 26 weeks before 2026-09-28, the week of the dropped file's newest record.
+    // 27 and 26 weeks before the week of now, 2026-09-28.
     await writeFile(
       path.join(stateDir, FINDINGS_WEEKLY),
       [old("2026-03-23"), old("2026-03-30")].map((row) => `${JSON.stringify(row)}\n`).join(""),
     )
     const dropped = path.join(stateDir, FINDINGS_LOG_ROTATED)
     await writeFile(dropped, OLD_ROTATED.map(line).join(""))
-    await rollUpDropped(stateDir, dropped, () => {})
+    await rollUpDropped(stateDir, dropped, () => {}, new Date("2026-09-30T00:00:00.000Z"))
     expect((await summaryLines(stateDir)).map((row) => row.week)).toEqual(["2026-03-30", "2026-09-21", "2026-09-28"])
+  })
+
+  test("a file whose records are older than the summary's newest is still counted (the rotation race)", async () => {
+    // The hook that wins the rotate lock writes its record after the rollup, while others append
+    // newer ones to the file that becomes .1: a time cutoff then dropped the winner's record.
+    const stateDir = await dir()
+    const dropped = path.join(stateDir, FINDINGS_LOG_ROTATED)
+    await writeFile(dropped, OLD_ROTATED.map(line).join(""))
+    await rollUpDropped(stateDir, dropped, () => {})
+    const older = [{ ...record("2026-09-29T09:00:00.000Z"), s: "winner" }]
+    await writeFile(dropped, older.map(line).join(""))
+    await rollUpDropped(stateDir, dropped, () => {})
+    const lines = await summaryLines(stateDir)
+    expect(lines).toHaveLength(3)
+    expect(lines[2]).toMatchObject({ log: fingerprint(older), week: "2026-09-28", runs: 1, sessions: 1 })
+  })
+
+  test("a future-dated record neither freezes the summary nor prunes real weeks", async () => {
+    const stateDir = await dir()
+    const dropped = path.join(stateDir, FINDINGS_LOG_ROTATED)
+    const now = new Date("2026-10-02T00:00:00.000Z")
+    // A clock a year ahead.
+    await writeFile(dropped, [...OLD_ROTATED, record("2027-10-01T00:00:00.000Z")].map(line).join(""))
+    await rollUpDropped(stateDir, dropped, () => {}, now)
+    const next = [record("2026-09-30T00:00:00.000Z"), record("2026-10-01T00:00:00.000Z")]
+    await writeFile(dropped, next.map(line).join(""))
+    await rollUpDropped(stateDir, dropped, () => {}, now)
+    const weeks = (await summaryLines(stateDir)).map((row) => `${row.week} ${row.runs}`)
+    expect(weeks).toEqual(["2026-09-21 2", "2026-09-28 1", "2027-09-27 1", "2026-09-28 2"])
   })
 
   test("hooks that reach the cap together summarise once", async () => {
@@ -341,6 +385,6 @@ describe("the weekly summary", () => {
   })
 
   test("no summary is no rows", async () => {
-    expect(await readWeeklyRollup(await dir())).toEqual({ rows: [], rolledUpTo: null, skipped: 0 })
+    expect(await readWeeklyRollup(await dir())).toEqual({ rows: [], rolledUpTo: null, logs: new Set(), skipped: 0 })
   })
 })
