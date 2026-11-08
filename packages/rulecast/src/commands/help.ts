@@ -246,6 +246,16 @@ export const COMMANDS: CommandHelp[] = [
     flags: [["--detector <kind>", "Only this detector kind; repeatable"]],
   },
   {
+    name: "binary",
+    synopsis: "rulecast binary install | rulecast binary path",
+    summary: "Put this standalone binary where the agent hooks and git hooks find it",
+    flags: [],
+    notes: [
+      "install copies the running binary into the cache home and makes it the current one; path prints",
+      "the current one and its version, or none. Under node, install prints the command that installs it.",
+    ],
+  },
+  {
     name: "hook",
     synopsis: "rulecast hook <adapter>",
     summary: "Answer an agent hook on stdin (the agent runs this, not you)",

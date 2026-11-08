@@ -116,6 +116,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
 | `rulecast clean` | Delete the cache |
 | `rulecast warm` | Build detector caches ahead of time |
+| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
 | `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
 `rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.

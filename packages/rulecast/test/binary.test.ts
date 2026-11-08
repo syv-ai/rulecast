@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -133,6 +133,39 @@ describe.runIf(canRun)("standalone binary", () => {
     const written = statSync(napi).mtimeMs
     expect(run().stdout).toContain("app/b.ts:1 logs.")
     expect(statSync(napi).mtimeMs).toBe(written)
+  }, 60_000)
+
+  test("binary install places it in the cache and links it as current, and a second install is a no-op", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "rulecast-binary-home-"))
+    const env = { ...process.env, RULECAST_HOME: home }
+    const install = () => spawnSync(binary, ["binary", "install"], { env, encoding: "utf8" })
+    const placed = path.join(home, "bin", VERSION, "rulecast")
+    const first = install()
+    expect(first.stderr).toBe("")
+    expect(first.stdout).toContain(`rulecast: installed ${VERSION} at ${placed}`)
+    expect(first.status).toBe(0)
+    expect(statSync(placed).mode & 0o111).not.toBe(0)
+    expect(realpathSync(path.join(home, "bin", "rulecast"))).toBe(realpathSync(placed))
+    // The native files are unpacked at install, not at the first edit.
+    expect(readdirSync(path.join(home, "native", `${VERSION}-${process.platform}-${process.arch}`)).sort()).toEqual([
+      "napi.node",
+      "python.so",
+    ])
+    const second = install()
+    expect(second).toMatchObject({ status: 0, stdout: `rulecast: ${VERSION} is already installed at ${placed}\n` })
+    const where = spawnSync(binary, ["binary", "path"], { env, encoding: "utf8" })
+    expect(where).toMatchObject({ status: 0, stdout: `${realpathSync(placed)} ${VERSION}\n` })
+  }, 60_000)
+
+  test("binary install into an unwritable home exits 2 and names the directory", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "rulecast-binary-home-"))
+    writeFileSync(path.join(home, "bin"), "")
+    const result = spawnSync(binary, ["binary", "install"], {
+      env: { ...process.env, RULECAST_HOME: home },
+      encoding: "utf8",
+    })
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain(`could not install into ${path.join(home, "bin")}`)
   }, 60_000)
 
   /**
