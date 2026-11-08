@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs rulecast's standalone binary, the way uv's installer does.
+# Installs rulecast's standalone binary.
 #
 #   curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
 #
@@ -11,9 +11,9 @@
 # the other, and installs it as <dir>/rulecast. Then it makes sure <dir> is on your PATH: it writes
 # <dir>/env and sources it from your shell's startup files, and prints every file it changed.
 #
-#   RULECAST_INSTALL_DIR     where to install (default: $XDG_BIN_HOME, else ~/.local/bin)
-#   RULECAST_NO_MODIFY_PATH  set to 1 to change no startup file
-#   RULECAST_DOWNLOAD_URL    where the release assets are (for mirrors)
+# In a terminal it first shows what it will do and asks: proceed, customize or cancel. With no
+# terminal to ask through (CI, an agent, a container build) it uses the defaults and says so. Pass
+# options after `sh -s --`, as in `curl -LsSf … | sh -s -- -y`; run with --help to list them.
 #
 # Linux and macOS, x64 and arm64. Anywhere else: npm install -g @syv-ai/rulecast.
 set -u
@@ -26,14 +26,156 @@ fail() {
   exit 1
 }
 
-# Appends the line that sources <dir>/env to $1, unless it is already there.
-source_from() {
-  if [ -f "$1" ] && grep -qxF "$env_line" "$1"; then return 0; fi
-  printf '\n# Added by the rulecast installer\n%s\n' "$env_line" >>"$1" || fail "could not write $1"
-  changed="$changed $1"
+usage() {
+  cat <<EOF
+Installs rulecast $VERSION's standalone binary and puts it on your PATH.
+
+usage: install.sh [options]      (piped: curl -LsSf <url> | sh -s -- [options])
+
+  -y, --yes               Ask nothing: install with the defaults and any options given
+      --install-dir DIR   Install as DIR/rulecast (default: \$XDG_BIN_HOME, else ~/.local/bin)
+      --no-modify-path    Change no shell startup file
+  -h, --help              Print this and exit
+
+Each has an environment variable, for setups that can't pass options: RULECAST_YES=1,
+RULECAST_INSTALL_DIR=DIR, RULECAST_NO_MODIFY_PATH=1. RULECAST_DOWNLOAD_URL points at a mirror
+of the release assets.
+EOF
+}
+
+# $1 with $HOME shown as ~, for messages.
+tilde() {
+  case "$1" in
+    "${HOME:-/nonexistent}" | "${HOME:-/nonexistent}"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Why $1 can't be the install directory, or nothing. It goes into the startup files inside double
+# quotes, under $HOME through $HOME, so only the rest has to be safe there.
+dir_problem() {
+  case "$1" in
+    /*) ;;
+    *)
+      printf 'the install directory must be an absolute path, not %s' "$1"
+      return
+      ;;
+  esac
+  case "$1" in
+    "${HOME:-/nonexistent}"/*) rest="${1#"$HOME"}" ;;
+    *) rest="$1" ;;
+  esac
+  case "$rest" in
+    *[\"\$\`\\]*) printf 'the install directory cannot contain ", $, ` or \\: %s' "$1" ;;
+  esac
+}
+
+# Sets `shown` (the install directory as the startup files name it) and `env_line` (the line that
+# sources its env file) for the current `dir`.
+naming() {
+  case "$dir" in
+    "${HOME:-/nonexistent}"/*) shown="\$HOME${dir#"$HOME"}" ;;
+    *) shown="$dir" ;;
+  esac
+  env_line=". \"$shown/env\""
+}
+
+on_path() {
+  case ":${PATH:-}:" in
+    *:"$dir":*) return 0 ;;
+  esac
+  return 1
+}
+
+# The startup files the install will add the source line to, one per line: none when the
+# directory is on the PATH already, PATH changes are off, or there is no HOME.
+planned_files() {
+  if on_path || [ "$modify_path" != 1 ] || [ -z "${HOME:-}" ]; then return 0; fi
+  for file in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+    case "$file" in
+      "$HOME/.bashrc" | "$HOME/.bash_profile") [ -f "$file" ] || continue ;;
+      "$HOME/.zshrc")
+        case "${SHELL:-}" in */zsh) ;; *) [ -f "$file" ] || continue ;; esac
+        ;;
+    esac
+    if [ -f "$file" ] && grep -qxF "$env_line" "$file"; then continue; fi
+    printf '%s\n' "$file"
+  done
+}
+
+summary() {
+  naming
+  printf '\nrulecast %s will be installed:\n\n  binary   %s/rulecast\n' "$VERSION" "$(tilde "$dir")"
+  files="$(planned_files)"
+  if on_path; then
+    printf '  PATH     already has %s\n' "$(tilde "$dir")"
+  elif [ "$modify_path" != 1 ]; then
+    printf '  PATH     no startup file changed; you add %s yourself\n' "$(tilde "$dir")"
+  elif [ -n "$files" ]; then
+    list=""
+    while IFS= read -r file; do list="${list:+$list, }$(tilde "$file")"; done <<EOF
+$files
+EOF
+    printf '  PATH     add %s in %s\n' "$(tilde "$dir")" "$list"
+  else
+    printf '  PATH     your startup files already add %s\n' "$(tilde "$dir")"
+  fi
+}
+
+customize() {
+  while :; do
+    printf 'Install rulecast where? [%s]: ' "$(tilde "$dir")"
+    read -r answer <&3 || answer=""
+    case "$answer" in
+      "") answer="$dir" ;;
+      "~") answer="$HOME" ;;
+      "~"/*) answer="$HOME/${answer#"~/"}" ;;
+    esac
+    problem="$(dir_problem "$answer")"
+    if [ -z "$problem" ]; then
+      dir="${answer%/}"
+      break
+    fi
+    say "$problem"
+  done
+  naming
+  if on_path || [ -z "${HOME:-}" ]; then return 0; fi
+  printf 'Add %s to your PATH in your shell startup files? [Y/n]: ' "$(tilde "$dir")"
+  read -r answer <&3 || answer=""
+  case "$answer" in
+    n | N | no | No | NO) modify_path=0 ;;
+    *) modify_path=1 ;;
+  esac
 }
 
 main() {
+  yes=""
+  [ "${RULECAST_YES:-}" = 1 ] && yes=1
+  dir="${RULECAST_INSTALL_DIR:-}"
+  modify_path=1
+  [ "${RULECAST_NO_MODIFY_PATH:-}" = 1 ] && modify_path=0
+  # Where the questions are read from: the terminal, also when the script itself arrives on stdin.
+  # RULECAST_INSTALL_TTY replaces it, for tests.
+  tty="${RULECAST_INSTALL_TTY:-/dev/tty}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -y | --yes) yes=1 ;;
+      --install-dir)
+        [ $# -ge 2 ] || fail "--install-dir needs a directory"
+        dir="$2"
+        shift
+        ;;
+      --install-dir=*) dir="${1#*=}" ;;
+      --no-modify-path) modify_path=0 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) fail "unknown option $1 (run with --help to list them)" ;;
+    esac
+    shift
+  done
+
   command -v curl >/dev/null 2>&1 || fail "curl is needed to download rulecast; nothing was installed"
   if command -v shasum >/dev/null 2>&1; then
     sha256="shasum -a 256"
@@ -52,25 +194,37 @@ main() {
     *) fail "no standalone binary for $(uname -sm); install it with npm: npm install -g @syv-ai/rulecast" ;;
   esac
 
-  dir="${RULECAST_INSTALL_DIR:-}"
   [ -n "$dir" ] || dir="${XDG_BIN_HOME:-}"
   if [ -z "$dir" ]; then
-    [ -n "${HOME:-}" ] || fail "HOME is not set; set RULECAST_INSTALL_DIR to where rulecast should go"
+    [ -n "${HOME:-}" ] || fail "HOME is not set; pass --install-dir to say where rulecast should go"
     dir="$HOME/.local/bin"
   fi
-  case "$dir" in
-    /*) ;;
-    *) fail "the install directory must be an absolute path, not $dir" ;;
-  esac
-  # <dir> as the startup files name it: under $HOME, through $HOME, so a shared dotfile works
-  # anywhere. What is written literally goes inside double quotes there.
-  case "$dir" in
-    "${HOME:-/nonexistent}"/*) shown="\$HOME${dir#"$HOME"}" literal="${dir#"$HOME"}" ;;
-    *) shown="$dir" literal="$dir" ;;
-  esac
-  case "$literal" in
-    *[\"\$\`\\]*) fail "the install directory cannot contain \", \$, \` or \\: $dir" ;;
-  esac
+  problem="$(dir_problem "$dir")"
+  [ -z "$problem" ] || fail "$problem"
+  dir="${dir%/}"
+  naming
+
+  if [ -z "$yes" ] && (: <"$tty") 2>/dev/null; then
+    exec 3<"$tty"
+    while :; do
+      summary
+      printf '\n1) Proceed (default)\n2) Customize\n3) Cancel\n> '
+      read -r choice <&3 || choice=3
+      case "$choice" in
+        "" | 1) break ;;
+        2) customize ;;
+        3)
+          say "cancelled; nothing was installed"
+          exit 1
+          ;;
+        *) say "answer 1, 2 or 3" ;;
+      esac
+    done
+    exec 3<&-
+    printf '\n'
+  elif [ -z "$yes" ]; then
+    say "no terminal to ask through: installing with the defaults (--help lists the options)"
+  fi
   base="${RULECAST_DOWNLOAD_URL:-https://github.com/syv-ai/rulecast/releases/download/v$VERSION}"
   asset="rulecast-$target"
 
@@ -104,7 +258,6 @@ main() {
   part=""
   say "installed rulecast $installed at $dir/rulecast"
 
-  env_line=". \"$shown/env\""
   cat >"$dir/env" <<EOF || fail "could not write $dir/env"
 #!/bin/sh
 # Written by the rulecast installer: puts $shown on the PATH, once.
@@ -118,28 +271,23 @@ EOF
     printf '%s\n' "$dir" >>"$GITHUB_PATH" || fail "could not write $GITHUB_PATH"
     say "added $dir to \$GITHUB_PATH"
   fi
-  case ":${PATH:-}:" in
-    *:"$dir":*) return 0 ;;
-  esac
-  if [ "${RULECAST_NO_MODIFY_PATH:-}" = 1 ] || [ -z "${HOME:-}" ]; then
+  if on_path; then return 0; fi
+  if [ "$modify_path" != 1 ] || [ -z "${HOME:-}" ]; then
     say "$dir is not on your PATH. Add this line to your shell's startup file: $env_line"
     return 0
   fi
-
-  changed=""
-  source_from "$HOME/.profile"
-  [ -f "$HOME/.bashrc" ] && source_from "$HOME/.bashrc"
-  [ -f "$HOME/.bash_profile" ] && source_from "$HOME/.bash_profile"
-  case "${SHELL:-}" in
-    */zsh) source_from "$HOME/.zshrc" ;;
-    *) [ -f "$HOME/.zshrc" ] && source_from "$HOME/.zshrc" ;;
-  esac
+  files="$(planned_files)"
+  if [ -n "$files" ]; then
+    while IFS= read -r file; do
+      printf '\n# Added by the rulecast installer\n%s\n' "$env_line" >>"$file" || fail "could not write $file"
+      say "added $dir to the PATH in $file"
+    done <<EOF
+$files
+EOF
+  fi
   case "${SHELL:-}" in
     */fish) say "for fish, run: fish_add_path $dir" ;;
   esac
-  if [ -n "$changed" ]; then
-    for file in $changed; do say "added $dir to the PATH in $file"; done
-  fi
   say "to use rulecast in this shell now, run: $env_line"
   return 0
 }

@@ -74,6 +74,10 @@ function install(
     body?: string
     /** The whole .sha256 file, in place of a correct one. */
     shaFile?: string
+    /** What the developer types, one answer per line: the script then has a terminal to ask through. */
+    answers?: string
+    /** Options after `sh install.sh`. */
+    args?: string[]
   } = {},
 ): Run {
   const assets = scratch("release")
@@ -95,12 +99,15 @@ function install(
   if (options.uname) script(stubs, "uname", `echo "${options.uname}"`)
   const home = options.home ?? scratch("home")
   const tmp = scratch("tmp")
-  const result = spawnSync(options.shell ?? "/bin/sh", [SCRIPT], {
+  const tty = options.answers === undefined ? {} : { RULECAST_INSTALL_TTY: path.join(scratch("tty"), "answers") }
+  if (tty.RULECAST_INSTALL_TTY) writeFileSync(tty.RULECAST_INSTALL_TTY, options.answers!)
+  const result = spawnSync(options.shell ?? "/bin/sh", [SCRIPT, ...(options.args ?? [])], {
     env: {
       HOME: home,
       TMPDIR: tmp,
       PATH: `${options.pathFirst ? `${options.pathFirst}:` : ""}${stubs}:${toolsDir(options.omit)}`,
       SHELL: "/bin/bash",
+      ...tty,
       ...options.env,
     },
     encoding: "utf8",
@@ -309,5 +316,99 @@ describe("install.sh", () => {
     expect(spawnSync("/bin/sh", ["-n", SCRIPT]).status).toBe(0)
     const dash = spawnSync("/bin/sh", ["-c", "command -v dash"], { encoding: "utf8" }).stdout.trim()
     if (dash) expect(install({ shell: dash }).status).toBe(0)
+  })
+})
+
+describe("install.sh, asking", () => {
+  test("shows what it will do, and Enter proceeds", () => {
+    const run = install({ answers: "\n" })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toContain("rulecast 0.9.0 will be installed:")
+    expect(run.stdout).toContain("  binary   ~/.local/bin/rulecast\n")
+    expect(run.stdout).toContain("  PATH     add ~/.local/bin in ~/.profile\n")
+    expect(run.stdout).toContain("1) Proceed (default)\n2) Customize\n3) Cancel\n")
+    expect(existsSync(path.join(bin(run.home), "rulecast"))).toBe(true)
+  })
+
+  test("Cancel installs nothing, and so does a terminal that closes", () => {
+    for (const answers of ["3\n", ""]) {
+      const run = install({ answers })
+      expect(run.status).toBe(1)
+      expect(run.stdout).toContain("cancelled; nothing was installed")
+      expect(readdirSync(run.home)).toEqual([])
+    }
+  })
+
+  test("Customize asks the directory and the PATH, then shows the plan again", () => {
+    const dir = scratch("custom")
+    const run = install({ answers: `2\n${dir}\nn\n1\n` })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toContain("Install rulecast where? [~/.local/bin]: ")
+    expect(run.stdout).toContain("in your shell startup files? [Y/n]: ")
+    expect(run.stdout).toContain(`  binary   ${dir}/rulecast\n`)
+    expect(run.stdout).toContain("  PATH     no startup file changed; you add")
+    expect(existsSync(path.join(dir, "rulecast"))).toBe(true)
+    expect(readdirSync(run.home)).toEqual([])
+  })
+
+  test("Customize asks again for a directory it can't use, and takes ~", () => {
+    const run = install({ answers: "2\nrelative/bin\n~/tools\n\n\n" })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toContain("must be an absolute path, not relative/bin")
+    expect(existsSync(path.join(run.home, "tools", "rulecast"))).toBe(true)
+    expect(count(read(path.join(run.home, ".profile")), '. "$HOME/tools/env"')).toBe(1)
+  })
+
+  test("an answer that is not 1, 2 or 3 is asked again", () => {
+    const run = install({ answers: "4\n1\n" })
+    expect(run.status).toBe(0)
+    expect(run.stdout).toContain("answer 1, 2 or 3")
+  })
+
+  test("-y, --yes and RULECAST_YES=1 ask nothing, even with a terminal", () => {
+    for (const options of [{ args: ["-y"] }, { args: ["--yes"] }, { env: { RULECAST_YES: "1" } }]) {
+      const run = install({ answers: "3\n", ...options })
+      expect(run.status, JSON.stringify(options)).toBe(0)
+      expect(run.stdout).not.toContain("1) Proceed")
+      expect(run.stdout).not.toContain("no terminal")
+    }
+  })
+
+  test("with no terminal it installs the defaults and says so", () => {
+    const run = install()
+    expect(run.status).toBe(0)
+    expect(run.stdout).toContain("no terminal to ask through: installing with the defaults (--help lists the options)")
+  })
+})
+
+describe("install.sh options", () => {
+  test("--install-dir DIR and --install-dir=DIR", () => {
+    const a = scratch("a")
+    const b = scratch("b")
+    expect(install({ args: ["-y", "--install-dir", a] }).status).toBe(0)
+    expect(install({ args: ["-y", `--install-dir=${b}/`] }).status).toBe(0)
+    expect(existsSync(path.join(a, "rulecast"))).toBe(true)
+    expect(existsSync(path.join(b, "rulecast"))).toBe(true)
+  })
+
+  test("--no-modify-path changes no startup file", () => {
+    const run = install({ args: ["--no-modify-path"] })
+    expect(run.status).toBe(0)
+    expect(readdirSync(run.home)).toEqual([".local"])
+  })
+
+  test("--help prints the options and does nothing else, curl or not", () => {
+    const run = install({ args: ["--help"], omit: ["curl"] })
+    expect(run.status).toBe(0)
+    for (const option of ["-y, --yes", "--install-dir DIR", "--no-modify-path", "-h, --help", "sh -s -- [options]"]) {
+      expect(run.stdout).toContain(option)
+    }
+    expect(readdirSync(run.home)).toEqual([])
+  })
+
+  test("an unknown option, or --install-dir with no directory, exits 1", () => {
+    expect(install({ args: ["--force"] })).toMatchObject({ status: 1 })
+    expect(install({ args: ["--force"] }).stderr).toContain("unknown option --force")
+    expect(install({ args: ["--install-dir"] }).stderr).toContain("--install-dir needs a directory")
   })
 })
