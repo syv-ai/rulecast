@@ -301,6 +301,8 @@ export interface InitReport {
     /** Where new conventions go, from this config or one above it; null when none names it. */
     conventions: { path: string; from: string } | null
     llm: { model: string | null; provider: string }
+    /** stats.weekly_summary: the page's "Weekly stats summary" item is on when this is. */
+    stats: { weeklySummary: boolean }
   }
   changes: { file: string; created: boolean; commit: boolean; summary: string; content: string }[]
   notes: string[]
@@ -467,6 +469,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
       exists: config !== null,
       conventions: await conventionsFor(root),
       llm: { model: own.llm.model, provider: own.llm.provider },
+      stats: { weeklySummary: own.stats.weeklySummary },
     },
     changes: changes.map(({ file, created, commit, summary, content }) => ({
       file,

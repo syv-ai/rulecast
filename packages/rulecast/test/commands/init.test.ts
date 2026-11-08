@@ -153,6 +153,10 @@ describe("rulecast init", () => {
     expect(parse(dry.changes[0]!.content)).toMatchObject({ stats: { weekly_summary: true } })
     const { report: without } = await report(root, "--no-agents", "--dry-run")
     expect(without.changes).toEqual([])
+    // The page's weekly summary item reads the config's setting.
+    expect(without.config.stats).toEqual({ weeklySummary: false })
+    await init(root, "--no-agents", "--weekly-summary")
+    expect((await report(root, "--no-agents", "--dry-run")).report.config.stats).toEqual({ weeklySummary: true })
   })
 
   test("the JSON report writes < as \\u003c, so a closing script tag cannot end a page's data block", async () => {
@@ -180,6 +184,7 @@ describe("rulecast init", () => {
       exists: true,
       conventions: { path: "docs/c.md", from: CONFIG_FILE },
       llm: { model: null, provider: "claude-code" },
+      stats: { weeklySummary: false },
     })
   })
 

@@ -21,7 +21,7 @@ rulecast init --dry-run --format json
 It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports:
 
 - the stack, the docs and their headings, and the agents it detects;
-- `committers`: how many people committed in the last six months, bots left out (null when there is no history);
+- `committers`: how many people committed in the last six months, bots left out (null when there are none, or in a shallow clone);
 - `packages`: declared workspaces and top-level directories with a manifest, each with its stack and whether it has its own agent doc or config;
 - `sessions`: directories below this one where an agent's settings already sit (`.claude/`);
 - `gitHooks`: pre-commit, lefthook or husky, and whether rulecast is already in each;
@@ -36,6 +36,7 @@ Then read what needs judgement:
 - The docs: `README`, `AGENTS.md` or `CLAUDE.md`, `CONTRIBUTING`, anything under `docs/`. Note the conventions they state that code could show, such as "never edit `src/client/` by hand".
 - Your own memory of this project, if you keep one (in Claude Code, `~/.claude/projects/<project>/memory/`). Corrections the developer made before are the best candidates for rules.
 - The script of any hook with `modifies: null`, named in `runs`, to see whether it changes files.
+- Whether rulecast is installed: `rulecast binary path` names an installed standalone binary, and `node_modules/.bin/rulecast` is a devDependency. Note whether there is a `package.json`, and whether the project pins its tools there.
 
 ## 3. Defaults and questions
 
@@ -44,7 +45,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Item | Default from | Default | Becomes a question when |
 |---|---|---|---|
 | Who it's for | `committers.count` | 2 or more: a team. 1: solo. Hooks `--scope shared` either way: with one committer the shared file affects only them, and the next person to join gets the hooks. Say they can keep them personal with "*N*: personal" | `committers` is null |
-| Install | a `package.json` at the git top | a devDependency with the project's package manager; else a global install, said in the footer | never |
+| Install | `rulecast binary path`, `node_modules/.bin/rulecast`, and whether `package.json` pins the project's tools | the one already installed, if any; else the devDependency when `package.json` pins the tools, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
 | Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
 | Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
 | Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
@@ -56,10 +57,11 @@ Each item on the page gets a default from what you found. Only the items below m
 | Catalog rules | `catalog.rules` with `matching` above 0, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
 | Stated conventions and memory corrections | your reading | each on: drafted after setup, one at a time | never |
 | Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
+| Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never: it is an item, and it never blocks approval |
 | **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended |
 | **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
-<!-- TODO(plan 22): add the "Weekly stats summary" row here: off by default, an item, never a question. -->
+The weekly stats summary row says what turning it on keeps: 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside this config's findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. It applies to this config only.
 
 A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off.
 
@@ -74,7 +76,7 @@ Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON
 - `questions`: the open questions from step 3, with their options and why they are asked.
 - `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, generated and vendored paths, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
 - `rules`: hook rules, catalog rules, generated and vendored paths, each with its state.
-- `decisions`: the setup rows from step 3. `found` is what step 2 showed, or null. `value` is the default. `why` says what it means here. `detail` shows exactly what changes: run the dry run again with the default flags and take the file contents from its `changes[].content`.
+- `decisions`: the setup rows from step 3. `found` is what step 2 showed, or null. `value` is the default. `why` says what it means here. `detail` shows exactly what changes: run the dry run again with the default flags and take the file contents from its `changes[].content`. For the install row, `detail` is the exact command step 6 will run (for the standalone binary, the whole command shown there).
 - `candidates`: the stated conventions and memory corrections to draft as rules after setup.
 - `footer`: what to say ("**go ahead**, or name numbers to strike or change"), which questions need an answer either way, and what the developer does themselves, such as CI.
 
@@ -101,13 +103,12 @@ Only after the developer approves. First, install rulecast as approved, by runni
 
   Everyone whose sessions run here installs it the same way. Tell the developer.
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
+- **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is neither a devDependency nor the installed binary. Everyone whose sessions run here installs it the same way.
 
-<!-- TODO(plan 23): add the standalone binary to the install row's options here, as plan 23's step 5 text says. -->
-
-The page's install row lists these as its options. Then, in each config's directory:
+These are the install row's three options. The hooks look in that order: the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Then, in each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
 ```
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.

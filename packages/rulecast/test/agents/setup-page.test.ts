@@ -20,12 +20,13 @@ const render = (data: unknown): string => runInNewContext(`${renderScript}\nrend
 const count = (html: string, needle: string) => html.split(needle).length - 1
 
 describe("setup page", () => {
-  test("the sample renders two questions, five numbered rules, six rows, two candidates and the footer", () => {
+  test("the sample renders two questions, five numbered rules, seven rows, two candidates and the footer", () => {
     const html = render(sample)
     expect(html).toContain("rulecast for <b>tidewater</b>")
     expect(count(html, 'class="q"')).toBe(2)
     expect(count(html, '<div class="rule ')).toBe(5)
-    expect(count(html, '<details class="row')).toBe(6)
+    expect(count(html, '<details class="row')).toBe(7)
+    expect(html).toContain("off · say 14 to turn on")
     expect(count(html, '<div class="cand ')).toBe(2)
     expect(count(html, "state-default")).toBeGreaterThanOrEqual(6)
     expect(count(html, '<span class="tag">recommended</span>')).toBe(1)

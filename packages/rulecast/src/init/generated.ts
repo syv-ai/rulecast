@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { open } from "node:fs/promises"
 import path from "node:path"
 
+import { childEnv } from "../core/child-env"
 import { withoutInheritedGitEnv } from "../core/git"
 
 /**
@@ -99,7 +100,7 @@ export async function linguistAttributes(
   const stdout = await new Promise<string | null>((resolve) => {
     const child = spawn("git", ["check-attr", "--stdin", "-z", ...LINGUIST], {
       cwd: root,
-      env: withoutInheritedGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0" }),
+      env: withoutInheritedGitEnv({ ...childEnv(), GIT_OPTIONAL_LOCKS: "0" }),
     })
     const chunks: Buffer[] = []
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
