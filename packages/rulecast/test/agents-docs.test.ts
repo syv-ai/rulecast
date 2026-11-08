@@ -95,6 +95,14 @@ describe("agent docs", () => {
     expect(checked).toBeGreaterThan(0)
   })
 
+  test("SETUP.md and the setup page tell the agent to write < as the literal escape \\u003c", async () => {
+    // An edit that decodes the escape leaves "write every < as <", which tells the agent nothing.
+    for (const file of ["agents/SETUP.md", "agents/setup-page.html", "agents/CONVENTIONS.md"]) {
+      const text = await readFile(path.join(repoRoot, file), "utf8")
+      expect(text, file).toContain("\\u003c")
+    }
+  })
+
   test("repositoryPaths finds raw and blob URLs", () => {
     const text = [
       "Read https://raw.githubusercontent.com/syv-ai/rulecast/v0.2.0/agents/DRAFT-RULES.md and",

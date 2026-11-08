@@ -69,7 +69,7 @@ The loop answer decides the loop-safety pack (`rulecast add loop-safety`) and `R
 
 ## 4. Show the page and ask
 
-Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON in its `setup-data` block. Its head comment describes the fields, and how items are numbered (`n`) and marked (`state`). In that JSON, write every `<` inside a string as `<`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
+Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON in its `setup-data` block. Its head comment describes the fields, and how items are numbered (`n`) and marked (`state`). In that JSON, write every `<` inside a string as `\u003c`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
 
 - `questions`: the open questions from step 3, with their options and why they are asked.
 - `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, generated and vendored paths, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
