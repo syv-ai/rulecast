@@ -153,7 +153,7 @@ The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm cac
 
 ## Status
 
-0.9. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
+0.10. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
 
 Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 
