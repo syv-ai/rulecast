@@ -1,16 +1,16 @@
-import { execFile, spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { promisify } from "node:util"
 import { beforeAll, describe, expect, test } from "vitest"
 
+import { buildBinary } from "../scripts/build-binary"
+import { VERSION } from "../src/core/version"
 import { localConfig } from "./helpers/config"
 import { createRepo } from "./helpers/git"
 import { TEST_HOME } from "./helpers/home"
 
-const exec = promisify(execFile)
 const hasBun = spawnSync("bun", ["--version"], { encoding: "utf8" }).status === 0
 /**
  * A prebuilt binary needs no bun; without one, the describe builds its own and so needs bun.
@@ -33,11 +33,19 @@ const PY_RULE = {
   message: "{{file}}:{{line}} swallows an exception.",
 }
 
+const TS_RULE = {
+  id: "no-console-log",
+  name: "No console.log",
+  files: "\\.ts$",
+  detect: { "ast-grep": { language: "typescript", rule: { pattern: "console.log($A)" } } },
+  message: "{{file}}:{{line}} logs.",
+}
+
 /**
  * Spec §16's early risk: the standalone binary has to embed @ast-grep/napi's native module and
- * @ast-grep/lang-python's prebuilt parser. Both are loaded from absolute paths inside node_modules
- * under Node, so this proves bun's bundler rewrote them into the binary. The binary is built
- * outside the repository and run from a temp directory: nothing can resolve node_modules there.
+ * @ast-grep/lang-python's prebuilt parser. Under Node both are loaded from absolute paths inside
+ * node_modules. The binary is built outside the repository and run from a temp directory, but
+ * this machine still has those paths, so the test below also checks that none is baked in.
  */
 describe.runIf(canRun)("standalone binary", () => {
   let binary: string
@@ -53,10 +61,9 @@ describe.runIf(canRun)("standalone binary", () => {
       binary = prebuilt
       return
     }
-    await exec("pnpm", ["build"])
     const out = await mkdtemp(path.join(tmpdir(), "rulecast-binary-"))
     binary = path.join(out, "rulecast")
-    await exec("bun", ["build", path.resolve("dist/cli.js"), "--compile", "--outfile", binary])
+    await buildBinary(binary)
   }, 180_000)
 
   test("matches a Python ast-grep rule with no node_modules in reach", async () => {
@@ -72,5 +79,40 @@ describe.runIf(canRun)("standalone binary", () => {
     expect(result.stderr).not.toContain("Cannot find module")
     expect(result.stdout).toContain("app/a.py:4 swallows an exception.")
     expect(result.status).toBe(1)
+  }, 60_000)
+
+  /**
+   * The binary is tested on the machine that built it, where any path baked in at build time still
+   * exists. 0.8.0 shipped binaries that looked for the Python parser in the build machine's
+   * node_modules, and every ast-grep rule failed everywhere else. No absolute path from here may be
+   * in the binary.
+   */
+  test("carries no path from the machine that built it", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../../..")
+    expect(readFileSync(binary).includes(Buffer.from(repoRoot))).toBe(false)
+  })
+
+  test("runs TypeScript and Python ast-grep rules, unpacking the parser into the cache home once", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "rulecast-binary-home-"))
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([PY_RULE, TS_RULE]),
+      "app/a.py": "def f():\n    try:\n        g()\n    except ValueError:\n        pass\n",
+      "app/b.ts": "console.log(1)\n",
+    })
+    const run = () =>
+      spawnSync(binary, ["run", "--all-files", "--format", "agent"], {
+        cwd: root,
+        env: { ...process.env, RULECAST_HOME: home },
+        encoding: "utf8",
+      })
+    const first = run()
+    expect(first.stdout).toContain("app/a.py:4 swallows an exception.")
+    expect(first.stdout).toContain("app/b.ts:1 logs.")
+    expect(first.status).toBe(1)
+    const native = path.join(home, "native", `${VERSION}-${process.platform}-${process.arch}`)
+    expect(readdirSync(native)).toEqual(["python.so"])
+    const written = statSync(path.join(native, "python.so")).mtimeMs
+    expect(run().status).toBe(1)
+    expect(statSync(path.join(native, "python.so")).mtimeMs).toBe(written)
   }, 60_000)
 })

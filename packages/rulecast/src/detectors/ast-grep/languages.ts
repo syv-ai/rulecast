@@ -2,8 +2,8 @@
  * The languages a rule may name. `@ast-grep/napi` builds in five; Python comes from a separate
  * package whose prebuilt parser is registered at runtime (see load.ts). `tsx` also handles `.jsx`.
  *
- * A dynamic language's specifier is written out inside a thunk, never resolved from a variable:
- * a bundler has to see the literal to embed the prebuilt parser in a standalone binary.
+ * A dynamic language is loaded inside a thunk, only when an ast-grep rule needs one. The standalone
+ * binary never loads the package: it embeds the parser itself (see embedded.ts).
  */
 export const LANGUAGES = {
   css: { builtin: "Css" },
