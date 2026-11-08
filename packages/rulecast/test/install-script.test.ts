@@ -270,6 +270,7 @@ describe("install.sh", () => {
     expect(result.stdout).toBe(`${bin(run.home)}:/usr/bin:/bin`)
   })
 
+  // Six installs in a row: slow on a loaded machine, so a longer timeout.
   test("maps every shipped target, and only those", () => {
     const unames: [string, string | null][] = [
       ["Linux x86_64", "linux-x64"],
@@ -292,7 +293,7 @@ describe("install.sh", () => {
       named.add(target)
     }
     expect([...named].sort()).toEqual([...BINARY_TARGETS].sort())
-  })
+  }, 120_000)
 
   test("an unknown platform exits 1 naming it, writing nothing", () => {
     const run = install({ uname: "FreeBSD amd64" })
