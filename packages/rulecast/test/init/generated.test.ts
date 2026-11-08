@@ -1,14 +1,14 @@
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test, vi } from "vitest"
 
 import { readSourceFile } from "../../src/core/detection/per-rule"
 import { allFiles } from "../../src/core/git"
 import {
-  attributedFiles,
   attributePatternRegex,
   filesOverride,
   findGenerated,
+  linguistAttributes,
   readHead,
 } from "../../src/init/generated"
 import { createRepo } from "../helpers/git"
@@ -32,13 +32,18 @@ function find(files: Record<string, string>, covered: ((file: string) => boolean
 }
 
 /** findGenerated over a git repository written from `files`, with git resolving .gitattributes. */
-async function findInRepo(files: Record<string, string>) {
+async function findInRepo(files: Record<string, string>, untracked: Record<string, string> = {}) {
   const root = await createRepo(files)
+  for (const [file, text] of Object.entries(untracked)) {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true })
+    await writeFile(path.join(root, file), text)
+  }
+  const all = await allFiles(root)
   return findGenerated({
-    files: await allFiles(root),
+    files: all,
     readHead: (file) => readHead(root, file),
     read: (file) => readSourceFile(root, file),
-    attributed: (attribute) => attributedFiles(root, attribute),
+    attributed: async (attribute) => (await linguistAttributes(root, all))[attribute],
     covered: null,
   })
 }
@@ -46,7 +51,8 @@ async function findInRepo(files: Record<string, string>) {
 /** What git says carries linguist-generated when .gitattributes holds only `pattern`. */
 async function gitSelects(root: string, pattern: string): Promise<string[]> {
   await writeFile(path.join(root, ".gitattributes"), `${pattern} linguist-generated\n`)
-  return (await attributedFiles(root, "linguist-generated")).filter((file) => file !== ".gitattributes")
+  const files = (await allFiles(root)).filter((file) => file !== ".gitattributes")
+  return (await linguistAttributes(root, files))["linguist-generated"]
 }
 
 describe("findGenerated", () => {
@@ -146,6 +152,16 @@ describe("findGenerated", () => {
     ])
   })
 
+  test("a generated directory that is not committed yet is found through its attribute", async () => {
+    const { generated } = await findInRepo(
+      { ".gitattributes": "client/** linguist-generated\n", "main.ts": "x\n" },
+      { "client/index.ts": "export {}\n", "client/sdk/users.ts": "export {}\n" },
+    )
+    expect(generated).toEqual([
+      { path: "client/**", kind: "pattern", files: 2, evidence: ".gitattributes linguist-generated" },
+    ])
+  })
+
   test("the pattern converter selects what git check-attr does", async () => {
     // The reviewer's fixture (tmp/review-24/glob/repo), and the forms named in the review.
     const files = [
@@ -173,9 +189,17 @@ describe("findGenerated", () => {
       "src/foo.js",
       "x/a/b.ts",
       "x/b.ts",
+      "acb",
+      "axb",
     ]
     const root = await createRepo(Object.fromEntries(files.map((file) => [file, "x\n"])))
+    // Classes the converter does not take: the pattern is not offered, its files fall back.
+    for (const pattern of ["lib/c[]1].ts", "lib/c[!]1].ts", "lib/c[[:digit:]].ts", "a[/]b", "lib/c[1.ts"]) {
+      expect(attributePatternRegex(pattern), pattern).toBeNull()
+    }
+    expect(attributePatternRegex("a[!x]b")).toBe("^(.*/)?a[^/x]b$")
     for (const pattern of [
+      "a[!x]b",
       "docs/*",
       "**/foo.js",
       "a/**/b",

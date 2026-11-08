@@ -1,7 +1,8 @@
+import { spawn } from "node:child_process"
 import { open } from "node:fs/promises"
 import path from "node:path"
 
-import { git } from "../core/git"
+import { withoutInheritedGitEnv } from "../core/git"
 
 /**
  * Generated and vendored paths, as init offers them for the `generated-code` and `vendored-code`
@@ -55,7 +56,7 @@ export interface FindInput {
   /** Reads a project-relative file; null when missing. */
   read(file: string): Promise<string | null>
   /**
-   * The project's files that carry the attribute, as git resolves .gitattributes (attributedFiles):
+   * The project's files that carry the attribute, as git resolves .gitattributes (linguistAttributes):
    * negation, last match wins and every glob form are git's own.
    */
   attributed(attribute: LinguistAttribute): Promise<readonly string[]>
@@ -81,22 +82,43 @@ export async function readHead(root: string, file: string): Promise<string | nul
   }
 }
 
+const LINGUIST: readonly LinguistAttribute[] = ["linguist-generated", "linguist-vendored"]
+
 /**
- * The files under `root` (tracked and untracked, not ignored) that git says carry `attribute`, set
- * or `=true`. Empty when git can't say.
+ * Which of `files` (project-relative, as allFiles lists them) carry each linguist attribute, set or
+ * `=true`, as `git check-attr` resolves .gitattributes: one call for every file. A pathspec query
+ * (`ls-files ':(attr:…)'`) would miss files in untracked directories, which git prunes before it
+ * looks at their attributes. Empty lists when git can't say.
  */
-export async function attributedFiles(root: string, attribute: LinguistAttribute): Promise<string[]> {
-  const result = await git(root, [
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    `:(attr:${attribute})`,
-    `:(attr:${attribute}=true)`,
-  ])
-  return result.ok ? [...new Set(result.stdout.split("\0").filter(Boolean))].sort() : []
+export async function linguistAttributes(
+  root: string,
+  files: readonly string[],
+): Promise<Record<LinguistAttribute, string[]>> {
+  const found: Record<LinguistAttribute, string[]> = { "linguist-generated": [], "linguist-vendored": [] }
+  if (files.length === 0) return found
+  const stdout = await new Promise<string | null>((resolve) => {
+    const child = spawn("git", ["check-attr", "--stdin", "-z", ...LINGUIST], {
+      cwd: root,
+      env: withoutInheritedGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0" }),
+    })
+    const chunks: Buffer[] = []
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+    child.on("error", () => resolve(null))
+    child.on("close", (code) => resolve(code === 0 ? Buffer.concat(chunks).toString("utf8") : null))
+    child.stdin.on("error", () => {})
+    child.stdin.end(`${files.join("\0")}\0`)
+  })
+  if (stdout === null) return found
+  // -z output: path NUL attribute NUL value NUL, for each path and attribute.
+  const fields = stdout.split("\0")
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const [file, attribute, value] = [fields[index]!, fields[index + 1]!, fields[index + 2]!]
+    if ((value === "set" || value === "true") && LINGUIST.includes(attribute as LinguistAttribute)) {
+      found[attribute as LinguistAttribute].push(file)
+    }
+  }
+  for (const attribute of LINGUIST) found[attribute].sort()
+  return found
 }
 
 /** The marker line of a generated file's header, or null. */
@@ -137,16 +159,16 @@ export function attributePatternRegex(pattern: string): string | null {
     } else if (char === "?") {
       out += "[^/]"
     } else if (char === "[") {
-      const close = body.indexOf("]", index + 2)
-      if (close === -1) {
-        out += "\\["
-        continue
-      }
-      const inner = body
-        .slice(index + 1, close)
-        .replace(/^!/, "^")
-        .replace(/\\/g, "\\\\")
-      out += `[${inner}]`
+      // Only plain classes: a "]" first, a POSIX class ([:alpha:]), a "/" or no closing "]" give
+      // null, and the pattern's files fall back to dirs and files.
+      const negated = body[index + 1] === "!"
+      const start = index + (negated ? 2 : 1)
+      const close = body.indexOf("]", start)
+      if (body[start] === "]" || close === -1) return null
+      const inner = body.slice(start, close)
+      if (inner.includes("[:") || inner.includes("/")) return null
+      // A negated class never matches "/": the pattern stays within one path segment.
+      out += `[${negated ? "^/" : ""}${inner.replace(/\\/g, "\\\\")}]`
       index = close
     } else if (char === "\\" && index + 1 < body.length) {
       out += literal(body[++index]!)

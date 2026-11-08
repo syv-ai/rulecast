@@ -19,10 +19,10 @@ import type { ConfigSettings, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
 import { type SetupFacts, setupFacts } from "../init/facts"
 import {
-  attributedFiles,
   type FoundPaths,
   filesOverride,
   findGenerated,
+  linguistAttributes,
   type OfferedPath,
   readHead,
 } from "../init/generated"
@@ -358,13 +358,19 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   // Paths are offered only for a rule the loaded catalog has: --generated and --vendored adopt it.
   const generatedRule = catalogRule(GENERATED_RULE)
   const vendoredRule = catalogRule(VENDORED_RULE)
+  let linguist: ReturnType<typeof linguistAttributes> | undefined
+  const linguistOnce = () => {
+    linguist ??= linguistAttributes(root, files)
+    return linguist
+  }
   const found: FoundPaths =
     generatedRule === null && vendoredRule === null
       ? { generated: [], vendored: [], notListed: { generated: 0, vendored: 0 } }
       : await findGenerated({
           files,
           readHead: (file) => readHead(root, file),
-          attributed: (attribute) => attributedFiles(root, attribute),
+          // One git check-attr for both attributes, asked for once.
+          attributed: async (attribute) => (await linguistOnce())[attribute],
           read,
           covered: generatedRule === null ? null : (file) => generatedRule.matches(file),
           coveredVendored: vendoredRule === null ? null : (file) => vendoredRule.matches(file),
