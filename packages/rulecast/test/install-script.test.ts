@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   chmodSync,
@@ -42,6 +42,30 @@ function toolsDir(omit: string[] = []): string {
   return dir
 }
 
+/**
+ * Runs a command without blocking: spawnSync would hold the test worker for every install, and a
+ * worker held that long misses vitest's own calls (Timeout calling "onTaskUpdate").
+ */
+function run(
+  command: string,
+  args: string[],
+  options: { env: NodeJS.ProcessEnv; encoding: "utf8" },
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env: options.env })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk
+    })
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk
+    })
+    child.on("error", reject)
+    child.on("close", (status) => resolve({ status, stdout, stderr }))
+  })
+}
+
 function script(dir: string, name: string, body: string): void {
   writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`)
   chmodSync(path.join(dir, name), 0o755)
@@ -59,7 +83,7 @@ interface Run {
  * Runs install.sh against a fake release of version 9.9.9 for this machine. `sha256` replaces the
  * published checksum; `curlExit` makes every download fail as a missing asset does (curl -f: 22).
  */
-function install(
+async function install(
   options: {
     env?: Record<string, string>
     home?: string
@@ -79,7 +103,7 @@ function install(
     /** Options after `sh install.sh`. */
     args?: string[]
   } = {},
-): Run {
+): Promise<Run> {
   const assets = scratch("release")
   const asset = `rulecast-${hostTarget()}`
   const body = options.body ?? `#!/bin/sh\n[ "$1" = --version ] && echo 9.9.9\n`
@@ -101,7 +125,7 @@ function install(
   const tmp = scratch("tmp")
   const tty = options.answers === undefined ? {} : { RULECAST_INSTALL_TTY: path.join(scratch("tty"), "answers") }
   if (tty.RULECAST_INSTALL_TTY) writeFileSync(tty.RULECAST_INSTALL_TTY, options.answers!)
-  const result = spawnSync(options.shell ?? "/bin/sh", [SCRIPT, ...(options.args ?? [])], {
+  const result = await run(options.shell ?? "/bin/sh", [SCRIPT, ...(options.args ?? [])], {
     env: {
       HOME: home,
       TMPDIR: tmp,
@@ -121,40 +145,40 @@ const SOURCE_LINE = '. "$HOME/.local/bin/env"'
 const count = (text: string | null, line: string) => (text ?? "").split("\n").filter((l) => l === line).length
 
 describe("install.sh", () => {
-  test("installs only after the checksum passes, and leaves nothing behind", () => {
-    const good = install()
+  test("installs only after the checksum passes, and leaves nothing behind", async () => {
+    const good = await install()
     expect(good.status, good.stderr).toBe(0)
     expect(good.stdout).toContain(`installed rulecast 9.9.9 at ${bin(good.home)}/rulecast`)
     expect(spawnSync(path.join(bin(good.home), "rulecast"), ["--version"], { encoding: "utf8" }).stdout).toBe("9.9.9\n")
     expect(readdirSync(bin(good.home)).sort()).toEqual(["env", "rulecast"])
     expect(readdirSync(good.tmp)).toEqual([])
 
-    const tampered = install({ sha256: "0".repeat(64) })
+    const tampered = await install({ sha256: "0".repeat(64) })
     expect(tampered.status).toBe(1)
     expect(tampered.stderr).toContain("does not match its checksum")
     expect(existsSync(bin(tampered.home))).toBe(false)
     expect(readdirSync(tampered.tmp)).toEqual([])
 
-    const missing = install({ curlExit: 22 })
+    const missing = await install({ curlExit: 22 })
     expect(missing.status).toBe(1)
     expect(missing.stderr).toContain("could not download https://github.com/syv-ai/rulecast/releases/download/v")
     expect(existsSync(bin(missing.home))).toBe(false)
     expect(readdirSync(missing.tmp)).toEqual([])
   })
 
-  test("a checksum file that is empty or not a hash installs nothing", () => {
+  test("a checksum file that is empty or not a hash installs nothing", async () => {
     for (const shaFile of ["", "not a hash\n", "  rulecast\n"]) {
-      const run = install({ shaFile })
+      const run = await install({ shaFile })
       expect(run.status, JSON.stringify(shaFile)).toBe(1)
       expect(run.stderr).toContain("checksum file is not a SHA-256 hash")
       expect(existsSync(bin(run.home))).toBe(false)
     }
   })
 
-  test("a binary that does not run here replaces nothing", () => {
+  test("a binary that does not run here replaces nothing", async () => {
     const home = scratch("home")
-    expect(install({ home }).status).toBe(0)
-    const broken = install({ home, body: "#!/bin/sh\nexit 1\n" })
+    expect((await install({ home })).status).toBe(0)
+    const broken = await install({ home, body: "#!/bin/sh\nexit 1\n" })
     expect(broken.status).toBe(1)
     expect(broken.stderr).toContain("does not run on this machine; nothing was installed")
     // The working one is still there, and nothing half-done is left beside it.
@@ -162,18 +186,18 @@ describe("install.sh", () => {
     expect(readdirSync(bin(home)).sort()).toEqual(["env", "rulecast"])
   })
 
-  test("an install directory that is relative, or would break a startup file, is refused", () => {
+  test("an install directory that is relative, or would break a startup file, is refused", async () => {
     for (const dir of ["bin", "~/bin", '/tmp/a"b', "/tmp/a$b", "/tmp/a`b"]) {
-      const run = install({ env: { RULECAST_INSTALL_DIR: dir } })
+      const run = await install({ env: { RULECAST_INSTALL_DIR: dir } })
       expect(run.status, dir).toBe(1)
       expect(run.stderr).toMatch(/must be an absolute path|cannot contain/)
     }
   })
 
-  test("a HOME with $, quotes or spaces still installs, its startup line naming it through $HOME", () => {
+  test("a HOME with $, quotes or spaces still installs, its startup line naming it through $HOME", async () => {
     const home = path.join(scratch("odd"), 'a $b "c`')
     mkdirSync(home)
-    const run = install({ home, env: { SHELL: "/bin/zsh" } })
+    const run = await install({ home, env: { SHELL: "/bin/zsh" } })
     expect(run.status, run.stderr).toBe(0)
     expect(count(read(path.join(home, ".zshrc")), SOURCE_LINE)).toBe(1)
     const env = path.join(bin(home), "env")
@@ -184,34 +208,34 @@ describe("install.sh", () => {
     expect(sourced.stdout).toBe(`${bin(home)}:/usr/bin:/bin`)
   })
 
-  test("installs into RULECAST_INSTALL_DIR, else XDG_BIN_HOME, else ~/.local/bin", () => {
+  test("installs into RULECAST_INSTALL_DIR, else XDG_BIN_HOME, else ~/.local/bin", async () => {
     const own = scratch("own")
-    expect(install({ env: { RULECAST_INSTALL_DIR: own, XDG_BIN_HOME: scratch("xdg") } }).status).toBe(0)
+    expect((await install({ env: { RULECAST_INSTALL_DIR: own, XDG_BIN_HOME: scratch("xdg") } })).status).toBe(0)
     expect(existsSync(path.join(own, "rulecast"))).toBe(true)
     const xdg = scratch("xdg")
-    expect(install({ env: { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: xdg } }).status).toBe(0)
+    expect((await install({ env: { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: xdg } })).status).toBe(0)
     expect(existsSync(path.join(xdg, "rulecast"))).toBe(true)
-    const home = install()
+    const home = await install()
     expect(existsSync(path.join(bin(home.home), "rulecast"))).toBe(true)
   })
 
-  test("installs where installDir says, so doctor looks where the script put it", () => {
+  test("installs where installDir says, so doctor looks where the script put it", async () => {
     for (const env of <Record<string, string>[]>[
       { RULECAST_INSTALL_DIR: scratch("own"), XDG_BIN_HOME: scratch("xdg") },
       { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: scratch("xdg") },
       {},
     ]) {
       const home = scratch("home")
-      expect(install({ home, env }).status).toBe(0)
+      expect((await install({ home, env })).status).toBe(0)
       expect(existsSync(path.join(installDir({ HOME: home, ...env }), "rulecast"))).toBe(true)
     }
   })
 
-  test("sets up the PATH once, in .profile and the shells' startup files that exist", () => {
+  test("sets up the PATH once, in .profile and the shells' startup files that exist", async () => {
     const home = scratch("home")
     writeFileSync(path.join(home, ".bashrc"), "# mine\n")
     writeFileSync(path.join(home, ".zshrc"), "# mine\n")
-    const first = install({ home })
+    const first = await install({ home })
     expect(first.status, first.stderr).toBe(0)
     for (const file of [".profile", ".bashrc", ".zshrc"]) {
       expect(count(read(path.join(home, file)), SOURCE_LINE), file).toBe(1)
@@ -221,7 +245,7 @@ describe("install.sh", () => {
     expect(existsSync(path.join(home, ".bash_profile"))).toBe(false)
 
     const before = [".profile", ".bashrc", ".zshrc"].map((file) => read(path.join(home, file)))
-    const second = install({ home })
+    const second = await install({ home })
     expect(second.status).toBe(0)
     expect([".profile", ".bashrc", ".zshrc"].map((file) => read(path.join(home, file)))).toEqual(before)
     expect(second.stdout).not.toContain("to the PATH in")
@@ -229,39 +253,39 @@ describe("install.sh", () => {
     expect(second.stdout).toContain(`to use rulecast in this shell now, run: ${SOURCE_LINE}`)
   })
 
-  test("a fresh account with zsh gets ~/.profile and ~/.zshrc", () => {
-    const run = install({ env: { SHELL: "/bin/zsh" } })
+  test("a fresh account with zsh gets ~/.profile and ~/.zshrc", async () => {
+    const run = await install({ env: { SHELL: "/bin/zsh" } })
     expect(run.status).toBe(0)
     expect(count(read(path.join(run.home, ".profile")), SOURCE_LINE)).toBe(1)
     expect(count(read(path.join(run.home, ".zshrc")), SOURCE_LINE)).toBe(1)
     expect(existsSync(path.join(run.home, ".bashrc"))).toBe(false)
   })
 
-  test("with the dir already on the PATH, no startup file changes", () => {
+  test("with the dir already on the PATH, no startup file changes", async () => {
     const home = scratch("home")
-    const run = install({ home, pathFirst: bin(home), env: { SHELL: "/bin/zsh" } })
+    const run = await install({ home, pathFirst: bin(home), env: { SHELL: "/bin/zsh" } })
     expect(run.status, run.stderr).toBe(0)
     expect(readdirSync(home)).toEqual([".local"])
     expect(run.stdout).not.toContain("to the PATH in")
   })
 
-  test("RULECAST_NO_MODIFY_PATH=1 changes no startup file and prints the line to add", () => {
-    const run = install({ env: { RULECAST_NO_MODIFY_PATH: "1", SHELL: "/bin/zsh" } })
+  test("RULECAST_NO_MODIFY_PATH=1 changes no startup file and prints the line to add", async () => {
+    const run = await install({ env: { RULECAST_NO_MODIFY_PATH: "1", SHELL: "/bin/zsh" } })
     expect(run.status).toBe(0)
     expect(readdirSync(run.home)).toEqual([".local"])
     expect(run.stdout).toContain(`Add this line to your shell's startup file: ${SOURCE_LINE}`)
   })
 
-  test("GITHUB_PATH set: appends the dir there once", () => {
+  test("GITHUB_PATH set: appends the dir there once", async () => {
     const githubPath = path.join(scratch("gh"), "path")
     const home = scratch("home")
-    expect(install({ home, env: { GITHUB_PATH: githubPath } }).status).toBe(0)
-    expect(install({ home, env: { GITHUB_PATH: githubPath } }).status).toBe(0)
+    expect((await install({ home, env: { GITHUB_PATH: githubPath } })).status).toBe(0)
+    expect((await install({ home, env: { GITHUB_PATH: githubPath } })).status).toBe(0)
     expect(read(githubPath)).toBe(`${bin(home)}\n`)
   })
 
-  test("sourcing <dir>/env puts the dir on the PATH once, also when sourced twice", () => {
-    const run = install()
+  test("sourcing <dir>/env puts the dir on the PATH once, also when sourced twice", async () => {
+    const run = await install()
     const env = path.join(bin(run.home), "env")
     const result = spawnSync("/bin/sh", ["-c", `. "${env}"; . "${env}"; printf %s "$PATH"`], {
       env: { HOME: run.home, PATH: "/usr/bin:/bin" },
@@ -271,7 +295,7 @@ describe("install.sh", () => {
   })
 
   // Six installs in a row: slow on a loaded machine, so a longer timeout.
-  test("maps every shipped target, and only those", () => {
+  test("maps every shipped target, and only those", async () => {
     const unames: [string, string | null][] = [
       ["Linux x86_64", "linux-x64"],
       ["Linux aarch64", "linux-arm64"],
@@ -283,7 +307,7 @@ describe("install.sh", () => {
     const named = new Set<string>()
     for (const [uname, target] of unames) {
       // The fake release only has this machine's asset: any other download fails, naming its URL.
-      const run = install({ uname })
+      const run = await install({ uname })
       expect(run.status).toBe(target === hostTarget() ? 0 : 1)
       if (target === null) {
         expect(run.stderr).toContain(`no standalone binary for ${uname}`)
@@ -295,34 +319,34 @@ describe("install.sh", () => {
     expect([...named].sort()).toEqual([...BINARY_TARGETS].sort())
   }, 120_000)
 
-  test("an unknown platform exits 1 naming it, writing nothing", () => {
-    const run = install({ uname: "FreeBSD amd64" })
+  test("an unknown platform exits 1 naming it, writing nothing", async () => {
+    const run = await install({ uname: "FreeBSD amd64" })
     expect(run.status).toBe(1)
     expect(run.stderr).toContain("no standalone binary for FreeBSD amd64")
     expect(readdirSync(run.home)).toEqual([])
   })
 
-  test("no curl, or neither shasum nor sha256sum: exits 1 naming what is missing, writing nothing", () => {
-    const noCurl = install({ omit: ["curl"] })
+  test("no curl, or neither shasum nor sha256sum: exits 1 naming what is missing, writing nothing", async () => {
+    const noCurl = await install({ omit: ["curl"] })
     expect(noCurl.status).toBe(1)
     expect(noCurl.stderr).toContain("curl is needed")
     expect(readdirSync(noCurl.home)).toEqual([])
-    const noSha = install({ omit: SHA_TOOLS })
+    const noSha = await install({ omit: SHA_TOOLS })
     expect(noSha.status).toBe(1)
     expect(noSha.stderr).toContain("shasum or sha256sum is needed")
     expect(readdirSync(noSha.home)).toEqual([])
   })
 
-  test("is POSIX sh: parses, and installs under dash when there is one", () => {
+  test("is POSIX sh: parses, and installs under dash when there is one", async () => {
     expect(spawnSync("/bin/sh", ["-n", SCRIPT]).status).toBe(0)
     const dash = spawnSync("/bin/sh", ["-c", "command -v dash"], { encoding: "utf8" }).stdout.trim()
-    if (dash) expect(install({ shell: dash }).status).toBe(0)
+    if (dash) expect((await install({ shell: dash })).status).toBe(0)
   })
 })
 
 describe("install.sh, asking", () => {
-  test("shows what it will do, and Enter proceeds", () => {
-    const run = install({ answers: "\n" })
+  test("shows what it will do, and Enter proceeds", async () => {
+    const run = await install({ answers: "\n" })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toContain("rulecast 0.9.0 will be installed:")
     expect(run.stdout).toContain("  binary   ~/.local/bin/rulecast\n")
@@ -331,18 +355,18 @@ describe("install.sh, asking", () => {
     expect(existsSync(path.join(bin(run.home), "rulecast"))).toBe(true)
   })
 
-  test("Cancel installs nothing, and so does a terminal that closes", () => {
+  test("Cancel installs nothing, and so does a terminal that closes", async () => {
     for (const answers of ["3\n", ""]) {
-      const run = install({ answers })
+      const run = await install({ answers })
       expect(run.status).toBe(1)
       expect(run.stdout).toContain("cancelled; nothing was installed")
       expect(readdirSync(run.home)).toEqual([])
     }
   })
 
-  test("Customize asks the directory and the PATH, then shows the plan again", () => {
+  test("Customize asks the directory and the PATH, then shows the plan again", async () => {
     const dir = scratch("custom")
-    const run = install({ answers: `2\n${dir}\nn\n1\n` })
+    const run = await install({ answers: `2\n${dir}\nn\n1\n` })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toContain("Install rulecast where? [~/.local/bin]: ")
     expect(run.stdout).toContain("in your shell startup files? [Y/n]: ")
@@ -352,54 +376,54 @@ describe("install.sh, asking", () => {
     expect(readdirSync(run.home)).toEqual([])
   })
 
-  test("Customize asks again for a directory it can't use, and takes ~", () => {
-    const run = install({ answers: "2\nrelative/bin\n~/tools\n\n\n" })
+  test("Customize asks again for a directory it can't use, and takes ~", async () => {
+    const run = await install({ answers: "2\nrelative/bin\n~/tools\n\n\n" })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toContain("must be an absolute path, not relative/bin")
     expect(existsSync(path.join(run.home, "tools", "rulecast"))).toBe(true)
     expect(count(read(path.join(run.home, ".profile")), '. "$HOME/tools/env"')).toBe(1)
   })
 
-  test("an answer that is not 1, 2 or 3 is asked again", () => {
-    const run = install({ answers: "4\n1\n" })
+  test("an answer that is not 1, 2 or 3 is asked again", async () => {
+    const run = await install({ answers: "4\n1\n" })
     expect(run.status).toBe(0)
     expect(run.stdout).toContain("answer 1, 2 or 3")
   })
 
-  test("-y, --yes and RULECAST_YES=1 ask nothing, even with a terminal", () => {
+  test("-y, --yes and RULECAST_YES=1 ask nothing, even with a terminal", async () => {
     for (const options of [{ args: ["-y"] }, { args: ["--yes"] }, { env: { RULECAST_YES: "1" } }]) {
-      const run = install({ answers: "3\n", ...options })
+      const run = await install({ answers: "3\n", ...options })
       expect(run.status, JSON.stringify(options)).toBe(0)
       expect(run.stdout).not.toContain("1) Proceed")
       expect(run.stdout).not.toContain("no terminal")
     }
   })
 
-  test("with no terminal it installs the defaults and says so", () => {
-    const run = install()
+  test("with no terminal it installs the defaults and says so", async () => {
+    const run = await install()
     expect(run.status).toBe(0)
     expect(run.stdout).toContain("no terminal to ask through: installing with the defaults (--help lists the options)")
   })
 })
 
 describe("install.sh options", () => {
-  test("--install-dir DIR and --install-dir=DIR", () => {
+  test("--install-dir DIR and --install-dir=DIR", async () => {
     const a = scratch("a")
     const b = scratch("b")
-    expect(install({ args: ["-y", "--install-dir", a] }).status).toBe(0)
-    expect(install({ args: ["-y", `--install-dir=${b}/`] }).status).toBe(0)
+    expect((await install({ args: ["-y", "--install-dir", a] })).status).toBe(0)
+    expect((await install({ args: ["-y", `--install-dir=${b}/`] })).status).toBe(0)
     expect(existsSync(path.join(a, "rulecast"))).toBe(true)
     expect(existsSync(path.join(b, "rulecast"))).toBe(true)
   })
 
-  test("--no-modify-path changes no startup file", () => {
-    const run = install({ args: ["--no-modify-path"] })
+  test("--no-modify-path changes no startup file", async () => {
+    const run = await install({ args: ["--no-modify-path"] })
     expect(run.status).toBe(0)
     expect(readdirSync(run.home)).toEqual([".local"])
   })
 
-  test("--help prints the options and does nothing else, curl or not", () => {
-    const run = install({ args: ["--help"], omit: ["curl"] })
+  test("--help prints the options and does nothing else, curl or not", async () => {
+    const run = await install({ args: ["--help"], omit: ["curl"] })
     expect(run.status).toBe(0)
     for (const option of ["-y, --yes", "--install-dir DIR", "--no-modify-path", "-h, --help", "sh -s -- [options]"]) {
       expect(run.stdout).toContain(option)
@@ -407,9 +431,9 @@ describe("install.sh options", () => {
     expect(readdirSync(run.home)).toEqual([])
   })
 
-  test("an unknown option, or --install-dir with no directory, exits 1", () => {
-    expect(install({ args: ["--force"] })).toMatchObject({ status: 1 })
-    expect(install({ args: ["--force"] }).stderr).toContain("unknown option --force")
-    expect(install({ args: ["--install-dir"] }).stderr).toContain("--install-dir needs a directory")
+  test("an unknown option, or --install-dir with no directory, exits 1", async () => {
+    expect(await install({ args: ["--force"] })).toMatchObject({ status: 1 })
+    expect((await install({ args: ["--force"] })).stderr).toContain("unknown option --force")
+    expect((await install({ args: ["--install-dir"] })).stderr).toContain("--install-dir needs a directory")
   })
 })
