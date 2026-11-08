@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest"
+import { parse } from "yaml"
 
 import { adapterByName } from "../../src/adapters"
 import { CONFIG_FILE } from "../../src/core/config/load"
-import { newConfigText } from "../../src/init/config-text"
+import { addCatalogRules, newConfigText, setSettings } from "../../src/init/config-text"
 import { type PlanContext, PlanError, planInit, reviewText } from "../../src/init/plan"
 
 const claude = adapterByName("claude-code")!
@@ -25,7 +26,10 @@ function context(files: Record<string, string>, overrides: Partial<PlanContext> 
 
 describe("planInit", () => {
   test("a new project gets a config and shared hooks", async () => {
-    const changes = await planInit({ hooks: [], settings, agents: [{ adapter: claude, scope: "shared" }] }, context({}))
+    const changes = await planInit(
+      { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" }] },
+      context({}),
+    )
     expect(changes).toEqual([
       {
         file: CONFIG_FILE,
@@ -51,7 +55,7 @@ describe("planInit", () => {
       ".claude/settings.local.json": JSON.stringify(existing),
     }
     const changes = await planInit(
-      { hooks: [], settings, agents: [{ adapter: claude, scope: "personal" }] },
+      { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "personal" }] },
       context(files, { local: true }),
     )
     expect(changes).toEqual([
@@ -71,42 +75,92 @@ describe("planInit", () => {
       [CONFIG_FILE]: newConfigText([], settings),
       ".claude/settings.local.json": merged({}),
     }
-    const selections = { hooks: [], settings, agents: [{ adapter: claude, scope: "shared" as const }] }
+    const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
     expect(await planInit(selections, context(files))).toEqual([])
   })
 
   test("settings are added to an existing config", async () => {
     const files = { [CONFIG_FILE]: newConfigText() }
-    const [change] = await planInit({ hooks: [], settings: { llmModel: "haiku" }, agents: [] }, context(files))
+    const [change] = await planInit(
+      { hooks: [], catalog: null, settings: { llmModel: "haiku" }, agents: [] },
+      context(files),
+    )
     expect(change).toMatchObject({ file: CONFIG_FILE, created: false, summary: "+llm.model haiku" })
     expect(change!.content).toContain("model: haiku")
   })
 
   test("the weekly summary is named for a new config, and as a change for an existing one", async () => {
-    const created = await planInit({ hooks: [], settings: { weeklySummary: true }, agents: [] }, context({}))
+    const created = await planInit(
+      { hooks: [], catalog: null, settings: { weeklySummary: true }, agents: [] },
+      context({}),
+    )
     expect(created[0]).toMatchObject({ created: true, summary: "new, stats" })
     const files = { [CONFIG_FILE]: "stats:\n  weekly_summary: false\nrepos: []\n" }
-    const [change] = await planInit({ hooks: [], settings: { weeklySummary: true }, agents: [] }, context(files))
+    const [change] = await planInit(
+      { hooks: [], catalog: null, settings: { weeklySummary: true }, agents: [] },
+      context(files),
+    )
     expect(change!.summary).toBe("stats.weekly_summary false → true")
   })
 
   test("a replaced setting is named with its old value; an unchanged one is not named", async () => {
     const files = { [CONFIG_FILE]: newConfigText([], { conventions: "docs/old/", llmModel: "haiku" }) }
     const [change] = await planInit(
-      { hooks: [], settings: { conventions: "docs/new/", llmModel: "haiku" }, agents: [] },
+      { hooks: [], catalog: null, settings: { conventions: "docs/new/", llmModel: "haiku" }, agents: [] },
       context(files),
     )
     expect(change!.summary).toBe("conventions docs/old/ → docs/new/")
   })
 
   test("with nothing chosen a new config has only the local repo", async () => {
-    const [change] = await planInit({ hooks: [], settings: {}, agents: [] }, context({}))
+    const [change] = await planInit({ hooks: [], catalog: null, settings: {}, agents: [] }, context({}))
     expect(change).toMatchObject({ file: CONFIG_FILE, created: true, summary: "new, no rules yet" })
+  })
+
+  test("catalog rules go into a new config and an existing one", async () => {
+    const ref = { url: "https://github.com/syv-ai/rulecast", rev: "v0.9.0" }
+    const catalog = {
+      ref,
+      rules: [
+        { id: "python/no-silent-except", context: null, files: null },
+        { id: "generated-code", context: null, files: "x|^web/client/" },
+      ],
+    }
+    const [created] = await planInit({ hooks: [], catalog, settings: {}, agents: [] }, context({}))
+    expect(created).toMatchObject({ created: true, summary: "new, 2 catalog rules" })
+    expect(parse(created!.content).repos).toEqual([
+      { repo: "local", rules: [] },
+      {
+        repo: ref.url,
+        rev: "v0.9.0",
+        rules: [{ id: "python/no-silent-except" }, { id: "generated-code", files: "x|^web/client/" }],
+      },
+    ])
+
+    const [changed] = await planInit(
+      { hooks: [], catalog, settings: { llmModel: "haiku" }, agents: [] },
+      context({ [CONFIG_FILE]: newConfigText() }),
+    )
+    expect(changed).toMatchObject({ created: false, summary: "+2 catalog rules, +llm.model haiku" })
+    expect(changed!.content).toBe(
+      addCatalogRules(setSettings(newConfigText(), { llmModel: "haiku" }).text, ref, catalog.rules),
+    )
+    // Planned again on what it wrote, nothing changes.
+    const again = await planInit(
+      { hooks: [], catalog, settings: {}, agents: [] },
+      context({ [CONFIG_FILE]: created!.content }),
+    )
+    expect(again).toEqual([])
   })
 
   test("unreadable settings name their file", async () => {
     const files = { ".claude/settings.json": "{ nope" }
-    const selections = { hooks: [], settings: {}, agents: [{ adapter: claude, scope: "shared" as const }] }
+    const selections = {
+      hooks: [],
+      catalog: null,
+      settings: {},
+      agents: [{ adapter: claude, scope: "shared" as const }],
+    }
     await expect(planInit(selections, context(files))).rejects.toThrow(PlanError)
     await expect(planInit(selections, context(files))).rejects.toThrow(/^\.claude\/settings\.json: /)
   })

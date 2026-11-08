@@ -2,7 +2,16 @@ import { CONFIG_FILE } from "../core/config/load"
 import { errorMessage } from "../core/errors"
 import { planHooks } from "../core/hook-plan"
 import type { Adapter, InstallScope } from "../core/types"
-import { addLocalRules, type ConfigSettings, newConfigText, type SettingChange, setSettings } from "./config-text"
+import {
+  addCatalogRules,
+  addLocalRules,
+  type CatalogRef,
+  type ConfigSettings,
+  newConfigText,
+  type RuleSelection,
+  type SettingChange,
+  setSettings,
+} from "./config-text"
 import type { LocalRule } from "./hooks"
 
 export interface AgentChoice {
@@ -15,6 +24,8 @@ export interface InitSelections {
   agents: AgentChoice[]
   /** The project's own pre-commit or lefthook hooks, as local rules. */
   hooks: LocalRule[]
+  /** Catalog rules to adopt, pinned at `ref`: only those to add, or whose `files` change. */
+  catalog: { ref: CatalogRef; rules: RuleSelection[] } | null
   /** Top-level settings from the interview: conventions, llm.model, llm.provider. */
   settings: ConfigSettings
 }
@@ -58,23 +69,33 @@ function settingText(change: SettingChange): string {
 }
 
 function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
-  const { hooks, settings } = selections
-  const rules = hooks.length === 0 ? [] : [plural(hooks.length, "hook rule")]
+  const { hooks, settings, catalog } = selections
+  const adopted = catalog?.rules ?? []
+  const withCatalog = (text: string) => (catalog === null ? text : addCatalogRules(text, catalog.ref, catalog.rules))
+  const hookRules = plural(hooks.length, "hook rule")
+  const catalogRules = plural(adopted.length, "catalog rule")
   if (configText === null) {
     const named = [
-      ...rules,
+      ...(hooks.length === 0 ? [] : [hookRules]),
+      ...(adopted.length === 0 ? [] : [catalogRules]),
       ...(settings.conventions ? ["conventions"] : []),
       ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
       ...(settings.weeklySummary ? ["stats"] : []),
     ]
     const summary = named.length === 0 ? "new, no rules yet" : `new, ${named.join(", ")}`
-    return { file: CONFIG_FILE, content: newConfigText(hooks, settings), created: true, summary, commit: true }
+    // A new config's catalog entry is written as an existing one's is, by addCatalogRules.
+    const content = withCatalog(newConfigText(hooks, settings))
+    return { file: CONFIG_FILE, content, created: true, summary, commit: true }
   }
-  const withRules = hooks.length > 0 ? addLocalRules(configText, hooks) : configText
+  const withHooks = hooks.length > 0 ? addLocalRules(configText, hooks) : configText
+  const withRules = withCatalog(withHooks)
   const set = setSettings(withRules, settings)
   const content = set.text
   if (content === configText) return null
-  const added = withRules === configText ? [] : rules.map((part) => `+${part}`)
+  const added = [
+    ...(withHooks === configText ? [] : [`+${hookRules}`]),
+    ...(withRules === withHooks ? [] : [`+${catalogRules}`]),
+  ]
   const summary = [...added, ...set.changes.map(settingText)].join(", ")
   return { file: CONFIG_FILE, content, created: false, summary, commit: true }
 }

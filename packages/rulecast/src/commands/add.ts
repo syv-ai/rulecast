@@ -61,7 +61,7 @@ export async function addCommand(root: string, args: string[], registry: Detecto
   const updated = addCatalogRules(
     text,
     catalog,
-    added.map((rule) => ({ id: rule.id, context: null })),
+    added.map((rule) => ({ id: rule.id, context: null, files: null })),
   )
   await writeFile(path.join(root, CONFIG_FILE), updated)
   out.push(`Added from ${catalog.label}:`, ...added.map((rule) => `  ${rule.id}  ${rule.name}`), "")

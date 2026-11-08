@@ -11,6 +11,8 @@ export interface RuleSelection {
   id: string
   /** null: keep the rule's own context; otherwise a `context` override. */
   context: string[] | null
+  /** null: keep the rule's own files; otherwise a `files` override. */
+  files: string | null
 }
 
 export class ConfigTextError extends Error {}
@@ -25,6 +27,7 @@ const scalar = (value: string) => (/^[A-Za-z0-9_./:@~+-]+$/.test(value) ? value 
 
 function ruleLines(rule: RuleSelection): string[] {
   const lines = [`- id: ${rule.id}`]
+  if (rule.files !== null) lines.push(`  files: ${JSON.stringify(rule.files)}`)
   if (rule.context !== null) lines.push("  context:", ...rule.context.map((ref) => `    - ${JSON.stringify(ref)}`))
   return lines
 }
@@ -244,7 +247,8 @@ function pairKey(map: YAMLMap, key: string): Node | null {
 
 /**
  * Adds catalog rules to an existing config, changing nothing else: new rules are appended to the catalog's
- * repo entry (rules already listed there are skipped), or a new entry for the catalog is appended to `repos`.
+ * repo entry, or a new entry for the catalog is appended to `repos`. A rule already listed there is
+ * skipped, unless the selection gives it `files` its entry does not hold: then only that key is set.
  */
 export function addCatalogRules(text: string, catalog: CatalogRef, rules: RuleSelection[]): string {
   const doc = parseDocument(text, { keepSourceTokens: true })
@@ -256,23 +260,50 @@ export function addCatalogRules(text: string, catalog: CatalogRef, rules: RuleSe
   if (reposKey === null || !isSeq(repos)) throw new ConfigTextError("the config has no repos list")
 
   const entry = repos.items.find((item): item is YAMLMap => isMap(item) && item.get("repo") === catalog.url)
-  let edit: Edit
+  const edits: Edit[] = []
   if (entry) {
     const listed = entry.get("rules", true)
     const rulesKey = pairKey(entry, "rules")
     if (!isSeq(listed) || rulesKey === null) throw new ConfigTextError(`${catalog.url} has no rules list`)
-    const present = new Set(listed.items.map((item) => (isMap(item) ? item.get("id") : undefined)))
+    const present = new Map<unknown, YAMLMap>()
+    for (const item of listed.items) if (isMap(item)) present.set(item.get("id"), item)
+    for (const rule of rules) {
+      const item = present.get(rule.id)
+      if (item !== undefined && rule.files !== null) edits.push(...setFiles(text, item, rule.files))
+    }
     const added = rules.filter((rule) => !present.has(rule.id))
-    if (added.length === 0) return text
-    edit = appendToSeq(text, listed, rulesKey, added.flatMap(ruleLines))
-  } else {
-    if (rules.length === 0) return text
-    edit = appendToSeq(text, repos, reposKey, repoLines(catalog, rules))
+    if (added.length > 0) edits.push(appendToSeq(text, listed, rulesKey, added.flatMap(ruleLines)))
+  } else if (rules.length > 0) {
+    edits.push(appendToSeq(text, repos, reposKey, repoLines(catalog, rules)))
   }
-  const updated = text.slice(0, edit.start) + edit.insert + text.slice(edit.end)
+  if (edits.length === 0) return text
+  let updated = text
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    updated = updated.slice(0, edit.start) + edit.insert + updated.slice(edit.end)
+  }
   const check = parseDocument(updated)
   if (check.errors.length > 0) throw new ConfigTextError(`could not update the config: ${check.errors[0]!.message}`)
   return updated
+}
+
+/** Sets a listed rule's `files`: its value replaced, or a key added after its first line. None when it holds it. */
+function setFiles(text: string, item: YAMLMap, files: string): Edit[] {
+  const node = item.get("files", true)
+  if (isScalar(node) && node.value === files) return []
+  const id = String(item.get("id"))
+  if (item.flow) throw new ConfigTextError(`write ${id} in block style so rulecast can set its files`)
+  if (isScalar(node) && node.type !== "BLOCK_LITERAL" && node.type !== "BLOCK_FOLDED") {
+    const [start, end] = node.range!
+    return [{ start, end, insert: JSON.stringify(files) }]
+  }
+  if (node !== undefined) throw new ConfigTextError(`write the files of ${id} on one line so rulecast can set them`)
+  const first = item.items[0]!
+  const key = first.key as Node
+  const at = lineEndAfter(text, ((first.value as Node | null) ?? key).range![1] - 1)
+  const eol = text.includes("\r\n") ? "\r\n" : "\n"
+  const prefix = at === text.length && !text.endsWith("\n") ? eol : ""
+  const line = `${" ".repeat(columnOf(text, key.range![0]))}files: ${JSON.stringify(files)}`
+  return [{ start: at, end: at, insert: `${prefix}${line}${eol}` }]
 }
 
 /**

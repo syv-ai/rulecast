@@ -11,8 +11,8 @@ import {
 
 const catalog = { url: "https://github.com/syv-ai/rulecast", rev: "v0.2.0" }
 const rules: RuleSelection[] = [
-  { id: "generated-code", context: null },
-  { id: "python/layering", context: ["@AGENTS.md#services"] },
+  { id: "generated-code", context: null, files: null },
+  { id: "python/layering", context: ["@AGENTS.md#services"], files: null },
 ]
 
 const NEW_RULES = [
@@ -231,6 +231,53 @@ describe("addCatalogRules", () => {
     ])
     expect(addCatalogRules(once, catalog, rules)).toBe(once)
     expect(addCatalogRules(once, catalog, [])).toBe(once)
+  })
+
+  test("ruleLines writes files when the selection overrides it", () => {
+    const files = "\\.gen\\.[cm]?[jt]sx?$|^frontend/src/client/"
+    expect(addCatalogRules("repos: []\n", catalog, [{ id: "generated-code", context: null, files }])).toBe(
+      [
+        "repos:",
+        `  - repo: ${catalog.url}`,
+        "    rev: v0.2.0",
+        "    rules:",
+        "      - id: generated-code",
+        `        files: ${JSON.stringify(files)}`,
+        "",
+      ].join("\n"),
+    )
+  })
+
+  test("a listed rule gets the files a selection gives it, and keeps them on a re-run", () => {
+    const text = [
+      "repos:",
+      `  - repo: ${catalog.url}`,
+      "    rev: v0.2.0",
+      "    rules:",
+      "      - id: generated-code # ours",
+      "      - id: vendored-code",
+      "        files: old # keep the comment",
+      "",
+    ].join("\n")
+    const selections: RuleSelection[] = [
+      { id: "generated-code", context: null, files: "a|^b/" },
+      { id: "vendored-code", context: null, files: "new" },
+    ]
+    const once = addCatalogRules(text, catalog, selections)
+    expect(once).toBe(
+      [
+        "repos:",
+        `  - repo: ${catalog.url}`,
+        "    rev: v0.2.0",
+        "    rules:",
+        "      - id: generated-code # ours",
+        '        files: "a|^b/"',
+        "      - id: vendored-code",
+        '        files: "new" # keep the comment',
+        "",
+      ].join("\n"),
+    )
+    expect(addCatalogRules(once, catalog, selections)).toBe(once)
   })
 
   test("refuses shapes it cannot extend without rewriting the file", () => {
