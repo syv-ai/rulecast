@@ -7,8 +7,17 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { cacheHome, projectStateDir } from "../core/home"
 import { cachedRepos } from "../core/repos/provider"
 import { derive, type RuleStats, ruleStats } from "../core/stats/derive"
-import { readFindingsLog } from "../core/stats/log"
+import { readFindingsLog, readWeeklyRollup } from "../core/stats/log"
 import { ruleRuns, type StopBlocks, stopBlocks } from "../core/stats/runs"
+import {
+  RECUR_MIN_SESSIONS,
+  TREND_MIN_FIRED,
+  TREND_MIN_RUNS,
+  WEEKLY_KEEP_WEEKS,
+  type WeeklyTrend,
+  weeklyTrend,
+  weekRows,
+} from "../core/stats/weekly"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -40,7 +49,12 @@ export interface StatsDocument {
   unknownRules?: string[]
   /** What did not compile (a rule repo not fetched, a bad rule); present only when anything did not. */
   notCompiled?: string[]
-  /** Lines of the log that could not be read; present only when there were any. */
+  /**
+   * Per rule that fired, its findings per 100 checks by week (core/stats/weekly.ts), from the log and,
+   * when this config keeps one, the weekly summary. `summary`: whether this config keeps one.
+   */
+  weekly: WeeklyTrend & { summary: "on" | "off" }
+  /** Lines of the log or the weekly summary that could not be read; present only when there were any. */
   skippedLines?: number
 }
 
@@ -87,10 +101,63 @@ const COLUMNS: [header: string, value: (rule: RuleStats) => string][] = [
 
 const percent = (rate: number) => `${Math.round(rate * 100)}%`
 
+/** Weeks shown in the text output; the JSON has them all. */
+const SHOWN_WEEKS = 8
+/** Recurring files shown per rule in the text output. */
+const SHOWN_FILES = 3
+
+/** The weekly section: only once the trend spans two weeks, since one week is no trend. */
+function weeklyLines(weekly: StatsDocument["weekly"]): string[] {
+  const spans = weekly.rules[0]?.weeks.length ?? 0
+  if (spans < 2) return []
+  const out: string[] = []
+  const enough = weekly.rules.filter((rule) => rule.enoughFindings)
+  if (enough.length > 0) {
+    const weeks = enough[0]!.weeks.slice(-SHOWN_WEEKS)
+    const labels = weeks.map((week) => `${week.week.slice(5)}${week.partial ? "*" : ""}`)
+    const width = Math.max(4, ...enough.map((rule) => rule.rule.length))
+    out.push(
+      `findings per 100 checks that ran the rule, by week (from Monday, UTC; * partial; - fewer than ${TREND_MIN_RUNS} checks):`,
+      `  ${["rule".padEnd(width), ...labels].join("  ")}`,
+    )
+    for (const rule of enough) {
+      const rates = rule.weeks
+        .slice(-SHOWN_WEEKS)
+        .map((week, index) =>
+          (week.firedPer100Runs === null ? "-" : String(week.firedPer100Runs)).padStart(labels[index]!.length),
+        )
+      out.push(`  ${[rule.rule.padEnd(width), ...rates].join("  ")}`)
+    }
+  }
+  const few = weekly.rules.filter((rule) => !rule.enoughFindings)
+  if (few.length > 0)
+    out.push(`too few findings for a trend (under ${TREND_MIN_FIRED}): ${few.map((rule) => rule.rule).join(", ")}`)
+  const recurring = weekly.rules.filter((rule) => rule.recurringFileCount > 0)
+  if (recurring.length > 0) {
+    out.push(`fired in the same file in ${RECUR_MIN_SESSIONS} or more sessions:`)
+    for (const rule of recurring) {
+      const files = rule.recurringFiles
+        .slice(0, SHOWN_FILES)
+        .map(({ file, sessions }) => `${file} (${sessions} sessions)`)
+      const more = rule.recurringFileCount - files.length
+      out.push(`  ${rule.rule}: ${files.join(", ")}${more > 0 ? `, and ${more} more` : ""}`)
+    }
+  }
+  if (weekly.summary === "off" && weekly.from !== null) {
+    out.push(
+      `the weekly summary is off: the trend covers only the log, from ${weekly.from.slice(0, 10)}. stats.weekly_summary: true in ${CONFIG_FILE} keeps ${WEEKLY_KEEP_WEEKS} weeks`,
+    )
+  }
+  out.push("")
+  return out
+}
+
 function terminal(document: StatsDocument): string {
   const out: string[] = []
   const since = document.window.since ?? document.window.firstRecord
-  out.push(`${document.sessions} ${document.sessions === 1 ? "session" : "sessions"} since ${since}`, "")
+  const sessions = `${document.sessions} ${document.sessions === 1 ? "session" : "sessions"}`
+  // Only a weekly summary: the log itself holds nothing yet.
+  out.push(since === null ? `${sessions} in the log` : `${sessions} since ${since}`, "")
   if (document.rules.length > 0) {
     const width = Math.max(4, ...document.rules.map((rule) => rule.rule.length))
     out.push(["rule".padEnd(width), ...COLUMNS.map(([header]) => header)].join("  "))
@@ -126,6 +193,7 @@ function terminal(document: StatsDocument): string {
     }
     out.push("")
   }
+  out.push(...weeklyLines(document.weekly))
   if (document.neverFired !== undefined && document.runs !== undefined) {
     const runs = document.runs
     const ran = document.neverFired.filter((rule) => (runs[rule] ?? 0) > 0)
@@ -169,8 +237,10 @@ export async function statsCommand(
   const since = values.since === undefined ? null : parseSince(values.since, new Date())
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const home = cacheHome(io.env)
-  const { records, skipped, rotated } = await readFindingsLog(projectStateDir(home, root))
-  if (records.length === 0 && values.format === "terminal") {
+  const stateDir = projectStateDir(home, root)
+  const { records, skipped, rotated } = await readFindingsLog(stateDir)
+  const rollup = await readWeeklyRollup(stateDir)
+  if (records.length === 0 && rollup.rows.length === 0 && values.format === "terminal") {
     io.stdout("no findings recorded yet (the log fills as agent hooks run)\n")
     return 0
   }
@@ -180,11 +250,12 @@ export async function statsCommand(
     .filter((diagnostic) => diagnostic.level === "error")
     .map((diagnostic) => diagnosticText(diagnostic))
   for (const text of notCompiled) io.stderr(`rulecast stats: not compiled: ${text}\n`)
-  const lives = derive(records, since)
-  const rules = ruleStats(lives)
+  const from = since?.toISOString()
+  // Replayed once, from the start: the trend needs every life, the table those from `since` on.
+  const lives = derive(records)
+  const rules = ruleStats(lives.filter((life) => from === undefined || life.firstAt >= from))
   const fired = new Set(rules.map((rule) => rule.rule))
   const configured = new Set(project.rules.map((rule) => rule.id))
-  const from = since?.toISOString()
   const windowed = records.filter((record) => from === undefined || record.at >= from)
   const firstRecord = records.reduce<string | null>(
     (first, { at }) => (first === null || at < first ? at : first),
@@ -195,6 +266,13 @@ export async function statsCommand(
   const neverFired = detectorRules.filter((rule) => !fired.has(rule)).sort()
   const runs = ruleRuns(windowed)
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
+  // What is at or before the summary's cutoff is counted from the summary only.
+  const trend = weeklyTrend([...rollup.rows, ...weekRows(records, lives, rollup.rolledUpTo)], {
+    since: from ?? null,
+    last: lastRecord ?? rollup.rolledUpTo,
+    rolledUpTo: rollup.rolledUpTo,
+  })
+  const skippedLines = skipped + rollup.skipped
   const document: StatsDocument = {
     schemaVersion: STATS_SCHEMA_VERSION,
     window: {
@@ -214,7 +292,8 @@ export async function statsCommand(
           stopBlocks: stopBlocks(windowed),
           unknownRules: [...fired].filter((rule) => !configured.has(rule)).sort(),
         }),
-    ...(skipped > 0 ? { skippedLines: skipped } : {}),
+    weekly: { ...trend, summary: project.config.stats.weeklySummary ? "on" : "off" },
+    ...(skippedLines > 0 ? { skippedLines } : {}),
   }
   io.stdout(values.format === "json" ? `${JSON.stringify(document, null, 2)}\n` : terminal(document))
   return 0

@@ -4,7 +4,8 @@ import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
 import { STATS_SCHEMA_VERSION } from "../../src/adapters/cli/contract"
 import { parseSince } from "../../src/commands/stats"
-import { FINDINGS_LOG, type FindingsRecord } from "../../src/core/stats/log"
+import { FINDINGS_LOG, FINDINGS_WEEKLY, type FindingsRecord } from "../../src/core/stats/log"
+import type { WeekRow } from "../../src/core/stats/weekly"
 
 import { runCli } from "../helpers/cli"
 import { createFixture, fixtureRules } from "../helpers/fixture"
@@ -47,6 +48,34 @@ async function projectWithLog(records: FindingsRecord[]): Promise<string> {
   await writeFile(path.join(stateDir, FINDINGS_LOG), records.map((item) => `${JSON.stringify(item)}\n`).join(""))
   return root
 }
+
+/** A weekly summary whose newest record was at `to`. */
+async function withSummary(root: string, to: string, rows: Partial<WeekRow>[]): Promise<void> {
+  const lines = rows.map((row) => ({
+    v: 1,
+    to,
+    rule: RULE,
+    runs: 0,
+    sessions: 1,
+    fired: 0,
+    files: {},
+    first: `${row.week}T00:00:00.000Z`,
+    ...row,
+  }))
+  await writeFile(
+    path.join(stateDirFor(root), FINDINGS_WEEKLY),
+    lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+  )
+}
+
+const SUMMARY_TO = "2026-09-30T12:00:00.000Z"
+const SUMMARY_ROWS = [
+  { week: "2026-09-21", runs: 30, fired: 3, first: "2026-09-23T08:00:00.000Z" },
+  { week: "2026-09-28", runs: 5, fired: 2 },
+]
+
+const weekOfRule = (document: { weekly: { rules: { rule: string; weeks: { week: string }[] }[] } }, rule: string) =>
+  document.weekly.rules.find((entry) => entry.rule === rule)?.weeks
 
 describe("rulecast stats", () => {
   test("--format json: the documented shape", async () => {
@@ -112,6 +141,36 @@ describe("rulecast stats", () => {
         },
       ],
       unknownRules: ["old/renamed-rule"],
+      weekly: {
+        from: "2026-10-01T10:00:00.000Z",
+        rolledUpTo: null,
+        summary: "off",
+        rules: [RULE, "old/renamed-rule"].map((rule) => ({
+          rule,
+          fired: 1,
+          enoughFindings: false,
+          weeks: [
+            {
+              week: "2026-09-28",
+              runs: 4,
+              sessions: 1,
+              fired: rule === RULE ? 1 : 0,
+              firedPer100Runs: null,
+              partial: true,
+            },
+            {
+              week: "2026-10-05",
+              runs: 2,
+              sessions: 1,
+              fired: rule === RULE ? 0 : 1,
+              firedPer100Runs: null,
+              partial: true,
+            },
+          ],
+          recurringFiles: [],
+          recurringFileCount: 0,
+        })),
+      },
     })
   })
 
@@ -129,6 +188,9 @@ describe("rulecast stats", () => {
         "",
         "blocks at stops, by the files a rule checked there:",
         "  backend/no-httpexception  1 file: 1 of 3  ·  2-5 files: -  ·  6+ files: -",
+        "",
+        "too few findings for a trend (under 10): backend/no-httpexception, old/renamed-rule",
+        "the weekly summary is off: the trend covers only the log, from 2026-10-01. stats.weekly_summary: true in .rulecast-config.yaml keeps 26 weeks",
         "",
         "never ran (no file the agents changed matched): frontend/no-generated-edits",
         "",
@@ -234,5 +296,90 @@ describe("rulecast stats", () => {
     for (const value of ["2026-02-30", "2026-13-01", "2026-09-01T25:00Z", "2026-09-01T10:00", "2026-09-01x"]) {
       expect(() => parseSince(value, now), value).toThrow(/--since/)
     }
+  })
+
+  test("a trend across weeks reads the summary and the live log, and counts the shared week once", async () => {
+    // One live record before the cutoff: the summary counted it already.
+    const before = record("2026-09-30T11:00:00.000Z", "edit", [["z1", RULE, "delivered"]])
+    const root = await projectWithLog([before, ...RECORDS])
+    await withSummary(root, SUMMARY_TO, SUMMARY_ROWS)
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.weekly.rolledUpTo).toBe(SUMMARY_TO)
+    expect(document.weekly.from).toBe("2026-09-23T08:00:00.000Z")
+    expect(weekOfRule(document, RULE)).toEqual([
+      { week: "2026-09-21", runs: 30, sessions: 1, fired: 3, firedPer100Runs: 10, partial: true },
+      { week: "2026-09-28", runs: 9, sessions: 2, fired: 3, firedPer100Runs: null, partial: false },
+      { week: "2026-10-05", runs: 2, sessions: 1, fired: 0, firedPer100Runs: null, partial: true },
+    ])
+    // The table counts the log as before: z1 is in it.
+    expect(document.rules.find((rule: { rule: string }) => rule.rule === RULE).fired).toBe(2)
+  })
+
+  test("with the summary on, stats says nothing about it and reports summary: on", async () => {
+    const root = await projectWithLog(RECORDS)
+    await writeFile(
+      path.join(root, ".rulecast-config.yaml"),
+      stringify({ stats: { weekly_summary: true }, repos: [{ repo: "local", rules: fixtureRules }] }),
+    )
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(document.weekly.summary).toBe("on")
+    const terminal = (await runCli(root, ["stats"])).stdout
+    expect(terminal).toContain("too few findings for a trend")
+    expect(terminal).not.toContain("weekly summary")
+  })
+
+  test("with only a summary, stats still shows its weeks", async () => {
+    const root = await projectWithLog([])
+    await withSummary(root, SUMMARY_TO, SUMMARY_ROWS)
+    const terminal = (await runCli(root, ["stats"])).stdout
+    expect(terminal).not.toContain("no findings recorded yet")
+    expect(terminal).toContain("0 sessions in the log")
+    expect(terminal).toContain("too few findings for a trend (under 10): backend/no-httpexception")
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(weekOfRule(document, RULE)?.map((week) => week.week)).toEqual(["2026-09-21", "2026-09-28"])
+    expect(document.weekly.rules[0].fired).toBe(5)
+  })
+
+  test("--since keeps the trend to whole weeks from its week", async () => {
+    const root = await projectWithLog(RECORDS)
+    await withSummary(root, SUMMARY_TO, SUMMARY_ROWS)
+    const document = JSON.parse((await runCli(root, ["stats", "--since", "2026-10-07", "--format", "json"])).stdout)
+    expect(document.weekly.from).toBe("2026-10-05T09:00:00.000Z")
+    expect(document.weekly.rules.map((rule: { rule: string }) => rule.rule)).toEqual(["old/renamed-rule"])
+    expect(weekOfRule(document, "old/renamed-rule")).toEqual([
+      { week: "2026-10-05", runs: 2, sessions: 1, fired: 1, firedPer100Runs: null, partial: true },
+    ])
+  })
+
+  test("a rule with enough findings gets a row of rates, and recurring files are listed", async () => {
+    // 30 checks in each of two weeks; 12 findings in the first, over 3 sessions, all in one file.
+    const records: FindingsRecord[] = []
+    for (const [week, findings] of [
+      ["2026-10-06", true],
+      ["2026-10-12", false],
+    ] as const) {
+      for (let i = 0; i < 30; i++) {
+        const at = new Date(Date.parse(`${week}T08:00:00.000Z`) + i * 60_000).toISOString()
+        const found: [string, string, "delivered"][] = findings && i % 5 < 2 ? [[`f${i}`, RULE, "delivered"]] : []
+        records.push(record(at, "edit", found, `s${(i % 3) + 1}`))
+      }
+    }
+    const root = await projectWithLog(records)
+    const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    const trend = document.weekly.rules[0]
+    expect(trend).toMatchObject({ rule: RULE, fired: 12, enoughFindings: true, recurringFileCount: 1 })
+    expect(trend.weeks.map((week: { firedPer100Runs: number | null }) => week.firedPer100Runs)).toEqual([40, 0])
+    expect(trend.recurringFiles).toEqual([{ file: USERS, sessions: 3 }])
+
+    const terminal = (await runCli(root, ["stats"])).stdout
+    expect(terminal).toContain(
+      [
+        "findings per 100 checks that ran the rule, by week (from Monday, UTC; * partial; - fewer than 20 checks):",
+        "  rule                      10-05*  10-12*",
+        "  backend/no-httpexception      40       0",
+        "fired in the same file in 3 or more sessions:",
+        `  ${RULE}: ${USERS} (3 sessions)`,
+      ].join("\n"),
+    )
   })
 })
