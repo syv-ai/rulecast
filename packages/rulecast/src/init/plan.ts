@@ -24,6 +24,8 @@ export interface InitSelections {
   agents: AgentChoice[]
   /** The project's own pre-commit or lefthook hooks, as local rules. */
   hooks: LocalRule[]
+  /** The project's own linters, as `linter` rules (init/linters.ts). Default: none. */
+  linters?: LocalRule[]
   /** Catalog rules to adopt, pinned at `ref`: only those to add, or whose `files` change. */
   catalog: { ref: CatalogRef; rules: RuleSelection[] } | null
   /** Top-level settings from the interview: conventions, llm.model, llm.provider. */
@@ -70,13 +72,18 @@ function settingText(change: SettingChange): string {
 
 function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
   const { hooks, settings, catalog } = selections
+  const linters = selections.linters ?? []
+  const local = [...linters, ...hooks]
   const adopted = catalog?.rules ?? []
   const withCatalog = (text: string) => (catalog === null ? text : addCatalogRules(text, catalog.ref, catalog.rules))
-  const hookRules = plural(hooks.length, "hook rule")
+  const localRules = [
+    ...(linters.length === 0 ? [] : [plural(linters.length, "linter rule")]),
+    ...(hooks.length === 0 ? [] : [plural(hooks.length, "hook rule")]),
+  ]
   const catalogRules = plural(adopted.length, "catalog rule")
   if (configText === null) {
     const named = [
-      ...(hooks.length === 0 ? [] : [hookRules]),
+      ...localRules,
       ...(adopted.length === 0 ? [] : [catalogRules]),
       ...(settings.conventions ? ["conventions"] : []),
       ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
@@ -84,17 +91,17 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
     ]
     const summary = named.length === 0 ? "new, no rules yet" : `new, ${named.join(", ")}`
     // A new config's catalog entry is written as an existing one's is, by addCatalogRules.
-    const content = withCatalog(newConfigText(hooks, settings))
+    const content = withCatalog(newConfigText(local, settings))
     return { file: CONFIG_FILE, content, created: true, summary, commit: true }
   }
-  const withHooks = hooks.length > 0 ? addLocalRules(configText, hooks) : configText
-  const withRules = withCatalog(withHooks)
+  const withLocal = local.length > 0 ? addLocalRules(configText, local) : configText
+  const withRules = withCatalog(withLocal)
   const set = setSettings(withRules, settings)
   const content = set.text
   if (content === configText) return null
   const added = [
-    ...(withHooks === configText ? [] : [`+${hookRules}`]),
-    ...(withRules === withHooks ? [] : [`+${catalogRules}`]),
+    ...(withLocal === configText ? [] : localRules.map((part) => `+${part}`)),
+    ...(withRules === withLocal ? [] : [`+${catalogRules}`]),
   ]
   const summary = [...added, ...set.changes.map(settingText)].join(", ")
   return { file: CONFIG_FILE, content, created: false, summary, commit: true }

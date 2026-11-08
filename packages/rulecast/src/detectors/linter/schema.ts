@@ -7,7 +7,7 @@ export const linterSchema = z
     tool: z.enum(TOOL_NAMES),
     /**
      * Linter rule ids to report, turned on for rulecast's run even where the project's config leaves
-     * them off. Omitted: every finding the tool reports under the project's own config.
+     * them off. Omitted: what the project's own config makes an error.
      */
     rules: z.array(z.string().min(1)).min(1).optional(),
   })

@@ -56,10 +56,20 @@ function localRuleLines(rule: LocalRule): string[] {
     `  name: ${scalar(rule.name)}`,
     ...(rule.description === undefined ? [] : [`  description: ${JSON.stringify(rule.description)}`]),
     ...(rule.files === undefined ? [] : [`  files: ${JSON.stringify(rule.files)}`]),
+    ...(rule.types_or === undefined ? [] : [`  types_or: [${rule.types_or.map(scalar).join(", ")}]`]),
     "  detect:",
     ...mappingLines(rule.detect).map((line) => `    ${line}`),
     `  message: ${JSON.stringify(rule.message)}`,
     ...(rule.context.length === 0 ? [] : ["  context:", ...rule.context.map((ref) => `    - ${JSON.stringify(ref)}`)]),
+    ...(rule.context_by_rule === undefined || Object.keys(rule.context_by_rule).length === 0
+      ? []
+      : [
+          "  context_by_rule:",
+          ...Object.entries(rule.context_by_rule).flatMap(([ruleId, refs]) => [
+            `    ${JSON.stringify(ruleId)}:`,
+            ...refs.map((ref) => `      - ${JSON.stringify(ref)}`),
+          ]),
+        ]),
   ]
 }
 

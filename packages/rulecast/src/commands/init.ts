@@ -27,6 +27,7 @@ import {
   readHead,
 } from "../init/generated"
 import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
+import { linterLines, linterRule, markSameAs, type OfferedLinter, offerLinters } from "../init/linters"
 import { type AgentChoice, type InitSelections, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
@@ -44,6 +45,8 @@ interface Flags {
   scope: InstallScope
   /** --hooks: the project's own hooks to run as rules, by the ids the dry run offers. */
   hooks: string[]
+  /** --linters: the project's own linters to run as rules, by the ids the dry run offers. */
+  linters: string[]
   /** --catalog: catalog rules to adopt, by id. */
   catalog: string[]
   /** --generated / --vendored: paths the dry run offers, covered by generated-code / vendored-code. */
@@ -70,6 +73,7 @@ function parseFlags(args: string[]): Flags {
       "no-agents": { type: "boolean", default: false },
       scope: { type: "string" },
       hooks: { type: "string" },
+      linters: { type: "string" },
       catalog: { type: "string" },
       generated: { type: "string" },
       vendored: { type: "string" },
@@ -107,6 +111,7 @@ function parseFlags(args: string[]): Flags {
     noAgents: values["no-agents"],
     scope: scope as InstallScope,
     hooks: list(values.hooks),
+    linters: list(values.linters),
     catalog: list(values.catalog),
     generated: list(values.generated),
     vendored: list(values.vendored),
@@ -293,9 +298,12 @@ export interface InitReport {
       modifies: boolean | null
       runs?: string
       configured: boolean
+      /** It runs a linter offered under `linters`: that rule is the one to offer. */
+      sameAs?: string
     }[]
     skipped: { name: string; source: string; reason: string }[]
   }
+  linters: { offered: OfferedLinter[] }
   config: {
     exists: boolean
     /** Where new conventions go, from this config or one above it; null when none names it. */
@@ -342,6 +350,22 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     )
   }
   const hooks = scan.offered.filter((hook) => flags.hooks.includes(hook.id) && !configured.has(hook.id)).map(hookRule)
+  const lintersOn = await offerLinters(root, files, detection.docs, {
+    read: (file) => readSourceFile(root, file),
+    top: await repositoryTop(root),
+    configured,
+  })
+  const unknownLinter = flags.linters.find((id) => !lintersOn.offered.some((linter) => linter.id === id))
+  if (unknownLinter !== undefined) {
+    const offered = lintersOn.offered.map((linter) => linter.id)
+    throw new UsageError(
+      `"${unknownLinter}" is not a linter offered here (${offered.length === 0 ? "none are" : `offered: ${offered.join(", ")}`})`,
+    )
+  }
+  const linters = lintersOn.detected
+    .filter((linter) => flags.linters.includes(linter.id) && !configured.has(linter.id))
+    .map(linterRule)
+  const offeredHooks = markSameAs(scan.offered, lintersOn.detected)
   const agents = chooseAgents(detection, flags)
   const read = (file: string) => readSourceFile(root, file)
   const facts = await setupFacts({ root, files, read, exists: markerExists(root), adapters: ADAPTERS })
@@ -391,13 +415,13 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
 
   // The hooks serve every config a session started here reaches, as rulecast install's do.
   const own = config ?? defaultConfig()
-  const notes: string[] = []
+  const notes: string[] = [...lintersOn.notes]
   // Another config that does not load is not this one's to fix: said, and left out of the hooks' timeout.
   const reached = await hookConfigs(root, "init", own, (problem) =>
     notes.push(`${problem}\nLeft out of the hooks' timeout and repo fetch.`),
   )
   const changes = await planInit(
-    { agents, hooks, catalog: adopted, settings: flags.settings },
+    { agents, hooks, linters, catalog: adopted, settings: flags.settings },
     {
       configText,
       verifyMs: reached.verifyMs,
@@ -455,16 +479,18 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
               })),
             },
     hooks: {
-      offered: scan.offered.map((hook) => ({
+      offered: offeredHooks.map((hook) => ({
         id: hook.id,
         name: hook.name,
         source: hook.source,
         modifies: hook.modifies,
         ...(hook.runs === undefined ? {} : { runs: hook.runs }),
         configured: configured.has(hook.id),
+        ...(hook.sameAs === undefined ? {} : { sameAs: hook.sameAs }),
       })),
       skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
     },
+    linters: { offered: lintersOn.offered },
     config: {
       exists: config !== null,
       conventions: await conventionsFor(root),
@@ -503,10 +529,11 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   return report.validate.errors > 0 || !fetched ? 2 : 0
 }
 
-/** The hook ids, catalog rule ids and paths a run wrote: no longer offered in its text. */
+/** The hook and linter ids, catalog rule ids and paths a run wrote: no longer offered in its text. */
 function adoptedNames(flags: Flags): string[] {
   return [
     ...flags.hooks,
+    ...flags.linters,
     ...flags.catalog,
     ...(flags.generated.length > 0 ? [GENERATED_RULE, ...flags.generated] : []),
     ...(flags.vendored.length > 0 ? [VENDORED_RULE, ...flags.vendored] : []),
@@ -516,6 +543,7 @@ function adoptedNames(flags: Flags): string[] {
 /** `wrapped`: what this run wrote (adoptedNames), left out of what it offers. */
 function terminalText(report: InitReport, detection: Detection, scan: HookScan, wrapped: readonly string[]): string {
   const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
+  out.push(...linterLines(report.linters.offered, wrapped))
   const offered = report.hooks.offered.filter((hook) => !hook.configured && !wrapped.includes(hook.id))
   if (offered.length > 0 || scan.skipped.length > 0) {
     out.push("Hooks")
@@ -565,7 +593,8 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
 /** How init's text says whether an offered hook changes files. */
-function writesNote(hook: { modifies: boolean | null; runs?: string }): string {
+function writesNote(hook: { modifies: boolean | null; runs?: string; sameAs?: string }): string {
+  if (hook.sameAs !== undefined) return ` (same as ${hook.sameAs}: offer that instead)`
   if (hook.modifies === true) return " (changes files)"
   if (hook.modifies === null) return ` (may change files: runs ${hook.runs})`
   return ""
