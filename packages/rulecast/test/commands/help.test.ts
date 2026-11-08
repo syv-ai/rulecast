@@ -8,12 +8,69 @@ import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
 import { createProject } from "../helpers/project"
 
-test("help prints every command with what it is for", async () => {
+const basic = COMMANDS.filter((command) => command.tier === "basic")
+const advanced = COMMANDS.filter((command) => command.tier === "advanced")
+
+test("help lists the basic commands and names the advanced ones", async () => {
   const cwd = await createProject({})
-  const result = await runCli(cwd, ["help"])
-  expect(result).toMatchObject({ code: 0, stdout: usage() })
-  for (const command of COMMANDS) expect(result.stdout).toContain(`  ${command.name}`)
-  for (const command of COMMANDS) expect(result.stdout).toContain(command.summary)
+  for (const flag of ["help", "--help", "-h"]) {
+    const result = await runCli(cwd, [flag])
+    expect(result).toMatchObject({ code: 0, stdout: usage() })
+    for (const command of basic) {
+      expect(result.stdout).toContain(`  ${command.name}`)
+      expect(result.stdout).toContain(command.summary)
+    }
+    for (const command of advanced) expect(result.stdout).not.toContain(command.summary)
+    expect(result.stdout).toContain(
+      "\nAdvanced: baseline, replay, autoupdate, try-repo, clean, warm, binary, hook (rulecast help --all)\n",
+    )
+  }
+})
+
+test("help --all lists every command, advanced ones under their own heading", async () => {
+  const cwd = await createProject({})
+  for (const argv of [
+    ["help", "--all"],
+    ["--help", "--all"],
+    ["-h", "--all"],
+  ]) {
+    const result = await runCli(cwd, argv)
+    expect(result).toMatchObject({ code: 0, stdout: usage({ all: true }) })
+    for (const command of COMMANDS) expect(result.stdout).toContain(command.summary)
+    const heading = result.stdout.indexOf("\nAdvanced:\n")
+    expect(heading).toBeGreaterThan(-1)
+    for (const command of basic) expect(result.stdout.indexOf(command.summary)).toBeLessThan(heading)
+    for (const command of advanced) expect(result.stdout.indexOf(command.summary)).toBeGreaterThan(heading)
+    expect(result.stdout).not.toContain("(rulecast help --all)")
+  }
+})
+
+test("every command still has its own help, advanced ones included", async () => {
+  const cwd = await createProject({})
+  for (const command of COMMANDS) {
+    for (const argv of [
+      [command.name, "--help"],
+      ["help", command.name],
+    ]) {
+      expect(await runCli(cwd, argv)).toMatchObject({ code: 0, stdout: commandHelp(command.name) })
+    }
+  }
+})
+
+test("the basic list is the shorter one", () => {
+  expect(basic.map((command) => command.name)).toEqual([
+    "init",
+    "install",
+    "uninstall",
+    "run",
+    "fix",
+    "list",
+    "add",
+    "test",
+    "stats",
+    "validate",
+    "doctor",
+  ])
 })
 
 test("no command prints usage and exits 2", async () => {
@@ -61,14 +118,27 @@ test("check is gone", async () => {
   expect(result.stderr).toContain('unknown command "check"')
 })
 
-/** The README's command table and COMMANDS name the same commands, in both directions. */
-test("the README's command table lists exactly the commands rulecast has", () => {
+/** The README's two command tables and COMMANDS name the same commands, tier by tier, in both directions. */
+test("the README's two command tables list each tier's commands", () => {
   const readme = readFileSync(fileURLToPath(new URL("../../../../README.md", import.meta.url)), "utf8")
-  const rows = readme.split("\n").filter((line) => line.startsWith("| `rulecast "))
-  const named = new Set(
-    rows.flatMap((row) => [...row.split("|")[1]!.matchAll(/`(?:rulecast )?([a-z-]+)/g)].map((match) => match[1]!)),
-  )
-  expect([...named].sort()).toEqual(COMMANDS.map((command) => command.name).sort())
+  const start = readme.indexOf("\n## Commands\n")
+  const end = readme.indexOf("\n## ", start + 1)
+  const section = readme.slice(start, end)
+  const split = section.indexOf("### Advanced commands")
+  expect(start).toBeGreaterThan(-1)
+  expect(split).toBeGreaterThan(-1)
+  const named = (text: string) => {
+    const rows = text.split("\n").filter((line) => line.startsWith("| `rulecast "))
+    return [
+      ...new Set(
+        rows.flatMap((row) => [...row.split("|")[1]!.matchAll(/`(?:rulecast )?([a-z-]+)/g)].map((match) => match[1]!)),
+      ),
+    ].sort()
+  }
+  const names = (commands: typeof COMMANDS) => commands.map((command) => command.name).sort()
+  expect(named(section.slice(0, split))).toEqual(names(basic))
+  expect(named(section.slice(split))).toEqual(names(advanced))
+  expect(named(readme.slice(0, start) + readme.slice(end))).toEqual([])
 })
 
 test("run --help and try-repo --help print the exit codes", async () => {

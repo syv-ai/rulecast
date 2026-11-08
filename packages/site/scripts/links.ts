@@ -1,5 +1,5 @@
 import path from "node:path"
-import { BASE, PAGES, readme } from "./sources"
+import { BASE, FRAGMENT_PAGE, FRAGMENTS, LEAD, PAGES, readme } from "./sources"
 
 const BLOB = "https://github.com/syv-ai/rulecast/blob/main/"
 
@@ -9,7 +9,7 @@ export function routeUrl(route: string): string {
 }
 
 /** A heading's anchor, as GitHub makes it. */
-function slug(heading: string): string {
+export function slug(heading: string): string {
   return heading
     .toLowerCase()
     .replace(/[^\p{L}\p{N} _-]/gu, "")
@@ -18,19 +18,22 @@ function slug(heading: string): string {
 
 /**
  * The page holding the README heading `anchor` names: the README is split over several pages. A `##`
- * heading equal to the page's title is dropped from the page, so a link to it keeps no anchor.
+ * heading equal to the page's title is dropped from the page, so a link to it keeps no anchor. The
+ * FRAGMENTS sections are on FRAGMENT_PAGE, under their own headings.
  */
 function readmeRoute(anchor: string): { route: string; anchor?: string } | null {
+  const sections = readme()
+  const holds = (heading: string) =>
+    (heading !== LEAD && slug(heading) === anchor) ||
+    [...(sections.get(heading) ?? "").matchAll(/^#{3,6} (.+)$/gm)].some((m) => slug(m[1]!.trim()) === anchor)
   for (const page of PAGES) {
     if (!("readme" in page.source)) continue
-    const sections = readme()
     for (const heading of page.source.readme) {
-      if (slug(heading) === anchor)
-        return heading === page.title ? { route: page.route } : { route: page.route, anchor }
-      const subheadings = [...(sections.get(heading) ?? "").matchAll(/^#{3,6} (.+)$/gm)].map((m) => m[1]!)
-      if (subheadings.some((candidate) => slug(candidate.trim()) === anchor)) return { route: page.route, anchor }
+      if (heading === page.title && slug(heading) === anchor) return { route: page.route }
+      if (holds(heading)) return { route: page.route, anchor }
     }
   }
+  if (Object.values(FRAGMENTS).some(holds)) return { route: FRAGMENT_PAGE, anchor }
   return null
 }
 

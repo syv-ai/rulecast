@@ -31,6 +31,18 @@ function frontmatter(page: Page): string {
   return `---\ntitle: ${JSON.stringify(page.title)}\ndescription: ${JSON.stringify(page.description)}\n---\n`
 }
 
+/** A generated page's Markdown body, links rewritten: what sync writes after the frontmatter. */
+export function pageMarkdown(page: Page, sections: Map<string, string>): string {
+  return pageParts(page, sections)
+    .map((part) => rewriteLinks(part.markdown, part.source))
+    .join("\n\n")
+}
+
+/** A README fragment's Markdown, links rewritten, as sync writes it to src/generated. */
+export function fragmentMarkdown(heading: string, sections: Map<string, string>): string {
+  return rewriteLinks(sections.get(heading) ?? "", "README.md")
+}
+
 export async function sync(): Promise<string[]> {
   const sections = readme()
   assertPlaced(sections)
@@ -44,9 +56,7 @@ export async function sync(): Promise<string[]> {
       if (!existsSync(file)) throw new Error(`hand-written page ${page.route} has no ${path.relative(siteDir, file)}`)
       continue
     }
-    const body = pageParts(page, sections)
-      .map((part) => rewriteLinks(part.markdown, part.source))
-      .join("\n\n")
+    const body = pageMarkdown(page, sections)
     const file = path.join(docsDir, `${page.route}.md`)
     await mkdir(path.dirname(file), { recursive: true })
     await writeFile(file, `${frontmatter(page)}\n${HEADER}\n\n${body}\n`)
@@ -57,7 +67,7 @@ export async function sync(): Promise<string[]> {
   written.push(rawAgentDocsDir)
   for (const [name, heading] of Object.entries(FRAGMENTS)) {
     const file = path.join(generatedDir, `${name}.md`)
-    await writeFile(file, `${rewriteLinks(sections.get(heading) ?? "", "README.md")}\n`)
+    await writeFile(file, `${fragmentMarkdown(heading, sections)}\n`)
     written.push(file)
   }
   return written

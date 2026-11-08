@@ -104,7 +104,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "help":
       case "--help":
       case "-h":
-        io.stdout(usage())
+        io.stdout(usage({ all: args.includes("--all") }))
         return command === undefined ? EXIT.failed : 0
       default:
         throw new UsageError(`unknown command "${command}"`)

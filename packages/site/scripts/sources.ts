@@ -113,13 +113,6 @@ export const PAGES: Page[] = [
     source: { readme: ["Git hooks and CI"] },
   },
   {
-    route: "guides/agent-loops",
-    title: "Agent loops",
-    description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
-    group: "Guides",
-    source: { file: "agents/reference/loops.md" },
-  },
-  {
     route: "guides/agents",
     title: "Agents",
     description: "Let your agent set rulecast up and draft rules from your docs.",
@@ -132,6 +125,20 @@ export const PAGES: Page[] = [
     description: "Add one rule at a time from inside a Claude Code session.",
     group: "Guides",
     source: { readme: ["Claude Code plugin"] },
+  },
+  {
+    route: "guides/agent-loops",
+    title: "Agent loops",
+    description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
+    group: "Guides",
+    source: { file: "agents/reference/loops.md" },
+  },
+  {
+    route: "guides/advanced",
+    title: "Advanced",
+    description: "Several agents at once, git operations, fresh environments and committed baselines.",
+    group: "Guides",
+    source: { readme: ["Advanced"] },
   },
   {
     route: "reference/commands",
@@ -200,6 +207,8 @@ export const PAGES: Page[] = [
  * how-it-works.mdx; the license is linked from the footer.
  */
 export const FRAGMENTS: Record<string, string> = { lead: LEAD, performance: "Performance" }
+/** The page that imports FRAGMENTS, so the page a link to one of their headings goes to. */
+export const FRAGMENT_PAGE = "how-it-works"
 export const DROPPED = ["License"]
 
 const FENCE = /^(```|~~~)/

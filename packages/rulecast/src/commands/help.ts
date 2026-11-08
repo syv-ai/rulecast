@@ -1,8 +1,12 @@
 import { EXIT_CODES, TRY_REPO_EXIT_CODES } from "../adapters/cli/contract"
 import { VERSION } from "../core/version"
 
+/** Basic commands are listed by `rulecast help`; advanced ones only by `rulecast help --all`. */
+export type CommandTier = "basic" | "advanced"
+
 export interface CommandHelp {
   name: string
+  tier: CommandTier
   synopsis: string
   /** One line, for `rulecast help`. */
   summary: string
@@ -27,6 +31,7 @@ const exitNotes = (codes: [code: number, meaning: string][]) => [
 export const COMMANDS: CommandHelp[] = [
   {
     name: "init",
+    tier: "basic",
     synopsis:
       "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
     summary: "Set rulecast up: config, settings, your existing git hooks as rules, agent hooks",
@@ -57,6 +62,7 @@ export const COMMANDS: CommandHelp[] = [
 
   {
     name: "install",
+    tier: "basic",
     synopsis: "rulecast install [--agent <name>]... [--scope shared|personal]",
     summary: "Add the agent hooks, or upgrade them, and fetch missing rule repos",
     flags: [
@@ -66,12 +72,14 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "uninstall",
+    tier: "basic",
     synopsis: "rulecast uninstall [--agent <name>]...",
     summary: "Remove the agent hooks rulecast added",
     flags: [["--agent <name>", "Only this agent; repeatable"]],
   },
   {
     name: "run",
+    tier: "basic",
     synopsis:
       "rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--llm | --no-llm]",
     summary: "Check staged files (the default), changed files, or everything",
@@ -95,6 +103,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "baseline",
+    tier: "advanced",
     synopsis: "rulecast baseline [--prune | --force] [--no-llm]",
     summary: "Record today's findings, so full-repo runs fail only on new ones",
     flags: [
@@ -112,6 +121,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "fix",
+    tier: "basic",
     synopsis: "rulecast fix [RULE_ID] (--all-files | --files F... | --from-ref A) [--dry-run] [--format terminal|json]",
     summary: "Apply regex and ast-grep rules' fixes; --dry-run prints the diff",
     flags: [
@@ -133,6 +143,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "list",
+    tier: "basic",
     synopsis: "rulecast list [RULE_ID] [--catalog] [--format terminal|json]",
     summary: "Show every configured rule: where it comes from, what it matches, what it cites",
     flags: [
@@ -143,6 +154,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "add",
+    tier: "basic",
     synopsis: "rulecast add <id|pack>...",
     summary: "Add catalog rules or packs, such as loop-safety, to the nearest config",
     flags: [["id|pack", "A catalog rule id, or a pack's name for all of its rules"]],
@@ -150,6 +162,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "test",
+    tier: "basic",
     synopsis:
       "rulecast test [RULE_ID] [--against PATH... | --history [--commits N] [--yes] [--label]] [--max-rate N] [--format terminal|json]",
     summary: "Run each rule's good/bad examples; --against and --history say how much it would flag",
@@ -181,6 +194,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "stats",
+    tier: "basic",
     synopsis: "rulecast stats [--since 30d] [--format terminal|json]",
     summary: "Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy",
     flags: [
@@ -194,6 +208,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "replay",
+    tier: "advanced",
     synopsis: "rulecast replay claude-code [--sessions N] [--rule ID]... [--llm [--yes]] [--format terminal|json]",
     summary: "What your rules would have told the agent in its recent sessions, from their transcripts",
     flags: [
@@ -210,12 +225,14 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "validate",
+    tier: "basic",
     synopsis: "rulecast validate [file...]",
     summary: "Check the config (and a rules manifest) and print diagnostics",
     flags: [["file...", "A config (repos:) or a manifest (a list of rules), whatever its name"]],
   },
   {
     name: "doctor",
+    tier: "basic",
     synopsis: "rulecast doctor [--ci] [--from-ref REF]",
     summary: "Compile, check the environment and hooks, dry-run every rule",
     flags: [
@@ -225,6 +242,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "autoupdate",
+    tier: "advanced",
     synopsis: "rulecast autoupdate [--freeze] [--repo URL]...",
     summary: "Move pinned rule repos to their latest tag",
     flags: [
@@ -234,6 +252,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "try-repo",
+    tier: "advanced",
     synopsis: "rulecast try-repo <path|url> [RULE_ID] [--ref REV] [run flags]",
     summary: "Run a rule repo against your project without configuring it",
     flags: [["--ref REV", "The revision of a URL repo (default HEAD)"]],
@@ -241,6 +260,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "clean",
+    tier: "advanced",
     synopsis: "rulecast clean [--project]",
     summary: "Delete the cache; the installed binary stays",
     flags: [["--project", "Only this project's directory"]],
@@ -251,12 +271,14 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "warm",
+    tier: "advanced",
     synopsis: "rulecast warm [--detector <kind>]...",
     summary: "Build detector caches ahead of time",
     flags: [["--detector <kind>", "Only this detector kind; repeatable"]],
   },
   {
     name: "binary",
+    tier: "advanced",
     synopsis: "rulecast binary install | rulecast binary path",
     summary: "Put this standalone binary where the agent hooks and git hooks find it",
     flags: [],
@@ -267,6 +289,7 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: "hook",
+    tier: "advanced",
     synopsis: "rulecast hook <adapter>",
     summary: "Answer an agent hook on stdin (the agent runs this, not you)",
     flags: [],
@@ -275,15 +298,22 @@ export const COMMANDS: CommandHelp[] = [
 
 const NAME_WIDTH = Math.max(...COMMANDS.map((command) => command.name.length))
 
-/** `rulecast`, `rulecast help`: what each command is for, one line each. */
-export function usage(): string {
+const line = (command: CommandHelp) => `  ${command.name.padEnd(NAME_WIDTH)}  ${command.summary}`
+
+/** `rulecast`, `rulecast help`: the basic commands, one line each, and the advanced ones by name. `all` lists those too. */
+export function usage(options: { all?: boolean } = {}): string {
+  const basic = COMMANDS.filter((command) => command.tier === "basic")
+  const advanced = COMMANDS.filter((command) => command.tier === "advanced")
   return [
     `rulecast ${VERSION}`,
     "",
     "usage: rulecast <command> [flags]",
     "",
-    ...COMMANDS.map((command) => `  ${command.name.padEnd(NAME_WIDTH)}  ${command.summary}`),
+    ...basic.map(line),
     "",
+    ...(options.all === true
+      ? ["Advanced:", ...advanced.map(line), ""]
+      : [`Advanced: ${advanced.map((command) => command.name).join(", ")} (rulecast help --all)`]),
     "rulecast <command> --help shows a command's flags.",
     "",
   ].join("\n")
