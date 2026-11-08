@@ -113,13 +113,6 @@ export const PAGES: Page[] = [
     source: { readme: ["Git hooks and CI"] },
   },
   {
-    route: "guides/agent-loops",
-    title: "Agent loops",
-    description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
-    group: "Guides",
-    source: { file: "agents/reference/loops.md" },
-  },
-  {
     route: "guides/agents",
     title: "Agents",
     description: "Let your agent set rulecast up and draft rules from your docs.",
@@ -132,6 +125,20 @@ export const PAGES: Page[] = [
     description: "Add one rule at a time from inside a Claude Code session.",
     group: "Guides",
     source: { readme: ["Claude Code plugin"] },
+  },
+  {
+    route: "guides/agent-loops",
+    title: "Agent loops",
+    description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
+    group: "Guides",
+    source: { file: "agents/reference/loops.md" },
+  },
+  {
+    route: "guides/advanced",
+    title: "Advanced",
+    description: "Several agents at once, git operations, fresh environments and committed baselines.",
+    group: "Guides",
+    source: { readme: ["Advanced"] },
   },
   {
     route: "reference/commands",

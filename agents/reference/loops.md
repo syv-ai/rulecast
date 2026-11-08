@@ -12,7 +12,7 @@ A loop usually starts somewhere fresh: a CI job, a cloud session, a new containe
 - **`npx rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
 - **The `loop-safety` pack:** `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
 
-Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Agents](../../README.md#agents)).
+Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Several agents at once](../../README.md#several-agents-at-once)).
 
 ## A goal that rulecast decides
 

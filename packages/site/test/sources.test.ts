@@ -70,6 +70,32 @@ describe("pageBody", () => {
   })
 })
 
+describe("the advanced page", () => {
+  const sections = readme()
+  const page = (route: string) => PAGES.find((candidate) => candidate.route === route)!
+
+  it("holds the moved subsections, and the first-tier pages no longer do", () => {
+    const advanced = pageBody(page("guides/advanced"), sections)
+    for (const heading of [
+      "### Several agents at once",
+      "### Git operations during a turn",
+      "### Fresh environments",
+      "### A committed baseline",
+      "### Agents with nobody watching",
+    ]) {
+      expect(advanced).toContain(heading)
+    }
+    expect(advanced).toContain("isolation: worktree")
+    expect(advanced.startsWith("## Advanced")).toBe(false)
+    expect(pageBody(page("guides/git-hooks-ci"), sections)).not.toMatch(/^### Fresh environments$/m)
+    expect(pageBody(page("guides/adopting-rules"), sections)).not.toContain("### A committed baseline")
+    expect(pageBody(page("guides/agents"), sections)).not.toContain("isolation: worktree")
+    const commands = pageBody(page("reference/commands"), sections)
+    expect(commands).toContain("### Advanced commands")
+    expect(commands).toContain("`rulecast replay claude-code`")
+  })
+})
+
 describe("exampleBinding", () => {
   it("finds the line the README's example rule produces in its opening output", () => {
     const binding = exampleBinding()

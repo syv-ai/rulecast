@@ -96,6 +96,19 @@ A refusal only ever rests on the text the agent is writing, never on a reconstru
 
 That covers the edit tools. A write through Bash cannot be refused before it runs, because nothing knows what a command will write, so rulecast catches it right after: the agent is told the file is protected and how to revert it, its stop is held until it has (up to the stop limit: once per prompt by default), and you are told which file it changed.
 
+## Turning a rule off
+
+- **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the line.
+- **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax. The reason is required; an ignore without one suppresses nothing.
+
+  ```python
+  except Exception:
+      # rulecast-ignore: python/no-silent-except best-effort cache cleanup
+      pass
+  ```
+
+`rulecast run --all-files --summary` counts the ignores, and an ignore or a config change made during an agent session is reported to you when the agent stops: the agent cannot quietly edit its way past a rule.
+
 ## Commands
 
 | Command | Does |
@@ -134,7 +147,7 @@ Most projects never run these by hand.
 
 | Command | Does |
 |---|---|
-| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](#a-committed-baseline)) |
+| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](README.md#a-committed-baseline)) |
 | `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
@@ -208,37 +221,6 @@ In a project without Node, replace the `setup-node` and `npm ci` steps with one 
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
-`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies, and `gitleaks` gets it on stdin too. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
-
-### Fresh environments
-
-A CI job, a cloud agent session or a new container starts with nothing installed. rulecast does not fail quietly there: in unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and the agent is held once per prompt to put that in its final report. `rulecast run` says `incomplete` and lists them under `disabled` in JSON. To have nothing to report:
-
-1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
-2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
-3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else the installed binary in `~/.cache/rulecast/bin/`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
-4. Check out with `fetch-depth: 0` if you use `--from-ref`.
-5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
-6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
-7. Optionally cache `~/.cache/rulecast/repos` between jobs (for example `actions/cache` keyed on `.rulecast-config.yaml`). It saves a clone per job.
-
-A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
-
-A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
-
-## Turning a rule off
-
-- **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the line.
-- **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax. The reason is required; an ignore without one suppresses nothing.
-
-  ```python
-  except Exception:
-      # rulecast-ignore: python/no-silent-except best-effort cache cleanup
-      pass
-  ```
-
-`rulecast run --all-files --summary` counts the ignores, and an ignore or a config change made during an agent session is reported to you when the agent stops: the agent cannot quietly edit its way past a rule.
-
 ## Adopting a rule on a codebase that already breaks it
 
 `rulecast run --all-files --summary` tells you how much you already owe:
@@ -272,24 +254,7 @@ proven.)
 
 When the fix is mechanical, give the rule a [`fix`](agents/reference/rule-format.md#fixes) and burn the stock down in one go: `rulecast fix <rule> --all-files --dry-run` shows the diff, and without `--dry-run` it writes it. Hooks never apply a fix; only that command does.
 
-### A committed baseline
-
-`--from-ref` needs a ref. A scheduled full-repository run, such as a nightly convention sweep or an agent loop told to keep `main` clean, has none, so every legacy violation is new and the run always fails. For those, record what is there today:
-
-```sh
-rulecast baseline            # writes .rulecast/baseline.json
-git add .rulecast/baseline.json && git commit -m "rulecast baseline"
-rulecast run --all-files     # exits 0 unless something got worse
-```
-
-- `run --all-files` and `run --files` treat the findings listed in the file as pre-existing, and fail only on new ones. Sessions, `--from-ref` and staged commits keep their own baseline, and hooks never read the file.
-- The file lists finding ids ([what an id is](agents/reference/output.md#finding-ids)), so editing a baselined line's offending text, or moving its file, makes the finding new.
-- When a run no longer finds an entry it says so: `baseline: 3 entries no longer found (fixed or changed); rulecast baseline --prune drops them`. Run `--prune` in the same pull request that fixes them. It only ever removes entries, never adds one, and keeps the entries of rules that did not run.
-- Recording new findings means rewriting the file with `rulecast baseline --force`. That is an amnesty, and it shows in review as one.
-- `rulecast doctor` reports its size, when it was added and when it last changed.
-- `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
-
-Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
+A scheduled full-repository run, which has no ref to diff against, needs a [committed baseline](README.md#a-committed-baseline).
 
 ## Agents
 
@@ -314,28 +279,9 @@ with the one convention you want checked.
 - [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for working out your conventions up front. It reads the code, then interviews you one question at a time about what matters in this kind of project. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
-With subagents, each one's stop checks only the files it edited, so it is never asked to fix
-another agent's code. The main agent's stop checks everything the session changed: a problem that
-only shows when two subagents' changes meet is caught there. A file two subagents both edit can
-block either of them. A change no agent's tool call made, such as your own edit, is reported at the
-main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
-
-When agents run in parallel in one working tree, in one session or several, and one of them changes
-files with the shell, a file another agent changed with Edit or Write while the command ran stays
-that agent's. What two agents' shell commands change at the same time can't be told apart: both are
-held to it, each is told once, and neither is told to `git checkout` a protected file the other may
-have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with
-`isolation: worktree`).
-
-A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull
-or merge brings lines into a file the agent edited, those lines are not counted as the agent's,
-as long as their commits were made before the operation. The agent's own commits stay its own. One
-gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only
-as a git operation, so files it alone changed are not checked.
-
-If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
-
 As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, which never fire, and whether a rule fires less over the weeks. `rulecast clean` deletes it.
+
+Several agents in one working tree, git operations during a turn, and agents with nobody watching are covered under [Advanced](README.md#advanced).
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 
@@ -382,6 +328,76 @@ The edit hook is budgeted to finish in under 500 ms at p95, measured from proces
 A new worktree, a new session or an empty per-project detector cache needs no preparation. Hooks never fetch, so rules from a rule repo that is not in the cache do not run until `rulecast install` (see [Fresh environments](#fresh-environments)). On macOS, the first edit in a new worktree is slower than later ones: macOS checks each executable the first time it runs from a new path, such as the project's own `command` script or a `node_modules/.bin` linter shim. Run them once beforehand and the first edit costs the same as later ones.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
+
+## Advanced
+
+Most projects need none of this. It covers particular setups: several agents in one working tree, git operations during a turn, fresh CI and cloud environments, and full-repository runs with no ref to diff against. The commands for them are under [Advanced commands](README.md#advanced-commands).
+
+### Several agents at once
+
+With subagents, each one's stop checks only the files it edited, so it is never asked to fix
+another agent's code. The main agent's stop checks everything the session changed: a problem that
+only shows when two subagents' changes meet is caught there. A file two subagents both edit can
+block either of them. A change no agent's tool call made, such as your own edit, is reported at the
+main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
+
+When agents run in parallel in one working tree, in one session or several, and one of them changes
+files with the shell, a file another agent changed with Edit or Write while the command ran stays
+that agent's. What two agents' shell commands change at the same time can't be told apart: both are
+held to it, each is told once, and neither is told to `git checkout` a protected file the other may
+have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with
+`isolation: worktree`).
+
+### Git operations during a turn
+
+A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull
+or merge brings lines into a file the agent edited, those lines are not counted as the agent's,
+as long as their commits were made before the operation. The agent's own commits stay its own. One
+gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only
+as a git operation, so files it alone changed are not checked.
+
+### Fresh environments
+
+A CI job, a cloud agent session or a new container starts with nothing installed. rulecast does not fail quietly there: in unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and the agent is held once per prompt to put that in its final report. `rulecast run` says `incomplete` and lists them under `disabled` in JSON. To have nothing to report:
+
+1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
+2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
+3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else the installed binary in `~/.cache/rulecast/bin/`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
+4. Check out with `fetch-depth: 0` if you use `--from-ref`.
+5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
+6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
+7. Optionally cache `~/.cache/rulecast/repos` between jobs (for example `actions/cache` keyed on `.rulecast-config.yaml`). It saves a clone per job.
+
+A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
+
+A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
+
+### Tools in staged and `--to-ref` runs
+
+`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies, and `gitleaks` gets it on stdin too. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
+
+### A committed baseline
+
+`--from-ref` needs a ref. A scheduled full-repository run, such as a nightly convention sweep or an agent loop told to keep `main` clean, has none, so every legacy violation is new and the run always fails. For those, record what is there today:
+
+```sh
+rulecast baseline            # writes .rulecast/baseline.json
+git add .rulecast/baseline.json && git commit -m "rulecast baseline"
+rulecast run --all-files     # exits 0 unless something got worse
+```
+
+- `run --all-files` and `run --files` treat the findings listed in the file as pre-existing, and fail only on new ones. Sessions, `--from-ref` and staged commits keep their own baseline, and hooks never read the file.
+- The file lists finding ids ([what an id is](agents/reference/output.md#finding-ids)), so editing a baselined line's offending text, or moving its file, makes the finding new.
+- When a run no longer finds an entry it says so: `baseline: 3 entries no longer found (fixed or changed); rulecast baseline --prune drops them`. Run `--prune` in the same pull request that fixes them. It only ever removes entries, never adds one, and keeps the entries of rules that did not run.
+- Recording new findings means rewriting the file with `rulecast baseline --force`. That is an amnesty, and it shows in review as one.
+- `rulecast doctor` reports its size, when it was added and when it last changed.
+- `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
+
+Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
+
+### Agents with nobody watching
+
+If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
 
 ## Status
 
