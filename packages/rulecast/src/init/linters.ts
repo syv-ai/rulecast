@@ -40,13 +40,13 @@ const TYPES: Record<ToolName, string[] | null> = {
 const LABEL: Record<ToolName, string> = { eslint: "ESLint", oxlint: "oxlint", ruff: "Ruff", gitleaks: "gitleaks" }
 
 /** Hook ids that run one of the linters: offered as the linter rule instead. */
-const HOOK_TOOL: Record<string, ToolName> = {
-  ruff: "ruff",
-  "ruff-check": "ruff",
-  eslint: "eslint",
-  oxlint: "oxlint",
-  gitleaks: "gitleaks",
-}
+const HOOK_TOOL = new Map<string, ToolName>([
+  ["ruff", "ruff"],
+  ["ruff-check", "ruff"],
+  ["eslint", "eslint"],
+  ["oxlint", "oxlint"],
+  ["gitleaks", "gitleaks"],
+])
 
 const basename = (file: string) => path.posix.basename(file)
 const dirOf = (file: string) => path.posix.dirname(file)
@@ -139,7 +139,9 @@ async function listRules(
   signal: AbortSignal,
 ): Promise<Listing> {
   const cwd = path.join(root, dir)
-  const resolved = await resolveTool(tool, cwd, undefined, top)
+  // Never through `uv run`: it syncs the project's environment, and a dry run writes nothing. The
+  // project's own node_modules/.bin or .venv, else the tool on the PATH.
+  const resolved = await resolveTool(tool, cwd, () => false, top)
   const run = async (args: string[]) =>
     (
       await runTool(resolved.command, [...resolved.prefix, ...args], {
@@ -282,7 +284,10 @@ export function linterRule(linter: DetectedLinter): LocalRule {
 export function markSameAs(hooks: readonly DetectedHook[], linters: readonly DetectedLinter[]): DetectedHook[] {
   const detected = new Set(linters.map((linter) => linter.tool))
   return hooks.map((hook) => {
-    const tool = HOOK_TOOL[hook.id.replace(/^hook\//, "")]
+    // By its id (`ruff-check`) or its name (`ruff check`, as a local hook calls it).
+    const tool =
+      HOOK_TOOL.get(hook.id.replace(/^hook\//, "")) ??
+      HOOK_TOOL.get(hook.name.trim().toLowerCase().replace(/\s+/g, "-"))
     return tool !== undefined && detected.has(tool) ? { ...hook, sameAs: `linter/${tool}` } : hook
   })
 }

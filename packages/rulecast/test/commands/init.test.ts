@@ -259,7 +259,9 @@ describe("rulecast init", () => {
       ...PROJECT,
       "pyproject.toml": "[project]\nname = 'x'\n\n[tool.ruff.lint]\nselect = ['F']\n",
       ".pre-commit-config.yaml":
-        "repos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.14.0\n    hooks:\n      - id: ruff-check\n",
+        "repos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.14.0\n    hooks:\n      - id: ruff-check\n" +
+        // A local hook names the linter only in its name, as the FastAPI template's does.
+        "  - repo: local\n    hooks:\n      - id: local-ruff-check\n        name: ruff check\n        entry: uv run ruff check\n        language: system\n",
     })
     await stubTool(root, "ruff")
     await writeFile(
@@ -269,6 +271,9 @@ describe("rulecast init", () => {
     const { report: dry } = await report(root, "--dry-run")
     expect(dry.linters.offered.map((linter) => [linter.id, linter.errorRules])).toEqual([["linter/ruff", ["F401"]]])
     expect(dry.hooks.offered).toContainEqual(expect.objectContaining({ id: "hook/ruff-check", sameAs: "linter/ruff" }))
+    expect(dry.hooks.offered).toContainEqual(
+      expect.objectContaining({ id: "hook/local-ruff-check", sameAs: "linter/ruff" }),
+    )
     expect((await init(root, "--dry-run")).stdout).toContain(
       "hook/ruff-check (same as linter/ruff: offer that instead)",
     )

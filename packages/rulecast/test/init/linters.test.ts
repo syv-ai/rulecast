@@ -1,4 +1,5 @@
-import { writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
@@ -103,6 +104,34 @@ describe("detectLinters", () => {
     expect(eslint!.note).toBe(
       "linter/eslint: could not list the rules its config makes errors (eslint printed no config).",
     )
+  })
+
+  test("listing never runs uv: it would sync the project's environment during a dry run", async () => {
+    const files = {
+      "pyproject.toml": "[project]\nname = 'x'\n\n[tool.ruff.lint]\nselect = ['F']\n",
+      "uv.lock": "",
+      "app/a.py": "x = 1\n",
+    }
+    const root = await createProject(files)
+    // The only tool on the PATH is a uv that records being run.
+    const bin = path.join(root, "fake-bin")
+    await mkdir(bin)
+    await writeFile(path.join(bin, "uv"), `#!/bin/sh\ntouch "${path.join(root, "uv-ran")}"\n`)
+    await chmod(path.join(bin, "uv"), 0o755)
+    const saved = process.env.PATH
+    process.env.PATH = `${bin}:/usr/bin:/bin`
+    try {
+      const [ruff] = await detectLinters(root, Object.keys(files), {
+        read: (file) => readSourceFile(root, file),
+        available: async (command) => command === "uv",
+      })
+      // Detected (uv would run it), but its rules are not listed through uv.
+      expect(ruff).toMatchObject({ id: "linter/ruff", errorRules: null })
+      expect(ruff!.note).toBe("linter/ruff: could not list the rules its config makes errors (ruff is not installed).")
+    } finally {
+      process.env.PATH = saved
+    }
+    expect(existsSync(path.join(root, "uv-ran"))).toBe(false)
   })
 
   test("gitleaks lists no rules: every finding counts", async () => {
