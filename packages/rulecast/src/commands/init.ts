@@ -18,7 +18,14 @@ import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } 
 import type { ConfigSettings, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
 import { type SetupFacts, setupFacts } from "../init/facts"
-import { type FoundPaths, filesOverride, findGenerated, type OfferedPath, readHead } from "../init/generated"
+import {
+  attributedFiles,
+  type FoundPaths,
+  filesOverride,
+  findGenerated,
+  type OfferedPath,
+  readHead,
+} from "../init/generated"
 import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
 import { type AgentChoice, type InitSelections, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
@@ -188,7 +195,8 @@ function catalogSelections(
       throw new UsageError(`"${id}" is not a catalog rule in ${catalog.label} (${offeredText(ids)})`)
     }
   }
-  const paths = new Map<string, string[]>()
+  // The offered entries, kind included: only an entry offered as a pattern is read as one.
+  const paths = new Map<string, OfferedPath[]>()
   for (const [flag, id, chosen, offered] of [
     ["--generated", GENERATED_RULE, flags.generated, found.generated],
     ["--vendored", VENDORED_RULE, flags.vendored, found.vendored],
@@ -200,7 +208,10 @@ function catalogSelections(
         `"${unknown}" is not a path ${flag} is offered here (${offeredText(offered.map((entry) => entry.path))})`,
       )
     }
-    paths.set(id, [...chosen])
+    paths.set(
+      id,
+      chosen.map((each) => offered.find((entry) => entry.path === each)!),
+    )
   }
 
   const rules: RuleSelection[] = []
@@ -353,6 +364,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
       : await findGenerated({
           files,
           readHead: (file) => readHead(root, file),
+          attributed: (attribute) => attributedFiles(root, attribute),
           read,
           covered: generatedRule === null ? null : (file) => generatedRule.matches(file),
           coveredVendored: vendoredRule === null ? null : (file) => vendoredRule.matches(file),

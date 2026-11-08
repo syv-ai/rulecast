@@ -1,7 +1,7 @@
 import { open } from "node:fs/promises"
 import path from "node:path"
 
-import { globToRegex } from "./hooks"
+import { git } from "../core/git"
 
 /**
  * Generated and vendored paths, as init offers them for the `generated-code` and `vendored-code`
@@ -28,6 +28,9 @@ export interface FoundPaths {
   notListed: { generated: number; vendored: number }
 }
 
+/** The two attributes GitHub's linguist reads, and init with it. */
+export type LinguistAttribute = "linguist-generated" | "linguist-vendored"
+
 /** A vendored directory: someone else's code, copied in. */
 export const VENDORED_DIR = /(^|\/)(vendor|third_party)\//
 
@@ -44,8 +47,6 @@ const EVIDENCE_LENGTH = 80
 const PARALLEL = 32
 /** Prose, whose first lines may say "do not edit" about something else: never header-scanned. */
 const PROSE = /\.(md|mdx|markdown)$/i
-/** A .gitattributes pattern that is a glob rather than one path. */
-const GLOB = /[*?[{]/
 
 export interface FindInput {
   files: readonly string[]
@@ -53,6 +54,11 @@ export interface FindInput {
   readHead(file: string): Promise<string | null>
   /** Reads a project-relative file; null when missing. */
   read(file: string): Promise<string | null>
+  /**
+   * The project's files that carry the attribute, as git resolves .gitattributes (attributedFiles):
+   * negation, last match wins and every glob form are git's own.
+   */
+  attributed(attribute: LinguistAttribute): Promise<readonly string[]>
   /** The catalog rule's default `files`, so already-covered paths are not offered; null when unknown. */
   covered: ((file: string) => boolean) | null
   /** The same for `vendored-code`. */
@@ -75,6 +81,24 @@ export async function readHead(root: string, file: string): Promise<string | nul
   }
 }
 
+/**
+ * The files under `root` (tracked and untracked, not ignored) that git says carry `attribute`, set
+ * or `=true`. Empty when git can't say.
+ */
+export async function attributedFiles(root: string, attribute: LinguistAttribute): Promise<string[]> {
+  const result = await git(root, [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    `:(attr:${attribute})`,
+    `:(attr:${attribute}=true)`,
+  ])
+  return result.ok ? [...new Set(result.stdout.split("\0").filter(Boolean))].sort() : []
+}
+
 /** The marker line of a generated file's header, or null. */
 function headerLine(head: string | null): string | null {
   if (head === null) return null
@@ -85,53 +109,100 @@ function headerLine(head: string | null): string | null {
   return line === undefined ? null : line.trim().slice(0, EVIDENCE_LENGTH)
 }
 
-interface Attribute {
-  /** As written in .gitattributes. */
-  pattern: string
-  regex: RegExp
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * A .gitattributes (gitignore-style) pattern as a regex over project paths: `*` and `?` stay within
+ * one path segment, `**` + `/` is any number of directories, a trailing `/**` everything below, `[...]`
+ * a character class. A leading `/` anchors at the root; a pattern with no other `/` matches at any
+ * depth. null for a pattern that matches no file: one ending in `/` names a directory, which
+ * attributes never reach into.
+ */
+export function attributePatternRegex(pattern: string): string | null {
+  if (pattern === "" || pattern.endsWith("/")) return null
+  const anchored = pattern.startsWith("/")
+  const body = anchored ? pattern.slice(1) : pattern
+  let out = ""
+  for (let index = 0; index < body.length; index++) {
+    const char = body[index]!
+    if (body.startsWith("**/", index) && (index === 0 || body[index - 1] === "/")) {
+      out += "(.*/)?"
+      index += 2
+    } else if (body.startsWith("/**", index) && index + 3 === body.length) {
+      out += "/.*"
+      index += 2
+    } else if (char === "*") {
+      while (body[index + 1] === "*") index++
+      out += "[^/]*"
+    } else if (char === "?") {
+      out += "[^/]"
+    } else if (char === "[") {
+      const close = body.indexOf("]", index + 2)
+      if (close === -1) {
+        out += "\\["
+        continue
+      }
+      const inner = body
+        .slice(index + 1, close)
+        .replace(/^!/, "^")
+        .replace(/\\/g, "\\\\")
+      out += `[${inner}]`
+      index = close
+    } else if (char === "\\" && index + 1 < body.length) {
+      out += literal(body[++index]!)
+    } else {
+      out += literal(char)
+    }
+  }
+  const atAnyDepth = !anchored && !body.includes("/")
+  return `^${atAnyDepth ? "(.*/)?" : ""}${out}$`
 }
 
-interface Attributes {
-  generated: Attribute[]
-  vendored: Attribute[]
+/** The patterns of a .gitattributes that set `attribute`, in file order. */
+function attributePatterns(text: string | null, attribute: LinguistAttribute): string[] {
+  const patterns: string[] = []
+  for (const raw of (text ?? "").split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line === "" || line.startsWith("#")) continue
+    const [pattern = "", ...attrs] = line.split(/\s+/)
+    if (attrs.includes(attribute) || attrs.includes(`${attribute}=true`)) patterns.push(pattern)
+  }
+  return patterns
 }
 
-/** Why a file is marked: the evidence, and the .gitattributes glob that marked it, if one did. */
+/** Why a file is marked: the evidence, and the .gitattributes pattern that covers it as one path, if any. */
 interface Mark {
   evidence: string
   pattern: string | null
 }
 
-/** A .gitattributes pattern as a regex over project paths: a name alone matches at any depth. */
-function attributeSource(pattern: string): string {
-  const anchored = pattern.replace(/^\//, "")
-  if (!pattern.replace(/\/$/, "").includes("/")) return `^(.*/)?${globToRegex(anchored).slice(1)}`
-  return globToRegex(anchored)
-}
-
-const attributeRegex = (pattern: string) => new RegExp(attributeSource(pattern))
-
-/** The `linguist-generated` and `linguist-vendored` patterns of the project's .gitattributes. */
-function attributes(text: string | null): Attributes {
-  const found: Attributes = { generated: [], vendored: [] }
-  for (const raw of (text ?? "").split(/\r?\n/)) {
-    const line = raw.trim()
-    if (line === "" || line.startsWith("#")) continue
-    const [pattern = "", ...attrs] = line.split(/\s+/)
-    for (const attr of attrs) {
-      const entry = () => ({ pattern, regex: attributeRegex(pattern) })
-      if (attr === "linguist-generated" || attr === "linguist-generated=true") found.generated.push(entry())
-      if (attr === "linguist-vendored" || attr === "linguist-vendored=true") found.vendored.push(entry())
+/**
+ * The marks for the files git says carry `attribute`. A pattern from the project's .gitattributes
+ * is kept, to be offered as one path, only when its regex selects exactly files git marked: a
+ * pattern that a later `-attr` or `!attr` line cuts into is not, and its files fall back to
+ * directories and files.
+ */
+function attributeMarks(
+  files: readonly string[],
+  marked: readonly string[],
+  text: string | null,
+  attribute: LinguistAttribute,
+): Map<string, Mark> {
+  const set = new Set(marked)
+  const evidence = `.gitattributes ${attribute}`
+  const marks = new Map<string, Mark>(marked.map((file) => [file, { evidence, pattern: null }]))
+  for (const pattern of attributePatterns(text, attribute)) {
+    const source = attributePatternRegex(pattern)
+    if (source === null) continue
+    const regex = new RegExp(source)
+    const selected = files.filter((file) => regex.test(file))
+    if (selected.length === 0 || !selected.every((file) => set.has(file))) continue
+    for (const file of selected) {
+      const mark = marks.get(file)!
+      mark.pattern ??= pattern
     }
   }
-  return found
-}
-
-/** The mark an attribute gives `file`, or null: a glob is kept, so the pattern can be offered as one path. */
-function attributeMark(list: readonly Attribute[], file: string, evidence: string): Mark | null {
-  const hit = list.find((attribute) => attribute.regex.test(file))
-  if (hit === undefined) return null
-  return { evidence, pattern: GLOB.test(hit.pattern) ? hit.pattern : null }
+  return marks
 }
 
 /** Every dir above `file`, "/"-terminated, nearest the root first; the root itself is not one. */
@@ -144,9 +215,9 @@ const byPath = (a: OfferedPath, b: OfferedPath) => (a.path < b.path ? -1 : a.pat
 
 /**
  * The topmost dirs of at least `min` files that are all marked or covered, with at least one marked;
- * then the .gitattributes globs that marked files outside them, one entry each; then the other marked
- * files, one by one, up to MAX_FILES. A dir or file whose files are all covered is left out: the
- * catalog default already reaches it.
+ * then the .gitattributes patterns that marked files outside them, one entry each; then the other
+ * marked files, one by one, up to MAX_FILES. A dir or file whose files are all covered is left out:
+ * the catalog default already reaches it.
  */
 function group(
   files: readonly string[],
@@ -156,8 +227,10 @@ function group(
 ): { offered: OfferedPath[]; notListed: number } {
   const stats = new Map<string, { total: number; ok: boolean; evidence: string | null }>()
   for (const file of files) {
-    const evidence = marked.get(file)?.evidence ?? null
-    const ok = evidence !== null || covered(file)
+    // A file a pattern covers is offered with its pattern: it never makes a dir on its own.
+    const mark = marked.get(file)
+    const evidence = mark !== undefined && mark.pattern === null ? mark.evidence : null
+    const ok = mark !== undefined || covered(file)
     for (const dir of dirsOf(file)) {
       const entry = stats.get(dir) ?? { total: 0, ok: true, evidence: null }
       entry.total++
@@ -208,36 +281,36 @@ async function inBatches<T, R>(items: readonly T[], each: (item: T) => Promise<R
 
 /** The project's generated and vendored paths, as init offers them. Vendored dirs are never header-scanned. */
 export async function findGenerated(input: FindInput): Promise<FoundPaths> {
-  const files = input.files.filter((file) => !file.split("/").includes("node_modules"))
+  const outsideNodeModules = (file: string) => !file.split("/").includes("node_modules")
+  const files = input.files.filter(outsideNodeModules)
+  const present = new Set(files)
   // An unreadable .gitattributes reads as none: it must not stop the dry run.
-  const attrs = attributes(await input.read(".gitattributes").catch(() => null))
+  const attributes = await input.read(".gitattributes").catch(() => null)
+  const listed = async (attribute: LinguistAttribute) =>
+    (await input.attributed(attribute).catch(() => [] as string[])).filter((file) => present.has(file))
   const covered = input.covered ?? (() => false)
   const coveredVendored = input.coveredVendored ?? (() => false)
 
   // Vendored: the topmost vendor/ or third_party/ dir of each file, then linguist-vendored files grouped.
   const vendorDirs = new Map<string, { files: number; covered: boolean; name: string }>()
-  const attributed = new Map<string, Mark>()
   const vendoredFiles = new Set<string>()
   for (const file of files) {
     const match = VENDORED_DIR.exec(file)
-    if (match !== null) {
-      const dir = file.slice(0, match.index + match[0].length)
-      const entry = vendorDirs.get(dir) ?? { files: 0, covered: true, name: match[2]! }
-      entry.files++
-      entry.covered &&= coveredVendored(file)
-      vendorDirs.set(dir, entry)
-      vendoredFiles.add(file)
-      continue
-    }
-    const mark = attributeMark(attrs.vendored, file, ".gitattributes linguist-vendored")
-    if (mark !== null) {
-      attributed.set(file, mark)
-      vendoredFiles.add(file)
-    }
+    if (match === null) continue
+    const dir = file.slice(0, match.index + match[0].length)
+    const entry = vendorDirs.get(dir) ?? { files: 0, covered: true, name: match[2]! }
+    entry.files++
+    entry.covered &&= coveredVendored(file)
+    vendorDirs.set(dir, entry)
+    vendoredFiles.add(file)
   }
+  const outsideVendor = files.filter((file) => !VENDORED_DIR.test(file))
+  const linguistVendored = (await listed("linguist-vendored")).filter((file) => !VENDORED_DIR.test(file))
+  for (const file of linguistVendored) vendoredFiles.add(file)
+  const vendoredMarks = attributeMarks(outsideVendor, linguistVendored, attributes, "linguist-vendored")
   const vendoredGroups = group(
-    files.filter((file) => !VENDORED_DIR.test(file)),
-    new Map([...attributed].filter(([file]) => !coveredVendored(file))),
+    outsideVendor,
+    new Map([...vendoredMarks].filter(([file]) => !coveredVendored(file))),
     coveredVendored,
     1,
   )
@@ -250,18 +323,14 @@ export async function findGenerated(input: FindInput): Promise<FoundPaths> {
 
   // Generated: linguist-generated, else a generator's header. Covered files and prose are not read.
   const candidates = files.filter((file) => !vendoredFiles.has(file) && !covered(file))
-  const marks = await inBatches(candidates, async (file): Promise<Mark | null> => {
-    const attribute = attributeMark(attrs.generated, file, ".gitattributes linguist-generated")
-    if (attribute !== null) return attribute
-    if (PROSE.test(file)) return null
-    const line = headerLine(await input.readHead(file))
-    return line === null ? null : { evidence: `header: ${line}`, pattern: null }
-  })
-  const marked = new Map<string, Mark>()
-  candidates.forEach((file, index) => {
-    const mark = marks[index]
-    if (mark) marked.set(file, mark)
-  })
+  const linguistGenerated = (await listed("linguist-generated")).filter((file) => candidates.includes(file))
+  const marked = attributeMarks(candidates, linguistGenerated, attributes, "linguist-generated")
+  const headers = await inBatches(
+    candidates.filter((file) => !marked.has(file) && !PROSE.test(file)),
+    async (file) => [file, headerLine(await input.readHead(file))] as const,
+  )
+  for (const [file, line] of headers)
+    if (line !== null) marked.set(file, { evidence: `header: ${line}`, pattern: null })
   const generated = group(files, marked, covered, 2)
   return {
     generated: generated.offered,
@@ -270,16 +339,15 @@ export async function findGenerated(input: FindInput): Promise<FoundPaths> {
   }
 }
 
-const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
 /**
- * `defaultFiles` widened with the chosen paths, each anchored at the project: `^frontend/src/client/`,
- * `^x/y\.ts$`, and a .gitattributes glob as the regex it means, at any depth for a bare name.
+ * `defaultFiles` widened with the chosen paths, each anchored at the project: a dir as a prefix
+ * (`^frontend/src/client/`), a file exactly (`^x/y\.ts$`), both literally (`app/[id]/` included),
+ * and only an entry offered as a `pattern` as the .gitattributes pattern it is.
  */
-export function filesOverride(defaultFiles: string, paths: readonly string[]): string {
-  const added = paths.map((entry) => {
-    if (GLOB.test(entry)) return attributeSource(entry)
-    return entry.endsWith("/") ? `^${literal(entry)}` : `^${literal(entry)}$`
+export function filesOverride(defaultFiles: string, paths: readonly Pick<OfferedPath, "path" | "kind">[]): string {
+  const added = paths.map(({ path: entry, kind }) => {
+    if (kind === "pattern") return attributePatternRegex(entry) ?? `^${literal(entry)}$`
+    return kind === "dir" || entry.endsWith("/") ? `^${literal(entry)}` : `^${literal(entry)}$`
   })
   return [defaultFiles, ...added].filter((part) => part !== "").join("|")
 }

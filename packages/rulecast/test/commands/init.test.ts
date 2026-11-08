@@ -500,11 +500,16 @@ describe("rulecast init", () => {
     const dry = JSON.parse((await runCli(root, ["init", "--dry-run", "--format", "json"], "", olderEnv)).stdout)
     expect(dry.generated.map((entry: { path: string }) => entry.path)).toEqual(["frontend/src/client/"])
     expect(dry.vendored).toEqual([])
-    const refused = await runCli(root, ["init", "--vendored", "static/lib/"], "", olderEnv)
+    const refused = await runCli(root, ["init", "--vendored", "static/lib/**"], "", olderEnv)
     expect(refused.code).toBe(2)
-    expect(refused.stderr).toContain('"static/lib/" is not a path --vendored is offered here (none are)')
+    expect(refused.stderr).toContain('"static/lib/**" is not a path --vendored is offered here (none are)')
     // With vendored-code in the catalog, the same path is offered.
-    expect((await report(root, "--dry-run")).report.vendored.map((entry) => entry.path)).toEqual(["static/lib/"])
+    expect((await report(root, "--dry-run")).report.vendored.map((entry) => entry.path)).toEqual(["static/lib/**"])
+    // Adopted, the pattern is written as the regex it means, and it validates.
+    const written = await report(root, "--no-agents", "--vendored", "static/lib/**")
+    expect(written.report.validate!.errors).toBe(0)
+    const text = await read(root, CONFIG_FILE)
+    expect(text).toContain('files: "(^|/)(vendor|third_party)/|^static/lib/.*$"')
   })
 
   test("in a fresh repository with no commits, committers is null and init still works", async () => {
