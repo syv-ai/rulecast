@@ -22,6 +22,19 @@ export interface EmbeddedLanguage {
   expandoChar?: string
 }
 
+/**
+ * The binary's copy of `@ast-grep/napi`'s native module, as a path inside the binary. Left to bun,
+ * it is written to a fresh temp path and loaded from there in every process, and macOS checks a
+ * library at a new path on its first load, which costs about 250 ms per hook. load.ts unpacks it
+ * once instead and points napi-rs's loader at the copy. A global of its own, beside the languages.
+ */
+export const EMBEDDED_NAPI_KEY = "__rulecastEmbeddedNapi"
+
+/** The embedded napi module's path inside the binary, or undefined outside it. */
+export function embeddedNapi(): string | undefined {
+  return (globalThis as Record<string, unknown>)[EMBEDDED_NAPI_KEY] as string | undefined
+}
+
 /** Whether this process is the standalone binary: its entry sets the embedded globals before the CLI starts. */
 export function isStandaloneBinary(): boolean {
   return (globalThis as Record<string, unknown>)[EMBEDDED_KEY] !== undefined
@@ -41,9 +54,9 @@ export function embeddedLanguage(name: string): EmbeddedLanguage | undefined {
  * written, the temp directory is used instead.
  */
 export async function unpack(file: string, name: string, env: Env): Promise<string> {
-  // Read, not copyFile: the copy syscall cannot read from bun's virtual file system.
-  const bytes = await readFile(file)
-  const size = bytes.length
+  // Stat, then read only to write: napi's module is 7 MB, and every hook in the binary asks.
+  const { size } = await stat(file)
+  let bytes: Buffer | undefined
   const dirName = `${VERSION}-${process.platform}-${process.arch}`
   const dirs = [
     path.join(cacheHome(env), "native", dirName),
@@ -56,6 +69,8 @@ export async function unpack(file: string, name: string, env: Env): Promise<stri
       if ((await stat(target).catch(() => null))?.size === size) return target
       await mkdir(dir, { recursive: true })
       const partial = `${target}.${process.pid}.tmp`
+      // Read, not copyFile: the copy syscall cannot read from bun's virtual file system.
+      bytes ??= await readFile(file)
       await writeFile(partial, bytes)
       await rename(partial, target)
       return target

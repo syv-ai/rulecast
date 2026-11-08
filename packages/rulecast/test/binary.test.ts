@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -110,9 +110,60 @@ describe.runIf(canRun)("standalone binary", () => {
     expect(first.stdout).toContain("app/b.ts:1 logs.")
     expect(first.status).toBe(1)
     const native = path.join(home, "native", `${VERSION}-${process.platform}-${process.arch}`)
-    expect(readdirSync(native)).toEqual(["python.so"])
+    expect(readdirSync(native).sort()).toEqual(["napi.node", "python.so"])
     const written = statSync(path.join(native, "python.so")).mtimeMs
     expect(run().status).toBe(1)
     expect(statSync(path.join(native, "python.so")).mtimeMs).toBe(written)
+  }, 60_000)
+
+  test("the napi module is unpacked into the cache home once", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "rulecast-binary-home-"))
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([TS_RULE]),
+      "app/b.ts": "console.log(1)\n",
+    })
+    const run = () =>
+      spawnSync(binary, ["run", "--all-files", "--format", "agent"], {
+        cwd: root,
+        env: { ...process.env, RULECAST_HOME: home },
+        encoding: "utf8",
+      })
+    expect(run().stdout).toContain("app/b.ts:1 logs.")
+    const napi = path.join(home, "native", `${VERSION}-${process.platform}-${process.arch}`, "napi.node")
+    const written = statSync(napi).mtimeMs
+    expect(run().stdout).toContain("app/b.ts:1 logs.")
+    expect(statSync(napi).mtimeMs).toBe(written)
+  }, 60_000)
+
+  /**
+   * The native directory cannot be made (a file is in its place), so the native files go to the
+   * per-user temp directory. The home itself stays writable: every run keeps project state there.
+   * With the temp directory unwritable too there is no way to load a native library at all, as
+   * bun's own unpacking needs it as well, and the rules are reported as not run.
+   */
+  test("with no writable native directory in the cache home, ast-grep rules still run", async () => {
+    const scratch = await mkdtemp(path.join(tmpdir(), "rulecast-binary-ro-"))
+    const home = path.join(scratch, "home")
+    const tmp = path.join(scratch, "tmp")
+    mkdirSync(home)
+    mkdirSync(tmp)
+    writeFileSync(path.join(home, "native"), "")
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([PY_RULE, TS_RULE]),
+      "app/a.py": "def f():\n    try:\n        g()\n    except ValueError:\n        pass\n",
+      "app/b.ts": "console.log(1)\n",
+    })
+    const result = spawnSync(binary, ["run", "--all-files", "--format", "agent"], {
+      cwd: root,
+      env: { ...process.env, RULECAST_HOME: home, TMPDIR: tmp },
+      encoding: "utf8",
+    })
+    expect(result.stdout).toContain("app/b.ts:1 logs.")
+    expect(result.stdout).toContain("app/a.py:4 swallows an exception.")
+    const fallback = readdirSync(tmp).find((name) => name.startsWith("rulecast-native-"))!
+    expect(readdirSync(path.join(tmp, fallback, `${VERSION}-${process.platform}-${process.arch}`)).sort()).toEqual([
+      "napi.node",
+      "python.so",
+    ])
   }, 60_000)
 })

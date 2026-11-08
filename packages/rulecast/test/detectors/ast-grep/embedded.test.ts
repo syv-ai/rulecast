@@ -1,10 +1,10 @@
-import { mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { VERSION } from "../../../src/core/version"
-import { unpack } from "../../../src/detectors/ast-grep/embedded"
+import { EMBEDDED_KEY, isStandaloneBinary, unpack } from "../../../src/detectors/ast-grep/embedded"
 
 async function source(bytes = "parser bytes"): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "rulecast-embedded-src-"))
@@ -38,6 +38,19 @@ describe("unpack", () => {
     expect(await readFile(target, "utf8")).toBe("the whole parser")
   })
 
+  test("a file already unpacked is not read again", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "rulecast-embedded-home-"))
+    const file = await source()
+    const first = await unpack(file, "napi", { RULECAST_HOME: home })
+    // Unreadable now: a second read would throw. stat still works.
+    await chmod(file, 0o000)
+    try {
+      expect(await unpack(file, "napi", { RULECAST_HOME: home })).toBe(first)
+    } finally {
+      await chmod(file, 0o644)
+    }
+  })
+
   test("falls back to the temp directory when the cache home cannot be written", async () => {
     const blocker = path.join(await mkdtemp(path.join(tmpdir(), "rulecast-embedded-")), "a-file")
     await writeFile(blocker, "")
@@ -46,6 +59,20 @@ describe("unpack", () => {
     expect(target.startsWith(tmpdir()) || target.startsWith(await realTmp())).toBe(true)
     expect(target).not.toContain(blocker)
     expect(await readFile(target, "utf8")).toBe("parser bytes")
+  })
+})
+
+describe("isStandaloneBinary", () => {
+  test("isStandaloneBinary follows the embedded global", () => {
+    const global = globalThis as Record<string, unknown>
+    expect(isStandaloneBinary()).toBe(false)
+    global[EMBEDDED_KEY] = {}
+    try {
+      expect(isStandaloneBinary()).toBe(true)
+    } finally {
+      delete global[EMBEDDED_KEY]
+    }
+    expect(isStandaloneBinary()).toBe(false)
   })
 })
 

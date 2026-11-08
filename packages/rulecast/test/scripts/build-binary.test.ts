@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { BINARY_RUNNERS, BINARY_TARGETS, hostTarget } from "../../scripts/build-binary"
+import { BINARY_RUNNERS, BINARY_TARGETS, binaryEntry, hostNapi, hostTarget } from "../../scripts/build-binary"
+import { EMBEDDED_NAPI_KEY } from "../../src/detectors/ast-grep/embedded"
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url))
 
@@ -29,6 +30,18 @@ describe("hostTarget", () => {
   test("every target has a runner, and no runner is used twice", () => {
     expect(Object.keys(BINARY_RUNNERS).sort()).toEqual([...BINARY_TARGETS].sort())
     expect(new Set(Object.values(BINARY_RUNNERS)).size).toBe(BINARY_TARGETS.length)
+  })
+})
+
+describe("binaryEntry", () => {
+  test("the entry embeds the host's napi module and sets its global", () => {
+    const entry = binaryEntry("/x/cli.js")
+    const { file } = hostNapi()
+    expect(file).toMatch(/\.node$/)
+    expect(entry).toContain(`import napiModule from ${JSON.stringify(file)} with { type: "file" }`)
+    expect(entry).toContain(`[${JSON.stringify(EMBEDDED_NAPI_KEY)}] = napiModule`)
+    // Set before the CLI is imported, so load.ts sees it.
+    expect(entry.indexOf(EMBEDDED_NAPI_KEY)).toBeLessThan(entry.indexOf('await import("/x/cli.js")'))
   })
 })
 

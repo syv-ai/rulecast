@@ -1,7 +1,7 @@
 import type { SgRoot } from "@ast-grep/napi"
 
 import { errorMessage } from "../../core/errors"
-import { embeddedLanguage, unpack } from "./embedded"
+import { embeddedLanguage, embeddedNapi, unpack } from "./embedded"
 import { LANGUAGES, type Language, napiLanguage } from "./languages"
 
 export interface Parser {
@@ -51,8 +51,21 @@ async function registration(name: string, load: () => Promise<unknown>): Promise
   }
 }
 
+/**
+ * In the binary, napi-rs's loader is pointed at a copy of the embedded module unpacked once into
+ * the cache home: it reads NAPI_RS_NATIVE_LIBRARY_PATH before anything else. With nowhere to
+ * unpack, it gets the embedded path itself, which bun writes to a fresh temp file per run: slow,
+ * but every rule still runs.
+ */
+async function pointAtEmbeddedNapi(): Promise<void> {
+  const embedded = embeddedNapi()
+  if (embedded === undefined) return
+  process.env.NAPI_RS_NATIVE_LIBRARY_PATH = await unpack(embedded, "napi", process.env).catch(() => embedded)
+}
+
 async function load(): Promise<Loaded> {
   loading ??= (async () => {
+    await pointAtEmbeddedNapi()
     const napi = await import("@ast-grep/napi")
     const dynamic: Record<string, Registration> = {}
     const failed = new Map<string, unknown>()

@@ -6,7 +6,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
-import { EMBEDDED_KEY } from "../src/detectors/ast-grep/embedded"
+import { EMBEDDED_KEY, EMBEDDED_NAPI_KEY } from "../src/detectors/ast-grep/embedded"
 
 const exec = promisify(execFile)
 const packageDir = fileURLToPath(new URL("../", import.meta.url))
@@ -44,9 +44,27 @@ export function hostTarget(platform: string = process.platform, arch: string = p
 const DYNAMIC_LANGUAGES = { python: "@ast-grep/lang-python" } as const
 
 /**
- * The binary's entry: it embeds each dynamic language's prebuilt parser for this machine (bun's
- * `type: "file"` import, which yields a path inside the binary), records what load.ts needs to
- * register it, and then starts the CLI. Read at build time from the packages themselves, so their
+ * The package holding this machine's `@ast-grep/napi` native module, and the module's path. Resolved
+ * from `@ast-grep/napi` itself, as its loader would: Linux has a glibc and a musl package, and the
+ * one installed is the one this machine runs.
+ */
+export function hostNapi(): { specifier: string; file: string } {
+  const require = createRequire(createRequire(path.join(packageDir, "package.json")).resolve("@ast-grep/napi"))
+  const base = `@ast-grep/napi-${process.platform}-${process.arch}`
+  for (const specifier of [base, `${base}-gnu`, `${base}-musl`]) {
+    try {
+      return { specifier, file: require.resolve(specifier) }
+    } catch {
+      // Not this variant; try the next.
+    }
+  }
+  throw new Error(`no @ast-grep/napi native module is installed for ${process.platform}-${process.arch}`)
+}
+
+/**
+ * The binary's entry: it embeds each dynamic language's prebuilt parser and napi's native module
+ * for this machine (bun's `type: "file"` import, which yields a path inside the binary), records
+ * what load.ts needs to register and load them, and then starts the CLI. Read at build time from the packages themselves, so their
  * registration never drifts. The packages are `--external`: bundled, they would carry the build
  * machine's node_modules path and look for the parser there.
  */
@@ -65,7 +83,9 @@ export function binaryEntry(cli: string): string {
     const rest = { extensions: entry.extensions, languageSymbol: entry.languageSymbol, expandoChar: entry.expandoChar }
     languages.push(`${JSON.stringify(name)}: { file: ${name}Parser, ...${JSON.stringify(rest)} }`)
   }
+  lines.push(`import napiModule from ${JSON.stringify(hostNapi().file)} with { type: "file" }`)
   lines.push(`;(globalThis as Record<string, unknown>)[${JSON.stringify(EMBEDDED_KEY)}] = { ${languages.join(", ")} }`)
+  lines.push(`;(globalThis as Record<string, unknown>)[${JSON.stringify(EMBEDDED_NAPI_KEY)}] = napiModule`)
   lines.push(`await import(${JSON.stringify(cli)})`)
   return `${lines.join("\n")}\n`
 }
@@ -78,7 +98,12 @@ export async function buildBinary(outfile: string): Promise<void> {
   try {
     const entry = path.join(scratch, "entry.ts")
     await writeFile(entry, binaryEntry(path.join(packageDir, "dist/cli.js")))
-    const external = Object.values(DYNAMIC_LANGUAGES).flatMap((specifier) => ["--external", specifier])
+    // napi's native package is external too: bundled, bun would embed a second copy of the module
+    // and write it to a new temp path on every run. The entry embeds it once, for load.ts to unpack.
+    const external = [...Object.values(DYNAMIC_LANGUAGES), hostNapi().specifier].flatMap((specifier) => [
+      "--external",
+      specifier,
+    ])
     await exec("bun", ["build", entry, "--compile", ...external, "--outfile", outfile])
   } finally {
     await rm(scratch, { recursive: true, force: true })
