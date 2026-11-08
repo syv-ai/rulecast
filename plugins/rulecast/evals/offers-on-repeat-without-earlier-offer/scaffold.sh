@@ -48,7 +48,7 @@ USERS = {1: "ada", 2: "grace"}
 
 def get(user_id: int) -> str:
     if user_id not in USERS:
-        raise NotFound(f"user {user_id} not found")
+        raise NotFound(f"user {user_id}")
     return USERS[user_id]
 PY
 

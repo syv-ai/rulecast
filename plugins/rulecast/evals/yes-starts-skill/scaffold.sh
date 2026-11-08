@@ -62,7 +62,7 @@ cat > node_modules/@syv-ai/rulecast/package.json <<'JSON'
 JSON
 cat > node_modules/@syv-ai/rulecast/bin/rulecast.js <<'JS'
 #!/usr/bin/env node
-// Eval stub for rulecast 0.8.2: answers `list` and `list --catalog` as the real CLI does for this project.
+// Eval stub for rulecast 0.8.2: answers `list` as the real CLI does for this project, and `list --catalog` with a shortened catalog.
 const args = process.argv.slice(2)
 const out = (text) => process.stdout.write(`${text}\n`)
 if (args[0] === "--version") {
