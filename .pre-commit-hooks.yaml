@@ -1,12 +1,14 @@
 # The stage names pre-commit/pre-push need pre-commit ≥ 3.2.0; consumers' configs should set
 # minimum_pre_commit_version: "3.2.0", and the README snippet does.
 #
-# language: system, calling the project's own install: the agent hooks already need
-# @syv-ai/rulecast in the project's devDependencies, so the git hook runs the same version.
+# language: system, running the rulecast the agent hooks run: the project's own
+# node_modules/.bin/rulecast, else the standalone binary installed in the cache home
+# (rulecast binary install), else one on the PATH. The entries are gitHookCommand() in
+# packages/rulecast/src/core/binary-home.ts, and a test holds them to it.
 - id: rulecast
   name: rulecast
   description: Check staged files against the project's rulecast rules.
-  entry: npx --no-install rulecast run
+  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run' --
   language: system
   pass_filenames: false
   always_run: true
@@ -16,7 +18,7 @@
   description: Check the commits being pushed.
   # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
   # from-ref on a branch's first push, which @{upstream} does not have.
-  entry: sh -c 'exec npx --no-install rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
+  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
   language: system
   pass_filenames: false
   always_run: true

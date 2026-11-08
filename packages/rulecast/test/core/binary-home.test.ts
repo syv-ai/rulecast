@@ -3,11 +3,17 @@ import { createHash } from "node:crypto"
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
+import { parse } from "yaml"
 
 import { BINARY_TARGETS, hostTarget } from "../../scripts/build-binary"
-import { CACHE_HOME_SH, installOneLiner, TARGET_SH } from "../../src/core/binary-home"
+import { CACHE_HOME_SH, gitHookCommand, installOneLiner, TARGET_SH } from "../../src/core/binary-home"
 import { cacheHome, type Env } from "../../src/core/home"
+import { LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
+import { createProject } from "../helpers/project"
+
+const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url))
 
 const BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -69,6 +75,36 @@ describe("TARGET_SH", () => {
     }
     expect([...named].sort()).toEqual([...BINARY_TARGETS].sort())
   })
+})
+
+describe("gitHookCommand", () => {
+  test(".pre-commit-hooks.yaml runs rulecast as the agent hooks find it", () => {
+    const hooks = parse(readFileSync(path.join(repoRoot, ".pre-commit-hooks.yaml"), "utf8")) as {
+      id: string
+      entry: string
+    }[]
+    expect(Object.fromEntries(hooks.map((hook) => [hook.id, hook.entry]))).toEqual({
+      rulecast: gitHookCommand("run"),
+      "rulecast-push": gitHookCommand('run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"'),
+    })
+  })
+
+  test.each(LOOKUP_FIXTURES)(
+    "the git-hook resolver prefers the project's, then the installed binary, then the PATH: $name",
+    async ({ places, runs }) => {
+      const root = await createProject({})
+      const { home, pathDir } = lookupSetup(places, root)
+      // pre-commit's entry is split like a shell would; the command is `sh -c <script> --`.
+      const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
+      const result = spawnSync("/bin/sh", ["-c", script, "--"], {
+        cwd: root,
+        env: { PATH: `${pathDir}:${BASE_PATH}`, RULECAST_HOME: home },
+        encoding: "utf8",
+      })
+      expect(result.stdout).toBe(`{"${runs}":true}\n`)
+      expect(readFileSync(path.join(root, `ran-${runs}`), "utf8")).toBe("run\n")
+    },
+  )
 })
 
 describe("installOneLiner", () => {
