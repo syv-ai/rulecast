@@ -286,52 +286,6 @@ export interface WorktreeMeasurement {
   worktrees: number
 }
 
-export interface InstallMeasurement {
-  /** The first edit on a fresh cache home right after `binary install`, which unpacked the native files. */
-  afterInstall: Measurement
-  /** The same first edit on a fresh cache home with no install before it: the edit pays the unpacking. */
-  withoutInstall: Measurement
-}
-
-const INSTALLS = 5
-
-/**
- * The binary only: `binary install` unpacks and loads ast-grep's native files, so the first edit
- * after it costs what a warm one does. Each of INSTALLS runs takes a cache home nothing has used.
- * Report only.
- */
-export async function measureFirstEditAfterInstall(): Promise<InstallMeasurement> {
-  if (PERF_BINARY === null) throw new Error("measureFirstEditAfterInstall measures the standalone binary")
-  await build()
-  const root = await preparedProject()
-  const original = readFileSync(path.join(root, FILE), "utf8")
-  const homes: string[] = []
-  const firstEdit = (home: string, sessionId: string) => {
-    writeFileSync(path.join(root, FILE), original)
-    const payload = (name: string) => claudeCodePayload(name, { root, file: FILE, sessionId })
-    runHook(root, payload("post-tool-use.read.complete"), home)
-    appendFileSync(path.join(root, FILE), "export const first = forbidden0(42)\n")
-    const edit = runHook(root, payload("post-tool-use.edit"), home)
-    if (!edit.stdout.includes("forbidden0(42)")) throw new Error("the first edit delivered no finding")
-    return edit.ms
-  }
-  const after: number[] = []
-  const without: number[] = []
-  try {
-    for (let i = 0; i < INSTALLS; i++) {
-      const installed = mkdtempSync(path.join(tmpdir(), "rulecast-perf-install-"))
-      const fresh = mkdtempSync(path.join(tmpdir(), "rulecast-perf-install-"))
-      homes.push(installed, fresh)
-      execFileSync(PERF_BINARY, ["binary", "install"], { env: { ...process.env, RULECAST_HOME: installed } })
-      after.push(firstEdit(installed, `perf-install-${i}`))
-      without.push(firstEdit(fresh, `perf-fresh-${i}`))
-    }
-    return { afterInstall: percentiles(after), withoutInstall: percentiles(without) }
-  } finally {
-    for (const home of homes) rmSync(home, { recursive: true, force: true })
-  }
-}
-
 const WORKTREES = 10
 
 /**
