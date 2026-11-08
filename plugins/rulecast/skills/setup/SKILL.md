@@ -10,6 +10,6 @@ The developer asked to set rulecast up. They said: $ARGUMENTS
 
 Setting rulecast up is a conversation with the developer: they decide every choice, and nothing is written until they approve. If they are not here, stop and say so.
 
-Read [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.8.2/agents/SETUP.md) and follow it. What the developer said above answers some of its questions or strikes some defaults: say how you read it.
+Read [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.9.0/agents/SETUP.md) and follow it. What the developer said above answers some of its questions or strikes some defaults: say how you read it.
 
 Commands there say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.

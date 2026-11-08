@@ -1,5 +1,81 @@
 # @syv-ai/rulecast
 
+## 0.9.0
+
+### Minor Changes
+
+- 571a7fd: The standalone binary is an install option for agent hooks. It needs no Node, no devDependency and no global npm install. You install it yourself; nothing downloads or installs it for you.
+  
+  - `rulecast binary install`, run by a downloaded binary, puts it at `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, points `<cache home>/bin/rulecast-<platform>-<arch>` (this machine's current link) at it, and removes this machine's older versions. `rulecast binary path` names the current one. Under Node, `binary install` prints the command that installs the binary and installs nothing.
+  - The README's Install section has a one-line install command. It downloads this version's binary and its `.sha256` from Releases over https only, checks them, and only then runs `binary install`.
+  - The binary unpacks ast-grep's native module once, into `<cache home>/native/`, instead of to a new temp path on every run. On macOS that took a TypeScript ast-grep run from about 630 ms to about 105 ms. The variable that points ast-grep at it is never passed to the tools rulecast runs, so a project's own napi-rs tools (vite, vitest, knip, tailwind) are unaffected.
+  - When the cache home's `native/` can't be written, the binary uses a temp directory only if this user owns it and nobody else can write it, and a fresh private one otherwise.
+  - An installed binary that can't run on this machine (built for another one, or refused by the OS) counts as not installed: the hooks go on to the PATH, and `doctor` and `binary path` don't fail.
+  - The binary can start `rulecast warm`. Before, the child it started failed with `unknown command "/$bunfs/root/rulecast"`.
+  - `doctor` says which rulecast the hooks run and its version. When that version is older than `minimum_rulecast_version`, it warns and prints the update command. When the project's rulecast and an installed binary differ, it names both.
+  - "requires rulecast X or newer" now names the rulecast that ran.
+  - Setup asks how to install rulecast, recommends the binary (or the devDependency when the project pins its tools in `package.json`), shows the exact command, and runs it only after approval.
+  
+  Breaking changes:
+  
+  - The agent hook command looks in the project's `node_modules/.bin`, then the installed binary, then the PATH. Existing hooks read as out of date in `doctor`; run `rulecast install` to rewrite them.
+  - The not-installed messages (`NOT_INSTALLED`, `NOT_INSTALLED_UNATTENDED`) have new text.
+  - The `.pre-commit-hooks.yaml` entries no longer run `npx --no-install rulecast`. They use the same lookup as the agent hooks, so git hooks need no Node.
+  - The README's Install section and lefthook snippet changed to match. The binary is no longer "for CI and one-off runs".
+  - `cacheHome()` reads `HOME` from the environment it is given before falling back to the OS home directory. With `HOME`, `XDG_CACHE_HOME` and `RULECAST_HOME` all unset, the hooks don't look for an installed binary.
+  - The installed binary's current link is `<cache home>/bin/rulecast-<platform>-<arch>`, one per machine, not `<cache home>/bin/rulecast`. The hooks only ever run this machine's link.
+  - `rulecast clean` keeps `<cache home>/bin` (the installed binary) and this version's native files. To remove the binary, delete `<cache home>/bin`.
+  - The docs site deploys after the release binaries are uploaded, so its install command never points at missing assets.
+- 03f1a52: The linters a project already runs can be delivered with their docs. A `linter` rule without `rules` delivers what the project's own ESLint, Ruff, oxlint or gitleaks config makes an error, and each finding says where its lint rule is explained: the project's own section, or else the linter's page for it.
+  
+  - New rule key `context_by_rule`: maps a lint rule id, exactly as `{{ruleId}}` shows it, to project doc sections, on `linter`, `command` and `hook` rules. A section is delivered only with the findings of its lint rule, and the first such finding in a block says `see <ref>`. A lint rule with no mapping says `upstream docs: <url>` when the tool's output gives one. For Ruff the keys are codes (`B006`); a name is a validate error.
+  - `rulecast init` detects the linters from their config files, lists how many rules each config makes errors and how many warnings will not be delivered, finds the doc sections that name those rules, and writes one rule per linter with `--linters linter/eslint,linter/ruff`. A pre-commit or lefthook hook that runs one of them says it is the same as the linter rule. init never writes `context_by_rule`: setup proposes each mapping and the developer agrees it.
+  - `rulecast list` shows each mapping, and SARIF rule help includes the mapped sections.
+  
+  Breaking changes:
+  
+  - A `linter` rule without `rules` no longer delivers warnings: only what the project's config makes an error (ESLint level 2, oxlint `error`/`deny`, every rule Ruff selects, every gitleaks finding).
+  - ESLint runs with `--format=json-with-metadata`.
+  - Findings in JSON output carry `docs`: `{ "ref": … }` or `{ "url": … }`.
+  - `context_by_rule` is a new rule key.
+- 44ad109: Setup shows a page of defaults drawn from the repository, then asks only the open questions.
+  
+  - `init --dry-run --format json` reports what setup used to gather by hand: `detected.committers` (distinct authors in the last six months, bots left out; null when there are none or the clone is shallow), `detected.packages` (declared workspaces and top-level directories with a manifest, with their stack and whether they have an agent doc or config), `detected.sessions` (agent settings below the project), `detected.gitHooks` (pre-commit, lefthook, husky, and whether rulecast is in each) and `detected.ci` (workflows that run a coding agent).
+  - It also reports `generated` and `vendored` paths (generator headers, `linguist-generated`, `linguist-vendored`, `vendor/` and `third_party/`) that the catalog rules' defaults don't already cover: a directory, a `.gitattributes` pattern as one path when it selects exactly the files git marks (git resolves the attributes, negation included), or files one by one (past 20, `notListed` counts the rest; Markdown is never header-scanned). They are offered only when the loaded catalog has `generated-code` or `vendored-code` to adopt them with. It also reports `catalog`: each catalog rule with how many of the project's files it matches, whether it is metered or in a pack, and whether it is configured.
+  - The dry run fetches the catalog's rule data at its latest tag (or the config's pin), waiting at most 5 s for the tag list. Offline, it uses the newest catalog already cached and says so; otherwise it reports `catalog: { error }` and still exits 0.
+  - New `init` flags: `--catalog id,id` adopts catalog rules, and `--generated path,path` and `--vendored path,path` add `generated-code` and `vendored-code` with `files` widened by those paths. Each takes only what the dry run offers, and `--catalog` refuses a pack and each rule in one. Catalog rules are now offered at setup; `rulecast add` and `list --catalog` stay for adopting them later.
+  - New catalog rule `vendored-code`: edits under `vendor/` and `third_party/` are errors, with a message to update the dependency and re-vendor it.
+  - SETUP.md's six-question interview is replaced: the agent fills the setup page with defaults from init's report and its own reading, asks the questions only the developer can answer (llm rules, agent loops with nobody watching) in the same turn, and writes after one approval. The setup page numbers every item, marks its state (default, said, off, struck) and has a "Needs your answer" section.
+  - On the page, the install is a row like the rest: the devDependency, the standalone binary (its install command in the row's detail) or a global install, with the one already installed, else the devDependency where `package.json` pins the tools, else the binary, as its default. It is run only after approval, and only as shown. The weekly stats summary is an `off` row the developer can turn on, never a question, and init's report shows the config's setting as `config.stats.weeklySummary`.
+  - All new work runs in `init`, which is not a hook: the edit-hook latency budget is unaffected.
+  
+  Breaking:
+  
+  - The setup page's `said` field is now `value`, and its items carry `n` and `state`. CONVENTIONS.md's review page uses `value` and `state: "said"`.
+  - SETUP.md's interview is replaced by the page of defaults.
+  - `init --format json` has new fields (`detected.committers`, `packages`, `sessions`, `gitHooks`, `ci`, and `generated`, `vendored`, `catalog`), and a dry run now loads the catalog.
+  - `RuleSelection` (internal) gains `files`. `remoteTags` (internal) takes a timeout, and `loadCatalog` can fall back to the cache.
+- a2538f1: `rulecast stats` shows a per-week trend for each rule: how often it fired per 100 checks that ran it, and the files it keeps firing on across sessions. The JSON gains a `weekly` key (`schemaVersion` stays 1), and the text output a weekly table once the trend spans two weeks.
+  
+  - The new config key `stats.weekly_summary` (off by default; `rulecast init --weekly-summary`) keeps 26 weeks of per-week counts in `findings-weekly.jsonl`, beside the config's findings log. A hook writes it when the log rotates and drops its oldest file. It holds rule ids, file paths, weeks and counts only. Without it, the trend covers what the log holds: about 8 MiB.
+  - The key applies to its own config's log only, and is not inherited by configs below it.
+  - The JSON is added to, so nothing breaks.
+
+### Patch Changes
+
+- d303d47: The plugin's add-rule skill now offers a rule instead of starting itself. When the developer corrects the agent in a way that says how code here should always or never be written, the agent finishes the fix and ends that reply with one line: `Want me to add a rulecast rule for this? "<the convention>"`. Nothing changes without a yes.
+  
+  - It offers once per convention per session, never again for that convention after a no, and at most once per reply. It does not offer for a change of mind about the task, a one-off bug, a mistake a rulecast finding already caught, or a run with nobody there to answer.
+  - After a yes, the skill takes the convention as offered and does not ask again whether you want a rule. If the agent starts the skill without offering first, it still says why and asks before anything else.
+  - The plugin has an eval suite in `plugins/rulecast/evals/`, run by hand with `claude plugin eval plugins/rulecast --scaffold --allow-tools Edit Write`. `yes-starts-skill` also needs Bash, and a grant applies to every case in a run, so run it on its own with `--case yes-starts-skill --allow-tools Bash Edit Write`.
+  
+  The plugin's version follows the CLI's, so this reaches you with the release.
+- 2c53cd6: `rulecast help` lists the commands most projects use. `baseline`, `replay`, `autoupdate`, `try-repo`, `clean`, `warm` and `hook` are named on one line, and `rulecast help --all` lists them with what they do. Every command works as before, and `rulecast <command> --help` is unchanged.
+  
+  The README and the docs site have a new Advanced section and page. It holds several agents in one working tree, git operations during a turn, fresh environments, how staged and `--to-ref` runs hand files to tools, committed baselines, and the loop-safety pack. Links to `#fresh-environments` and `#a-committed-baseline` still work. Text about parallel agents that was under `#agents` is now under `#several-agents-at-once`.
+  
+  The README's command table is split into commands and advanced commands. "Turning a rule off" now sits next to the other rule sections.
+
 ## 0.8.2
 
 ### Patch Changes

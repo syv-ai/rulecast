@@ -173,7 +173,7 @@ rulecast installs no git hooks itself: lefthook, husky and pre-commit already ow
 minimum_pre_commit_version: "3.2.0"
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.8.2
+    rev: v0.9.0
     hooks:
       - id: rulecast
       - id: rulecast-push
@@ -306,7 +306,7 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 **Standalone binary (no Node).**
 
 ```sh
-sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
 ```
 
 This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.
@@ -401,7 +401,7 @@ If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude 
 
 ## Status
 
-0.8. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
+0.9. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
 
 Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 
