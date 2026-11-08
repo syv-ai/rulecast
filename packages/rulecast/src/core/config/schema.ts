@@ -103,6 +103,11 @@ const ruleKeys = {
   message: z.string().optional(),
   context: z.array(referenceInputSchema).optional(),
   /**
+   * Sections delivered with the findings of one lint rule only, keyed by the rule id exactly as
+   * `{{ruleId}}` shows it. For detectors that report rule ids (linter, command, hook).
+   */
+  context_by_rule: z.record(z.union([referenceInputSchema, z.array(referenceInputSchema).nonempty()])).optional(),
+  /**
    * Code the rule must flag (`bad`) and must not (`good`), and edits whose findings it must sort
    * into new and pre-existing (`baseline`), run by `rulecast test`.
    */

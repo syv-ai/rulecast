@@ -260,6 +260,11 @@ export interface Detector<Config> {
   /** Input is unknown: schemas may apply defaults and refinements. */
   schema: ZodType<Config, ZodTypeDef, unknown>
   captures(config: Config): string[]
+  /**
+   * Whether `id` can ever be one of this rule's `{{ruleId}}` values: null when it can, else why
+   * not. Asked of each `context_by_rule` key at compile, so the core knows no tool's id form.
+   */
+  checkRuleId?(config: Config, id: string): string | null
   events(config: Config): DetectorEvent[]
   /**
    * Whether this detector reads only through `read`, and so can judge a write before it happens

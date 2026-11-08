@@ -93,6 +93,9 @@ export const linterDetector: Detector<LinterConfig> = {
   kind: "linter",
   schema: linterSchema,
   captures: () => ["message", "ruleId"],
+  // ruff reports codes (B006); a key in its name form (mutable-argument-default) could never match.
+  checkRuleId: (config, id) =>
+    config.tool === "ruff" && !/^[A-Z]+[0-9]+$/.test(id) ? "ruff reports rule codes such as B006, not names" : null,
   // A copy: compileRule stores this as the rule's stages, and module-level data must not escape into it.
   events: (config) => [...TOOLS[config.tool].events],
   takesContent: (config) => TOOLS[config.tool].stdinArgs !== undefined,
