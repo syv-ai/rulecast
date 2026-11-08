@@ -2,7 +2,7 @@
 
 Use this when the developer asks you to set up rulecast. rulecast delivers a project's conventions to coding agents while they work: rules in `.rulecast-config.yaml` pair a check with a message and a pointer to the doc section it enforces.
 
-Setup is short. You find out what the repository can tell you, ask the developer the rest, show them one page with everything you agreed, and write it once they approve. Most rules come later, one at a time: with `/rulecast:add-rule` from the rulecast plugin in Claude Code, or with [DRAFT-RULES.md](DRAFT-RULES.md) for one convention elsewhere.
+Setup is short. You read what the repository can tell you, show the developer one page of defaults with the few questions only they can answer, and write it once they approve. More rules come later, one at a time: with `/rulecast:add-rule` from the rulecast plugin in Claude Code, or with [DRAFT-RULES.md](DRAFT-RULES.md) for one convention elsewhere.
 
 Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
 
@@ -12,49 +12,86 @@ Every decision here is the developer's. Ask, and wait for the answer. If you wer
 
 ## 2. Find first
 
-Before asking anything, read what answers questions for you:
+Run init's dry run first, in each directory a config might go:
 
-- The docs: `README`, `AGENTS.md` or `CLAUDE.md`, `CONTRIBUTING`, anything under `docs/`.
-- The tree: packages, their languages and tools, where agent instructions sit (`.claude/`, `AGENTS.md` per package).
-- Who works on it: `git log --since="6 months ago" --format='%an' | sort | uniq -c`.
-- Git hooks and CI: `.pre-commit-config.yaml`, `lefthook.yml`, `.github/workflows/` and the like, and whether an agent runs in CI.
-- Any `.rulecast-config.yaml` already there.
+```sh
+rulecast init --dry-run --format json
+```
+
+It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports:
+
+- the stack, the docs and their headings, and the agents it detects;
+- `committers`: how many people committed in the last six months, bots left out (null when there are none, or in a shallow clone);
+- `packages`: declared workspaces and top-level directories with a manifest, each with its stack and whether it has its own agent doc or config;
+- `sessions`: directories below this one where an agent's settings already sit (`.claude/`);
+- `gitHooks`: pre-commit, lefthook or husky, and whether rulecast is already in each;
+- `ci`: workflow files that run a coding agent;
+- the project's own hooks it can run as rules (and the ones it can't, with why);
+- `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence: a directory, a `.gitattributes` pattern, or a file (past 20 files, `notListed` counts the rest). They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`);
+- `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether it is configured;
+- the config's current settings, and every file it would write.
+
+Then read what needs judgement:
+
+- The docs: `README`, `AGENTS.md` or `CLAUDE.md`, `CONTRIBUTING`, anything under `docs/`. Note the conventions they state that code could show, such as "never edit `src/client/` by hand".
+- Your own memory of this project, if you keep one (in Claude Code, `~/.claude/projects/<project>/memory/`). Corrections the developer made before are the best candidates for rules.
+- The script of any hook with `modifies: null`, named in `runs`, to see whether it changes files.
 - Whether rulecast is installed: `rulecast binary path` names an installed standalone binary, and `node_modules/.bin/rulecast` is a devDependency. Note whether there is a `package.json`, and whether the project pins its tools there.
-- Your own memory of this project, if you keep one (in Claude Code, `~/.claude/projects/<project>/memory/`). Corrections the developer made before are the best candidates for first rules.
-- What init sees, in each directory a config might go:
 
-  ```sh
-  rulecast init --dry-run --format json
-  ```
+## 3. Defaults and questions
 
-  It writes nothing. It reports the stack, the docs and their headings, the agents it detects, the project's pre-commit and lefthook hooks it can run as rules (and the ones it can't, with why), the config's current settings, and every file it would write.
+Each item on the page gets a default from what you found. Only the items below marked **always** are questions; the rest are defaults the developer can strike or change. Put your recommendation first, except for llm rules.
 
-Write down what this settles, so you don't ask it.
+| Item | Default from | Default | Becomes a question when |
+|---|---|---|---|
+| Who it's for | `committers.count` | 2 or more: a team. 1: solo. Hooks `--scope shared` either way: with one committer the shared file affects only them, and the next person to join gets the hooks. Say they can keep them personal with "*N*: personal" | `committers` is null |
+| Install | `rulecast binary path`, `node_modules/.bin/rulecast`, and whether `package.json` pins the project's tools | the one already installed, if any; else the devDependency when `package.json` pins the tools, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
+| Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
+| Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
+| Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
+| CI | `ci` | an aside in the footer: rulecast never edits CI | never |
+| Conventions location | the config's `conventions`, else an existing folder such as `docs/conventions/`, else `primaryDoc` | that path | none of the three exists |
+| Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script | you cannot read the script |
+| Generated paths | `generated` | each on, with `--generated` | never |
+| Vendored paths | `vendored` | each on, with `--vendored` | never |
+| Catalog rules | `catalog.rules` with `matching` above 0, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
+| Stated conventions and memory corrections | your reading | each on: drafted after setup, one at a time | never |
+| Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
+| Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never: it is an item, and it never blocks approval |
+| **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended |
+| **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
-## 3. Interview
+The weekly stats summary row says what turning it on keeps: 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside this config's findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. It applies to this config only.
 
-Ask in this order, one question at a time, with your question tool if you have one. Put your recommendation first. When step 2 already answered a question, say what you found in one line and ask only whether it holds.
+A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off.
 
-1. **Who it's for and where it runs.** Solo or a team. Where rulecast should run: in agent sessions (always), on pre-commit, in CI, in agent loops that run with nobody watching (`/goal`, `claude -p`, scheduled runs). A team gets shared hook settings and a committed config; one person can keep them personal.
-2. **Where configs go and where sessions start.** One `.rulecast-config.yaml` at the top, one per package, or both. Every config above a file applies to it, each on its own: its rules, its paths and its findings. Nothing is merged. Agents read hook settings only in the directory a session starts in, so hooks are installed there; one install reaches every config below it.
-3. **Where conventions live, and how the developer thinks about them.** A file, or a folder with one file per area (`docs/conventions/errors.md`, `docs/conventions/testing.md`). New conventions are written there when a rule is added. Ask how many rules they want and how strict: a few that always hold, or broader coverage.
-4. **llm rules.** Some conventions can't be shown with a pattern, and an llm rule asks a model about each changed file. It sends the file to the model's provider and costs money per file. Ask whether that is OK, and with which model. Recommend `haiku`, the cheapest. The provider is your own harness's (`claude-code` in Claude Code). Without a yes, no llm rule is ever proposed.
-5. **The project's own hooks as rules.** For each hook the dry run offers, say what it would do as a rule: the agent sees its findings before it finishes, not first at commit. A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving out. Recommend leaving out formatters (`modifies: true` in the JSON: they change files). A hook with `modifies: null` ("may change files" in the text output) runs a script init cannot see into, named in `runs`: read that script before you recommend it.
-6. **Review up front, or build as you go.** As you go is the default: rules are added when something goes wrong, with `/rulecast:add-rule`. Up front means working out the conventions now, through [CONVENTIONS.md](CONVENTIONS.md), which takes longer.
-7. **How rulecast is installed.** The agent hooks and git hooks run the project's `node_modules/.bin/rulecast` first, then the standalone binary in `~/.cache/rulecast/bin/`, then one on the PATH. Recommend the standalone binary: it needs no Node and no change to the project. If the project already pins its tools in `package.json`, recommend the devDependency instead, so everyone runs the same version. If one is already installed, say which and ask whether it holds.
+Stated conventions become candidates only when a pattern in the code can show them, at most five. One that names a generated path is not a candidate of its own: it joins that path's item, with a note that `AGENTS.md` says so too.
 
-## 4. Show the page
+The loop answer decides the loop-safety pack (`rulecast add loop-safety`) and `RULECAST_MODE=unattended` for those runs. The llm answer decides `--llm-model` and `--llm-provider`; the provider is your own harness's (`claude-code` in Claude Code). Without a yes, no llm rule is ever proposed.
 
-Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and replace only the JSON in its `setup-data` block; its head comment describes the fields. In that JSON, write every `<` inside a string as `\u003c`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
+## 4. Show the page and ask
 
-- `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
-- `rules`: the hook rules chosen, and llm rules if allowed.
-- `decisions`: one row per question in step 3. `found` is what step 2 showed, or null. `said` is the developer's answer, close to their words. `why` says what the choice means here. `detail` shows exactly what changes: take the file contents from the dry run's `changes[].content`, run again with the agreed flags, and for hook rules show the rules. For the install, `detail` is the exact command step 5 will run. Add one more row that is not a question: "Weekly stats summary", with `found: null` and `said: "off"` unless the developer turns it on. Its `why`: turned on, this config keeps 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside its findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. Applies to this config only.
-- `candidates`: on the as-you-go path, the first-rule candidates from step 6, each with a rough `sketch` of its rule.
+Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON in its `setup-data` block. Its head comment describes the fields, and how items are numbered (`n`) and marked (`state`). In that JSON, write every `<` inside a string as `\u003c`, as `init --format json` already does, so text such as a closing script tag cannot end the block early.
 
-If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Then ask in the chat whether to go ahead. If they change something, go back to that question, and show the page again.
+- `questions`: the open questions from step 3, with their options and why they are asked.
+- `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, generated and vendored paths, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
+- `rules`: hook rules, catalog rules, generated and vendored paths, each with its state.
+- `decisions`: the setup rows from step 3. `found` is what step 2 showed, or null. `value` is the default. `why` says what it means here. `detail` shows exactly what changes: run the dry run again with the default flags and take the file contents from its `changes[].content`. For the install row, `detail` is the exact command step 6 will run (for the standalone binary, the whole command shown there).
+- `candidates`: the stated conventions and memory corrections to draft as rules after setup.
+- `footer`: what to say ("**go ahead**, or name numbers to strike or change"), which questions need an answer either way, and what the developer does themselves, such as CI.
 
-## 5. Write
+If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is.
+
+In the same turn, ask every question on the page with your question tool, several in one call where the tool allows, and add one last question: "Everything else on the page: go ahead as shown / I'll name what to change". When the developer answers every question and picks go ahead, that is approval.
+
+## 5. The reply
+
+- Map what the developer says to numbers ("strike 4 and 7", "turn on 6", "2: also `backend/`", or free text) and repeat it back in one line.
+- If the reply only strikes items, turns `off` items on, or answers the questions with options the page listed, that approves the page as amended. Say in one line what you will write ("Writing everything on the page except 5 and 8, llm rules with haiku"), and write it.
+- If it changes a value or adds an item, show the page again with the change, keeping every number, and ask again.
+- Ask again any question left unanswered. "Go ahead" never answers one.
+
+## 6. Write
 
 Only after the developer approves. First, install rulecast as approved, by running exactly the command the page showed. If the developer would rather run it themselves, give them the command and wait. Never install anything the page did not show.
 
@@ -66,18 +103,19 @@ Only after the developer approves. First, install rulecast as approved, by runni
 
   Everyone whose sessions run here installs it the same way. Tell the developer.
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
+- **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is neither a devDependency nor the installed binary. Everyone whose sessions run here installs it the same way.
 
-Then, in each config's directory:
+These are the install row's three options. The hooks look in that order: the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Then, in each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
 ```
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
 
-`init` writes the config and the agent hooks, validates them, and says what to commit. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
+`init` writes the config and the agent hooks, validates them, and says what to commit. `--generated` and `--vendored` add `generated-code` and `vendored-code` with `files` widened by those paths. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
 
-Then, as agreed:
+Then, as the page says:
 
 - **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there.
 - **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as the README's [Git hooks and CI](https://github.com/syv-ai/rulecast#git-hooks-and-ci) shows. Show the change first.
@@ -85,24 +123,19 @@ Then, as agreed:
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
 - **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.
 
-## 6. Then
+## 7. Then
 
-**As you go:** offer a short list of first rules, and recommend one. Look for candidates in:
+Draft each candidate the developer kept, one at a time: in Claude Code with `/rulecast:add-rule`, elsewhere with [DRAFT-RULES.md](DRAFT-RULES.md) for that one convention. Show each draft and get it approved on its own.
 
-- conventions the docs state that nothing checks yet;
-- corrections the developer made in this session;
-- your memory of the project;
-- the project's hooks that were not made rules;
-- best practice for the project's languages and tools: `rulecast list --catalog` shows the catalog's rules, and `rulecast add <id>` adopts one. You may suggest design practices too; say they are suggestions;
-- past agent sessions, only if the developer says you may read them (`rulecast replay` reads Claude Code's transcripts).
+With none kept, tell the developer in two sentences how to add a rule later, and stop. Catalog rules can be adopted later too: `rulecast list --catalog` shows them, and `rulecast add <id>` adopts one.
 
-If the developer picks one, add it: in Claude Code with `/rulecast:add-rule`, elsewhere with [DRAFT-RULES.md](DRAFT-RULES.md) for that one convention. If not, tell them in two sentences how to add a rule later, and stop.
-
-**Up front:** follow [CONVENTIONS.md](CONVENTIONS.md).
+**Up front** (the developer struck "as you go"): follow [CONVENTIONS.md](CONVENTIONS.md).
 
 ## Never
 
 - Never write anything before the developer approves the page.
+- Never write an item the developer has not seen on the page.
+- Never take "go ahead" as an answer to a question on the page.
 - Never add a `rulecast-ignore` comment or set `enabled: false` on a rule without the developer's agreement. Ignores added during a session are reported to the developer when you stop.
 - Never edit agent hook settings (such as `.claude/settings.json`) by hand: `rulecast init`, `install` and `uninstall` manage them.
 - Never set rulecast up without the developer.

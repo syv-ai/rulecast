@@ -78,7 +78,7 @@ function usesReact(text: string | null): boolean {
   }
 }
 
-async function detectStack(files: readonly string[], read: DetectInput["read"]): Promise<string[]> {
+export async function detectStack(files: readonly string[], read: DetectInput["read"]): Promise<string[]> {
   const tags = new Set<string>()
   const names = new Set<string>()
   for (const file of files) {

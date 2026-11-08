@@ -64,8 +64,8 @@ From the answers, draft the principles and conventions in plain language: short 
 Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its head comment describes (every `<` inside a JSON string written as `\u003c`), with:
 
 - `decisionsTitle`: `"Conventions"`, and `columns`: `["Convention", "Found", "You said", "Goes in"]`;
-- one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `said` what the developer said, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`);
-- no `tree`, `rules` or `candidates`.
+- one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `value` what the developer said, `state`: `"said"`, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`). Leave out `n`: the rows are numbered in order;
+- no `tree`, `rules`, `questions` or `candidates`.
 
 If you have a tool that publishes private artifacts, publish it there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Ask in the chat what to change, apply it, and show the page again until the developer is satisfied.
 

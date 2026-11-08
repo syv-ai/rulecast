@@ -18,6 +18,24 @@
       - path: src/__generated__/schema.ts
         code: |
           export type Query = { users: User[] }
+- id: vendored-code
+  name: Vendored code is never edited in place
+  description: "Flags edits to vendored code: vendor/ and third_party/ directories."
+  files: (^|/)(vendor|third_party)/
+  severity: error
+  detect:
+    path: {}
+  message: "{{file}} is vendored. Update the dependency and re-vendor it (or patch it upstream); never edit it in place."
+  context:
+    - "@packages/rules-general/vendored-code.md"
+  examples:
+    bad:
+      - path: vendor/github.com/acme/lib/lib.go
+        code: |
+          package lib
+      - path: third_party/zlib/inflate.c
+        code: |
+          int inflate(void);
 - id: loop-safety/no-skipped-tests-python
   name: No new skipped or expected-to-fail Python tests
   description: "For agents that run unattended: flags a new pytest skip or xfail, or a unittest skip, in a test file. Skipping a red test is the cheapest way for a loop to make pytest pass."

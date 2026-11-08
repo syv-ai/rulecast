@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
   rulecast's setup page (agents/SETUP.md, step 4). An agent copies this file, replaces the JSON in
-  <script id="setup-data"> with the setup it agreed with the developer, and shows the page: a private
-  artifact where the agent can publish one, otherwise a local file outside the repository. CONVENTIONS.md uses it too,
-  with conventions as the rows and no repository or candidates. The page is read-only: approval and
-  changes happen in the conversation. Change only the data block.
+  <script id="setup-data"> with the defaults it drew from the repository and the questions only the
+  developer can answer, and shows the page: a private artifact where the agent can publish one,
+  otherwise a local file outside the repository. CONVENTIONS.md uses it too, with conventions as the
+  rows and no repository, questions or candidates. The page is read-only: the developer answers,
+  strikes and changes items in the conversation. Change only the data block.
 
   Data (every string is text; `backticks` become code, nothing else is markup):
   {
@@ -12,28 +13,49 @@
     "state":    "Nothing written yet",
     "lead":     "One or two sentences on what the page shows and what to do next.",
     "key":      true,                            show the colour key (found / you said / sessions)
+    "questionsTitle": "Needs your answer",       optional heading for the questions
+    "questions": [                               shown first, right after the header
+      { "n": 1, "question": "May rules ask a model?", "why": ["Paragraph."],
+        "options": [ { "text": "Yes, with Haiku", "lands": "`llm.model: haiku`", "recommended": false } ],
+        "answer": null }                         the developer's answer, shown in place of the options
+    ],
     "tree": [                                    optional: the repository as setup touches it
       { "depth": 0, "name": "tidewater/", "highlight": true, "dim": false,
         "marks": [ { "kind": "session" | "config" | "conventions" | "note", "text": "sessions start here" } ] }
     ],
-    "rules": [ { "name": "gitleaks", "source": "your pre-commit hook", "text": "What it does here." } ],
-    "decisionsTitle": "What we agreed",          optional heading for the rows
-    "columns": ["Decision", "Found", "You said", "Lands in"],   optional
+    "rules": [ { "n": 3, "state": "default", "name": "gitleaks", "source": "your pre-commit hook", "text": "What it does here." } ],
+    "decisionsTitle": "Setup",                   optional heading for the rows
+    "columns": ["Decision", "Found", "Set to", "Lands in"],   optional
     "decisions": [
-      { "decision": "Who and where",
-        "found": "4 committers, pre-commit" | null,          null: nothing in the repository says
-        "said": "Team, shared.",
+      { "n": 8, "state": "default",
+        "decision": "Who it's for",
+        "found": "4 committers" | null,          null: nothing in the repository says
+        "value": "Team: hooks in the shared settings.",
         "lands": "`--scope shared`",
         "why": ["Paragraph.", "Paragraph."],
         "detail": { "label": "What changes" | "Draft rules", "code": "# comment line\n+ added line\nplain line" } | null,
         "open": false }
     ],
-    "candidatesTitle": "First rule, if you want one",       optional
-    "candidates": [ { "text": "The convention, one sentence.", "source": "from memory",
+    "candidatesTitle": "Conventions to draft as rules",       optional
+    "candidates": [ { "n": 14, "state": "default", "text": "The convention, one sentence.", "source": "from memory",
                       "recommended": true, "note": "Why it is a candidate.",
                       "sketch": "- id: …\n  detect: …" | null } ],
     "footer": { "go": "Say **go ahead** …", "aside": "What the developer does themselves, such as CI." }
   }
+
+  Numbers and states. Every question, rule, row and candidate has a number `n`, which the developer
+  names in the chat ("strike 4", "6: also `backend/`"). Three rules hold:
+  - `n` is unique across the whole page, and an item keeps its number in every later version of the
+    page. A row without `n` is numbered by its place in "decisions" (1, 2, …); CONVENTIONS.md relies on it.
+  - A struck item stays on the page, crossed out, so the numbers stay put.
+  - A question is never settled by "go ahead": only an answer settles it.
+  "state" is one of:
+  - "default": set from what was found in the repository, with a small "default" label. Also what a
+    missing "state" means.
+  - "said":    the developer's own word, in blue.
+  - "off":     offered, not on: faint, labelled "off · say N to turn on".
+  - "struck":  struck by the developer: crossed out.
+
   In "go", **double asterisks** mark the words to say. Write every "<" inside a string as \u003c, so
   text such as a closing script tag cannot end the data block early; the page shows it as "<".
 -->
@@ -153,14 +175,37 @@ details.sk pre { margin-top: 10px; font-size: 12px; }
 .foot .cell.go { background: var(--tone-2); color: var(--ink); font-size: 15px; }
 .foot .go b { font-weight: 500; color: var(--ink); }
 
+/* questions */
+.qs { display: grid; gap: 4px; border-radius: 14px; overflow: hidden; }
+.q { background: var(--tone-2); padding: 22px 26px; display: grid; gap: 10px; }
+.q .qh { display: flex; gap: 14px; align-items: baseline; }
+.q .qh b { font-weight: 500; font-size: 16px; }
+.q > p { color: var(--muted); font-size: 14px; max-width: 64ch; padding-left: 28px; }
+.q > p.ans { color: var(--said); font-size: 15px; }
+.opts { list-style: none; margin: 4px 0 0; padding: 0 0 0 28px; display: grid; gap: 8px; }
+.opts li { display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; font-size: 14.5px; }
+.opts li::before { content: "○"; color: var(--faint); margin-right: -4px; }
+.opts .l { font-size: 12.5px; }
+
+/* numbers and states: default is ink with a small label, said is blue, off is faint, struck is crossed out */
+.tag { margin-left: 8px; font: 400 11.5px/1 var(--display); color: var(--faint); white-space: nowrap; }
+.v { color: var(--ink); }
+.v.state-said, .rule.state-said p, .cand.state-said p.t { color: var(--said); }
+.v.state-off, .rule.state-off b, .rule.state-off p, .cand.state-off p.t { color: var(--faint); }
+del { color: var(--faint); text-decoration-thickness: 1px; }
+details.row.struck .d, details.row.struck .f, details.row.struck .l { color: var(--faint); }
+.cand .src .i { margin-right: 10px; }
+.rule .t b .i { margin-right: 10px; }
+
 @media (prefers-reduced-motion: reduce) { details.row > summary::after { transition: none; } }
 @media (max-width: 860px) {
   .map, .foot { grid-template-columns: 1fr; }
   .head { display: none; }
   .cols { grid-template-columns: 24px 1fr 16px; gap: 6px 14px; }
-  .cols > :nth-child(n+3):not(:last-child) { grid-column: 2; }
+  .cols > :nth-child(n+3) { grid-column: 2; }
   .more { grid-template-columns: 1fr; padding-left: 26px; }
   h1 { font-size: 32px; }
+  .q > p, .opts { padding-left: 0; }
 }
 </style>
 </head>
@@ -171,51 +216,74 @@ details.sk pre { margin-top: 10px; font-size: 12px; }
 {
   "project": "tidewater",
   "state": "Nothing written yet",
-  "lead": "Where rulecast will sit, what each choice rests on, and the first rule to add. Read it through, then tell me in the chat to go ahead or what to change.",
+  "lead": "What I'd set up, from what the repository shows. Answer the two questions, strike or change anything by its number, and I'll write it.",
   "key": true,
+  "questions": [
+    { "n": 1, "question": "May rules ask a model?",
+      "why": ["Some conventions can't be shown with a pattern. An llm rule asks a model about each changed file. That costs money per file, and the file leaves your machine: through Claude Code to Anthropic.", "Saying yes adds no rule. Each llm rule is still proposed to you, with what it costs."],
+      "options": [
+        { "text": "No llm rules", "lands": "nothing" },
+        { "text": "Yes, with Haiku", "lands": "`llm.model: haiku`" },
+        { "text": "Yes, with Sonnet", "lands": "`llm.model: sonnet`" }
+      ],
+      "answer": null },
+    { "n": 2, "question": "Do agents run here with nobody watching?",
+      "why": ["`agent.yml` runs Claude in CI. The repository can't show whether you run `/goal` or `claude -p` on your own machine.", "The loop-safety rules catch the shortcuts a loop takes to make tests pass: skipped tests, deleted assertions, new suppressions. With nobody watching they are errors, and edits to rulecast's own config are refused."],
+      "options": [
+        { "text": "In CI only", "lands": "`rulecast add loop-safety`", "recommended": true },
+        { "text": "In CI and locally", "lands": "`rulecast add loop-safety`, `RULECAST_MODE=unattended` for those runs" },
+        { "text": "No", "lands": "nothing" }
+      ],
+      "answer": null }
+  ],
   "tree": [
     { "depth": 0, "name": "tidewater/", "highlight": true, "marks": [{ "kind": "session", "text": "sessions start here" }, { "kind": "config", "text": "config" }] },
     { "depth": 1, "name": ".claude/settings.json", "marks": [{ "kind": "note", "text": "hooks, shared" }] },
     { "depth": 1, "name": ".pre-commit-config.yaml", "marks": [{ "kind": "note", "text": "+ rulecast run" }] },
     { "depth": 1, "name": "AGENTS.md", "dim": true },
     { "depth": 1, "name": "docs/conventions/", "highlight": true, "marks": [{ "kind": "conventions", "text": "new conventions go here" }] },
-    { "depth": 2, "name": "errors.md", "dim": true, "marks": [{ "kind": "note", "text": "from AGENTS.md" }] },
-    { "depth": 2, "name": "data.md", "dim": true, "marks": [{ "kind": "note", "text": "new" }] },
-    { "depth": 1, "name": "api/", "highlight": true, "marks": [{ "kind": "config", "text": "config" }, { "kind": "note", "text": "Python" }] },
-    { "depth": 1, "name": "web/", "marks": [{ "kind": "note", "text": "TypeScript, no config yet" }] },
+    { "depth": 1, "name": "api/", "highlight": true, "marks": [{ "kind": "config", "text": "config" }, { "kind": "note", "text": "Python, own AGENTS.md" }] },
+    { "depth": 1, "name": "web/", "marks": [{ "kind": "note", "text": "TypeScript" }] },
+    { "depth": 2, "name": "src/client/", "dim": true, "marks": [{ "kind": "note", "text": "generated" }] },
     { "depth": 1, "name": ".github/workflows/agent.yml", "dim": true, "marks": [{ "kind": "note", "text": "not touched" }] }
   ],
   "rules": [
-    { "name": "gitleaks", "source": "your pre-commit hook", "text": "Whole repository. A secret shows up while the agent is still writing it." },
-    { "name": "ruff", "source": "your pre-commit hook", "text": "Python in `api/`. The same findings a commit would show." },
-    { "name": "llm rules", "source": "Haiku", "text": "Allowed, none yet. Each one is proposed to you first." }
+    { "n": 3, "state": "default", "name": "gitleaks", "source": "your pre-commit hook", "text": "Whole repository. A secret shows up while the agent is still writing it." },
+    { "n": 4, "state": "default", "name": "ruff", "source": "your pre-commit hook", "text": "Python in `api/`. The same findings a commit would show." },
+    { "n": 5, "state": "off", "name": "ruff-format", "source": "your pre-commit hook", "text": "It rewrites files, so it stays a commit hook." },
+    { "n": 6, "state": "default", "name": "generated-code", "source": "catalog", "text": "`web/src/client/` too: its files say they are generated by `@hey-api/openapi-ts`. An edit there is refused with the regenerate step." },
+    { "n": 7, "state": "default", "name": "python/no-silent-except", "source": "catalog", "text": "An `except` whose only statement is `pass`. 41 Python files." }
   ],
+  "decisionsTitle": "Setup",
   "decisions": [
-    { "decision": "Who and where", "found": "4 committers, pre-commit, Claude in CI", "said": "Team, shared. Sessions and pre-commit. No unattended loops.", "lands": "`--scope shared`, pre-commit entry",
-      "why": ["Four people committed in the last six months, so the hooks go in the shared settings file and the config is committed: everyone's agent gets the same rules.", "pre-commit already runs on every commit, so rulecast joins it there. Claude runs in `agent.yml`, but I don't edit CI; the footer says what to add."],
-      "detail": { "label": "What changes", "code": "# .claude/settings.json: rulecast install --scope shared\n# .pre-commit-config.yaml, appended\n+ - repo: https://github.com/syv-ai/rulecast\n+   rev: v0.8.0\n+   hooks:\n+     - id: rulecast" } },
-    { "decision": "Configs and sessions", "found": "Python `api/`, TypeScript `web/`", "said": "Top and `api/`. `web/` later.", "lands": "two configs",
-      "why": ["Each config applies to the files below it, on its own; nothing is merged. Rules for the whole repository go in the top config, Python-only ones in `api/`.", "Sessions start at the top, so one hook install reaches both configs."],
+    { "n": 8, "state": "default", "decision": "Who it's for", "found": "4 committers in the last six months", "value": "Team: hooks in the shared settings, config committed.", "lands": "`--scope shared`",
+      "why": ["Four people committed in the last six months, so everyone's agent gets the same hooks and rules."],
+      "detail": { "label": "What changes", "code": "# .claude/settings.json\n+ rulecast's hooks, shared" } },
+    { "n": 9, "state": "default", "decision": "Install", "found": "`package.json` pins the tools, pnpm; none installed", "value": "A devDependency.", "lands": "`package.json`",
+      "why": ["The project pins its tools in `package.json`, so rulecast goes there too and everyone runs the same version. The agent hooks and git hooks run it first.", "The other options: the standalone binary, which needs no Node (say 9: binary, and the row shows its install command), or a global `npm install -g @syv-ai/rulecast`. Nothing is installed before you approve."],
+      "detail": { "label": "What changes", "code": "# runs\npnpm add -D @syv-ai/rulecast" } },
+    { "n": 10, "state": "default", "decision": "Configs and sessions", "found": "`api/` (Python, own `AGENTS.md`), `web/` (TypeScript)", "value": "One at the top, one in `api/`. Sessions start at the top.", "lands": "two configs",
+      "why": ["Each config applies to the files below it, on its own. `api/` has its own agent doc, so it gets its own config; `web/` uses the top one.", "Sessions start at the top, so one hook install reaches both configs."],
       "detail": { "label": "Files", "code": "# new\n.rulecast-config.yaml\napi/.rulecast-config.yaml" } },
-    { "decision": "Conventions", "found": "Three in `AGENTS.md`, all on errors", "said": "Few rules, each strict. One file per area in a new folder.", "lands": "`conventions:`",
-      "why": ["New conventions go in `docs/conventions/`, one file per area. When you approve a rule, add-rule proposes the file; you have the final say."],
+    { "n": 11, "state": "default", "decision": "Pre-commit", "found": "`.pre-commit-config.yaml`, no rulecast in it", "value": "Add rulecast's hook.", "lands": "`.pre-commit-config.yaml`",
+      "why": ["pre-commit already runs on every commit, so rulecast joins it there, and a commit is checked against the same rules as an edit."],
+      "detail": { "label": "What changes", "code": "# .pre-commit-config.yaml, appended\n+ - repo: https://github.com/syv-ai/rulecast\n+   rev: v0.8.2\n+   hooks:\n+     - id: rulecast" } },
+    { "n": 12, "state": "default", "decision": "Conventions", "found": "`docs/conventions/`", "value": "New conventions go in `docs/conventions/`.", "lands": "`conventions:`",
+      "why": ["The folder already holds one file per area. When you approve a rule, add-rule proposes the file; you have the final say."],
       "detail": { "label": "What changes", "code": "# .rulecast-config.yaml\nconventions: docs/conventions/" } },
-    { "decision": "llm rules", "found": null, "said": "Yes, with Haiku.", "lands": "`llm.model`",
-      "why": ["Some conventions can't be shown with a pattern. An llm rule asks a model about each changed file; it runs through Claude Code and sends the file to Anthropic.", "Allowing it adds no rule. Each llm rule is still proposed to you, with what it costs."],
-      "detail": { "label": "What changes", "code": "# .rulecast-config.yaml\nllm:\n  model: haiku" } },
-    { "decision": "Hooks as rules", "found": "ruff, ruff-format, gitleaks, eslint", "said": "ruff and gitleaks. eslint is too slow per edit.", "lands": "two rules", "open": true,
-      "why": ["A hook as a rule runs on the files an agent just edited and shows it the findings while it can still fix them. Without it, they first show up at commit.", "eslint takes about 4 s per run here; it stays a commit hook. ruff-format is left to the formatter."],
-      "detail": { "label": "Draft rules", "code": "# .rulecast-config.yaml\n- id: hook/gitleaks\n  detect:\n    hook: { pre-commit: gitleaks }\n\n# api/.rulecast-config.yaml\n- id: hook/ruff\n  files: '\\.py$'\n  detect:\n    hook: { pre-commit: ruff }" } },
-    { "decision": "Up front or as you go", "found": null, "said": "As you go.", "lands": "`/rulecast:add-rule`",
-      "why": ["No conventions review now. When an agent gets something wrong that should not happen again, run `/rulecast:add-rule`, or the agent offers it after your correction."],
-      "detail": null }
+    { "n": 13, "state": "default", "decision": "Up front or as you go", "found": "rulecast's default", "value": "As you go.", "lands": "`/rulecast:add-rule`",
+      "why": ["No conventions review now. When an agent gets something wrong that should not happen again, run `/rulecast:add-rule`, or the agent offers it after your correction.", "Strike this to go through your conventions up front instead."],
+      "detail": null },
+    { "n": 14, "state": "off", "decision": "Weekly stats summary", "found": null, "value": "Off.", "lands": "`--weekly-summary`",
+      "why": ["Turned on, this config keeps 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside its findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock.", "It applies to this config only."],
+      "detail": { "label": "What changes", "code": "# .rulecast-config.yaml, when turned on\nstats:\n  weekly_summary: true" } }
   ],
+  "candidatesTitle": "Conventions to draft as rules",
   "candidates": [
-    { "text": "Services raise domain exceptions, never `HTTPException`.", "source": "from memory", "recommended": true, "note": "You corrected this on 28 October, and once since.", "sketch": "- id: no-http-exception-in-services\n  files: '^api/services/.*\\.py$'\n  detect:\n    ast-grep: { rule: { pattern: raise HTTPException($$$) } }" },
-    { "text": "Migrations come from `alembic revision --autogenerate`, never by hand.", "source": "from AGENTS.md", "note": "Written down, not checked.", "sketch": null },
-    { "text": "No `print()` in `api/`. Log with structlog.", "source": "a suggestion", "note": "Common Python practice. Three in your code today.", "sketch": "# ruff already has this check:\n# turn on T201 in pyproject.toml instead" }
+    { "n": 15, "state": "default", "text": "Migrations come from `alembic revision --autogenerate`, never by hand.", "source": "from AGENTS.md", "note": "Written down, not checked. A rule would flag a migration without the autogenerate header.", "sketch": null },
+    { "n": 16, "state": "default", "text": "Services raise domain exceptions, never `HTTPException`.", "source": "from memory", "note": "You corrected this on 28 October, and once since.", "sketch": "- id: no-http-exception-in-services\n  files: '^api/services/.*\\.py$'\n  detect:\n    ast-grep: { rule: { pattern: raise HTTPException($$$) } }" }
   ],
-  "footer": { "go": "Say **go ahead** and I'll run `rulecast init` with these choices. To change one, name its number.", "aside": "CI is yours to change: add `npx rulecast install` and `npx rulecast doctor --ci` before the agent step in `agent.yml`." }
+  "footer": { "go": "Say **go ahead**, or name numbers to strike or change. Questions 1 and 2 need an answer either way.", "aside": "CI is yours to change: add `npx rulecast install` and `npx rulecast doctor --ci` before the agent step in `agent.yml`." }
 }
 </script>
 
@@ -245,6 +313,23 @@ function code(text) {
     return asText(line)
   })
   return `<pre>${lines.join("\n")}</pre>`
+}
+
+/** An item's state (the head comment); anything else counts as "default". */
+function stateOf(item) {
+  return ["default", "said", "off", "struck"].includes(item.state) ? item.state : "default"
+}
+
+/** The label after an item's text: "default", or how to turn an "off" item on. */
+function stateTag(state, n) {
+  if (state === "default") return `<span class="tag">default</span>`
+  if (state === "off") return `<span class="tag">off · say ${asText(n)} to turn on</span>`
+  return ""
+}
+
+/** Escaped inline text, crossed out when the item is struck. */
+function stated(value, state) {
+  return state === "struck" ? `<del>${inline(value)}</del>` : inline(value)
 }
 
 /** Tree connectors from depths alone: a row is the last of its siblings when no later sibling follows. */
@@ -287,10 +372,30 @@ function render(data) {
     "</header>",
   )
 
+  const questions = data.questions ?? []
+  if (questions.length) {
+    const items = questions.map((question, index) => {
+      const n = question.n ?? index + 1
+      const why = (question.why ?? []).map((paragraph) => `<p>${inline(paragraph)}</p>`).join("")
+      const options = (question.options ?? [])
+        .map((option) => `<li><span>${inline(option.text)}</span>${option.recommended ? `<span class="tag">recommended</span>` : ""}<span class="l">${inline(option.lands)}</span></li>`)
+        .join("")
+      const body = question.answer == null ? `<ul class="opts">${options}</ul>` : `<p class="ans">${inline(question.answer)}</p>`
+      return `<div class="q"><div class="qh"><span class="i">${asText(n)}</span><b>${inline(question.question)}</b></div>${why}${body}</div>`
+    })
+    out.push(`<section><h2>${asText(data.questionsTitle ?? "Needs your answer")}</h2><div class="qs">${items.join("")}</div></section>`)
+  }
+
   const rules = data.rules ?? []
   if (data.tree?.length || rules.length) {
     const side = rules.length
-      ? `<div class="side">${rules.map((rule) => `<div class="rule"><div class="t"><b>${asText(rule.name)}</b><span>${asText(rule.source)}</span></div><p>${inline(rule.text)}</p></div>`).join("")}</div>`
+      ? `<div class="side">${rules
+          .map((rule, index) => {
+            const state = stateOf(rule)
+            const n = rule.n ?? index + 1
+            return `<div class="rule state-${state}"><div class="t"><b><span class="i">${asText(n)}</span>${stated(rule.name, state)}</b><span>${asText(rule.source)}</span></div><p>${stated(rule.text, state)}${stateTag(state, n)}</p></div>`
+          })
+          .join("")}</div>`
       : ""
     const tree = data.tree?.length ? `<div class="tree" aria-label="Repository map">${treeRows(data.tree)}</div>` : ""
     out.push(`<section><h2>${data.tree?.length ? "The repository" : "Rules"}</h2><div class="map${tree && side ? "" : " solo"}">${tree}${side}</div></section>`)
@@ -298,30 +403,34 @@ function render(data) {
 
   const decisions = data.decisions ?? []
   if (decisions.length) {
-    const columns = data.columns ?? ["Decision", "Found", "You said", "Lands in"]
+    const columns = data.columns ?? ["Decision", "Found", "Set to", "Lands in"]
     const head = `<div class="cols head"><span></span>${columns.map((column) => `<span>${asText(column)}</span>`).join("")}<span></span></div>`
     const rows = decisions.map((row, index) => {
+      const state = stateOf(row)
+      const n = row.n ?? index + 1
       const found = row.found == null ? `<span class="none">nothing to find</span>` : `<span class="f">${inline(row.found)}</span>`
       const why = (row.why ?? []).map((paragraph) => `<p>${inline(paragraph)}</p>`).join("")
       const detail = row.detail ? `<div><span class="lab">${asText(row.detail.label)}</span>${code(row.detail.code)}</div>` : "<div></div>"
       return (
-        `<details class="row"${row.open ? " open" : ""}><summary class="cols"><span class="i">${index + 1}</span>` +
-        `<span class="d">${inline(row.decision)}</span>${found}<span class="s">${inline(row.said)}</span>` +
+        `<details class="row${state === "struck" ? " struck" : ""}"${row.open ? " open" : ""}><summary class="cols"><span class="i">${asText(n)}</span>` +
+        `<span class="d">${inline(row.decision)}</span>${found}<span class="v state-${state}">${stated(row.value, state)}${stateTag(state, n)}</span>` +
         `<span class="l">${inline(row.lands)}</span></summary>` +
         `<div class="more"><div><span class="lab">Why</span>${why}</div>${detail}</div></details>`
       )
     })
-    out.push(`<section><h2>${asText(data.decisionsTitle ?? "What we agreed")}</h2><div class="ledger">${head}${rows.join("")}</div></section>`)
+    out.push(`<section><h2>${asText(data.decisionsTitle ?? "Setup")}</h2><div class="ledger">${head}${rows.join("")}</div></section>`)
   }
 
   const candidates = data.candidates ?? []
   if (candidates.length) {
-    const cards = candidates.map((card) => {
+    const cards = candidates.map((card, index) => {
+      const state = stateOf(card)
+      const n = card.n ?? index + 1
       const source = [card.recommended ? "Recommended" : "", card.source ?? ""].filter(Boolean).join(" · ")
       const sketch = card.sketch ? `<details class="sk"><summary>Sketch of the rule</summary>${code(card.sketch)}</details>` : ""
-      return `<div class="cand${card.recommended ? " rec" : ""}"><span class="src">${asText(source)}</span><p class="t">${inline(card.text)}</p>${card.note ? `<p class="m">${inline(card.note)}</p>` : ""}${sketch}</div>`
+      return `<div class="cand state-${state}${card.recommended ? " rec" : ""}"><span class="src"><span class="i">${asText(n)}</span>${asText(source)}${stateTag(state, n)}</span><p class="t">${stated(card.text, state)}</p>${card.note ? `<p class="m">${inline(card.note)}</p>` : ""}${sketch}</div>`
     })
-    out.push(`<section><h2>${asText(data.candidatesTitle ?? "First rule, if you want one")}</h2><div class="cands">${cards.join("")}</div></section>`)
+    out.push(`<section><h2>${asText(data.candidatesTitle ?? "Conventions to draft as rules")}</h2><div class="cands">${cards.join("")}</div></section>`)
   }
 
   if (data.footer) {

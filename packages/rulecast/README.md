@@ -35,7 +35,7 @@ Your coding agent sets rulecast up with you. In Claude Code, install the plugin 
 
 With another agent, paste the prompt under [Agents](https://github.com/syv-ai/rulecast/blob/main/README.md#agents).
 
-The agent reads the repository first, then asks what it can't tell: who works on it and where rulecast should run, where configs go, where your conventions live, whether rules that ask a model are OK and with which one, and which of your git hooks to run as rules. It shows you everything it agreed with you on one page, and writes nothing until you approve. Then it installs rulecast the way you agreed (the standalone binary, or a devDependency) and runs `rulecast init` with your answers. You review the changes and commit them.
+The agent reads the repository first and shows you one page of defaults drawn from it: who works on it, where configs go and sessions start, how rulecast is installed, your git hooks as rules, generated and vendored code, the catalog rules that fit, and the conventions your AGENTS.md already states. You strike or change items by number and answer the few questions only you can, such as whether rules that ask a model are OK. It writes nothing until you approve. Then it installs rulecast the way the page says (the standalone binary, or a devDependency) and runs `rulecast init` with your answers. You review the changes and commit them.
 
 Most rules come later, one at a time. When an agent makes a mistake that should not happen again, run `/rulecast:add-rule`, or accept when the agent offers it. If you would rather work out your conventions up front, say so during setup.
 
@@ -305,7 +305,7 @@ lists them). Never edit hook settings by hand: `rulecast init`, `install` and `u
 Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md)
 with the one convention you want checked.
 
-- [`agents/SETUP.md`](https://github.com/syv-ai/rulecast/blob/main/agents/SETUP.md) — your agent sets rulecast up with you: it asks what the repository can't tell it, shows you the agreed setup on one page, and writes it when you approve.
+- [`agents/SETUP.md`](https://github.com/syv-ai/rulecast/blob/main/agents/SETUP.md) — your agent sets rulecast up with you: it shows you a page of defaults from the repository, asks only what it can't tell, and writes it when you approve.
 - [`agents/CONVENTIONS.md`](https://github.com/syv-ai/rulecast/blob/main/agents/CONVENTIONS.md) — for working out your conventions up front. It reads the code, then interviews you one question at a time about what matters in this kind of project. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 

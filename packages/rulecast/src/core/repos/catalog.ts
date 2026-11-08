@@ -1,10 +1,13 @@
+import { readdir } from "node:fs/promises"
+import path from "node:path"
+
 import { compileManifest } from "../compile/project"
 import type { CompiledRule } from "../compile/rule"
 import type { DetectorRegistry } from "../detection/registry"
 import { errorMessage } from "../errors"
 import type { Env } from "../home"
 import { ensureRepo } from "./fetch"
-import { repoLabel } from "./layout"
+import { repoDir, repoLabel } from "./layout"
 import { latestTag, remoteTags } from "./tags"
 
 /**
@@ -50,6 +53,21 @@ export interface Catalog {
   /** The checkout, where the rules' cited docs are read from. */
   dir: string
   rules: CompiledRule[]
+  /** Set when the latest tag could not be asked for and a cached one was used instead: why. */
+  offline?: string
+}
+
+export interface LoadOptions {
+  /** How long asking the remote for its tags may take. */
+  tagsTimeoutMs?: number
+  /** When the remote can't be asked, use the newest tag already in the cache. */
+  cachedFallback?: boolean
+}
+
+/** The newest version tag of `url` already fetched into the cache, or null. */
+async function newestCachedTag(home: string, url: string): Promise<string | null> {
+  const names = await readdir(path.dirname(repoDir(home, url, "x"))).catch(() => [] as string[])
+  return latestTag(names.filter((name) => !name.startsWith(".")).map((name) => ({ name, sha: "" })))?.name ?? null
 }
 
 /** The catalog at `rev` (the config's pin), else at its latest tag; a message when it cannot be loaded. */
@@ -58,17 +76,35 @@ export async function loadCatalog(
   rev: string | undefined,
   home: string,
   registry: DetectorRegistry,
+  options: LoadOptions = {},
 ): Promise<Catalog | string> {
   try {
     let pinned = rev
+    let offline: string | undefined
     if (pinned === undefined) {
-      const tag = latestTag(await remoteTags(url))
+      let tags: Awaited<ReturnType<typeof remoteTags>>
+      try {
+        tags = await remoteTags(url, { timeoutMs: options.tagsTimeoutMs })
+      } catch (error) {
+        const cached = options.cachedFallback ? await newestCachedTag(home, url) : null
+        if (cached === null) throw error
+        tags = [{ name: cached, sha: "" }]
+        offline = `${url} could not be reached (${errorMessage(error).replace(/\s+/g, " ").trim()}); using the cached ${cached}`
+      }
+      const tag = latestTag(tags)
       if (tag === null) return `${url} has no version tags`
       pinned = tag.name
     }
     const dir = await ensureRepo(home, url, pinned)
     const { rules } = await compileManifest(dir, registry)
-    return { url, rev: pinned, label: repoLabel(url, pinned), dir, rules }
+    return {
+      url,
+      rev: pinned,
+      label: repoLabel(url, pinned),
+      dir,
+      rules,
+      ...(offline === undefined ? {} : { offline }),
+    }
   } catch (error) {
     return errorMessage(error)
   }

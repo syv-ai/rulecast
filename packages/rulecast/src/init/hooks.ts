@@ -48,7 +48,7 @@ export interface HookScan {
   skipped: SkippedHook[]
 }
 
-const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"]
+export const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"]
 
 /** Names that say "I rewrite files": the hook is a formatter or a fixer. */
 const FIXER_NAME =

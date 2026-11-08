@@ -13,11 +13,21 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import { allFiles, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
+import { type Catalog, catalogEntry, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } from "../core/types"
-import type { ConfigSettings } from "../init/config-text"
+import type { ConfigSettings, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
+import { type SetupFacts, setupFacts } from "../init/facts"
+import {
+  type FoundPaths,
+  filesOverride,
+  findGenerated,
+  linguistAttributes,
+  type OfferedPath,
+  readHead,
+} from "../init/generated"
 import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
-import { type AgentChoice, type PlannedChange, planInit, reviewText } from "../init/plan"
+import { type AgentChoice, type InitSelections, type PlannedChange, planInit, reviewText } from "../init/plan"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
@@ -34,6 +44,11 @@ interface Flags {
   scope: InstallScope
   /** --hooks: the project's own hooks to run as rules, by the ids the dry run offers. */
   hooks: string[]
+  /** --catalog: catalog rules to adopt, by id. */
+  catalog: string[]
+  /** --generated / --vendored: paths the dry run offers, covered by generated-code / vendored-code. */
+  generated: string[]
+  vendored: string[]
   settings: ConfigSettings
   dryRun: boolean
   format: "terminal" | "json"
@@ -55,6 +70,9 @@ function parseFlags(args: string[]): Flags {
       "no-agents": { type: "boolean", default: false },
       scope: { type: "string" },
       hooks: { type: "string" },
+      catalog: { type: "string" },
+      generated: { type: "string" },
+      vendored: { type: "string" },
       "llm-model": { type: "string" },
       "llm-provider": { type: "string" },
       conventions: { type: "string" },
@@ -89,6 +107,9 @@ function parseFlags(args: string[]): Flags {
     noAgents: values["no-agents"],
     scope: scope as InstallScope,
     hooks: list(values.hooks),
+    catalog: list(values.catalog),
+    generated: list(values.generated),
+    vendored: list(values.vendored),
     settings: {
       conventions: values.conventions ?? null,
       llmModel: values["llm-model"]?.trim() || null,
@@ -142,6 +163,75 @@ function chooseAgents(detection: Detection, flags: Flags): AgentChoice[] {
   return chosen.map((adapter) => ({ adapter, scope: flags.scope }))
 }
 
+const GENERATED_RULE = "generated-code"
+const VENDORED_RULE = "vendored-code"
+/** How long the dry run waits for the catalog's tags before it falls back to the cache. */
+const TAGS_TIMEOUT_MS = 5000
+
+/** "none are" or "offered: a, b", for a usage error naming what a flag may take. */
+const offeredText = (offered: readonly string[]) =>
+  offered.length === 0 ? "none are" : `offered: ${offered.join(", ")}`
+
+/**
+ * The catalog rules the flags adopt, validated against what init offers. `--generated` and
+ * `--vendored` imply their rule, with `files` widened by the paths (filesOverride). A rule the config
+ * already lists is left out, unless its `files` lack a path asked for.
+ */
+function catalogSelections(
+  catalog: Catalog,
+  flags: Flags,
+  found: { generated: OfferedPath[]; vendored: OfferedPath[] },
+  listed: readonly unknown[],
+): InitSelections["catalog"] {
+  for (const id of flags.catalog) {
+    if (id in PACKS) throw new UsageError(`"${id}" is a pack: adopt it with rulecast add ${id}`)
+    // A pack is adopted whole, with what it is for: never one of its rules at setup.
+    const pack = groupOf(id)
+    if (pack in PACKS && catalog.rules.some((rule) => rule.id === id)) {
+      throw new UsageError(`"${id}" is in the ${pack} pack: adopt the pack with rulecast add ${pack}`)
+    }
+    if (!catalog.rules.some((rule) => rule.id === id)) {
+      const ids = catalog.rules.filter((rule) => !(groupOf(rule.id) in PACKS)).map((rule) => rule.id)
+      throw new UsageError(`"${id}" is not a catalog rule in ${catalog.label} (${offeredText(ids)})`)
+    }
+  }
+  // The offered entries, kind included: only an entry offered as a pattern is read as one.
+  const paths = new Map<string, OfferedPath[]>()
+  for (const [flag, id, chosen, offered] of [
+    ["--generated", GENERATED_RULE, flags.generated, found.generated],
+    ["--vendored", VENDORED_RULE, flags.vendored, found.vendored],
+  ] as const) {
+    if (chosen.length === 0) continue
+    const unknown = chosen.find((each) => !offered.some((entry) => entry.path === each))
+    if (unknown !== undefined) {
+      throw new UsageError(
+        `"${unknown}" is not a path ${flag} is offered here (${offeredText(offered.map((entry) => entry.path))})`,
+      )
+    }
+    paths.set(
+      id,
+      chosen.map((each) => offered.find((entry) => entry.path === each)!),
+    )
+  }
+
+  const rules: RuleSelection[] = []
+  for (const id of new Set([...flags.catalog, ...paths.keys()])) {
+    const rule = catalog.rules.find((each) => each.id === id)!
+    const current = listed.find((item) => idOf(item) === id)
+    const chosen = paths.get(id) ?? []
+    if (chosen.length === 0) {
+      if (current === undefined) rules.push({ id, context: null, files: null })
+      continue
+    }
+    const own = (current as { files?: unknown } | undefined)?.files
+    const base = typeof own === "string" ? own : rule.patterns.files
+    const missing = chosen.filter((each) => !base.split("|").includes(filesOverride("", [each])))
+    if (current !== undefined && missing.length === 0) continue
+    rules.push({ id, context: null, files: filesOverride(base, missing) })
+  }
+  return { ref: { url: catalog.url, rev: catalog.rev }, rules }
+}
+
 async function write(root: string, changes: readonly PlannedChange[]): Promise<void> {
   for (const change of changes) {
     const file = path.join(root, change.file)
@@ -150,7 +240,23 @@ async function write(root: string, changes: readonly PlannedChange[]): Promise<v
   }
 }
 
-/** What `rulecast init --format json` prints: what it found, and what it would write or wrote (plan 20). */
+/** One catalog rule as init reports it: how many of the project's files it matches, and whether it is configured. */
+export interface CatalogFit {
+  id: string
+  name: string
+  description: string | null
+  matching: number
+  /** The pack it belongs to: packs are adopted with `rulecast add`, not at setup. */
+  pack: string | null
+  /** It asks a model: money per file, and the files leave the machine. */
+  metered: boolean
+  installed: boolean
+}
+
+/**
+ * What `rulecast init --format json` prints: what it found, and what it would write or wrote (plan 20).
+ * Plan 24 adds the facts setup's page of defaults is drawn from.
+ */
 export interface InitReport {
   root: string
   detected: {
@@ -159,7 +265,25 @@ export interface InitReport {
     primaryDoc: string | null
     docs: { file: string; headings: string[] }[]
     agents: { name: string; label: string; supported: boolean }[]
+    committers: SetupFacts["committers"]
+    packages: SetupFacts["packages"]
+    sessions: string[]
+    gitHooks: SetupFacts["gitHooks"]
+    ci: SetupFacts["ci"]
   }
+  /**
+   * Paths `--generated` / `--vendored` take, beyond what the catalog rules' defaults cover. Empty when
+   * the catalog was not loaded or has no `generated-code` / `vendored-code` rule to adopt them with.
+   */
+  generated: OfferedPath[]
+  vendored: OfferedPath[]
+  /** Marked files past the listed ones, offered one by one: not listed, only counted. */
+  notListed: { generated: number; vendored: number }
+  /**
+   * The catalog's rules and how each fits; `{ error }` when it could not be loaded. null when it was
+   * not needed: a run without --dry-run, --catalog, --generated or --vendored does not load it.
+   */
+  catalog: { label: string; rules: CatalogFit[] } | { error: string } | null
   hooks: {
     /** modifies: null when the hook runs a script init cannot see into, named by `runs`. */
     offered: {
@@ -177,6 +301,8 @@ export interface InitReport {
     /** Where new conventions go, from this config or one above it; null when none names it. */
     conventions: { path: string; from: string } | null
     llm: { model: string | null; provider: string }
+    /** stats.weekly_summary: the page's "Weekly stats summary" item is on when this is. */
+    stats: { weeklySummary: boolean }
   }
   changes: { file: string; created: boolean; commit: boolean; summary: string; content: string }[]
   notes: string[]
@@ -217,6 +343,51 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   }
   const hooks = scan.offered.filter((hook) => flags.hooks.includes(hook.id) && !configured.has(hook.id)).map(hookRule)
   const agents = chooseAgents(detection, flags)
+  const read = (file: string) => readSourceFile(root, file)
+  const facts = await setupFacts({ root, files, read, exists: markerExists(root), adapters: ADAPTERS })
+
+  // The catalog, at the rev the config pins, else its latest tag: for the dry run's fit, and for flags that adopt from it.
+  const adopts = flags.catalog.length > 0 || flags.generated.length > 0 || flags.vendored.length > 0
+  const { url, entry } = catalogEntry(config?.repos ?? [], io.env)
+  // Bounded: offline, the dry run uses the newest catalog already in the cache, or reports the error.
+  const loaded =
+    flags.dryRun || adopts
+      ? await loadCatalog(url, entry?.rev, home, registry, { tagsTimeoutMs: TAGS_TIMEOUT_MS, cachedFallback: true })
+      : null
+  if (typeof loaded === "string" && adopts) throw new Error(`the catalog could not be loaded: ${loaded}`)
+  const catalog = typeof loaded === "string" ? null : loaded
+  const catalogRule = (id: string) => catalog?.rules.find((rule) => rule.id === id) ?? null
+  // Paths are offered only for a rule the loaded catalog has: --generated and --vendored adopt it.
+  const generatedRule = catalogRule(GENERATED_RULE)
+  const vendoredRule = catalogRule(VENDORED_RULE)
+  let linguist: ReturnType<typeof linguistAttributes> | undefined
+  const linguistOnce = () => {
+    linguist ??= linguistAttributes(root, files)
+    return linguist
+  }
+  const found: FoundPaths =
+    generatedRule === null && vendoredRule === null
+      ? { generated: [], vendored: [], notListed: { generated: 0, vendored: 0 } }
+      : await findGenerated({
+          files,
+          readHead: (file) => readHead(root, file),
+          // One git check-attr for both attributes, asked for once.
+          attributed: async (attribute) => (await linguistOnce())[attribute],
+          read,
+          covered: generatedRule === null ? null : (file) => generatedRule.matches(file),
+          coveredVendored: vendoredRule === null ? null : (file) => vendoredRule.matches(file),
+        })
+  if (generatedRule === null) {
+    found.generated = []
+    found.notListed.generated = 0
+  }
+  if (vendoredRule === null) {
+    found.vendored = []
+    found.notListed.vendored = 0
+  }
+  const listed = (entry?.rules ?? []) as unknown[]
+  const installed = new Set(listed.map(idOf).filter((id): id is string => id !== null))
+  const adopted = catalog === null ? null : catalogSelections(catalog, flags, found, listed)
 
   // The hooks serve every config a session started here reaches, as rulecast install's do.
   const own = config ?? defaultConfig()
@@ -226,7 +397,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     notes.push(`${problem}\nLeft out of the hooks' timeout and repo fetch.`),
   )
   const changes = await planInit(
-    { agents, hooks, settings: flags.settings },
+    { agents, hooks, catalog: adopted, settings: flags.settings },
     {
       configText,
       verifyMs: reached.verifyMs,
@@ -235,6 +406,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     },
   )
   if (agents.length === 0) notes.push(NO_HOOKS)
+  if (catalog?.offline !== undefined) notes.push(`Catalog: ${catalog.offline}.`)
   // Hook rules from a config above the project cite nothing: their findings come without a doc section.
   const uncited = hooks.filter((hook) => hook.context.length === 0).length
   if (uncited > 0) {
@@ -256,7 +428,32 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
         label: agent.label,
         supported: agent.adapter !== null,
       })),
+      committers: facts.committers,
+      packages: facts.packages,
+      sessions: facts.sessions,
+      gitHooks: facts.gitHooks,
+      ci: facts.ci,
     },
+    generated: found.generated,
+    vendored: found.vendored,
+    notListed: found.notListed,
+    catalog:
+      loaded === null
+        ? null
+        : typeof loaded === "string"
+          ? { error: loaded }
+          : {
+              label: loaded.label,
+              rules: loaded.rules.map((rule) => ({
+                id: rule.id,
+                name: rule.name,
+                description: rule.description,
+                matching: files.filter((file) => rule.matches(file)).length,
+                pack: groupOf(rule.id) in PACKS ? groupOf(rule.id) : null,
+                metered: rule.detector !== null && registry.get(rule.detector.kind)?.metered === true,
+                installed: installed.has(rule.id),
+              })),
+            },
     hooks: {
       offered: scan.offered.map((hook) => ({
         id: hook.id,
@@ -272,6 +469,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
       exists: config !== null,
       conventions: await conventionsFor(root),
       llm: { model: own.llm.model, provider: own.llm.provider },
+      stats: { weeklySummary: own.stats.weeklySummary },
     },
     changes: changes.map(({ file, created, commit, summary, content }) => ({
       file,
@@ -300,11 +498,22 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   // \u003c rather than <: the agent pastes this into setup-page.html's script data block, which a
   // literal "</script>" in a file's content would end early.
   if (flags.format === "json") io.stdout(`${JSON.stringify(report, null, 2).replaceAll("<", "\\u003c")}\n`)
-  else io.stdout(terminalText(report, detection, scan, report.written ? flags.hooks : []))
+  else io.stdout(terminalText(report, detection, scan, report.written ? adoptedNames(flags) : []))
   if (report.validate === null) return 0
   return report.validate.errors > 0 || !fetched ? 2 : 0
 }
 
+/** The hook ids, catalog rule ids and paths a run wrote: no longer offered in its text. */
+function adoptedNames(flags: Flags): string[] {
+  return [
+    ...flags.hooks,
+    ...flags.catalog,
+    ...(flags.generated.length > 0 ? [GENERATED_RULE, ...flags.generated] : []),
+    ...(flags.vendored.length > 0 ? [VENDORED_RULE, ...flags.vendored] : []),
+  ]
+}
+
+/** `wrapped`: what this run wrote (adoptedNames), left out of what it offers. */
 function terminalText(report: InitReport, detection: Detection, scan: HookScan, wrapped: readonly string[]): string {
   const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
   const offered = report.hooks.offered.filter((hook) => !hook.configured && !wrapped.includes(hook.id))
@@ -315,6 +524,30 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
     }
     out.push(...notOfferedLines(scan.skipped), "")
   }
+  if (report.catalog !== null && "error" in report.catalog) {
+    out.push("Catalog", `Could not be loaded: ${report.catalog.error}`, "")
+  } else if (report.catalog !== null) {
+    const fitting = report.catalog.rules.filter(
+      (rule) => rule.matching > 0 && rule.pack === null && !rule.installed && !wrapped.includes(rule.id),
+    )
+    if (fitting.length > 0) {
+      const named = fitting.map((rule) => `${rule.id} (${plural(rule.matching, "file")}${rule.metered ? ", llm" : ""})`)
+      out.push(`Catalog (${report.catalog.label})`, `Fits, with --catalog: ${named.join(", ")}`, "")
+    }
+  }
+  const paths = (flag: string, offered: readonly OfferedPath[], more: number) => {
+    const left = offered.filter((entry) => !wrapped.includes(entry.path))
+    const named = left.map((entry) =>
+      entry.kind === "file" ? entry.path : `${entry.path} (${plural(entry.files, "file")})`,
+    )
+    const rest = more > 0 ? `, and ${plural(more, "more file")} not listed` : ""
+    return left.length === 0 ? [] : [`Offered with ${flag}: ${named.join(", ")}${rest}`]
+  }
+  const generated = [
+    ...paths("--generated", report.generated, report.notListed.generated),
+    ...paths("--vendored", report.vendored, report.notListed.vendored),
+  ]
+  if (generated.length > 0) out.push("Generated", ...generated, "")
   const planned = report.changes as PlannedChange[]
   out.push(
     report.written ? "Written" : "Would write",
@@ -328,6 +561,8 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   else out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
   return `${out.join("\n")}\n`
 }
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
 /** How init's text says whether an offered hook changes files. */
 function writesNote(hook: { modifies: boolean | null; runs?: string }): string {

@@ -28,18 +28,24 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "init",
     synopsis:
-      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
+      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
     summary: "Set rulecast up: config, settings, your existing git hooks as rules, agent hooks",
     flags: [
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable. Default: the agents detected"],
       ["--no-agents", "Install no agent hooks"],
       ["--scope shared|personal", "Write hooks to the shared (default) or the personal settings file"],
       ["--hooks id,id", "Run these of the project's pre-commit or lefthook hooks as rules (--dry-run lists them)"],
+      ["--catalog id,id", "Adopt these catalog rules (--dry-run lists the ones that fit)"],
+      ["--generated path,path", "Cover these generated paths with generated-code (--dry-run lists them)"],
+      ["--vendored path,path", "Cover these vendored paths with vendored-code (--dry-run lists them)"],
       ["--llm-model <name>", "Allow llm rules, and run those that name no model on this one (e.g. haiku)"],
       ["--llm-provider <name>", "claude-code (default), opencode, anthropic or openai-compatible"],
       ["--conventions <path>", "The file or folder where new conventions are written"],
       ["--weekly-summary", "Keep 26 weeks of per-week counts for rulecast stats beside this config's findings log"],
-      ["--dry-run", "Write nothing; show what was found and every file that would be written"],
+      [
+        "--dry-run",
+        "Write nothing; show what was found and every file that would be written. Fetches the catalog's rule data at its latest tag (or the config's pin) to show which rules fit",
+      ],
       ["--format", "terminal or json"],
     ],
     notes: [
