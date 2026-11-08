@@ -143,6 +143,19 @@ export async function generateReadme(): Promise<{ target: string; source: string
   return { target, source: withInstallVersion(withReadmeVersion(await readFile(target, "utf8"), version), version) }
 }
 
+const INSTALL_SCRIPT_VERSION = /^VERSION="\d+\.\d+\.\d+"$/gm
+
+/** install.sh downloads the release it names in its one `VERSION="x.y.z"` line. */
+export function withInstallScriptVersion(source: string, version: string): string {
+  once(source, INSTALL_SCRIPT_VERSION, "install.sh", 'the VERSION="…" line')
+  return source.replace(INSTALL_SCRIPT_VERSION, `VERSION="${version}"`)
+}
+
+export async function generateInstallScript(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, "install.sh")
+  return { target, source: withInstallScriptVersion(await readFile(target, "utf8"), await packageVersion()) }
+}
+
 /** The guide with the pre-commit and lefthook snippets. */
 export const GIT_HOOKS_GUIDE = "guides/git-hooks-ci.md"
 
@@ -164,6 +177,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ...(await generateSkillFiles()),
     await generateReadme(),
     await generateGitHooksGuide(),
+    await generateInstallScript(),
     await generateSetup(),
     await generatePreCommitHooks(),
   ]

@@ -6,10 +6,12 @@ import { describe, expect, test } from "vitest"
 import {
   GIT_HOOKS_GUIDE,
   generateGitHooksGuide,
+  generateInstallScript,
   generatePreCommitHooks,
   generateReadme,
   generateSetup,
   generateVersionFile,
+  withInstallScriptVersion,
   withInstallVersion,
   withPreCommitRev,
   withReadmeVersion,
@@ -86,6 +88,17 @@ describe("sync-version", () => {
     const status = withReadmeVersion("## Status\n\n0.4. Everything above works and is tested.\n", "1.2.3")
     expect(status).toContain("\n1.2. Everything above works and is tested.\n")
     expect(() => withReadmeVersion("# no status\n", "1.2.3")).toThrow(/Status/)
+  })
+
+  test("install.sh's one VERSION line follows the version", () => {
+    expect(withInstallScriptVersion('set -u\nVERSION="0.1.0"\nmain\n', "1.2.3")).toBe('set -u\nVERSION="1.2.3"\nmain\n')
+    expect(() => withInstallScriptVersion("set -u\n", "1.2.3")).toThrow(/VERSION/)
+    expect(() => withInstallScriptVersion('VERSION="0.1.0"\nVERSION="0.1.0"\n', "1.2.3")).toThrow(/VERSION/)
+  })
+
+  test("the committed install.sh already matches package.json", async () => {
+    const { target, source } = await generateInstallScript()
+    expect(await readFile(target, "utf8"), "install.sh is stale: run pnpm sync-version").toBe(source)
   })
 
   test("the committed Git hooks guide already matches package.json", async () => {
