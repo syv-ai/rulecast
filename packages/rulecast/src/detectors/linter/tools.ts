@@ -60,10 +60,10 @@ function json(tool: ToolName, stdout: string): unknown {
 const number = (value: unknown, fallback: number): number => (typeof value === "number" ? value : fallback)
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 /**
- * A doc url as the tool gave it, kept only when it is one line of a sane length: it goes into the
- * agent's context as-is, so a plugin's multi-line or huge "url" must not.
+ * A doc url as the tool gave it, kept only when it is printable ASCII of a sane length: it goes into
+ * the agent's context as-is, so a plugin's multi-line, huge or control-character "url" must not.
  */
-const DOC_URL = /^https?:\/\/[^\s]{1,300}$/
+const DOC_URL = /^https?:\/\/[!-~]{1,300}$/
 const url = (value: unknown): string | null => (typeof value === "string" && DOC_URL.test(value) ? value : null)
 
 /** oxlint reports "eslint(no-debugger)"; the rule id people write is the part inside. */

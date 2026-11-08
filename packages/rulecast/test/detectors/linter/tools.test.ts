@@ -264,6 +264,11 @@ describe("tool adapters", () => {
       `https://example.com/${"a".repeat(20_000)}`,
       "javascript:alert(1)",
       "",
+      "https://example.com/a\u001b[2Jb",
+      "https://example.com/a\u0000b",
+      "https://example.com/a\u202eb",
+      "https://example.com/a\u2028b",
+      "https://example.com/a b",
     ]
     for (const docsUrl of bad) {
       expect(TOOLS.eslint.parse(eslintWith(docsUrl), ROOT)[0]!.docs).toBeNull()
