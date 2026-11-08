@@ -1,5 +1,9 @@
 import type { FindingsRecord } from "./log"
 
+/** The rules that ran on at least one file in this record. A guard's empty `ran` is never a run. */
+export const rulesRun = (record: FindingsRecord): string[] =>
+  Object.keys(record.ran).filter((rule) => record.ran[rule]!.length > 0)
+
 /**
  * Per rule, how many checks ran it to completion on at least one file: edit checks and stops, never
  * a guard, which judges a write that has not happened. A rule with no finding and many runs has
@@ -8,9 +12,7 @@ import type { FindingsRecord } from "./log"
 export function ruleRuns(records: readonly FindingsRecord[]): Map<string, number> {
   const runs = new Map<string, number>()
   for (const record of records) {
-    for (const [rule, files] of Object.entries(record.ran)) {
-      if (files.length > 0) runs.set(rule, (runs.get(rule) ?? 0) + 1)
-    }
+    for (const rule of rulesRun(record)) runs.set(rule, (runs.get(rule) ?? 0) + 1)
   }
   return runs
 }
@@ -37,8 +39,8 @@ export function stopBlocks(records: readonly FindingsRecord[]): StopBlocks[] {
   for (const record of records) {
     if (record.ev !== "stop") continue
     const blocking = new Set(record.found.filter((found) => found.o === "blocked").map((found) => found.r))
-    for (const [rule, files] of Object.entries(record.ran)) {
-      if (files.length === 0) continue
+    for (const rule of rulesRun(record)) {
+      const files = record.ran[rule]!
       const sizes = byRule.get(rule) ?? new Map()
       byRule.set(rule, sizes)
       const bucket = sizes.get(sizeOf(files.length)) ?? { stops: 0, blocked: 0 }

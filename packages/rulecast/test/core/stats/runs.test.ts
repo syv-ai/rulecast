@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 
 import type { FindingsRecord } from "../../../src/core/stats/log"
-import { ruleRuns, stopBlocks } from "../../../src/core/stats/runs"
+import { ruleRuns, rulesRun, stopBlocks } from "../../../src/core/stats/runs"
 
 const stop = (files: number, blocked: boolean, ev: FindingsRecord["ev"] = "stop"): FindingsRecord => ({
   v: 1,
@@ -44,4 +44,8 @@ test("a guard's empty run is not a run", () => {
       ["quiet", 1],
     ]),
   )
+})
+
+test("rulesRun leaves out a rule whose run is empty", () => {
+  expect(rulesRun({ ...stop(1, false, "edit"), ran: { a: [0], b: [] } })).toEqual(["a"])
 })
