@@ -129,6 +129,8 @@ function renderFindings(
   findings: ClassifiedFinding[],
   status: Finding["status"],
   display: (file: string) => string,
+  /** Filled with each finding's `context_by_rule` sections, for the ones whose lint rule maps any. */
+  sections?: Map<Finding, ReferenceSpec[]>,
 ): Finding[] {
   const merged = new Map<string, Finding>()
   for (const { id, rule, match } of findings) {
@@ -141,11 +143,15 @@ function renderFindings(
       text: match.text,
       rule: rule.id,
     })
-    const key = `${rule.id} ${match.file} ${message}`
+    // A rule that maps sections per lint rule keeps its lint rules apart, even where their messages
+    // read the same: each finding then points to one lint rule's section.
+    const ruleId = match.captures.ruleId ?? ""
+    const key = `${rule.id} ${match.file} ${message}${rule.contextByRule.size > 0 ? ` ${ruleId}` : ""}`
     const existing = merged.get(key)
     const site = { line: match.line, endLine: match.endLine, column: match.column }
     if (existing === undefined) {
-      merged.set(key, {
+      const mapped = rule.contextByRule.get(ruleId)
+      const finding: Finding = {
         id,
         rule: rule.id,
         severity: rule.severity,
@@ -159,7 +165,9 @@ function renderFindings(
         // a removed finding: what is gone has nothing to rewrite.
         ...(rule.fixable && rule.scope !== "removed" ? { fixable: true as const } : {}),
         ...docsFor(rule, match, display),
-      })
+      }
+      merged.set(key, finding)
+      if (mapped !== undefined) sections?.set(finding, mapped)
       continue
     }
     existing.count++
@@ -259,6 +267,12 @@ export interface Assembled {
    * it has here (`ruleContextFor`), a touch rule's `context`. What the budget charges with each rule.
    */
   ruleRefs: ReadonlyMap<string, ReferenceSpec[]>
+  /**
+   * The `context_by_rule` sections of each finding in `delivery.findings` whose lint rule maps any,
+   * by identity. The budget charges such a section with the first finding of its lint rule it shows,
+   * and drops it when it shows none.
+   */
+  findingSections: ReadonlyMap<Finding, ReferenceSpec[]>
 }
 
 /** Pre-existing findings whose file's summary this context has not been given yet. */
@@ -305,7 +319,8 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
 
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
-  delivery.findings = renderFindings(fresh, "new", display)
+  const findingSections = new Map<Finding, ReferenceSpec[]>()
+  delivery.findings = renderFindings(fresh, "new", display, findingSections)
   if (input.listPreexisting === true) {
     delivery.preexisting = renderFindings(
       input.findings.filter((finding) => finding.status === "preexisting"),
@@ -388,7 +403,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     }
   }
 
-  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels, ruleRefs }
+  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels, ruleRefs, findingSections }
 }
 
 export interface Trimmed {
@@ -483,20 +498,21 @@ export function trim(
   const resolvedRefs = new Set(delivery.references.map((reference) => reference.ref))
   const charged = new Set<string>()
   const orphaned = new Set<string>()
+  // A `context_by_rule` section explains one lint rule's findings, so it is charged with the first of
+  // them the delivery shows, not with the rule as a whole: at the floor that is the block's first
+  // finding, and the rest come with the repeats that bring them.
+  const sectionsOf = (finding: Finding) => (assembled.findingSections.get(finding) ?? []).map((spec) => shown(spec.ref))
 
   /** One pass at the floor. Returns what it spent, what it kept, and what it had no room for. */
   const floorWithin = (cap: number) => {
     const spent = { chars: 0, kept: new Map<string, Finding[]>(), refs: new Set<string>(), dropped: new Set<string>() }
-    const uncharged = (rule: CompiledRule) => [
-      ...new Set(
-        citedBy(rule)
-          .map((spec) => shown(spec.ref))
-          .filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref)),
-      ),
+    const uncharged = (refs: readonly string[]) => [
+      ...new Set(refs.filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref))),
     ]
+    const ownRefs = (rule: CompiledRule) => rule.context.map((spec) => shown(spec.ref))
     for (const [id, findings] of byRule) {
       const rule = rulesById.get(ruleOf(id))
-      const refs = rule === undefined ? [] : uncharged(rule)
+      const refs = rule === undefined ? [] : uncharged([...ownRefs(rule), ...sectionsOf(findings[0]!)])
       const size =
         measureRuleBlock(ruleOf(id), [findings[0]!], findings, delivery.templates[ruleOf(id)], render) +
         refs.reduce((sum, ref) => sum + lineCost(ref), 0)
@@ -511,7 +527,7 @@ export function trim(
     // Touch rules are never dropped: their reference is the whole delivery, and the session has
     // already recorded the rule as touched, so a dropped one would never be delivered again.
     for (const touch of touches) {
-      for (const ref of uncharged(touch)) {
+      for (const ref of uncharged(ownRefs(touch))) {
         spent.chars += lineCost(ref)
         spent.refs.add(ref)
       }
@@ -534,7 +550,8 @@ export function trim(
     delivery.omitted.rules = new Set([...floor.dropped].map(ruleOf).filter((rule) => !keptRules.has(rule))).size
     for (const [id, findings] of floor.kept) kept.set(id, findings)
     for (const ref of floor.refs) charged.add(ref)
-    // What is left is cited only by rules that were dropped, and explains nothing the agent can see.
+    // What is left is cited only by rules that were dropped, or by lint rules whose findings the floor
+    // did not show: it explains nothing the agent can see, unless a repeat below brings its finding.
     for (const ref of resolvedRefs) if (!charged.has(ref)) orphaned.add(ref)
   }
 
@@ -612,7 +629,26 @@ export function trim(
     context.push({ t: "preexisting", rule: summary.rule, file: assembled.summaryFiles.get(summary) ?? summary.file })
   }
   delivery.preexistingSummary = summariesKept
-  if (orphaned.size > 0) delivery.references = delivery.references.filter((one) => !orphaned.has(one.ref))
+
+  // A section the floor left out, brought by a repeat that shows its lint rule's finding: its line
+  // comes with that finding, and its content when there is still room.
+  const candidateOf = new Map(candidates.map((candidate) => [shown(candidate.resolved.spec.ref), candidate]))
+  const bring = (refs: readonly string[]) => {
+    for (const ref of refs) {
+      orphaned.delete(ref)
+      charged.add(ref)
+      const candidate = candidateOf.get(ref)
+      if (candidate === undefined) continue
+      const { index, resolved } = candidate
+      const size = deliveryCost.referenceContent(ref, resolved.content, locationOf(resolved.spec).location)
+      if (fits(size)) {
+        used += size
+        context.push({ t: "delivered", path: resolved.spec.path, anchor: resolved.spec.anchor, hash: resolved.hash })
+      } else {
+        delivery.references[index] = { ref, state: "read", reason: "budget", ...locationOf(resolved.spec) }
+      }
+    }
+  }
 
   if (limit !== null) {
     // One match per rule per pass, so a rule that fired forty times does not crowd out the others.
@@ -627,12 +663,16 @@ export function trim(
         // loop would pull every finding of every rule into the delivery at no apparent cost.
         if (shown === undefined || shown.length >= Math.min(findings.length, limits.maxMatchesPerRule)) continue
         const template = delivery.templates[ruleOf(rule)]
+        const next = findings[shown.length]!
+        const brought = [...new Set(sectionsOf(next).filter((ref) => orphaned.has(ref)))]
         const delta =
-          measureRuleBlock(ruleOf(rule), [...shown, findings[shown.length]!], findings, template, render) -
-          measureRuleBlock(ruleOf(rule), shown, findings, template, render)
+          measureRuleBlock(ruleOf(rule), [...shown, next], findings, template, render) -
+          measureRuleBlock(ruleOf(rule), shown, findings, template, render) +
+          brought.reduce((sum, ref) => sum + lineCost(ref), 0)
         if (!fits(delta)) continue
         used += delta
-        shown.push(findings[shown.length]!)
+        shown.push(next)
+        bring(brought)
         added = true
       }
     }
@@ -654,6 +694,7 @@ export function trim(
     }
     delivery.findings = delivery.findings.filter((finding) => kept.get(blockOf(finding))?.includes(finding) === true)
   }
+  if (orphaned.size > 0) delivery.references = delivery.references.filter((one) => !orphaned.has(one.ref))
 
   return { delivery, overflow: droppedBlocks > 0 ? assembled.delivery : null, context }
 }

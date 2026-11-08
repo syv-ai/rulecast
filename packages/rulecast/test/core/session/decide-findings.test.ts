@@ -262,6 +262,36 @@ describe("decide: stop gate", () => {
     expect(decision.overflow!.findings).toHaveLength(1)
   })
 
+  test("two lint rules with the same message stay apart when the rule maps sections, so each says see", async () => {
+    const spec = (anchor: string) => parseReference(`@docs/a.md#${anchor}`, "inject", { dir: "/p", label: null })
+    const mapped = rule({
+      id: "lint/house",
+      message: "{{message}}",
+      contextByRule: new Map([
+        ["a", [spec("a")]],
+        ["b", [spec("b")]],
+      ]),
+    })
+    const unmapped = rule({ id: "lint/plain", message: "{{message}}" })
+    const same = (ruleId: string, line: number) => at("x.py", line, { message: "same words", ruleId })
+    const { delivery } = await decide(
+      input({
+        findings: [
+          { rule: mapped, match: same("a", 1), id: "1", status: "new" },
+          { rule: mapped, match: same("b", 2), id: "2", status: "new" },
+          { rule: unmapped, match: same("a", 1), id: "3", status: "new" },
+          { rule: unmapped, match: same("b", 2), id: "4", status: "new" },
+        ],
+      }),
+    )
+    expect(delivery.findings.filter((one) => one.rule === "lint/house").map((one) => one.docs)).toEqual([
+      { ref: "docs/a.md#a" },
+      { ref: "docs/a.md#b" },
+    ])
+    // Without a mapping, merging is as it always was.
+    expect(delivery.findings.filter((one) => one.rule === "lint/plain").map((one) => one.count)).toEqual([2])
+  })
+
   test("an unmapped finding carries the tool's url; a mapped one carries the shown ref", async () => {
     const linter = rule({
       id: "linter/eslint",

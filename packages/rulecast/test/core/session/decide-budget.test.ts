@@ -197,6 +197,70 @@ describe("decide: warnings are charged after the floor", () => {
     expect(overflow!.warnings).toHaveLength(80)
   })
 
+  describe("a lint rule's section is charged with the finding it explains", () => {
+    const sections = {
+      "docs/a.md#eq": `## Eq\n${"Use === always. ".repeat(10)}`,
+      "docs/a.md#console": `## Console\n${"Use the logger. ".repeat(10)}`,
+      ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`docs/s${i}.md#sec`, `## Sec\nText ${i}`])),
+    }
+    const lintResolver = fakeResolver(sections)
+    const lintRule = (map: [string, string][]) =>
+      rule({
+        id: "linter/eslint",
+        message: "{{message}} ({{ruleId}})",
+        contextByRule: new Map(map.map(([id, r]) => [id, [ref(r)]])),
+      })
+    const lint = (linter: ReturnType<typeof lintRule>, ruleId: string, line: number) => ({
+      rule: linter,
+      id: `${ruleId}${line}`,
+      status: "new" as const,
+      match: { file: "a.ts", line, endLine: line, column: 1, text: "", captures: { message: `msg ${line}`, ruleId } },
+    })
+
+    test("a section is never delivered in full while its lint rule's finding is cut", async () => {
+      const linter = lintRule([
+        ["eqeqeq", "@docs/a.md#eq"],
+        ["no-console", "@docs/a.md#console"],
+      ])
+      const findings = [lint(linter, "eqeqeq", 1), lint(linter, "no-console", 2)]
+      const bad: number[] = []
+      let both = 0
+      // 535–560 used to deliver the no-console section with its finding cut.
+      for (let limit = 100; limit <= 1200; limit += 5) {
+        const { delivery } = await decide(input({ resolver: lintResolver, findings, maxContextChars: limit }))
+        expect(renderAgentText(delivery, { maxMatchesPerRule: 10 }).length, `limit ${limit}`).toBeLessThanOrEqual(limit)
+        const shownRules = new Set(delivery.findings.map((finding) => finding.message.match(/\((.+)\)$/)?.[1]))
+        for (const [ruleId, section] of [
+          ["eqeqeq", "docs/a.md#eq"],
+          ["no-console", "docs/a.md#console"],
+        ]) {
+          if (delivery.references.some((one) => one.ref === section) && !shownRules.has(ruleId)) bad.push(limit)
+        }
+        if (shownRules.size === 2) both++
+      }
+      expect(bad).toEqual([])
+      expect(both).toBeGreaterThan(0)
+    })
+
+    test("twelve mapped lint rules do not crowd another rule out at the floor", async () => {
+      const linter = lintRule(Array.from({ length: 12 }, (_, i) => [`r${i}`, `@docs/s${i}.md#sec`]))
+      const plain = { ...violation("zz/plain", "b.py", 1) }
+      const findings = [...Array.from({ length: 12 }, (_, i) => lint(linter, `r${i}`, i + 1)), plain]
+      for (const limit of [800, 1000, 1200]) {
+        const { delivery } = await decide(input({ resolver: lintResolver, findings, maxContextChars: limit }))
+        const rules = new Set(delivery.findings.map((finding) => finding.rule))
+        expect(rules, `limit ${limit}`).toEqual(new Set(["linter/eslint", "zz/plain"]))
+        // Every section delivered has its finding shown.
+        const shownIds = new Set(delivery.findings.map((finding) => finding.message.match(/\((r\d+)\)$/)?.[1]))
+        for (const reference of delivery.references) {
+          const index = /docs\/s(\d+)\.md/.exec(reference.ref)?.[1]
+          if (index !== undefined) expect(shownIds.has(`r${index}`), `${reference.ref} at ${limit}`).toBe(true)
+        }
+        expect(renderAgentText(delivery, { maxMatchesPerRule: 10 }).length).toBeLessThanOrEqual(limit)
+      }
+    })
+  })
+
   test("a mapped section's line is charged with its rule at the floor", async () => {
     const linter = rule({
       id: "linter/ruff",
