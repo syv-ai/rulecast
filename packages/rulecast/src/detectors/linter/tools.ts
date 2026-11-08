@@ -12,6 +12,10 @@ export interface LinterFinding {
   /** "" when the tool reported none (a syntax error, say). */
   ruleId: string
   message: string
+  /** What the project's own config makes of it. Only the detector filters on it. */
+  level: "error" | "warning"
+  /** The tool's page for the lint rule, as the tool's output gives it; null when it gives none. */
+  docs: string | null
 }
 
 export interface LinterTool {
@@ -55,6 +59,7 @@ function json(tool: ToolName, stdout: string): unknown {
 
 const number = (value: unknown, fallback: number): number => (typeof value === "number" ? value : fallback)
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
+const url = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null)
 
 /** oxlint reports "eslint(no-debugger)"; the rule id people write is the part inside. */
 function oxlintRuleId(code: unknown): string {
@@ -93,6 +98,9 @@ export const TOOLS: Record<ToolName, LinterTool> = {
           endColumn: typeof leak.EndColumn === "number" ? leak.EndColumn + 1 : null,
           ruleId: text(leak.RuleID),
           message: text(leak.Description),
+          // Every leak is a secret: there is no lesser level, and gitleaks links no page.
+          level: "error",
+          docs: null,
         }
       })
     },
@@ -136,6 +144,9 @@ export const TOOLS: Record<ToolName, LinterTool> = {
           endColumn: typeof end.column === "number" ? end.column : null,
           ruleId: text(result.code),
           message: text(result.message),
+          // ruff has no levels: every rule the project's config selects is an error.
+          level: "error",
+          docs: url(result.url),
         }
       })
     },
@@ -163,6 +174,8 @@ export const TOOLS: Record<ToolName, LinterTool> = {
           endColumn: null,
           ruleId: oxlintRuleId(diagnostic.code),
           message: text(diagnostic.message),
+          level: diagnostic.severity === "error" ? "error" : "warning",
+          docs: url(diagnostic.url),
         }
       })
     },
@@ -180,31 +193,50 @@ export const TOOLS: Record<ToolName, LinterTool> = {
     ],
     // --rule wins over the config, its per-file settings included; inline disable comments still
     // apply. A plugin rule needs its plugin loaded by the project's config.
+    // json-with-metadata is plain json plus each fired rule's meta, where its doc url is: the same
+    // single process, no extra run.
     args: (files, select) => [
-      "--format=json",
+      "--format=json-with-metadata",
       "--no-error-on-unmatched-pattern",
       ...eslintRules(select),
       "--",
       ...files,
     ],
-    stdinArgs: (file, select) => ["--format=json", ...eslintRules(select), "--stdin", "--stdin-filename", file],
+    stdinArgs: (file, select) => [
+      "--format=json-with-metadata",
+      ...eslintRules(select),
+      "--stdin",
+      "--stdin-filename",
+      file,
+    ],
     parse(stdout, cwd, root = cwd) {
       const parsed = json("eslint", stdout)
-      if (!Array.isArray(parsed)) throw new Error("eslint output is not a JSON array of file results")
+      if (!isObject(parsed) || !Array.isArray(parsed.results)) {
+        throw new Error("eslint output is not JSON with results")
+      }
+      const meta = isObject(parsed.metadata) && isObject(parsed.metadata.rulesMeta) ? parsed.metadata.rulesMeta : {}
+      const docsOf = (ruleId: string): string | null => {
+        const rule = ruleId ? meta[ruleId] : undefined
+        return isObject(rule) && isObject(rule.docs) ? url(rule.docs.url) : null
+      }
       const relative = repoRelativeFrom(cwd, root)
       const findings: LinterFinding[] = []
-      for (const file of parsed.filter(isObject)) {
+      for (const file of parsed.results.filter(isObject)) {
         const messages = Array.isArray(file.messages) ? file.messages : []
         for (const message of messages.filter(isObject)) {
           const line = number(message.line, 1)
+          const ruleId = text(message.ruleId)
           findings.push({
             file: relative(text(file.filePath)),
             line,
             column: number(message.column, 1),
             endLine: number(message.endLine, line),
             endColumn: typeof message.endColumn === "number" ? message.endColumn : null,
-            ruleId: text(message.ruleId),
+            ruleId,
             message: text(message.message),
+            // 2 is "error" in the project's config; 1 is "warn", and also eslint's own notices.
+            level: message.severity === 2 ? "error" : "warning",
+            docs: docsOf(ruleId),
           })
         }
       }

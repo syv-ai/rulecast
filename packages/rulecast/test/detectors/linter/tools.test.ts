@@ -35,7 +35,18 @@ describe("tool adapters", () => {
   test("each tool asks for JSON and passes the files last", () => {
     expect(TOOLS.ruff.args(["a.py"], [])).toEqual(["check", "--output-format", "json", "--force-exclude", "--", "a.py"])
     expect(TOOLS.oxlint.args(["a.js"], [])).toEqual(["--format=json", "--", "a.js"])
-    expect(TOOLS.eslint.args(["a.js"], [])).toEqual(["--format=json", "--no-error-on-unmatched-pattern", "--", "a.js"])
+    expect(TOOLS.eslint.args(["a.js"], [])).toEqual([
+      "--format=json-with-metadata",
+      "--no-error-on-unmatched-pattern",
+      "--",
+      "a.js",
+    ])
+    expect(TOOLS.eslint.stdinArgs!("a.js", [])).toEqual([
+      "--format=json-with-metadata",
+      "--stdin",
+      "--stdin-filename",
+      "a.js",
+    ])
   })
 
   test("each tool turns on the rules it is asked for, whatever the project's config selects", () => {
@@ -70,7 +81,7 @@ describe("tool adapters", () => {
       "a.js",
     ])
     expect(TOOLS.eslint.args(["a.js"], ["no-empty", "@typescript-eslint/no-explicit-any"])).toEqual([
-      "--format=json",
+      "--format=json-with-metadata",
       "--no-error-on-unmatched-pattern",
       "--rule",
       "no-empty: error",
@@ -80,7 +91,7 @@ describe("tool adapters", () => {
       "a.js",
     ])
     expect(TOOLS.eslint.stdinArgs!("a.js", ["no-empty"])).toEqual([
-      "--format=json",
+      "--format=json-with-metadata",
       "--rule",
       "no-empty: error",
       "--stdin",
@@ -132,6 +143,8 @@ describe("tool adapters", () => {
         ruleId: "generic-api-key",
         message:
           "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+        level: "error",
+        docs: null,
       },
     ])
     expect(TOOLS.gitleaks.parse(await recording("gitleaks-stdin"), ROOT).map((finding) => finding.file)).toEqual([""])
@@ -148,8 +161,20 @@ describe("tool adapters", () => {
         endColumn: 10,
         ruleId: "F401",
         message: "`os` imported but unused",
+        level: "error",
+        docs: "https://docs.astral.sh/ruff/rules/unused-import",
       },
-      { file: "app/a.py", line: 2, column: 1, endLine: 2, endColumn: 6, ruleId: "T201", message: "`print` found" },
+      {
+        file: "app/a.py",
+        line: 2,
+        column: 1,
+        endLine: 2,
+        endColumn: 6,
+        ruleId: "T201",
+        message: "`print` found",
+        level: "error",
+        docs: "https://docs.astral.sh/ruff/rules/print",
+      },
     ])
   })
 
@@ -169,22 +194,84 @@ describe("tool adapters", () => {
     ])
   })
 
+  test("eslint output carries each message's level and its rule's doc url", async () => {
+    const findings = TOOLS.eslint.parse(await recording("eslint"), ROOT)
+    expect(findings.map(({ ruleId, level, docs }) => ({ ruleId, level, docs }))).toEqual([
+      { ruleId: "no-console", level: "error", docs: "https://eslint.org/docs/latest/rules/no-console" },
+      { ruleId: "no-debugger", level: "warning", docs: "https://eslint.org/docs/latest/rules/no-debugger" },
+    ])
+  })
+
+  test("an eslint message with no rule (a syntax error) is an error with no doc url", () => {
+    const stdout = JSON.stringify({
+      results: [
+        {
+          filePath: "/repo/a.js",
+          messages: [{ ruleId: null, fatal: true, severity: 2, message: "Parsing error: Unexpected token", line: 2 }],
+        },
+      ],
+      metadata: { rulesMeta: {} },
+    })
+    expect(TOOLS.eslint.parse(stdout, ROOT)).toMatchObject([{ ruleId: "", level: "error", docs: null }])
+  })
+
+  test("ruff findings are errors with the url ruff gives", async () => {
+    const findings = TOOLS.ruff.parse(await recording("ruff"), ROOT)
+    expect(findings[0]).toMatchObject({
+      ruleId: "F401",
+      level: "error",
+      docs: "https://docs.astral.sh/ruff/rules/unused-import",
+    })
+    // A syntax error: no code and no url, still an error.
+    const syntax = JSON.stringify([
+      { code: null, url: null, filename: "/repo/a.py", location: { row: 1, column: 1 }, message: "SyntaxError" },
+    ])
+    expect(TOOLS.ruff.parse(syntax, ROOT)).toMatchObject([{ ruleId: "", level: "error", docs: null }])
+  })
+
+  test("oxlint findings take their level and url from the diagnostic", async () => {
+    const findings = TOOLS.oxlint.parse(await recording("oxlint"), ROOT)
+    expect(findings.map(({ ruleId, level, docs }) => ({ ruleId, level, docs }))).toEqual([
+      {
+        ruleId: "no-unused-vars",
+        level: "warning",
+        docs: "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-vars.html",
+      },
+      {
+        ruleId: "no-debugger",
+        level: "warning",
+        docs: "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-debugger.html",
+      },
+    ])
+    const denied = JSON.stringify({
+      diagnostics: [{ code: "eslint(no-empty)", severity: "error", filename: "a.js", labels: [], message: "m" }],
+    })
+    expect(TOOLS.oxlint.parse(denied, ROOT)).toMatchObject([{ ruleId: "no-empty", level: "error", docs: null }])
+  })
+
+  test("gitleaks findings are errors with no doc url", async () => {
+    expect(TOOLS.gitleaks.parse(await recording("gitleaks"), ROOT)).toMatchObject([{ level: "error", docs: null }])
+  })
+
   test("empty output from each tool is no findings", () => {
     expect(TOOLS.ruff.parse("[]", ROOT)).toEqual([])
     expect(TOOLS.oxlint.parse('{"diagnostics":[]}', ROOT)).toEqual([])
-    expect(TOOLS.eslint.parse('[{"filePath":"/repo/a.js","messages":[]}]', ROOT)).toEqual([])
+    expect(TOOLS.eslint.parse('{"results":[{"filePath":"/repo/a.js","messages":[]}],"metadata":{}}', ROOT)).toEqual([])
   })
 
   test("relativises a path the tool resolved through a symlink", async () => {
     // eslint reports realpaths, so a root given as a symlinked path comes back resolved. Without
     // this the file never matches the rule's.
     const { root, real } = await symlinkedDir("rulecast-symlink")
-    const stdout = JSON.stringify([{ filePath: path.join(real, "src/a.js"), messages: [{ ruleId: "x", line: 1 }] }])
+    const stdout = JSON.stringify({
+      results: [{ filePath: path.join(real, "src/a.js"), messages: [{ ruleId: "x", line: 1 }] }],
+    })
     expect(TOOLS.eslint.parse(stdout, root)[0]!.file).toBe("src/a.js")
   })
 
   test("unreadable output is an error naming the tool", () => {
     expect(() => TOOLS.ruff.parse("boom", ROOT)).toThrow("ruff output is not JSON")
     expect(() => TOOLS.oxlint.parse("[]", ROOT)).toThrow("oxlint output is not JSON")
+    expect(() => TOOLS.eslint.parse("[]", ROOT)).toThrow("eslint output is not JSON")
   })
 })

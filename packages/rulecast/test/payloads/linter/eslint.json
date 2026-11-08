@@ -1,48 +1,102 @@
-[
-  {
-    "filePath": "__ROOT__/src/a.js",
-    "messages": [
-      {
-        "ruleId": "no-console",
-        "severity": 2,
-        "message": "Unexpected console statement.",
-        "line": 1,
-        "column": 1,
-        "messageId": "unexpected",
-        "endLine": 1,
-        "endColumn": 12,
-        "suggestions": [
+{
+  "results": [
+    {
+      "filePath": "__ROOT__/src/a.js",
+      "messages": [
+        {
+          "ruleId": "no-console",
+          "severity": 2,
+          "message": "Unexpected console statement.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "MemberExpression",
+          "messageId": "unexpected",
+          "endLine": 1,
+          "endColumn": 12,
+          "suggestions": [
+            {
+              "fix": {
+                "range": [0, 17],
+                "text": ""
+              },
+              "messageId": "removeConsole",
+              "data": {
+                "propertyName": "log"
+              },
+              "desc": "Remove the console.log()."
+            }
+          ]
+        },
+        {
+          "ruleId": "no-debugger",
+          "severity": 1,
+          "message": "Unexpected 'debugger' statement.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "DebuggerStatement",
+          "messageId": "unexpected",
+          "endLine": 3,
+          "endColumn": 9
+        }
+      ],
+      "suppressedMessages": [],
+      "errorCount": 1,
+      "fatalErrorCount": 0,
+      "warningCount": 1,
+      "fixableErrorCount": 0,
+      "fixableWarningCount": 0,
+      "source": "console.log(\"hi\")\nconst unused = 1\ndebugger\n",
+      "usedDeprecatedRules": []
+    }
+  ],
+  "metadata": {
+    "cwd": "__ROOT__",
+    "rulesMeta": {
+      "no-console": {
+        "type": "suggestion",
+        "defaultOptions": [{}],
+        "docs": {
+          "description": "Disallow the use of `console`",
+          "recommended": false,
+          "url": "https://eslint.org/docs/latest/rules/no-console"
+        },
+        "schema": [
           {
-            "fix": {
-              "range": [0, 17],
-              "text": ""
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
             },
-            "messageId": "removeConsole",
-            "data": {
-              "propertyName": "log"
-            },
-            "desc": "Remove the console.log()."
+            "additionalProperties": false
           }
-        ]
+        ],
+        "hasSuggestions": true,
+        "messages": {
+          "unexpected": "Unexpected console statement.",
+          "limited": "Unexpected console statement. Only these console methods are allowed: {{ allowed }}.",
+          "removeConsole": "Remove the console.{{ propertyName }}().",
+          "removeMethodCall": "Remove the console method call."
+        }
       },
-      {
-        "ruleId": "no-debugger",
-        "severity": 1,
-        "message": "Unexpected 'debugger' statement.",
-        "line": 3,
-        "column": 1,
-        "messageId": "unexpected",
-        "endLine": 3,
-        "endColumn": 9
+      "no-debugger": {
+        "type": "problem",
+        "docs": {
+          "description": "Disallow the use of `debugger`",
+          "recommended": true,
+          "url": "https://eslint.org/docs/latest/rules/no-debugger"
+        },
+        "fixable": null,
+        "schema": [],
+        "messages": {
+          "unexpected": "Unexpected 'debugger' statement."
+        }
       }
-    ],
-    "suppressedMessages": [],
-    "errorCount": 1,
-    "fatalErrorCount": 0,
-    "warningCount": 1,
-    "fixableErrorCount": 0,
-    "fixableWarningCount": 0,
-    "source": "console.log(\"hi\")\nconst unused = 1\ndebugger\n",
-    "usedDeprecatedRules": []
+    }
   }
-]
+}

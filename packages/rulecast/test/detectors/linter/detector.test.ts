@@ -190,7 +190,7 @@ describe("linter detector", () => {
     await stubTool(root, "eslint")
     const result = await run(root, [ruleFor("js", { tool: "eslint", rules: ["no-console"] }, ["src/a.js"])])
     expect(await stubArgv(root, "eslint")).toBe(
-      "--format=json --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
+      "--format=json-with-metadata --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
     )
     expect(result.errors).toEqual([])
     expect(result.findings).toHaveLength(1)
@@ -259,7 +259,7 @@ describe("where a linter runs", () => {
     await stubTool(root, "eslint", { ranIn: path.join(root, "frontend") })
     const result = await run(root, [ruleFor("js", { tool: "eslint", rules: ["no-console"] }, ["frontend/src/a.js"])])
     expect(await stubCalls(root, "eslint")).toEqual([
-      "--format=json --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
+      "--format=json-with-metadata --no-error-on-unmatched-pattern --rule no-console: error -- src/a.js",
     ])
     expect(await stubCwds(root, "eslint")).toEqual([realpathSync(path.join(root, "frontend"))])
     expect(result.errors).toEqual([])

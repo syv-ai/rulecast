@@ -15,7 +15,7 @@ fixture's `node_modules/.bin`, which is where the detector looks first.
 | `oxlint.json` | oxlint 1.83.0 | `oxlint --format=json -- src/a.js` | `console.log("hi")` + an unused const + `debugger` |
 | `gitleaks.json` | gitleaks 8.30.1 | `gitleaks dir --no-banner --log-level error --report-format json --report-path - -- app/conf.py` | `API_KEY = "x8Fq…Gh"` (a made-up generic key) + `TIMEOUT = 30` |
 | `gitleaks-stdin.json` | gitleaks 8.30.1 | `gitleaks stdin …` with the same flags, the file on stdin | the same file; stdin findings carry no file name |
-| `eslint.json` | eslint 10.11.0 | `eslint --format=json --no-error-on-unmatched-pattern -- src/a.js` | the same JS, with `no-console: error` and `no-debugger: warn` |
+| `eslint.json` | eslint 9.39.5 | `eslint --format=json-with-metadata --no-error-on-unmatched-pattern -- src/a.js` (re-recorded 2026-11-08) | the same JS, with `no-console: error` and `no-debugger: warn` |
 
 ## Why these are recordings
 
