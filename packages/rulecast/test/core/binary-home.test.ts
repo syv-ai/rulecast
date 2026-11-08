@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -108,7 +108,9 @@ describe("TARGET_SH", () => {
   test("TARGET_SH names every shipped target and nothing else", () => {
     const named = new Set<string>()
     for (const [os, machine, target] of unames) {
-      const bin = stubs({ uname: `case "$1" in -s) echo ${os};; -m) echo ${machine};; esac` })
+      const bin = stubs({
+        uname: `case "$1" in -sm) echo "${os} ${machine}";; -s) echo ${os};; -m) echo ${machine};; esac`,
+      })
       const result = sh(`${TARGET_SH}; printf %s "$T"`, { PATH: `${bin}:${BASE_PATH}` })
       if (target === null) {
         expect(result.status).not.toBe(0)
@@ -150,6 +152,20 @@ describe("gitHookCommand", () => {
       expect(readFileSync(path.join(root, `ran-${runs}`), "utf8")).toBe("run\n")
     },
   )
+
+  test("an installed binary killed by a signal fails the git hook: the PATH rulecast does not run too", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["binary", "path"], root)
+    writeFileSync(realpathSync(setup.file.binary), "#!/bin/sh\nkill -SEGV $$\n")
+    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
+    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
+      cwd: root,
+      env: { PATH: `${setup.pathDir}:${BASE_PATH}`, RULECAST_HOME: setup.home },
+      encoding: "utf8",
+    })
+    expect(result.status).toBe(139)
+    expect(existsSync(path.join(root, "ran-path"))).toBe(false)
+  })
 
   test("an installed binary that cannot run on this machine falls through to the PATH", async () => {
     const root = await createProject({})

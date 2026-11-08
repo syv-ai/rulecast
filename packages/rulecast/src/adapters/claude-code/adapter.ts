@@ -1,4 +1,4 @@
-import { CACHE_HOME_SH, runInstalledBinarySh } from "../../core/binary-home"
+import { CACHE_HOME_SH, exitUnlessUnrunnable, runInstalledBinarySh } from "../../core/binary-home"
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
@@ -111,7 +111,7 @@ export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
   "P=$(cat); " +
   `${CACHE_HOME_SH}; ${runInstalledBinarySh("hook claude-code", '"$P"')}; ` +
-  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; [ "$R" -lt 126 ] && exit "$R"; fi; ` +
+  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
   SHELL_UNATTENDED +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
   `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`

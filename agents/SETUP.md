@@ -4,7 +4,7 @@ Use this when the developer asks you to set up rulecast. rulecast delivers a pro
 
 Setup is short. You find out what the repository can tell you, ask the developer the rest, show them one page with everything you agreed, and write it once they approve. Most rules come later, one at a time: with `/rulecast:add-rule` from the rulecast plugin in Claude Code, or with [DRAFT-RULES.md](DRAFT-RULES.md) for one convention elsewhere.
 
-Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use `~/.cache/rulecast/bin/rulecast` if it exists, else `npx @syv-ai/rulecast`.
+Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
 
 ## 1. The developer is there
 
@@ -61,7 +61,7 @@ Only after the developer approves. First, install rulecast as approved, by runni
 - **The standalone binary:** this downloads the binary for this machine and its checksum from the release, checks them, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`:
 
   ```sh
-  sh -c 'case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -s) $(uname -m)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+  sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
   ```
 
   Everyone whose sessions run here installs it the same way. Tell the developer.
@@ -83,7 +83,7 @@ Then, as agreed:
 - **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as the README's [Git hooks and CI](https://github.com/syv-ai/rulecast#git-hooks-and-ci) shows. Show the change first.
 - **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
-- **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast` in place of `npx rulecast`. Don't edit CI yourself.
+- **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.
 
 ## 6. Then
 

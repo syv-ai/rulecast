@@ -165,11 +165,11 @@ repos:
 pre-commit:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run' --
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run' --
 pre-push:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
 **GitHub Actions:**
@@ -197,7 +197,7 @@ jobs:
           sarif_file: rulecast.sarif
 ```
 
-In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](#install), and run `~/.cache/rulecast/bin/rulecast` where the example runs `npx rulecast`.
+In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` (the binary for the runner's platform) where the example runs `npx rulecast`.
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
@@ -355,7 +355,7 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 **Standalone binary (no Node).**
 
 ```sh
-sh -c 'case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -s) $(uname -m)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
 ```
 
 This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.

@@ -6,7 +6,7 @@ import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 
 import { buildBinary } from "../scripts/build-binary"
-import { binaryPath } from "../src/core/binary-home"
+import { binaryPath, currentBinaryPath } from "../src/core/binary-home"
 import { VERSION } from "../src/core/version"
 import { localConfig } from "./helpers/config"
 import { createRepo } from "./helpers/git"
@@ -189,7 +189,7 @@ describe.runIf(canRun)("standalone binary", () => {
     expect(existsSync(otherMachine)).toBe(true)
     expect(first.status).toBe(0)
     expect(statSync(placed).mode & 0o111).not.toBe(0)
-    expect(realpathSync(path.join(home, "bin", "rulecast"))).toBe(realpathSync(placed))
+    expect(realpathSync(currentBinaryPath(home))).toBe(realpathSync(placed))
     // The native files are unpacked at install, not at the first edit.
     expect(readdirSync(path.join(home, "native", `${VERSION}-${process.platform}-${process.arch}`)).sort()).toEqual([
       "napi.node",
@@ -215,7 +215,7 @@ describe.runIf(canRun)("standalone binary", () => {
   test("a failed binary install leaves no partial file behind", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "rulecast-binary-home-"))
     // The current link's place is a directory with something in it: the binary copies, the link fails.
-    mkdirSync(path.join(home, "bin", "rulecast", "in-the-way"), { recursive: true })
+    mkdirSync(path.join(currentBinaryPath(home), "in-the-way"), { recursive: true })
     const result = spawnSync(binary, ["binary", "install"], {
       env: { ...process.env, RULECAST_HOME: home },
       encoding: "utf8",

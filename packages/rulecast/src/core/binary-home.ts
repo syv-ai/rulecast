@@ -10,9 +10,10 @@ import { VERSION } from "./version"
  * hooks run. `rulecast binary install` is the one thing that writes here, and only when the
  * developer runs it (directly, or through the one-liner below). No hook downloads or installs.
  *
- * Layout: `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, plus `<cache home>/bin/rulecast`,
- * a link to the one installed last. Keyed by platform as well as version: a cache home can be shared
- * between machines (a mounted home directory), and one machine's binary does not run on another.
+ * Layout: `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, plus
+ * `<cache home>/bin/rulecast-<platform>-<arch>`, a link to the one installed last for that platform.
+ * Both are keyed by platform: a cache home can be shared between machines (a mounted home
+ * directory), one machine's binary does not run on another, and each machine has its own current one.
  */
 
 /** `<version>-<platform>-<arch>`: what a binary or its native files are built for. */
@@ -24,8 +25,13 @@ export function binaryPath(home: string, version: string): string {
   return path.join(home, "bin", platformKey(version), "rulecast")
 }
 
-export function currentBinaryPath(home: string): string {
-  return path.join(home, "bin", "rulecast")
+/** This machine's current link; the hooks' shell finds the same one through runInstalledBinarySh. */
+export function currentBinaryPath(
+  home: string,
+  platform: string = process.platform,
+  arch: string = process.arch,
+): string {
+  return path.join(home, "bin", `rulecast-${platform}-${arch}`)
 }
 
 /** Where this version's standalone binary unpacks its native files (detectors/ast-grep/embedded.ts). */
@@ -53,14 +59,40 @@ export function hookCacheHome(env: Env): string | null {
 }
 
 /**
- * After CACHE_HOME_SH: runs the installed binary with `args` when there is one, and exits with its
- * code. One that cannot run (126, 127: built for another machine, or refused by the OS) counts as
- * none, so the command goes on to the PATH. Not `exec`: then a broken binary would be the end. The
- * input is `stdin`, a shell word (the agent hook's payload, read once).
+ * Sets `T` to this machine's release target, as scripts/build-binary.ts names them, from one
+ * `uname -sm`; anything else runs `otherwise`. The one mapping behind the one-liner (TARGET_SH)
+ * and the hooks' choice of link (runInstalledBinarySh).
+ */
+function targetCase(otherwise: string): string {
+  return (
+    'case "$(uname -sm)" in ' +
+    '"Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; ' +
+    '"Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; ' +
+    `*) ${otherwise};; esac`
+  )
+}
+
+/**
+ * After CACHE_HOME_SH: runs this machine's installed binary (`<home>/bin/rulecast-<target>`) with
+ * `args` when there is one, and exits with its code. Only this machine's link is ever run: a shell
+ * such as busybox's runs a binary it cannot execute as a script, which could end in any exit code.
+ * One that still cannot run (126 or 127, such as one the OS refuses) counts as none, so the command
+ * goes on to the PATH; every other code, a crash or a kill (128+N) too, is the answer. Not `exec`:
+ * then a broken binary would be the end. The input is `stdin`, a shell word (the agent hook's
+ * payload, read once).
  */
 export function runInstalledBinarySh(args: string, stdin?: string): string {
-  const run = stdin === undefined ? `"$H/bin/rulecast" ${args}` : `printf '%s' ${stdin} | "$H/bin/rulecast" ${args}`
-  return `if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then ${run}; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi`
+  const bin = '"$H/bin/rulecast-$T"'
+  const run = stdin === undefined ? `${bin} ${args}` : `printf '%s' ${stdin} | ${bin} ${args}`
+  return (
+    `T=; [ -n "$H" ] && ${targetCase("T=")}; ` +
+    `if [ -n "$T" ] && [ -x ${bin} ]; then ${run}; S=$?; ${exitUnlessUnrunnable("S")}; fi`
+  )
+}
+
+/** Exits with `$<name>` unless it is 126 or 127, the shell's "could not run it". */
+export function exitUnlessUnrunnable(name: string): string {
+  return `[ "$${name}" -ne 126 ] && [ "$${name}" -ne 127 ] && exit "$${name}"`
 }
 
 export const RELEASE_REPO = "syv-ai/rulecast"
@@ -71,11 +103,7 @@ export function releaseAssetUrl(version: string, asset: string): string {
 }
 
 /** Sets `T` to the release target for this machine, as scripts/build-binary.ts names them, or exits 1. */
-export const TARGET_SH =
-  'case "$(uname -s)-$(uname -m)" in ' +
-  "Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; " +
-  "Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; " +
-  '*) echo "rulecast: no standalone binary for $(uname -s) $(uname -m)" >&2; exit 1;; esac'
+export const TARGET_SH = targetCase('echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1')
 
 /**
  * The command a developer runs to install the binary of `version`. It downloads the release asset
@@ -114,7 +142,7 @@ export function gitHookCommand(args: string): string {
 export function probeRulecast(file: string, signal?: AbortSignal): Promise<{ version: string | null } | null> {
   return new Promise((resolve) => {
     try {
-      execFile(file, ["--version"], { timeout: 5000, signal, encoding: "utf8", env: childEnv() }, (error, stdout) => {
+      execFile(file, ["--version"], { timeout: 15_000, signal, encoding: "utf8", env: childEnv() }, (error, stdout) => {
         const code = (error as { code?: unknown } | null)?.code
         if (error && (typeof code === "string" || code === 126 || code === 127)) return resolve(null)
         const version = /^\d+\.\d+\.\d+$/.test(stdout.trim()) ? stdout.trim() : null

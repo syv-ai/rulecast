@@ -1,9 +1,19 @@
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { HOOK_COMMAND, NOT_INSTALLED, NOT_INSTALLED_UNATTENDED } from "../../../src/adapters/claude-code/adapter"
+import { currentBinaryPath } from "../../../src/core/binary-home"
 import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
@@ -191,6 +201,29 @@ describe("the committed hook command", () => {
     const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, { RULECAST_HOME: setup.home })
     expect(start.code).toBe(0)
     expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  test("an installed binary that crashes or is killed is the answer: the PATH rulecast does not run too", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["binary", "path"], root)
+    writeFileSync(realpathSync(setup.file.binary), "#!/bin/sh\ncat > /dev/null\nkill -KILL $$\n")
+    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    const result = hook(root, { hook_event_name: "PostToolUse" }, env)
+    expect(result.code).toBe(137)
+    expect(result.stdout).toBe("")
+    expect(existsSync(path.join(root, "ran-path"))).toBe(false)
+  })
+
+  test("a home holding only another platform's binary falls through to the PATH", async () => {
+    // A cache home shared with another machine: its link is never run here, by any shell.
+    const root = await createProject({})
+    const setup = lookupSetup(["path"], root)
+    const foreign = currentBinaryPath(setup.home, process.platform === "linux" ? "darwin" : "linux", "x64")
+    mkdirSync(path.dirname(foreign), { recursive: true })
+    writeFileSync(foreign, "#!/bin/sh\necho '{\"foreign\":true}'\n")
+    chmodSync(foreign, 0o755)
+    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe('{"path":true}\n')
   })
 
   test("the installed binary keeps its own exit code and output", async () => {

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { stringify } from "yaml"
 
-import { installOneLiner } from "../../src/core/binary-home"
+import { currentBinaryPath, installOneLiner } from "../../src/core/binary-home"
 import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
@@ -360,7 +360,7 @@ describe("rulecast doctor", () => {
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
     expect(result.stdout).toContain(
-      `warning  Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, at ${path.join(TEST_HOME, "bin", "rulecast")} or on the PATH, so no rules run. ` +
+      `warning  Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, at ${currentBinaryPath(TEST_HOME)} or on the PATH, so no rules run. ` +
         `Install the standalone binary: ${installOneLiner(VERSION)}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
     )
     // A warning, not an error: the installation is wrong, not broken beyond use.
