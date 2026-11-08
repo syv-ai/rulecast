@@ -308,6 +308,10 @@ export const deliveryCost = {
   referenceLine(ref: string, location: string | undefined): number {
     return linesCost(referenceLines({ ref, state: "read", reason: "budget", location }))
   },
+  /** A reference this session already delivered: its line never changes, so it is priced as printed. */
+  pointerLine(ref: string): number {
+    return linesCost(referenceLines({ ref, state: "pointer" }))
+  },
   /** What a reference given in full adds over its one-line price: the content and the blank line. */
   referenceContent(ref: string, content: string, location: string | undefined): number {
     return linesCost(referenceLines({ ref, state: "full", content })) - deliveryCost.referenceLine(ref, location)

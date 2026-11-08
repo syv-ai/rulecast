@@ -491,7 +491,9 @@ export function trim(
   const specs = new Map<string, ReferenceSpec>()
   for (const rule of [...rulesById.values(), ...touches])
     for (const spec of citedBy(rule)) specs.set(shown(spec.ref), spec)
+  const pointers = new Set(delivery.references.filter((one) => one.state === "pointer").map((one) => one.ref))
   const lineCost = (ref: string) => {
+    if (pointers.has(ref)) return deliveryCost.pointerLine(ref)
     const spec = specs.get(ref)
     return deliveryCost.referenceLine(ref, spec === undefined ? undefined : locationOf(spec).location)
   }
@@ -510,6 +512,15 @@ export function trim(
       ...new Set(refs.filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref))),
     ]
     const ownRefs = (rule: CompiledRule) => rule.context.map((spec) => shown(spec.ref))
+    // Touch rules first, and never dropped: their reference is the whole delivery, and the session
+    // has already recorded the rule as touched, so a dropped one would never be delivered again.
+    // Charged before the rule blocks, so a block is only kept when it fits beside them.
+    for (const touch of touches) {
+      for (const ref of uncharged(ownRefs(touch))) {
+        spent.chars += lineCost(ref)
+        spent.refs.add(ref)
+      }
+    }
     for (const [id, findings] of byRule) {
       const rule = rulesById.get(ruleOf(id))
       const refs = rule === undefined ? [] : uncharged([...ownRefs(rule), ...sectionsOf(findings[0]!)])
@@ -523,14 +534,6 @@ export function trim(
       spent.chars += size
       for (const ref of refs) spent.refs.add(ref)
       spent.kept.set(id, [findings[0]!])
-    }
-    // Touch rules are never dropped: their reference is the whole delivery, and the session has
-    // already recorded the rule as touched, so a dropped one would never be delivered again.
-    for (const touch of touches) {
-      for (const ref of uncharged(ownRefs(touch))) {
-        spent.chars += lineCost(ref)
-        spent.refs.add(ref)
-      }
     }
     return spent
   }
