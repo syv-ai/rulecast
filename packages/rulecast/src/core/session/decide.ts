@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 
-import type { CompiledRule } from "../compile/rule"
+import { type CompiledRule, findingDocs, ruleContextFor } from "../compile/rule"
 import type { Mode } from "../config/schema"
 import { deliveryCost, measureRuleBlock, SWEPT_BLOCK } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
@@ -118,6 +118,13 @@ function capturesFor(rule: CompiledRule, match: Match): Record<string, string> |
   return values
 }
 
+/** What a finding points to, as the delivery shows it: a project section by its shown ref. */
+function docsFor(rule: CompiledRule, match: Match, display: (file: string) => string): Pick<Finding, "docs"> {
+  const docs = findingDocs(rule, match)
+  if (docs === null) return {}
+  return { docs: "spec" in docs ? { ref: shownRef(docs.spec, display) } : docs }
+}
+
 function renderFindings(
   findings: ClassifiedFinding[],
   status: Finding["status"],
@@ -151,6 +158,7 @@ function renderFindings(
         // Only when true, so a document from a project with no fixes is unchanged (output.md). Never
         // a removed finding: what is gone has nothing to rewrite.
         ...(rule.fixable && rule.scope !== "removed" ? { fixable: true as const } : {}),
+        ...docsFor(rule, match, display),
       })
       continue
     }
@@ -158,7 +166,8 @@ function renderFindings(
     // The earliest match is the one shown, and its id the merged finding's: a tool's emit order
     // must not decide either.
     if (match.line < existing.line || (match.line === existing.line && match.column < existing.column)) {
-      Object.assign(existing, { id, ...site, captures: capturesFor(rule, match) })
+      delete existing.docs
+      Object.assign(existing, { id, ...site, captures: capturesFor(rule, match), ...docsFor(rule, match, display) })
     }
   }
   return [...merged.values()].sort(
@@ -168,19 +177,6 @@ function renderFindings(
       (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) ||
       a.line - b.line,
   )
-}
-
-function referencesInOrder(rules: CompiledRule[]): ReferenceSpec[] {
-  const seen = new Set<string>()
-  const specs: ReferenceSpec[] = []
-  for (const rule of rules) {
-    for (const spec of rule.context) {
-      if (seen.has(spec.ref)) continue
-      seen.add(spec.ref)
-      specs.push(spec)
-    }
-  }
-  return specs
 }
 
 async function isCovered(
@@ -258,6 +254,11 @@ export interface Assembled {
    * reference shown from somewhere other than the root (`shownRef`).
    */
   refLabels: ReadonlyMap<string, string>
+  /**
+   * The references each rule in this delivery cites, by rule id: a detector rule's for the findings
+   * it has here (`ruleContextFor`), a touch rule's `context`. What the budget charges with each rule.
+   */
+  ruleRefs: ReadonlyMap<string, ReferenceSpec[]>
 }
 
 /** Pre-existing findings whose file's summary this context has not been given yet. */
@@ -353,11 +354,23 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     }
   }
 
-  // References.
-  const ruleOrder = [...new Map(fresh.map((finding) => [finding.rule.id, finding.rule])).values(), ...touches]
+  // References: each rule's for the findings it has here (a lint rule's section only when that lint
+  // rule fired), in rule order, each ref once.
+  const matchesByRule = new Map<string, { rule: CompiledRule; matches: Match[] }>()
+  for (const { rule, match } of fresh) {
+    const group = matchesByRule.get(rule.id)
+    if (group === undefined) matchesByRule.set(rule.id, { rule, matches: [match] })
+    else group.matches.push(match)
+  }
+  const ruleRefs = new Map<string, ReferenceSpec[]>()
+  for (const [id, { rule, matches }] of matchesByRule) ruleRefs.set(id, ruleContextFor(rule, matches))
+  for (const rule of touches) if (!ruleRefs.has(rule.id)) ruleRefs.set(rule.id, rule.context)
   const candidates: Assembled["candidates"] = []
   const refLabels = new Map<string, string>()
-  for (const spec of referencesInOrder(ruleOrder)) {
+  const seenRefs = new Set<string>()
+  for (const spec of [...ruleRefs.values()].flat()) {
+    if (seenRefs.has(spec.ref)) continue
+    seenRefs.add(spec.ref)
     const ref = shownRef(spec, display)
     if (ref !== spec.ref) refLabels.set(spec.ref, ref)
     const resolved = await input.resolver.resolve(spec)
@@ -375,9 +388,8 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     }
   }
 
-  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels }
+  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels, ruleRefs }
 }
-
 export interface Trimmed {
   delivery: Delivery
   /** The untrimmed delivery, when the budget had to cut whole rules out; null when it cut none. */
@@ -459,9 +471,10 @@ export function trim(
   // Keyed by what the delivery calls a reference, which is not its spec's `ref` for a project
   // reference shown from elsewhere (Assembled.refLabels).
   const shown = (ref: string) => assembled.refLabels.get(ref) ?? ref
+  const citedBy = (rule: CompiledRule) => assembled.ruleRefs.get(rule.id) ?? []
   const specs = new Map<string, ReferenceSpec>()
   for (const rule of [...rulesById.values(), ...touches])
-    for (const spec of rule.context) specs.set(shown(spec.ref), spec)
+    for (const spec of citedBy(rule)) specs.set(shown(spec.ref), spec)
   const lineCost = (ref: string) => {
     const spec = specs.get(ref)
     return deliveryCost.referenceLine(ref, spec === undefined ? undefined : locationOf(spec).location)
@@ -475,7 +488,9 @@ export function trim(
     const spent = { chars: 0, kept: new Map<string, Finding[]>(), refs: new Set<string>(), dropped: new Set<string>() }
     const uncharged = (rule: CompiledRule) => [
       ...new Set(
-        rule.context.map((spec) => shown(spec.ref)).filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref)),
+        citedBy(rule)
+          .map((spec) => shown(spec.ref))
+          .filter((ref) => resolvedRefs.has(ref) && !spent.refs.has(ref)),
       ),
     ]
     for (const [id, findings] of byRule) {

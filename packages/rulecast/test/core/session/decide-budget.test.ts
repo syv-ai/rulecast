@@ -197,6 +197,36 @@ describe("decide: warnings are charged after the floor", () => {
     expect(overflow!.warnings).toHaveLength(80)
   })
 
+  test("a mapped section's line is charged with its rule at the floor", async () => {
+    const linter = rule({
+      id: "linter/ruff",
+      message: "{{message}} ({{ruleId}})",
+      contextByRule: new Map([["B006", [ref("@conventions/backend.md#errors")]]]),
+    })
+    const lint = (line: number) => ({
+      rule: linter,
+      match: { ...at("a.py", line, "x"), captures: { message: `default ${line}`, ruleId: "B006" } },
+      id: `l${line}`,
+      status: "new" as const,
+    })
+    const findings = [lint(1), lint(2), violation("zz/other", "b.py", 1)]
+    const full = renderAgentText((await decide(input({ findings }))).delivery, { maxMatchesPerRule: 10 })
+    let keptWithItsSection = 0
+    // At every limit, the section's line costs what the floor charged for it: never past the limit,
+    // and never a linter finding without the section that explains it.
+    // Up past the full text, so the limits where the floor first holds the linter are covered.
+    for (let limit = 100; limit <= full.length + 300; limit += 3) {
+      const { delivery } = await decide(input({ findings, maxContextChars: limit }))
+      const text = renderAgentText(delivery, { maxMatchesPerRule: 10 })
+      expect(text.length, `limit ${limit}`).toBeLessThanOrEqual(limit)
+      if (delivery.findings.some((finding) => finding.rule === "linter/ruff")) {
+        expect(text, `limit ${limit}`).toContain("conventions/backend.md#errors ")
+        keptWithItsSection++
+      }
+    }
+    expect(keptWithItsSection).toBeGreaterThan(0)
+  })
+
   test("what the renderer produces stays inside the limit, warnings included", async () => {
     const { delivery } = await decide(
       input({

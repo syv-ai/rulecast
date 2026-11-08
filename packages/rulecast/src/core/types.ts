@@ -367,6 +367,11 @@ export interface Finding {
   captures?: Record<string, string>
   /** `rulecast fix` can apply this rule's fix. Present only when true. */
   fixable?: true
+  /**
+   * What the finding's lint rule points to: the project's section for it (`context_by_rule`, the
+   * ref as delivered), else the tool's own page. Absent when there is neither.
+   */
+  docs?: { ref: string } | { url: string }
 }
 
 export interface DeliveredReference {

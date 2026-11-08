@@ -1,0 +1,65 @@
+{
+  "about": "A grouped block prints what a site points to under that site's line, once per value in the block.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "lint/house",
+        "severity": "error",
+        "status": "new",
+        "file": "app/a.py",
+        "line": 4,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": { "ruleId": "B006" },
+        "docs": { "ref": "docs/python.md#defaults" }
+      },
+      {
+        "rule": "lint/house",
+        "severity": "error",
+        "status": "new",
+        "file": "app/a.py",
+        "line": 9,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": { "ruleId": "B006" },
+        "docs": { "ref": "docs/python.md#defaults" }
+      },
+      {
+        "rule": "lint/house",
+        "severity": "error",
+        "status": "new",
+        "file": "app/a.py",
+        "line": 12,
+        "column": 1,
+        "message": "x",
+        "count": 1,
+        "captures": { "ruleId": "F401" },
+        "docs": { "url": "https://docs.astral.sh/ruff/rules/unused-import" }
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [
+      {
+        "ref": "docs/python.md#defaults",
+        "state": "pointer"
+      }
+    ],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {
+      "lint/house": "{{file}}:{{line}} breaks one of the project's lint rules; fix it as its doc says ({{ruleId}})"
+    },
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPaths": []
+  }
+}

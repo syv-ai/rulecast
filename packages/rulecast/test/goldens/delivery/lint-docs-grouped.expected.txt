@@ -1,0 +1,12 @@
+rulecast: 1 rule violated in app/a.py
+
+error lint/house — 3 in 1 file
+  {file}:{line} breaks one of the project's lint rules; fix it as its doc says ({ruleId})
+
+  app/a.py:4   B006
+    see docs/python.md#defaults
+  app/a.py:9   B006
+  app/a.py:12  F401
+    upstream docs: https://docs.astral.sh/ruff/rules/unused-import
+
+--- docs/python.md#defaults (provided earlier in this session) ---

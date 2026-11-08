@@ -1,0 +1,15 @@
+rulecast: 1 rule violated in src/a.ts
+
+error linter/eslint
+  src/a.ts:3 Expected '===' and instead saw '=='. (eqeqeq) (×2)
+    see docs/conventions.md#comparisons
+  src/a.ts:9 Unexpected console statement. (no-console)
+    upstream docs: https://eslint.org/docs/latest/rules/no-console
+  src/a.ts:11 'a' is assigned a value but never used. (no-unused-vars)
+    upstream docs: https://eslint.org/docs/latest/rules/no-unused-vars
+  src/a.ts:12 'b' is assigned a value but never used. (no-unused-vars)
+  src/a.ts:14 Parsing error: Unexpected token ) ()
+
+--- docs/conventions.md#comparisons ---
+## Comparisons
+Use === everywhere: == coerces.

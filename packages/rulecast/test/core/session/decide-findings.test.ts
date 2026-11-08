@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 
+import { parseReference } from "../../../src/core/references"
 import { type DecideInput, decide } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork, preexistingKey } from "../../../src/core/session/state"
 import type { Match } from "../../../src/core/types"
@@ -259,5 +260,43 @@ describe("decide: stop gate", () => {
     expect(decision.delivery.omitted.rules).toBe(1)
     expect(decision.overflow).not.toBeNull()
     expect(decision.overflow!.findings).toHaveLength(1)
+  })
+
+  test("an unmapped finding carries the tool's url; a mapped one carries the shown ref", async () => {
+    const linter = rule({
+      id: "linter/eslint",
+      message: "{{message}} ({{ruleId}})",
+      contextByRule: new Map([["eqeqeq", [parseReference("@docs/a.md#eq", "inject", { dir: "/p", label: null })]]]),
+    })
+    const lint = (line: number, ruleId: string, docs?: string): Match => ({
+      ...at("web/src/a.ts", line, { message: `m${line}`, ruleId }),
+      ...(docs && { docs }),
+    })
+    const { delivery } = await decide(
+      input({
+        // Shown from web/, as a project with its config below the root would: the ref is too.
+        display: (file) => (file.startsWith("web/") ? file.slice(4) : `../${file}`),
+        findings: [
+          {
+            rule: linter,
+            match: lint(1, "eqeqeq", "https://eslint.org/docs/latest/rules/eqeqeq"),
+            id: "a",
+            status: "new",
+          },
+          {
+            rule: linter,
+            match: lint(2, "no-console", "https://eslint.org/docs/latest/rules/no-console"),
+            id: "b",
+            status: "new",
+          },
+          { rule: linter, match: lint(3, ""), id: "c", status: "new" },
+        ],
+      }),
+    )
+    expect(delivery.findings.map((finding) => finding.docs)).toEqual([
+      { ref: "../docs/a.md#eq" },
+      { url: "https://eslint.org/docs/latest/rules/no-console" },
+      undefined,
+    ])
   })
 })

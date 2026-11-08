@@ -156,4 +156,30 @@ describe("measureRuleBlock", () => {
       )
     }
   })
+
+  test("prices a block whose lint rule repeats its docs as printed: one line, not five", () => {
+    const withDocs = (line: number, docs: Finding["docs"]): Finding => ({ ...finding("r", "a.ts", line), docs })
+    const all = [
+      ...Array.from({ length: 5 }, (_, n) => withDocs(n + 1, { ref: "docs/x.md#y" })),
+      withDocs(9, { url: "https://example.com/rule" }),
+      finding("r", "a.ts", 10),
+    ]
+    // Ungrouped, and grouped (seven findings and a long literal).
+    for (const template of [undefined, "{{file}}:{{line}} breaks one of the project's lint rules ({{ruleId}})"]) {
+      const delivery: Delivery = {
+        ...emptyDelivery(),
+        findings: all,
+        templates: template === undefined ? {} : { r: template },
+        warnings: ["after"],
+      }
+      const text = render(delivery)
+      expect(text.match(/see docs\/x\.md#y/g)).toHaveLength(1)
+      expect(text.match(/upstream docs: https:\/\/example\.com\/rule/g)).toHaveLength(1)
+      const withoutBlock = render({ ...delivery, findings: [] })
+      const header = text.split("\n")[0]!.length + 2
+      expect(text.length - header - withoutBlock.length).toBe(
+        measureRuleBlock("r", all, all, template, { maxMatchesPerRule: 10 }),
+      )
+    }
+  })
 })
