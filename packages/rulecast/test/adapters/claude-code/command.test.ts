@@ -4,7 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { HOOK_COMMAND, NOT_INSTALLED, NOT_INSTALLED_UNATTENDED } from "../../../src/adapters/claude-code/adapter"
-import { LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
+import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
 /** Runs the committed hook command the way Claude Code does: through a shell, payload on stdin. */
@@ -176,6 +176,35 @@ describe("the committed hook command", () => {
     expect(hook(root, { hook_event_name: "PostToolUse" }, env)).toEqual({ code: 0, stdout: "", stderr: "" })
     const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, env)
     expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  test("an installed binary that cannot run on this machine falls through to the PATH, then to not installed", async () => {
+    // A shared cache home with another machine's binary in it, or one the OS refuses.
+    const root = await createProject({})
+    const setup = lookupSetup(["binary", "path"], root)
+    breakInstalledBinary(setup)
+    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    const payload = { hook_event_name: "PostToolUse", tool_name: "Edit" }
+    expect(hook(root, payload, env)).toMatchObject({ code: 0, stdout: '{"path":true}\n' })
+    expect(readFileSync(path.join(root, "ran-path"), "utf8")).toBe(`hook claude-code\n${JSON.stringify(payload)}`)
+    rmSync(setup.file.path)
+    const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, { RULECAST_HOME: setup.home })
+    expect(start.code).toBe(0)
+    expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  test("the installed binary keeps its own exit code and output", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["binary"], root)
+    writeFileSync(
+      realpathSync(setup.file.binary),
+      "#!/bin/sh\ncat > /dev/null\necho '{\"x\":1}'\necho blocked >&2\nexit 2\n",
+    )
+    expect(hook(root, { hook_event_name: "Stop" }, { RULECAST_HOME: setup.home })).toEqual({
+      code: 2,
+      stdout: '{"x":1}\n',
+      stderr: "blocked\n",
+    })
   })
 
   test("with HOME unset and no RULECAST_HOME it still exits 0", async () => {

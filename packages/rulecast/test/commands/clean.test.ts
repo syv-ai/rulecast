@@ -4,8 +4,10 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
+import { binaryPath, nativeDir } from "../../src/core/binary-home"
 import { projectStateDir } from "../../src/core/home"
 import { FINDINGS_LOG } from "../../src/core/stats/log"
+import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
 import { createFixture, fixtureFiles } from "../helpers/fixture"
 import { createProject } from "../helpers/project"
@@ -60,6 +62,36 @@ describe("rulecast clean", () => {
     expect(await runCli(root, ["clean"], "", env)).toMatchObject({ code: 0, stdout: `removed ${home}\n` })
     expect(existsSync(home)).toBe(false)
     expect(await runCli(root, ["clean"], "", env)).toMatchObject({ code: 0, stdout: "nothing to clean\n" })
+  })
+
+  test("without flags keeps the installed binary and this version's native files", async () => {
+    const { home, env } = freshHome()
+    const root = await createFixture()
+    await runCli(root, ["run", "--all-files"], "", env)
+    const binary = binaryPath(home, VERSION)
+    await mkdir(path.dirname(binary), { recursive: true })
+    await writeFile(binary, "")
+    const native = nativeDir(home)
+    await mkdir(native, { recursive: true })
+    await writeFile(path.join(native, "napi.node"), "")
+    const old = nativeDir(home, "0.0.1")
+    await mkdir(old, { recursive: true })
+    const result = await runCli(root, ["clean"], "", env)
+    expect(result).toMatchObject({ code: 0 })
+    expect(result.stdout).toBe(
+      `removed ${home}, keeping ${path.join(home, "bin")} and ${native} (delete ${path.join(home, "bin")} to remove the installed binary)\n`,
+    )
+    expect(existsSync(binary)).toBe(true)
+    expect(existsSync(path.join(native, "napi.node"))).toBe(true)
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(projectStateDir(home, root))).toBe(false)
+    expect(await runCli(root, ["clean"], "", env)).toMatchObject({ code: 0, stdout: "nothing to clean\n" })
+  })
+
+  test("the help says what clean keeps and how to remove the binary", async () => {
+    const help = (await runCli(await createProject({}), ["clean", "--help"])).stdout
+    expect(help).toContain("bin/ (the installed binary)")
+    expect(help).toContain("delete <cache home>/bin")
   })
 
   test("--project needs a project", async () => {

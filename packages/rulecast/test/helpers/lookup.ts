@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -69,4 +69,17 @@ export function lookupSetup(
     }
   }
   return { root, home, pathDir, file }
+}
+
+/**
+ * Replaces the installed binary with one the OS cannot run: executable, but not a program for this
+ * machine, as a binary built for another platform in a shared cache home is.
+ */
+export function breakInstalledBinary(setup: LookupSetup): void {
+  const target = realpathSync(setup.file.binary)
+  writeFileSync(
+    target,
+    Buffer.from("\u007fELF\u0002\u0001\u0001\u0000not a program for this machine\u0000\u0001", "latin1"),
+  )
+  chmodSync(target, 0o755)
 }

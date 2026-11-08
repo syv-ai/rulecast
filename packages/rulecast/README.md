@@ -116,7 +116,7 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
-| `rulecast clean` | Delete the cache |
+| `rulecast clean` | Delete the cache; the installed binary stays |
 | `rulecast warm` | Build detector caches ahead of time |
 | `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
 | `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
@@ -165,11 +165,11 @@ repos:
 pre-commit:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run' --
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run' --
 pre-push:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
+      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
 **GitHub Actions:**
@@ -215,7 +215,7 @@ A CI job, a cloud agent session or a new container starts with nothing installed
 6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
 7. Optionally cache `~/.cache/rulecast/repos` between jobs (for example `actions/cache` keyed on `.rulecast-config.yaml`). It saves a clone per job.
 
-A read-only cache home still works: the binary unpacks its native files into the temp directory instead, and is slower for it.
+A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
 
 A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
 
@@ -355,10 +355,10 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 **Standalone binary (no Node).**
 
 ```sh
-sh -c 'case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -s) $(uname -m)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+sh -c 'case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -s) $(uname -m)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.8.2/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
 ```
 
-This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version. `rulecast doctor` says when the config needs one.
+This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.
 
 **npm**, for a project that wants one pinned version for everyone:
 

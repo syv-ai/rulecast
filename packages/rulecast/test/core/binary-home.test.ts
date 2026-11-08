@@ -8,9 +8,17 @@ import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
 import { BINARY_TARGETS, hostTarget } from "../../scripts/build-binary"
-import { CACHE_HOME_SH, gitHookCommand, installOneLiner, TARGET_SH } from "../../src/core/binary-home"
+import {
+  CACHE_HOME_SH,
+  gitHookCommand,
+  hookCacheHome,
+  installOneLiner,
+  probeRulecast,
+  TARGET_SH,
+} from "../../src/core/binary-home"
+import { childEnv, markOwnEnv, unmarkOwnEnv } from "../../src/core/child-env"
 import { cacheHome, type Env } from "../../src/core/home"
-import { LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
+import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url))
@@ -48,6 +56,43 @@ describe("CACHE_HOME_SH", () => {
     // A hook always has the user's HOME; the case sets its own to show it is the one used.
     const full = { PATH: BASE_PATH, HOME: homedir(), ...env }
     expect(sh(`${CACHE_HOME_SH}; printf %s "$H"`, full).stdout).toBe(cacheHome(full))
+  })
+})
+
+describe("probeRulecast", () => {
+  test("a file the OS cannot execute is none, not a crash", async () => {
+    const setup = lookupSetup(["binary"], await createProject({}))
+    expect(await probeRulecast(setup.file.binary)).toEqual({ version: "0.8.2" })
+    breakInstalledBinary(setup)
+    expect(await probeRulecast(setup.file.binary)).toBeNull()
+  })
+})
+
+describe("childEnv", () => {
+  test("drops what rulecast set for itself, and keeps a value the user set", () => {
+    markOwnEnv("NAPI_RS_NATIVE_LIBRARY_PATH", "/ours/napi.node")
+    try {
+      expect(childEnv({ NAPI_RS_NATIVE_LIBRARY_PATH: "/ours/napi.node", A: "1" })).toEqual({ A: "1" })
+      expect(childEnv({ NAPI_RS_NATIVE_LIBRARY_PATH: "/theirs.node" })).toEqual({
+        NAPI_RS_NATIVE_LIBRARY_PATH: "/theirs.node",
+      })
+    } finally {
+      unmarkOwnEnv("NAPI_RS_NATIVE_LIBRARY_PATH")
+    }
+    expect(childEnv({ NAPI_RS_NATIVE_LIBRARY_PATH: "/ours/napi.node" })).toEqual({
+      NAPI_RS_NATIVE_LIBRARY_PATH: "/ours/napi.node",
+    })
+  })
+})
+
+describe("hookCacheHome", () => {
+  test("with HOME, XDG_CACHE_HOME and RULECAST_HOME all unset the shell names no home, and neither does hookCacheHome", () => {
+    expect(sh(`${CACHE_HOME_SH}; printf %s "$H"`, { PATH: BASE_PATH }).stdout).toBe("")
+    expect(hookCacheHome({})).toBeNull()
+    expect(hookCacheHome({ HOME: "", XDG_CACHE_HOME: "" })).toBeNull()
+    for (const env of [{ HOME: "/h" }, { XDG_CACHE_HOME: "/x" }, { RULECAST_HOME: "/r" }]) {
+      expect(hookCacheHome(env)).toBe(sh(`${CACHE_HOME_SH}; printf %s "$H"`, { PATH: BASE_PATH, ...env }).stdout)
+    }
   })
 })
 
@@ -105,6 +150,19 @@ describe("gitHookCommand", () => {
       expect(readFileSync(path.join(root, `ran-${runs}`), "utf8")).toBe("run\n")
     },
   )
+
+  test("an installed binary that cannot run on this machine falls through to the PATH", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["binary", "path"], root)
+    breakInstalledBinary(setup)
+    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
+    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
+      cwd: root,
+      env: { PATH: `${setup.pathDir}:${BASE_PATH}`, RULECAST_HOME: setup.home },
+      encoding: "utf8",
+    })
+    expect(result.stdout).toBe('{"path":true}\n')
+  })
 })
 
 describe("installOneLiner", () => {
@@ -125,7 +183,7 @@ describe("installOneLiner", () => {
     const curl =
       options.curlExit !== undefined
         ? `exit ${options.curlExit}`
-        : `for a in "$@"; do case "$a" in -*) ;; *) cp "${assets}/$(basename "$a")" . || exit 22;; esac; done`
+        : `for a in "$@"; do case "$a" in -*|=*) ;; *) cp "${assets}/$(basename "$a")" . || exit 22;; esac; done`
     const bin = stubs({ curl })
     const result = sh(installOneLiner("9.9.9"), { PATH: `${bin}:${BASE_PATH}`, HOME: homedir() })
     return { result, ran: existsSync(record) ? readFileSync(record, "utf8") : null }
@@ -149,6 +207,8 @@ describe("installOneLiner", () => {
     const line = installOneLiner("1.2.3")
     expect(line).toContain("https://github.com/syv-ai/rulecast/releases/download/v1.2.3/rulecast-$T")
     expect(line).toContain("rulecast-$T.sha256")
+    // Both downloads refuse to follow a redirect off https.
+    expect(line.match(/curl --proto =https -fsSLO https:/g)).toHaveLength(2)
     // Pasted into a shell as one argument.
     expect(line.startsWith("sh -c '")).toBe(true)
     expect(line.slice("sh -c '".length, -1)).not.toContain("'")

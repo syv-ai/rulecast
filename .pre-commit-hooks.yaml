@@ -8,7 +8,7 @@
 - id: rulecast
   name: rulecast
   description: Check staged files against the project's rulecast rules.
-  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run' --
+  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run' --
   language: system
   pass_filenames: false
   always_run: true
@@ -18,7 +18,7 @@
   description: Check the commits being pushed.
   # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
   # from-ref on a branch's first push, which @{upstream} does not have.
-  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-$HOME/.cache/rulecast}; R=./node_modules/.bin/rulecast; [ -x "$R" ] || R="$H/bin/rulecast"; [ -x "$R" ] || R=rulecast; exec "$R" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
+  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; if [ -n "$H" ] && [ -x "$H/bin/rulecast" ]; then "$H/bin/rulecast" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; S=$?; [ "$S" -lt 126 ] && exit "$S"; fi; exec rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
   language: system
   pass_filenames: false
   always_run: true

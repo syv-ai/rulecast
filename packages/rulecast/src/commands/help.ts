@@ -236,8 +236,12 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "clean",
     synopsis: "rulecast clean [--project]",
-    summary: "Delete the cache",
+    summary: "Delete the cache; the installed binary stays",
     flags: [["--project", "Only this project's directory"]],
+    notes: [
+      "Without --project, everything in the cache home goes except bin/ (the installed binary) and the",
+      "native files this version loads. To remove the installed binary, delete <cache home>/bin.",
+    ],
   },
   {
     name: "warm",

@@ -3,7 +3,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { ADAPTERS, adapterByName } from "../adapters"
-import { currentBinaryPath, probeRulecast } from "../core/binary-home"
+import { currentBinaryPath, hookCacheHome, probeRulecast } from "../core/binary-home"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
@@ -53,9 +53,10 @@ export interface HookRulecast {
 /**
  * Every rulecast the hook command would consider, in the order it tries them: the project's
  * `node_modules/.bin/rulecast`, the installed binary's current link, then the PATH. Executable is
- * enough for the first two (the hook execs them); one on the PATH that cannot run (126, 127)
- * counts as none, as in the hook. A project with none has hooks that are installed and run no
- * rules, which `doctor` exists to catch.
+ * enough for the project's (the hook execs it); an installed binary or one on the PATH that cannot
+ * run (126, 127, a binary for another machine) counts as none, as in the hook, and so does the
+ * binary when the hook's environment names no home (hookCacheHome). A project with none has hooks
+ * that are installed and run no rules, which `doctor` exists to catch.
  *
  * `env`'s PATH, without the bins of package runners (TEMPORARY_BIN): the setup docs run doctor as
  * `npx @syv-ai/rulecast doctor`, which puts its own rulecast on the PATH it runs doctor with, and
@@ -63,19 +64,20 @@ export interface HookRulecast {
  */
 export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal): Promise<HookRulecast[]> {
   const found: HookRulecast[] = []
-  const fixed = [
-    ["project", path.join(root, "node_modules", ".bin", "rulecast")],
-    ["binary", currentBinaryPath(cacheHome(env))],
-  ] as const
-  for (const [via, file] of fixed) {
-    if (
-      !(await access(file, constants.X_OK).then(
-        () => true,
-        () => false,
-      ))
+  const executable = (file: string) =>
+    access(file, constants.X_OK).then(
+      () => true,
+      () => false,
     )
-      continue
-    found.push({ via, path: file, version: (await probeRulecast(file, signal))?.version ?? null })
+  const project = path.join(root, "node_modules", ".bin", "rulecast")
+  if (await executable(project)) {
+    found.push({ via: "project", path: project, version: (await probeRulecast(project, signal))?.version ?? null })
+  }
+  const home = hookCacheHome(env)
+  const binary = home === null ? null : currentBinaryPath(home)
+  if (binary !== null && (await executable(binary))) {
+    const probe = await probeRulecast(binary, signal)
+    if (probe !== null) found.push({ via: "binary", path: binary, version: probe.version })
   }
   const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
   const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
@@ -83,11 +85,6 @@ export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal
   const probe = onPath === null ? null : await probeRulecast(onPath, signal)
   if (onPath !== null && probe !== null) found.push({ via: "path", path: onPath, version: probe.version })
   return found
-}
-
-/** The rulecast the installed hooks run, or null when they would find none. */
-export async function hookRulecast(root: string, env: Env, signal?: AbortSignal): Promise<HookRulecast | null> {
-  return (await hookRulecasts(root, env, signal))[0] ?? null
 }
 
 /**

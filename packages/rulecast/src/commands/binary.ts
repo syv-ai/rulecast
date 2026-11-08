@@ -1,7 +1,7 @@
-import { chmod, copyFile, mkdir, readlink, realpath, rename, rm, stat, symlink } from "node:fs/promises"
+import { chmod, copyFile, mkdir, readdir, readlink, realpath, rename, rm, stat, symlink } from "node:fs/promises"
 import path from "node:path"
 
-import { binaryPath, currentBinaryPath, installOneLiner, probeRulecast } from "../core/binary-home"
+import { binaryPath, currentBinaryPath, installOneLiner, platformKey, probeRulecast } from "../core/binary-home"
 import { errorMessage } from "../core/errors"
 import { cacheHome } from "../core/home"
 import { installLabel } from "../core/self"
@@ -44,21 +44,34 @@ async function install(io: CliIo): Promise<number> {
     io.stdout(`rulecast: ${VERSION} is already installed at ${target}\n`)
     return 0
   }
+  const partial = `${target}.${process.pid}.tmp`
+  const partialLink = `${link}.${process.pid}.tmp`
   try {
     if (self !== (await realpath(target).catch(() => null))) {
       await mkdir(path.dirname(target), { recursive: true })
-      const partial = `${target}.${process.pid}.tmp`
       await copyFile(self, partial)
       await chmod(partial, 0o755)
       await rename(partial, target)
     }
-    const partialLink = `${link}.${process.pid}.tmp`
     await rm(partialLink, { force: true })
     await symlink(relative, partialLink)
     await rename(partialLink, link)
   } catch (error) {
+    // A copy cut short (a full disk) must not stay behind: 65 MB, and never used.
+    await rm(partial, { force: true }).catch(() => {})
+    await rm(partialLink, { force: true }).catch(() => {})
     io.stderr(`rulecast: could not install into ${path.dirname(link)}: ${errorMessage(error)}\n`)
     return 2
+  }
+  // Other versions of the binary for this machine are no longer run by anything. Those for other
+  // machines stay: a shared cache home may be another machine's install.
+  const removed: string[] = []
+  const suffix = platformKey("").slice(1)
+  for (const entry of await readdir(path.dirname(link), { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || !entry.name.endsWith(`-${suffix}`)) continue
+    if (entry.name === path.basename(path.dirname(target))) continue
+    await rm(path.join(path.dirname(link), entry.name), { recursive: true, force: true })
+    removed.push(entry.name.slice(0, -suffix.length - 1))
   }
   // Loads ast-grep's native module and the Python parser once now, through the same unpacking the
   // hooks use, so the first edit after installing does not pay for it.
@@ -70,6 +83,7 @@ async function install(io: CliIo): Promise<number> {
   io.stdout(
     `rulecast: installed ${VERSION} at ${target}; the agent hooks and git hooks run it unless the project has its own in node_modules\n`,
   )
+  if (removed.length > 0) io.stdout(`rulecast: removed the binary of ${removed.join(", ")}\n`)
   return 0
 }
 

@@ -1,4 +1,4 @@
-import { CACHE_HOME_SH, CURRENT_BINARY_SH } from "../../core/binary-home"
+import { CACHE_HOME_SH, runInstalledBinarySh } from "../../core/binary-home"
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
@@ -97,19 +97,20 @@ const SHELL_UNATTENDED =
  * Guarded, it runs the project's own rulecast, else the standalone binary installed in the cache
  * home (`rulecast binary install`, core/binary-home.ts), else one on the PATH (a global install). A
  * devDependency is a version the project committed to, so it wins for everyone. The command only
- * looks: it never downloads or installs anything. A PATH rulecast that cannot execute (126 or 127, such as a
- * version-manager shim with no rulecast behind it) counts as none. With none, it exits 0, after
- * telling the user on `SessionStart`, and — unattended — at every stop. Never a block: without
- * session state it could not hold the agent only once per prompt.
+ * looks: it never downloads or installs anything. An installed binary or a PATH rulecast that
+ * cannot execute (126 or 127: a binary built for another machine, or a version-manager shim with no
+ * rulecast behind it) counts as none. With none, it exits 0, after telling the user on
+ * `SessionStart`, and — unattended — at every stop. Never a block: without session state it could
+ * not hold the agent only once per prompt.
  *
- * The project's own rulecast and the installed binary get stdin through `exec`, untouched; past that the payload is read
- * once and piped to the PATH's. One string for every event, and it still contains
+ * The project's own rulecast gets stdin through `exec`, untouched; past that the payload is read
+ * once and piped to the installed binary, then to the PATH's. One string for every event, and it still contains
  * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
  */
 export const HOOK_COMMAND =
   'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
-  `${CACHE_HOME_SH}; B=${CURRENT_BINARY_SH}; [ -x "$B" ] && exec "$B" hook claude-code; ` +
   "P=$(cat); " +
+  `${CACHE_HOME_SH}; ${runInstalledBinarySh("hook claude-code", '"$P"')}; ` +
   `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; [ "$R" -lt 126 ] && exit "$R"; fi; ` +
   SHELL_UNATTENDED +
   `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +

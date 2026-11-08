@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
@@ -13,7 +13,7 @@ import { createRepo, git } from "../helpers/git"
 import { stateDirFor, TEST_HOME, testEnv } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
-import { LOOKUP_FIXTURES, lookupSetup, type Place } from "../helpers/lookup"
+import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup, type Place } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -281,6 +281,18 @@ describe("rulecast doctor", () => {
       path: `rulecast on the PATH (${setup.file.path})`,
     }[runs]
     expect(stdout).toContain(`ok       Claude Code — .claude/settings.json — runs ${label} 0.8.2\n`)
+  })
+
+  test("an installed binary that cannot run on this machine is not the one the hooks run", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]), "src/x.ts": "" })
+    const setup = lookupSetup(["binary", "path"], root)
+    breakInstalledBinary(setup)
+    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
+    const result = await runCli(root, ["doctor"], "", env)
+    expect(result.stdout).toContain(`runs rulecast on the PATH (${setup.file.path}) 0.8.2\n`)
+    rmSync(setup.file.path)
+    expect((await runCli(root, ["doctor"], "", env)).stdout).toContain("so no rules run")
   })
 
   test("an installed binary runs the hooks, and doctor names it with its version", async () => {

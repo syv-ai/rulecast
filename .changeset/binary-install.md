@@ -4,9 +4,11 @@
 
 The standalone binary is an install option for agent hooks. It needs no Node, no devDependency and no global npm install. You install it yourself; nothing downloads or installs it for you.
 
-- `rulecast binary install`, run by a downloaded binary, puts it at `<cache home>/bin/<version>/rulecast` and points `<cache home>/bin/rulecast` at it. `rulecast binary path` names the current one. Under Node, `binary install` prints the command that installs the binary and installs nothing.
-- The README's Install section has a one-line install command. It downloads this version's binary and its `.sha256` from Releases, checks them, and only then runs `binary install`.
-- The binary unpacks ast-grep's native module once, into `<cache home>/native/`, instead of to a new temp path on every run. On macOS that took a TypeScript ast-grep run from about 630 ms to about 105 ms.
+- `rulecast binary install`, run by a downloaded binary, puts it at `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, points `<cache home>/bin/rulecast` at it, and removes this machine's older versions. `rulecast binary path` names the current one. Under Node, `binary install` prints the command that installs the binary and installs nothing.
+- The README's Install section has a one-line install command. It downloads this version's binary and its `.sha256` from Releases over https only, checks them, and only then runs `binary install`.
+- The binary unpacks ast-grep's native module once, into `<cache home>/native/`, instead of to a new temp path on every run. On macOS that took a TypeScript ast-grep run from about 630 ms to about 105 ms. The variable that points ast-grep at it is never passed to the tools rulecast runs, so a project's own napi-rs tools (vite, vitest, knip, tailwind) are unaffected.
+- When the cache home's `native/` can't be written, the binary uses a temp directory only if this user owns it and nobody else can write it, and a fresh private one otherwise.
+- An installed binary that can't run on this machine (built for another one, or refused by the OS) counts as not installed: the hooks go on to the PATH, and `doctor` and `binary path` don't fail.
 - The binary can start `rulecast warm`. Before, the child it started failed with `unknown command "/$bunfs/root/rulecast"`.
 - `doctor` says which rulecast the hooks run and its version. When that version is older than `minimum_rulecast_version`, it warns and prints the update command. When the project's rulecast and an installed binary differ, it names both.
 - "requires rulecast X or newer" now names the rulecast that ran.
@@ -18,4 +20,6 @@ Breaking changes:
 - The not-installed messages (`NOT_INSTALLED`, `NOT_INSTALLED_UNATTENDED`) have new text.
 - The `.pre-commit-hooks.yaml` entries no longer run `npx --no-install rulecast`. They use the same lookup as the agent hooks, so git hooks need no Node.
 - The README's Install section and lefthook snippet changed to match. The binary is no longer "for CI and one-off runs".
-- `cacheHome()` reads `HOME` from the environment it is given before falling back to the OS home directory.
+- `cacheHome()` reads `HOME` from the environment it is given before falling back to the OS home directory. With `HOME`, `XDG_CACHE_HOME` and `RULECAST_HOME` all unset, the hooks don't look for an installed binary.
+- `rulecast clean` keeps `<cache home>/bin` (the installed binary) and this version's native files. To remove the binary, delete `<cache home>/bin`.
+- The docs site deploys after the release binaries are uploaded, so its install command never points at missing assets.
