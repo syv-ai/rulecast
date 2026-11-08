@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: offers-on-repeat-without-earlier-offer
+description: "Control for no-reoffer-after-no: the same correction, in a session where no rule was offered yet, gets an offer."
+context:
+  scaffold_script: scaffold.sh
+  history_file: history.jsonl

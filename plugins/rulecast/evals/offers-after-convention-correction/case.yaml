@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: offers-after-convention-correction
+description: After a correction that states a convention, the agent fixes the code and offers a rule in one line.
+context:
+  scaffold_script: scaffold.sh

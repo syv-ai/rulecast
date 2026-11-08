@@ -36,3 +36,9 @@ packages/site/public/agents/
 # Plans and specs are working material and stay on the developer's machine. Evidence stays public.
 docs/plans/
 docs/specs/
+
+# plugin eval runs (claude plugin eval plugins/rulecast)
+plugins/rulecast/evals/results/
+# a replayed history writes the resumed session (and its subagents) beside history.jsonl
+plugins/rulecast/evals/*/*-*-*-*-*.jsonl
+plugins/rulecast/evals/*/*-*-*-*-*/

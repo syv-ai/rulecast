@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: no-offer-change-of-mind
+description: A reversal scoped to this task is not a convention, so the agent offers no rule.
+context:
+  scaffold_script: scaffold.sh
+  history_file: history.jsonl
