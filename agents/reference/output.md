@@ -377,7 +377,7 @@ rulecast replay claude-code --sessions 20 --format json   # --rule ID (repeatabl
 rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
 ```
 
-A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist.
+A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist. For `weekly`, `--since` rounds down to the Monday of its week, so the trend holds whole weeks.
 
 ```json
 {
@@ -421,7 +421,25 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
       ]
     }
   ],
-  "unknownRules": []
+  "unknownRules": [],
+  "weekly": {
+    "from": "2026-10-01T10:00:00.000Z",
+    "rolledUpTo": null,
+    "summary": "off",
+    "rules": [
+      {
+        "rule": "backend/no-httpexception",
+        "fired": 1,
+        "enoughFindings": false,
+        "weeks": [
+          { "week": "2026-09-28", "runs": 3, "sessions": 1, "fired": 1, "firedPer100Runs": null, "partial": true },
+          { "week": "2026-10-05", "runs": 1, "sessions": 1, "fired": 0, "firedPer100Runs": null, "partial": true }
+        ],
+        "recurringFiles": [],
+        "recurringFileCount": 0
+      }
+    ]
+  }
 }
 ```
 
@@ -439,7 +457,11 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `stopBlocks` | Per rule that blocked a stop in the window, its stops by how many files it judged there (`1`, `2-5`, `6+`), and how many of those it blocked. A block rate that climbs with the number of files, whatever they hold, is a rule that is sometimes wrong: each file is one more chance to block. Left out with `neverFired`. |
 | `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. Left out when anything in the config did not compile. |
 | `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
-| `skippedLines` | Lines of the log that could not be read, or that were not a whole record. Present only when there were any. |
+| `weekly` | Per rule, its findings by week, to see over weeks whether it fires less. Always present. See [Reading the trend](#reading-the-trend). |
+| `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
+| `weekly.rolledUpTo` | Records up to this time are counted from the weekly summary, the rest from the log. `null` when there is no summary. |
+| `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds. A summary written before it was turned off is still read. |
+| `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
 
@@ -459,16 +481,51 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. It counts `suppressAttempted` from the first release; nothing earlier was published, so this is not a change of meaning. |
 | `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, under an ignore the agent added or changed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
 
+`weekly.rules` lists the rules with a finding in the trend's weeks, most fired first. Weeks start on Monday at 00:00 UTC. They run from the first week with data to the week of the newest record, with zeros for weeks without any:
+
+| Key | Meaning |
+|---|---|
+| `fired` | Findings first reported in the trend's weeks, counted as in the table above. |
+| `enoughFindings` | `fired` is at least 10. Below that the trend says little. |
+| `weeks[].week` | The week's Monday, as `YYYY-MM-DD`. |
+| `weeks[].runs` | Edit checks and stops that week that ran the rule on at least one file. It is the same count as the top-level `runs`, so rules that run only at a stop (hook rules) have a denominator too. |
+| `weeks[].sessions` | Sessions with such a check that week. |
+| `weeks[].fired` | Findings of the rule first reported that week. |
+| `weeks[].firedPer100Runs` | `fired * 100 / runs`, to one decimal. `null` when the rule ran fewer than 20 times that week: below that, one finding moves the rate by more than 5. |
+| `weeks[].partial` | The data does not cover the whole week: it starts after the week's Monday, or ends before the next one. The current week is always partial. |
+| `recurringFiles` | Files the rule fired on in 3 or more sessions, most sessions first, then by path; at most 10. |
+| `recurringFileCount` | How many files are recurring, the ones past the first 10 included. |
+
+The floors (20 checks a week, 10 findings, 3 sessions) are first guesses, to be tuned from use.
+
 Things to know when reading the counts:
 
 - A finding's identity is its [id](#finding-ids), which hashes its source line. So any edit to that line, fixing it or not, counts as one fixed finding and one new one, unless the edit only adds a trailing `rulecast-ignore`.
 - A finding the context budget kept out of a delivery still counts as reported.
 - Only agent hooks write the log. `rulecast run`, git hooks and CI do not, and findings that were there before the session or are in files the user changed during it are not counted.
 
+### Reading the trend
+
+To decide whether a rule is working, look at:
+
+- **The in-session counts in `rules`.** A high `fixed`, a `medianTurnsToFix` of 0 or 1 and a low `repeatRate` mean the finding and its doc section get the agent to fix the code. This is the main sign. An agent starts each session with no memory of the last, so a rule that works can keep firing at a flat rate: it catches the mistake each time, and the agent fixes it each time.
+- **`firedPer100Runs` over the weeks, for a rule with `enoughFindings`.** A rate that falls while `runs` holds steady means agents make the mistake less often in the files the rule checks. That usually means the codebase has fewer examples of the wrong pattern left to copy, or the convention reached the agent some other way. A rate that falls only because `runs` fell means nothing.
+- **`recurringFiles`.** A file where the rule fires in session after session. Either it holds code the agent keeps copying (often an old example of the wrong pattern, which the rule does not count, because findings that were already there are never logged), or the rule is wrong for that file. Open the file. Changing the rule's `exclude` is the developer's call.
+
+What the trend cannot tell you:
+
+- **Why the rate changed.** There is no control group. A change of model, a new section in the agent's instructions, different work (other files, other kinds of task) or an edit to the rule itself all move the rate. The log does not record rule versions: look at the config's history for edits to the rule.
+- **More than the log holds, unless the summary is on.** With `stats.weekly_summary` off, the trend reaches back only to the log's first record: about a week for a busy loop.
+- **Anything about rules with too few findings:** under 10 in the window (`enoughFindings: false`), or a week with under 20 checks (`firedPer100Runs: null`).
+- **Sessions on other machines or in other checkouts.** The log is per machine and per checkout. Each worktree has its own, so a loop that works in fresh worktrees leaves each week's data spread over logs that `stats` in the main checkout never reads.
+- **Exact counts at the edges.** A finding still open when one log file is summarised and the next one starts can be counted as fired in both. A session that runs past Sunday midnight UTC counts in both weeks. A file's recurring count can be off by one for the same reason.
+
 ### The findings log
 
-The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
+The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). There is one log per config and checkout: each config runs as its own project, and the directory is keyed by the config's real path. Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
 
-The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. That is about a week for a loop that writes a record every 20 seconds around the clock, and weeks for a developer working by hand. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+
+With `stats.weekly_summary: true` in the config (off by default), a hook that is about to drop the old `findings.1.jsonl` first adds that file's per-week counts to `findings-weekly.jsonl` beside it, which keeps 26 weeks. It holds rule ids, file paths, weeks and counts only. It is written once per rotation, only for the config that turned it on (configs below it do not inherit the key), and on a best-effort basis like the log. `rulecast clean` removes it too.
 
 Its format is internal and can change in any release. The `stats` JSON above is the contract.

@@ -47,7 +47,7 @@ Fill [setup-page.html](setup-page.html) with what you agreed. Copy the file and 
 
 - `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
 - `rules`: the hook rules chosen, and llm rules if allowed.
-- `decisions`: one row per question in step 3. `found` is what step 2 showed, or null. `said` is the developer's answer, close to their words. `why` says what the choice means here. `detail` shows exactly what changes: take the file contents from the dry run's `changes[].content`, run again with the agreed flags, and for hook rules show the rules.
+- `decisions`: one row per question in step 3. `found` is what step 2 showed, or null. `said` is the developer's answer, close to their words. `why` says what the choice means here. `detail` shows exactly what changes: take the file contents from the dry run's `changes[].content`, run again with the agreed flags, and for hook rules show the rules. Add one more row that is not a question: "Weekly stats summary", with `found: null` and `said: "off"` unless the developer turns it on. Its `why`: turned on, this config keeps 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside its findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. Applies to this config only.
 - `candidates`: on the as-you-go path, the first-rule candidates from step 6, each with a rough `sketch` of its rule.
 
 If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Then ask in the chat whether to go ahead. If they change something, go back to that question, and show the page again.
@@ -62,10 +62,10 @@ Only after the developer approves. First, install rulecast where the hooks will 
 Then, in each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
 ```
 
-Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
+Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
 
 `init` writes the config and the agent hooks, validates them, and says what to commit. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
 

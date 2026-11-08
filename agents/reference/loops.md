@@ -120,7 +120,7 @@ Not measured: whether each `/loop` iteration counts as a new prompt for the stop
 
 ## Learning from what the agent hits
 
-`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never ran may have a `files` pattern that matches nothing; one that ran often and never fired may not be worth keeping. A rule whose block rate climbs with the number of files at a stop (`stopBlocks`) is sometimes wrong.
+`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never ran may have a `files` pattern that matches nothing; one that ran often and never fired may not be worth keeping. A rule whose block rate climbs with the number of files at a stop (`stopBlocks`) is sometimes wrong. `weekly` shows whether a rule fires less over the weeks, and its `recurringFiles` the files it keeps firing on. Both need enough findings to say anything, and a falling rate can come from changes rulecast does not see ([Reading the trend](output.md#reading-the-trend)).
 
 This takes two steps, and only the first runs unattended:
 

@@ -325,7 +325,7 @@ as a git operation, so files it alone changed are not checked.
 
 If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](https://github.com/syv-ai/rulecast/blob/main/packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
 
-As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, and which never fire. `rulecast clean` deletes it.
+As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, which never fire, and whether a rule fires less over the weeks. `rulecast clean` deletes it.
 
 Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
 
