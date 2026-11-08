@@ -68,6 +68,9 @@ describe("the Claude Code plugin", () => {
     for (const { name } of cases) {
       expect(existsSync(path.join(evals, name, "prompt.md")), name).toBe(true)
       expect(existsSync(path.join(evals, name, "graders/no-rule-writes.md")), name).toBe(true)
+      // plugin eval skips a case whose case.yaml does not parse, and says so only in its log.
+      const caseFile = path.join(evals, name, "case.yaml")
+      if (existsSync(caseFile)) expect(parse(readFileSync(caseFile, "utf8")).name, name).toBe(name)
     }
   })
 
