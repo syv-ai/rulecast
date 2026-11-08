@@ -113,3 +113,123 @@ describe("a trimmed delivery fits its limit", () => {
     }
   })
 })
+
+/**
+ * The plan 25 re-review's sweep: rules with sections, a touch rule, a section this session already
+ * delivered, a swept file and a warning, with and without a linter rule that maps sections per lint
+ * rule. The touch rule's line used to be charged after every block had passed the cap, so the
+ * delivery overran (limit 582 rendered 585), and a section delivered earlier was priced as the
+ * longer "read this" line.
+ */
+describe("decide: the budget holds with touch rules and sections delivered earlier", () => {
+  const sections: Record<string, string> = {
+    "docs/a.md#eq": `## Eq\n${"Use === always. ".repeat(10)}`,
+    "docs/a.md#console": `## Console\n${"Use the logger. ".repeat(10)}`,
+    "docs/a.md#shared": "## Shared\nShared text.",
+    "docs/a.md#own": "## Own\nOwn linter context. ".repeat(3),
+    "docs/b.md#plain": `## Plain\n${"Plain rule section. ".repeat(8)}`,
+    "docs/b.md#plain2": `## Plain2\n${"Second. ".repeat(20)}`,
+    "docs/b.md#early": "## Early\nAlready delivered earlier.",
+    "docs/b.md#touch": "## Touch\nTouch section. ".repeat(4),
+  }
+  const ref = (text: string) => parseReference(text, "inject", { dir: "/project", label: null })
+  const plain = rule({
+    id: "aa/plain",
+    message: "plain {{file}}:{{line}}",
+    context: [ref("@docs/b.md#plain"), ref("@docs/b.md#early")],
+  })
+  const plain2 = rule({
+    id: "zz/plain2",
+    message: "p2 {{line}}",
+    context: [ref("@docs/b.md#plain2"), ref("@docs/a.md#shared")],
+  })
+  const touch = rule({ id: "tt/touch", detector: null, context: [ref("@docs/b.md#touch")] })
+  const linter = rule({
+    id: "linter/eslint",
+    message: "{{message}} ({{ruleId}})",
+    context: [ref("@docs/a.md#own")],
+    contextByRule: new Map([
+      ["eqeqeq", [ref("@docs/a.md#eq")]],
+      ["no-console", [ref("@docs/a.md#console"), ref("@docs/a.md#shared")]],
+      ["x", [ref("@docs/a.md#shared")]],
+      ["early", [ref("@docs/b.md#early")]],
+      ["plainmap", [ref("@docs/b.md#plain")]],
+    ]),
+  })
+  const at = (r: typeof plain, id: string, file: string, line: number, captures: Record<string, string> = {}) => ({
+    rule: r,
+    id,
+    status: "new" as const,
+    match: { file, line, endLine: line, column: 1, text: Object.keys(captures).length > 0 ? "" : "x", captures },
+  })
+  const lint = (ruleId: string, file: string, line: number, message = `msg ${line}`) =>
+    at(linter, `${ruleId}${file}${line}`, file, line, { message, ruleId })
+  const findingsFor = (withLinter: boolean): ClassifiedFinding[] => [
+    at(plain, "p1", "b.ts", 1),
+    at(plain, "p2", "b.ts", 5),
+    at(plain, "p3", "c.ts", 2),
+    at(plain2, "q1", "b.ts", 3),
+    at(plain2, "q2", "swept.ts", 9),
+    { ...at(plain, "pre1", "old.ts", 1), status: "preexisting" },
+    ...(withLinter
+      ? [
+          lint("unmapped", "a.ts", 1),
+          lint("eqeqeq", "a.ts", 2),
+          lint("eqeqeq", "a.ts", 3),
+          lint("no-console", "a.ts", 4),
+          lint("x", "a.ts", 5),
+          lint("early", "a.ts", 6),
+          lint("plainmap", "a.ts", 7),
+          lint("no-console", "swept.ts", 8),
+          lint("eqeqeq", "a.ts", 9, "same"),
+          lint("no-console", "a.ts", 10, "same"),
+        ]
+      : []),
+  ]
+
+  test.each([false, true])(
+    "with a linter rule: %s, the delivery fits every limit from 100 to 2000",
+    async (withLinter) => {
+      const resolver = fakeResolver(sections)
+      const hash = (await resolver.currentHash("docs/b.md", "early"))!
+      const over: string[] = []
+      for (const swept of [false, true]) {
+        for (const maxMatchesPerRule of [1, 2, 10]) {
+          const run = async (limit: number) => {
+            const context = emptyContext()
+            context.delivered.push({ path: "docs/b.md", anchor: "early", hash })
+            const { delivery } = await decide({
+              agent: "main",
+              findings: findingsFor(withLinter),
+              touches: [touch],
+              agentRead: null,
+              warnings: [{ key: "w1", text: "a warning about something" }],
+              work: emptyWork(),
+              context,
+              resolver,
+              maxBytes: 32768,
+              maxBlocks: 3,
+              maxContextChars: limit,
+              maxMatchesPerRule,
+              stopGate: false,
+              ...(swept ? { swept: ["swept.ts"] } : {}),
+            })
+            return { delivery, text: renderAgentText(delivery, { maxMatchesPerRule }) }
+          }
+          // Below the floor only the touch rule's section is left, which is never dropped (§9): that
+          // is the one delivery allowed past a limit.
+          const floor = await run(1)
+          expect(floor.delivery.findings).toEqual([])
+          expect(floor.delivery.references.map((one) => one.ref)).toEqual(["docs/b.md#touch"])
+          for (let limit = 100; limit <= 2000; limit++) {
+            const { text } = await run(limit)
+            if (text.length > Math.max(limit, floor.text.length)) {
+              over.push(`${limit}:${text.length} (swept ${swept}, max ${maxMatchesPerRule})`)
+            }
+          }
+        }
+      }
+      expect(over).toEqual([])
+    },
+  )
+})

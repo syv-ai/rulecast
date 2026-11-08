@@ -19,6 +19,7 @@ import {
   readCommittedBaseline,
 } from "../core/baseline/committed"
 import { type CompiledProject, type CompileOptions, compile, diagnosticText } from "../core/compile/project"
+import { allRuleContext } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { WORKTREE } from "../core/content"
 import { combineDeliveries } from "../core/delivery/combine"
@@ -263,14 +264,15 @@ async function ruleMetadata(project: CompiledProject, ids: ReadonlySet<string>):
   const rules = project.rules.filter((rule) => ids.has(rule.id))
   return Promise.all(
     rules.map(async (rule) => {
-      const resolved = new Map((await resolveRuleContext(resolver, rule.context)).map((entry) => [entry.ref, entry]))
+      const cited = allRuleContext(rule)
+      const resolved = new Map((await resolveRuleContext(resolver, cited)).map((entry) => [entry.ref, entry]))
       return {
         id: rule.id,
         name: rule.name,
         description: rule.description,
         severity: rule.severity,
         source: rule.source,
-        context: rule.context.map((spec) => ({ ref: spec.ref, content: resolved.get(spec.ref)?.content ?? null })),
+        context: cited.map((spec) => ({ ref: spec.ref, content: resolved.get(spec.ref)?.content ?? null })),
       }
     }),
   )

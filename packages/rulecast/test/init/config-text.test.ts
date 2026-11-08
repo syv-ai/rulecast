@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
+import { parseConfig } from "../../src/core/config/load"
 import {
   addCatalogRules,
+  addLocalRules,
   ConfigTextError,
   newConfigText,
   type RuleSelection,
@@ -21,6 +23,30 @@ const NEW_RULES = [
   "        context:",
   '          - "@AGENTS.md#services"',
 ]
+
+describe("a linter rule's text", () => {
+  test("types_or and context_by_rule print as valid YAML that parseConfig reads back", () => {
+    const rule = {
+      id: "linter/eslint",
+      name: "ESLint errors",
+      types_or: ["javascript", "jsx", "ts", "tsx"],
+      detect: { linter: { tool: "eslint" } },
+      message: "{{message}} ({{ruleId}})",
+      context: [],
+      context_by_rule: {
+        eqeqeq: ["@docs/conventions.md#comparisons"],
+        "@typescript-eslint/no-floating-promises": ["@docs/async.md#awaiting", "@docs/async.md#errors"],
+      },
+    }
+    const parsed = parseConfig(parse(newConfigText([rule])))
+    expect(parsed.ok).toBe(true)
+    const { context: _context, ...written } = rule
+    expect(parsed.ok && parsed.value.repos[0]!.rules).toEqual([written])
+    // Appended to an existing config the same way.
+    const added = parseConfig(parse(addLocalRules("repos:\n  - repo: local\n    rules: []\n", [rule])))
+    expect(added.ok && added.value.repos[0]!.rules).toEqual([written])
+  })
+})
 
 describe("newConfigText", () => {
   test("with nothing chosen it writes an empty local repo", () => {

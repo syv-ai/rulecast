@@ -111,6 +111,11 @@ export interface Match {
    * them out, as it does a detector's own volatile captures.
    */
   volatileCaptures?: readonly string[]
+  /**
+   * The tool's own page for the lint rule behind the match, as the tool's output gave it; absent
+   * when it gave none. Not a capture and not part of what the finding is: no id hashes it.
+   */
+  docs?: string
 }
 
 export interface ChangeSet {
@@ -255,6 +260,11 @@ export interface Detector<Config> {
   /** Input is unknown: schemas may apply defaults and refinements. */
   schema: ZodType<Config, ZodTypeDef, unknown>
   captures(config: Config): string[]
+  /**
+   * Whether `id` can ever be one of this rule's `{{ruleId}}` values: null when it can, else why
+   * not. Asked of each `context_by_rule` key at compile, so the core knows no tool's id form.
+   */
+  checkRuleId?(config: Config, id: string): string | null
   events(config: Config): DetectorEvent[]
   /**
    * Whether this detector reads only through `read`, and so can judge a write before it happens
@@ -357,6 +367,11 @@ export interface Finding {
   captures?: Record<string, string>
   /** `rulecast fix` can apply this rule's fix. Present only when true. */
   fixable?: true
+  /**
+   * What the finding's lint rule points to: the project's section for it (`context_by_rule`, the
+   * ref as delivered), else the tool's own page. Absent when there is neither.
+   */
+  docs?: { ref: string } | { url: string }
 }
 
 export interface DeliveredReference {

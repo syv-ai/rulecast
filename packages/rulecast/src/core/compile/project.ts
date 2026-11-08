@@ -262,7 +262,8 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
       // Shallow merge (spec §4); an overridden context is written in the project, so it resolves there.
       const data = { ...base.data, ...override.data }
       const contextRoot = "context" in override.data ? project : repoRoot
-      await add({ data, source: checkout.label, contextRoot }, source)
+      const contextByRuleRoot = "context_by_rule" in override.data ? project : repoRoot
+      await add({ data, source: checkout.label, contextRoot, contextByRuleRoot }, source)
     }
   }
 

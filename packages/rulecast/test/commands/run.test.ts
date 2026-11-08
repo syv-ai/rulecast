@@ -9,6 +9,7 @@ import { localConfig } from "../helpers/config"
 import { backendConventions, createFixture, fixtureFiles, fixtureRules } from "../helpers/fixture"
 import { createRepo, git } from "../helpers/git"
 import { stateDirFor, testEnv } from "../helpers/home"
+import { stubTool } from "../helpers/linters"
 import { stubAgentCli, stubStdin } from "../helpers/llm"
 import { pipelineAt } from "../helpers/pipeline"
 import { createProject } from "../helpers/project"
@@ -452,6 +453,32 @@ describe("rulecast run: the output contract", () => {
     const parsed = json((await run(root, "--from-ref", "main", "--format", "json")).stdout)
     expect(parsed.preexisting).toMatchObject([{ status: "preexisting", line: 2 }])
     expect(sarifRun.results[1].partialFingerprints["rulecastFindingId/v1"]).toBe(parsed.preexisting[0].id)
+  })
+
+  test("sarif help includes the mapped sections", async () => {
+    const root = await createRepo({
+      "src/a.js": 'console.log("hi")\nconst unused = 1\ndebugger\n',
+      "docs/js.md": "# JS\n\n## Logging\nUse the logger, not console.\n",
+      ".rulecast-config.yaml": localConfig([
+        {
+          id: "linter/eslint",
+          name: "ESLint errors",
+          detect: { linter: { tool: "eslint" } },
+          message: "{{message}} ({{ruleId}})",
+          context_by_rule: { "no-console": "@docs/js.md#logging" },
+        },
+      ]),
+    })
+    await stubTool(root, "eslint")
+    const sarif = JSON.parse((await run(root, "--all-files", "--format", "sarif")).stdout).runs[0]
+    expect(sarif.tool.driver.rules[0]).toMatchObject({
+      id: "linter/eslint",
+      help: { markdown: expect.stringContaining("Use the logger, not console.") },
+      properties: { context: ["docs/js.md#logging"] },
+    })
+    // The json form says what the finding points to.
+    const parsed = json((await run(root, "--all-files", "--format", "json")).stdout)
+    expect(parsed.findings.map((finding: { docs?: unknown }) => finding.docs)).toEqual([{ ref: "docs/js.md#logging" }])
   })
 })
 

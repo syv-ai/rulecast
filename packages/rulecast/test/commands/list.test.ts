@@ -9,6 +9,30 @@ import { createRepo } from "../helpers/git"
 import { createProject } from "../helpers/project"
 
 describe("rulecast list", () => {
+  test("list shows each lint rule's sections", async () => {
+    const root = await createRepo({
+      "docs/js.md": "# JS\n\n## Logging\nUse the logger.\n\n## Comparisons\nUse ===.\n",
+      ".rulecast-config.yaml": localConfig([
+        {
+          id: "linter/eslint",
+          name: "ESLint errors",
+          detect: { linter: { tool: "eslint" } },
+          message: "{{message}} ({{ruleId}})",
+          context_by_rule: { "no-console": "@docs/js.md#logging", eqeqeq: ["@docs/js.md#comparisons"] },
+        },
+      ]),
+    })
+    const [listed] = JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)
+    expect(listed.context).toEqual([])
+    expect(listed.contextByRule).toEqual({ "no-console": ["docs/js.md#logging"], eqeqeq: ["docs/js.md#comparisons"] })
+    const text = (await runCli(root, ["list"])).stdout
+    expect(text).toContain("  cites for no-console: docs/js.md#logging\n  cites for eqeqeq: docs/js.md#comparisons\n")
+    // One rule's view prints each section it can deliver.
+    const one = (await runCli(root, ["list", "linter/eslint"])).stdout
+    expect(one).toContain("--- docs/js.md#logging ---\n## Logging\nUse the logger.")
+    expect(one).toContain("--- docs/js.md#comparisons ---")
+  })
+
   test("says where new conventions go, and which config says so", async () => {
     const rule = { id: "a", name: "A", detect: { regex: { pattern: "x" } }, message: "m" }
     const root = await createRepo({ ".rulecast-config.yaml": `conventions: docs/conventions/\n${localConfig([rule])}` })

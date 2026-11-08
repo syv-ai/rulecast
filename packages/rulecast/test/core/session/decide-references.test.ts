@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 
 import { fnv1a } from "../../../src/core/baseline/hash"
+import { renderAgentText } from "../../../src/core/delivery/render-agent"
 import { parseReference } from "../../../src/core/references"
 import { type DecideInput, decide } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork } from "../../../src/core/session/state"
@@ -177,5 +178,51 @@ describe("decide: references", () => {
       },
       { ref: "acme/rules@v1:big.md", state: "read", reason: "tooLarge", location: "/cache/repos/acme/v1/big.md" },
     ])
+  })
+})
+
+describe("decide: a lint rule's sections", () => {
+  const linter = rule({
+    id: "linter/eslint",
+    message: "{{message}} ({{ruleId}})",
+    context: [ref("@conventions/state.md")],
+    contextByRule: new Map([
+      ["eqeqeq", [ref("@conventions/api.md#errors")]],
+      ["no-console", [ref("@conventions/api.md#retries")]],
+    ]),
+  })
+  const lint = (ruleId: string, line: number) => ({
+    rule: linter,
+    match: { file: "a.ts", line, endLine: line, column: 1, text: "", captures: { message: `m${line}`, ruleId } },
+    id: `id${line}`,
+    status: "new" as const,
+  })
+
+  test("a lint rule's mapped section is delivered with the finding that fired it, and not for one that did not fire", async () => {
+    const decision = await decide(input({ findings: [lint("eqeqeq", 1), lint("eqeqeq", 2), lint("other", 3)] }))
+    expect(decision.delivery.references.map((one) => one.ref)).toEqual([
+      "conventions/state.md",
+      "conventions/api.md#errors",
+    ])
+    expect(decision.delivery.findings.map((finding) => finding.docs)).toEqual([
+      { ref: "conventions/api.md#errors" },
+      { ref: "conventions/api.md#errors" },
+      undefined,
+    ])
+  })
+
+  test("a mapped section already delivered is a pointer, and the finding still says see", async () => {
+    const context = emptyContext()
+    context.delivered.push({
+      path: "conventions/api.md",
+      anchor: "errors",
+      hash: fnv1a(files["conventions/api.md#errors"]),
+    })
+    const decision = await decide(input({ context, findings: [lint("eqeqeq", 1)] }))
+    expect(decision.delivery.references).toContainEqual({ ref: "conventions/api.md#errors", state: "pointer" })
+    expect(decision.delivery.findings[0]!.docs).toEqual({ ref: "conventions/api.md#errors" })
+    const text = renderAgentText(decision.delivery, { maxMatchesPerRule: 10 })
+    expect(text).toContain("    see conventions/api.md#errors")
+    expect(text).toContain("--- conventions/api.md#errors (provided earlier in this session) ---")
   })
 })

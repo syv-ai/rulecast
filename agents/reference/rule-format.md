@@ -89,6 +89,7 @@ A repository can hold any number of `.rulecast-config.yaml` files: one at the to
 | `fix` | no; inside `detect.regex` or `detect.ast-grep` | The replacement `rulecast fix` writes over each match (below). No other detector takes one |
 | `message` | with `detect` | Template with `{{file}}`, `{{line}}`, `{{column}}`, `{{text}}`, `{{rule}}` and the detector's captures; a removed rule also has `{{removed}}` and `{{baseline}}` (below) |
 | `context` | for touch rules | References delivered with the rule (below) |
+| `context_by_rule` | no; `linter`, `command` and `hook` rules | References delivered only with the findings of one lint rule, keyed by its id exactly as `{{ruleId}}` shows it (below) |
 | `examples` | no | Code the rule must flag and must not, run by `rulecast test` (below) |
 | `minimum_rulecast_version` | no | `X.Y.Z`, for rules published in rule repos. Read before the rest of the rule, so an older rulecast says to upgrade rather than rejecting a key it does not know |
 
@@ -476,7 +477,7 @@ Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` f
 
 ### Overrides
 
-An entry under a URL repo is merged over the published rule key by key. The merge is shallow: an overridden `detect` or `context` replaces the whole value. `@` paths in an overriding `context` resolve against your project; the published rule's own paths resolve against the rule repo.
+An entry under a URL repo is merged over the published rule key by key. The merge is shallow: an overridden `detect`, `context` or `context_by_rule` replaces the whole value. `@` paths in an overriding `context` or `context_by_rule` resolve against your project; the published rule's own paths resolve against the rule repo.
 
 ## Context references
 
@@ -491,5 +492,26 @@ context:
 - **Path**: `@` plus a path relative to the project root, or to the rule repo's root for rules published there. Any text file. A path may not leave its root.
 - **Anchor**: `.md` and `.mdx` only. The GitHub heading slug: lowercase, punctuation dropped, spaces turned into `-`; repeated headings get `-1`, `-2`. The section runs from its heading to the next heading of the same or a higher level, subsections included.
 - **Mode**: `inject` delivers the content; `read` tells the agent to read the file. The default is `context.mode`.
+
+### Per lint rule
+
+A rule whose detector reports rule ids (`linter`, `command`, `hook`) can cite a section for each lint rule:
+
+```yaml
+- id: linter/eslint
+  name: ESLint errors
+  types_or: [javascript, jsx, ts, tsx]
+  detect:
+    linter: { tool: eslint }
+  message: "{{message}} ({{ruleId}})"
+  context_by_rule:
+    eqeqeq: "@docs/conventions.md#comparisons"
+    "@typescript-eslint/no-floating-promises": ["@docs/async.md#awaiting", "@docs/async.md#errors"]
+```
+
+- **Keys** are the tool's rule ids exactly as `{{ruleId}}` shows them. For Ruff that is the code (`B006`), not the name (`mutable-argument-default`): a name is a `validate` error, because it could never match. A key that never fires does nothing; `rulecast list` shows each mapping.
+- **Values** are one reference or a list, in the `context` syntax, `mode` included. Each is checked like `context`: a missing file or anchor disables the rule, named as `context_by_rule.<id>: …`.
+- A mapped section is delivered only when a finding of that lint rule is, after the rule's own `context`. The first finding of that lint rule in a block says `see <ref>`. A finding of a lint rule with no mapping says `upstream docs: <url>` instead, when the tool gives one.
+- The mapping lives in `.rulecast-config.yaml`, so the project's docs stay free of rulecast syntax.
 
 rulecast dedupes references: content the agent already has in its context is not delivered again.

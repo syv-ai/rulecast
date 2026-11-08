@@ -29,6 +29,8 @@ export interface DetectedHook {
   source: string
   /** The hook's own `description`, when its config gives one. */
   description?: string
+  /** It runs a linter init also offers as a rule (`linter/ruff`): that rule is offered instead. */
+  sameAs?: string
 }
 
 /** A hook the config declares that init does not offer in this project, and why. */
@@ -422,9 +424,11 @@ export interface LocalRule {
   name: string
   description?: string
   files?: string
+  types_or?: string[]
   detect: Record<string, unknown>
   message: string
   context: string[]
+  context_by_rule?: Record<string, string[]>
 }
 
 export function hookRule(hook: DetectedHook): LocalRule {

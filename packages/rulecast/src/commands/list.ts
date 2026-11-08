@@ -2,7 +2,7 @@ import { parseArgs } from "node:util"
 import { stringify } from "yaml"
 
 import { compile, diagnosticText } from "../core/compile/project"
-import type { CompiledRule } from "../core/compile/rule"
+import { allRuleContext, type CompiledRule } from "../core/compile/rule"
 import { conventionsFor } from "../core/config/conventions"
 import { CONFIG_FILE } from "../core/config/load"
 import { createReferenceResolver } from "../core/delivery/resolve"
@@ -33,6 +33,8 @@ export interface ListedRule {
   /** How many of the project's files the rule matches; null outside a git repository. */
   matchingFiles: number | null
   context: string[]
+  /** `context_by_rule`: each lint rule id's refs. Absent when the rule has none. */
+  contextByRule?: Record<string, string[]>
   /** With a RULE_ID only: the files it matches, its message, and the text of each section it cites. */
   matching?: string[]
   message?: string | null
@@ -53,6 +55,11 @@ function listed(rule: CompiledRule, files: readonly string[] | null): ListedRule
     exclude: rule.patterns.exclude,
     matchingFiles: files === null ? null : files.filter((file) => rule.matches(file)).length,
     context: rule.context.map((spec) => spec.ref),
+    ...(rule.contextByRule.size > 0 && {
+      contextByRule: Object.fromEntries(
+        [...rule.contextByRule].map(([ruleId, specs]) => [ruleId, specs.map((spec) => spec.ref)]),
+      ),
+    }),
   }
 }
 
@@ -115,7 +122,7 @@ export async function listCommand(
     rules[0]!.matching = (files ?? []).filter((file) => rule.matches(file))
     rules[0]!.message = rule.message
     rules[0]!.sections = await Promise.all(
-      rule.context.map(async (spec) => {
+      allRuleContext(rule).map(async (spec) => {
         const resolved = await resolver.resolve(spec)
         return { ref: spec.ref, content: resolved.found ? resolved.content : null }
       }),
@@ -182,6 +189,9 @@ function ruleLines(rule: ListedRule): string[] {
   }
   if (rule.message !== undefined && rule.message !== null) out.push(`  message ${rule.message}`)
   if (rule.context.length > 0) out.push(`  cites ${rule.context.join(", ")}`)
+  for (const [ruleId, refs] of Object.entries(rule.contextByRule ?? {})) {
+    out.push(`  cites for ${ruleId}: ${refs.join(", ")}`)
+  }
   out.push("")
   for (const section of rule.sections ?? []) {
     if (section.content === null) out.push(`--- ${section.ref} --- not found`, "")
@@ -244,7 +254,7 @@ async function listCatalog(
     entries[0]!.matching = (files ?? []).filter((file) => rule.matches(file))
     entries[0]!.message = rule.message
     entries[0]!.sections = await Promise.all(
-      rule.context.map(async (spec) => {
+      allRuleContext(rule).map(async (spec) => {
         const resolved = await resolver.resolve(spec)
         return { ref: spec.ref, content: resolved.found ? resolved.content : null }
       }),

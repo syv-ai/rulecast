@@ -1,0 +1,84 @@
+{
+  "about": "A linter rule's findings say what each points to, once per lint rule in the block: the project's section as see, else the tool's page as upstream docs; a finding with neither says nothing.",
+  "options": {
+    "maxMatchesPerRule": 10
+  },
+  "delivery": {
+    "findings": [
+      {
+        "rule": "linter/eslint",
+        "severity": "error",
+        "status": "new",
+        "file": "src/a.ts",
+        "line": 3,
+        "column": 7,
+        "message": "Expected '===' and instead saw '=='. (eqeqeq)",
+        "count": 2,
+        "docs": { "ref": "docs/conventions.md#comparisons" }
+      },
+      {
+        "rule": "linter/eslint",
+        "severity": "error",
+        "status": "new",
+        "file": "src/a.ts",
+        "line": 9,
+        "column": 1,
+        "message": "Unexpected console statement. (no-console)",
+        "count": 1,
+        "docs": { "url": "https://eslint.org/docs/latest/rules/no-console" }
+      },
+      {
+        "rule": "linter/eslint",
+        "severity": "error",
+        "status": "new",
+        "file": "src/a.ts",
+        "line": 11,
+        "column": 7,
+        "message": "'a' is assigned a value but never used. (no-unused-vars)",
+        "count": 1,
+        "docs": { "url": "https://eslint.org/docs/latest/rules/no-unused-vars" }
+      },
+      {
+        "rule": "linter/eslint",
+        "severity": "error",
+        "status": "new",
+        "file": "src/a.ts",
+        "line": 12,
+        "column": 7,
+        "message": "'b' is assigned a value but never used. (no-unused-vars)",
+        "count": 1,
+        "docs": { "url": "https://eslint.org/docs/latest/rules/no-unused-vars" }
+      },
+      {
+        "rule": "linter/eslint",
+        "severity": "error",
+        "status": "new",
+        "file": "src/a.ts",
+        "line": 14,
+        "column": 1,
+        "message": "Parsing error: Unexpected token ) ()",
+        "count": 1
+      }
+    ],
+    "preexistingSummary": [],
+    "references": [
+      {
+        "ref": "docs/conventions.md#comparisons",
+        "state": "full",
+        "content": "## Comparisons\nUse === everywhere: == coerces."
+      }
+    ],
+    "touches": [],
+    "stop": null,
+    "warnings": [],
+    "templates": {
+      "linter/eslint": "{{message}} ({{ruleId}})"
+    },
+    "omitted": {
+      "findings": [],
+      "rules": 0,
+      "preexisting": 0
+    },
+    "overflowPaths": []
+  }
+}

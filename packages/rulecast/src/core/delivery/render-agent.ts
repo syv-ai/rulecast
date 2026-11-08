@@ -110,6 +110,19 @@ function findingLines(finding: Finding, template: string | undefined): string[] 
   return lines
 }
 
+/**
+ * The line under a finding naming what its lint rule points to, the first time a block shows that
+ * value: the same lint rule firing five times is one link, not five. `said` is the block's own.
+ */
+function docsLine(finding: Finding, said: Set<string>): string[] {
+  const docs = finding.docs
+  if (docs === undefined) return []
+  const line = "ref" in docs ? `    see ${docs.ref}` : `    upstream docs: ${docs.url}`
+  if (said.has(line)) return []
+  said.add(line)
+  return [line]
+}
+
 /** A `path` rule's message never says {{line}}, and every one of its matches is line 1. */
 const locationOf = (finding: Finding, withLine: boolean) =>
   withLine ? `${finding.file}:${finding.line}` : finding.file
@@ -140,7 +153,10 @@ function groupedLines(findings: Finding[], template: string): string[] {
     .split("\n")
     .map((line) => `  ${line}`)
   out.push("")
-  if (names.length === 0) {
+  const said = new Set<string>()
+  // Packed sites have no line of their own to put a docs line under, so a block whose sites point
+  // somewhere is listed one site per line.
+  if (names.length === 0 && findings.every((finding) => finding.docs === undefined)) {
     out.push(...packed(findings.map((finding) => `${at(finding)}${repeatOf(finding)}`)))
     return out
   }
@@ -148,6 +164,7 @@ function groupedLines(findings: Finding[], template: string): string[] {
   for (const finding of findings) {
     const values = names.map((name) => bindingValue(finding.captures?.[name])).join("  ")
     out.push(`  ${at(finding).padEnd(width)}  ${values}${repeatOf(finding)}`.trimEnd())
+    out.push(...docsLine(finding, said))
   }
   return out
 }
@@ -194,7 +211,10 @@ function ruleBlock(
   const files = new Set(findings.map((finding) => finding.file)).size + dropped.files
   const out = [grouped ? `${severity} ${rule} — ${total} in ${plural(files, "file")}` : `${severity} ${rule}`]
   if (grouped && template !== undefined) out.push(...groupedLines(shown, template))
-  else for (const finding of shown) out.push(...findingLines(finding, template))
+  else {
+    const said = new Set<string>()
+    for (const finding of shown) out.push(...findingLines(finding, template), ...docsLine(finding, said))
+  }
 
   const more = hidden.length + dropped.count
   if (more > 0) {
@@ -287,6 +307,10 @@ export const deliveryCost = {
    */
   referenceLine(ref: string, location: string | undefined): number {
     return linesCost(referenceLines({ ref, state: "read", reason: "budget", location }))
+  },
+  /** A reference this session already delivered: its line never changes, so it is priced as printed. */
+  pointerLine(ref: string): number {
+    return linesCost(referenceLines({ ref, state: "pointer" }))
   },
   /** What a reference given in full adds over its one-line price: the content and the blank line. */
   referenceContent(ref: string, content: string, location: string | undefined): number {

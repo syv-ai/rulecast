@@ -12,6 +12,7 @@ import { catalogFiles, createCatalogRepo } from "../helpers/catalog"
 import { runCli } from "../helpers/cli"
 import { createRepo, git } from "../helpers/git"
 import { testEnv } from "../helpers/home"
+import { stubTool } from "../helpers/linters"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -196,6 +197,86 @@ describe("rulecast init", () => {
     expect(localIds(await read(root, CONFIG_FILE))).toEqual(["hook/types"])
     expect(result.stdout).toContain("new, 1 hook rule")
     expect(result.stdout).toContain("rulecast validate: 1 rule valid")
+  })
+
+  test("offers linter rules and writes the chosen ones", async () => {
+    const root = await createRepo({
+      ...PROJECT,
+      "eslint.config.mjs": "export default []\n",
+      "src/a.js": "x\n",
+      "docs/conventions.md": "# Conventions\n\n## Comparisons\nAlways `eqeqeq`.\n",
+    })
+    await stubTool(root, "eslint")
+    await writeFile(
+      path.join(root, "node_modules", ".bin", "eslint.recording.json"),
+      '{"rules":{"eqeqeq":[2],"no-unused-vars":[2],"no-console":[1]}}',
+    )
+    const { report: dry } = await report(root, "--dry-run")
+    expect(dry.linters.offered).toEqual([
+      {
+        id: "linter/eslint",
+        tool: "eslint",
+        config: "eslint.config.mjs",
+        errorRules: ["eqeqeq", "no-unused-vars"],
+        warningRules: 1,
+        configured: false,
+        candidates: [{ ruleId: "eqeqeq", ref: "@docs/conventions.md#comparisons" }],
+      },
+    ])
+    expect((await init(root, "--dry-run")).stdout).toContain(
+      "Linters\nOffered as rules with --linters: linter/eslint (2 error rules, 1 warning not delivered)\n",
+    )
+
+    const result = await init(root, "--no-agents", "--linters", "linter/eslint")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("new, 1 linter rule")
+    expect(result.stdout).toContain("rulecast validate: 1 rule valid")
+    expect(result.stdout).not.toContain("Offered as rules with --linters")
+    const written = parse(await read(root, CONFIG_FILE)) as { repos: { rules: Record<string, unknown>[] }[] }
+    // No stages: eslint's rule runs at the stop. And no context_by_rule: that is the developer's.
+    expect(written.repos[0]!.rules).toEqual([
+      {
+        id: "linter/eslint",
+        name: "ESLint errors",
+        types_or: ["javascript", "jsx", "ts", "tsx"],
+        detect: { linter: { tool: "eslint" } },
+        message: "{{message}} ({{ruleId}})",
+      },
+    ])
+    const again = await report(root, "--dry-run")
+    expect(again.report.linters.offered[0]!.configured).toBe(true)
+  })
+
+  test("an unknown --linters id names what is offered", async () => {
+    const root = await createRepo(PROJECT)
+    const result = await init(root, "--linters", "linter/ruff")
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain('"linter/ruff" is not a linter offered here (none are)')
+  })
+
+  test("a ruff pre-commit hook says it is the same as linter/ruff", async () => {
+    const root = await createRepo({
+      ...PROJECT,
+      "pyproject.toml": "[project]\nname = 'x'\n\n[tool.ruff.lint]\nselect = ['F']\n",
+      ".pre-commit-config.yaml":
+        "repos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.14.0\n    hooks:\n      - id: ruff-check\n" +
+        // A local hook names the linter only in its name, as the FastAPI template's does.
+        "  - repo: local\n    hooks:\n      - id: local-ruff-check\n        name: ruff check\n        entry: uv run ruff check\n        language: system\n",
+    })
+    await stubTool(root, "ruff")
+    await writeFile(
+      path.join(root, "node_modules", ".bin", "ruff.recording.json"),
+      "linter.rules.enabled = [\n\tunused-import (F401),\n]\n",
+    )
+    const { report: dry } = await report(root, "--dry-run")
+    expect(dry.linters.offered.map((linter) => [linter.id, linter.errorRules])).toEqual([["linter/ruff", ["F401"]]])
+    expect(dry.hooks.offered).toContainEqual(expect.objectContaining({ id: "hook/ruff-check", sameAs: "linter/ruff" }))
+    expect(dry.hooks.offered).toContainEqual(
+      expect.objectContaining({ id: "hook/local-ruff-check", sameAs: "linter/ruff" }),
+    )
+    expect((await init(root, "--dry-run")).stdout).toContain(
+      "hook/ruff-check (same as linter/ruff: offer that instead)",
+    )
   })
 
   test("without --hooks no hook is wrapped, and the terminal output names the ones on offer", async () => {

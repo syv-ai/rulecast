@@ -73,6 +73,11 @@ describe.runIf(process.env.RULECAST_LINTERS === "1")("live linters", () => {
       expect(findings.map((finding) => finding.ruleId)).toContain(live.ruleId)
       expect(findings.every((finding) => finding.file === live.file)).toBe(true)
       expect(findings.every((finding) => finding.line >= 1 && finding.column >= 1)).toBe(true)
+      // Every tool but gitleaks links its page for the lint rule; each finding says its level.
+      const found = findings.find((finding) => finding.ruleId === live.ruleId)!
+      expect(["error", "warning"]).toContain(found.level)
+      if (live.tool === "gitleaks") expect(found.docs).toBeNull()
+      else expect(found.docs).toMatch(/^https:\/\//)
     }, 60_000)
   }
 

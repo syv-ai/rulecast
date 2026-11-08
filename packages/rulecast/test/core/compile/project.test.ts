@@ -8,6 +8,7 @@ import { repoDir, repoLabel } from "../../../src/core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../../../src/core/repos/provider"
 import type { Detector } from "../../../src/core/types"
 import { requiresNewerMessage } from "../../../src/core/version"
+import { builtinDetectors } from "../../../src/detectors"
 import { TEST_HOME } from "../../helpers/home"
 import { createProject } from "../../helpers/project"
 import { createRuleRepo } from "../../helpers/rule-repo"
@@ -622,6 +623,51 @@ describe("compile: rule repos", () => {
         level: "warning",
       },
     ])
+  })
+
+  describe("context_by_rule on an override of a catalog linter rule", () => {
+    const linters = createRegistry([...builtinDetectors])
+    async function overridden(override: Record<string, unknown>) {
+      const url = await createRuleRepo([
+        {
+          tag: "v1.0.0",
+          files: {
+            ".rulecast-rules.yaml": stringify([
+              {
+                id: "python/x",
+                name: "X",
+                detect: { linter: { tool: "ruff", rules: ["S110"] } },
+                message: "{{message}}",
+                context: ["@errors.md#swallowed"],
+              },
+            ]),
+            "errors.md": "# E\n\n## Swallowed\nNo.\n",
+          },
+        },
+      ])
+      const root = await createProject({
+        "docs/p.md": "# P\n\n## Mine\nMine.\n",
+        ".rulecast-config.yaml": stringify({
+          repos: [{ repo: url, rev: "v1.0.0", rules: [{ id: "python/x", ...override }] }],
+        }),
+      })
+      return compile({ root, registry: linters, repos: fetchingRepos(TEST_HOME) })
+    }
+
+    test("resolves in the project, while the rule's own context stays the repo's", async () => {
+      const project = await overridden({ context_by_rule: { S110: "@docs/p.md#mine" } })
+      expect(project.diagnostics).toEqual([])
+      const rule = project.rules[0]!
+      expect(rule.contextByRule.get("S110")!.map((spec) => spec.ref)).toEqual(["docs/p.md#mine"])
+      expect(rule.context.map((spec) => spec.ref)).toEqual([expect.stringMatching(/@v1\.0\.0:errors\.md#swallowed$/)])
+    })
+
+    test("a missing anchor in the project is an error naming the lint rule", async () => {
+      const project = await overridden({ context_by_rule: { S110: "@docs/p.md#nope" } })
+      expect(project.diagnostics.map((diagnostic) => [diagnostic.rule, diagnostic.message])).toEqual([
+        ["python/x", 'context_by_rule.S110: anchor "#nope" not found in docs/p.md'],
+      ])
+    })
   })
 })
 

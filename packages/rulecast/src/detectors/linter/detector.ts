@@ -93,14 +93,17 @@ export const linterDetector: Detector<LinterConfig> = {
   kind: "linter",
   schema: linterSchema,
   captures: () => ["message", "ruleId"],
+  // ruff reports codes (B006); a key in its name form (mutable-argument-default) could never match.
+  checkRuleId: (config, id) =>
+    config.tool === "ruff" && !/^[A-Z]+[0-9]+$/.test(id) ? "ruff reports rule codes such as B006, not names" : null,
   // A copy: compileRule stores this as the rule's stages, and module-level data must not escape into it.
   events: (config) => [...TOOLS[config.tool].events],
   takesContent: (config) => TOOLS[config.tool].stdinArgs !== undefined,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     // One run per tool for the rules that name their linter rules, with those rules turned on, and
-    // one for the rules that take every finding, which must see only what the project's own config
-    // reports. Most configs have only one kind, so most tools still run once.
+    // one for the rules that name none, which must see only what the project's own config reports
+    // (and of that, only its errors). Most configs have only one kind, so most tools still run once.
     const runs = new Map<string, { tool: ToolName; select: string[]; rules: DetectorRuleInput<LinterConfig>[] }>()
     for (const rule of input.rules) {
       const key = `${rule.config.tool}:${rule.config.rules ? "named" : "all"}`
@@ -143,9 +146,13 @@ export const linterDetector: Detector<LinterConfig> = {
               text: TOOLS[tool].redacts ? "[redacted]" : excerpt(await read(finding.file), finding),
               captures: { message: finding.message, ruleId: finding.ruleId },
               ...(TOOLS[tool].redacts && { redacted: true }),
+              ...(finding.docs && { docs: finding.docs }),
             }
             for (const rule of rules) {
               if (!rule.files.includes(finding.file)) continue
+              // A rule that names no lint rules delivers what the project's config makes an error.
+              // A named rule's ids run as errors anyway, and the line below decides.
+              if (finding.level !== "error" && !rule.config.rules) continue
               if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
               result.findings.push({ rule: rule.id, match })
             }

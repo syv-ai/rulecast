@@ -55,8 +55,19 @@ describe("linter on content that is not on disk", () => {
     const root = await createProject({ "src/a.js": "on disk\n" })
     await stubTool(root, "eslint")
     await runOnContent(root, [ruleFor({ tool: "eslint" }, ["src/a.js"])], { "src/a.js": 'console.log("x")\n' })
-    expect(await stubArgv(root, "eslint")).toBe("--format=json --stdin --stdin-filename src/a.js")
+    expect(await stubArgv(root, "eslint")).toBe("--format=json-with-metadata --stdin --stdin-filename src/a.js")
     expect(await stubStdin(root, "eslint")).toBe('console.log("x")\n')
+  })
+
+  test("a staged run keeps only what the project's config makes an error, as a path run does", async () => {
+    const root = await createProject({ "src/a.js": "on disk\n" })
+    await stubTool(root, "eslint")
+    const result = await runOnContent(root, [ruleFor({ tool: "eslint" }, ["src/a.js"])], {
+      "src/a.js": 'console.log("hi")\nconst unused = 1\ndebugger\n',
+    })
+    expect(result.findings.map((finding) => [finding.match.captures.ruleId, finding.match.docs])).toEqual([
+      ["no-console", "https://eslint.org/docs/latest/rules/no-console"],
+    ])
   })
 
   test("a file absent from the content is skipped", async () => {

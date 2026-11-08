@@ -5,9 +5,15 @@ import type { Config, Mode, RuleEntry, RuleExamples, RuleScope, Stage } from "..
 import type { DetectorRegistry } from "../detection/registry"
 import { formatZodError } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
-import { parseReference, type ReferenceRoot, type ReferenceSpec, ReferenceSyntaxError } from "../references"
+import {
+  parseReference,
+  type ReferenceInput,
+  type ReferenceRoot,
+  type ReferenceSpec,
+  ReferenceSyntaxError,
+} from "../references"
 import { CORE_VARIABLES, REMOVED_VARIABLES, templateVariables } from "../template"
-import type { Severity } from "../types"
+import type { Match, Severity } from "../types"
 import { isOlder, requiresNewerMessage, VERSION } from "../version"
 
 export interface CompiledDetector {
@@ -46,7 +52,13 @@ export interface CompiledRule {
   matches(file: string): boolean
   detector: CompiledDetector | null
   message: string | null
+  /** Delivered with any finding of the rule. Read it through `ruleContextFor` or `allRuleContext`. */
   context: ReferenceSpec[]
+  /**
+   * `context_by_rule`: sections delivered only with findings whose `ruleId` capture is the key, in
+   * the order the config wrote them. Empty for a rule without the key.
+   */
+  contextByRule: ReadonlyMap<string, ReferenceSpec[]>
   /**
    * `rulecast fix` may apply this rule's fix: its detector says the config carries one, and the rule
    * has a `bad` example to prove it on. Hooks never apply one, whatever this says.
@@ -80,6 +92,8 @@ export interface RuleInput {
   source: string
   /** Where `context` resolves: the project, unless the context came from a manifest. */
   contextRoot: ReferenceRoot
+  /** Where `context_by_rule` resolves, which an override may write apart from `context`. Default: `contextRoot`. */
+  contextByRuleRoot?: ReferenceRoot
 }
 
 export interface RuleContext {
@@ -230,21 +244,24 @@ export async function compileRule(
     }
   }
 
-  const references: ReferenceSpec[] = []
-  for (const reference of data.context ?? []) {
-    let spec: ReferenceSpec
-    try {
-      spec = parseReference(reference, context.config.context.mode, input.contextRoot)
-    } catch (error) {
-      if (error instanceof ReferenceSyntaxError) return error.message
-      throw error
+  const references = await compileReferences(data.context ?? [], context, input.contextRoot, "")
+  if (typeof references === "string") return references
+
+  const contextByRule = new Map<string, ReferenceSpec[]>()
+  if (data.context_by_rule !== undefined) {
+    if (detector === null || !detector.captures.includes("ruleId")) {
+      return `context_by_rule needs a detector that reports rule ids; ${detector?.kind ?? "a rule without detect"} does not`
     }
-    const text = await context.read(path.resolve(input.contextRoot.dir, spec.path))
-    if (text === null) return `referenced file not found: ${fileOf(spec)}`
-    if (spec.anchor !== null && !sectionRange(text, spec.anchor)) {
-      return `anchor "#${spec.anchor}" not found in ${fileOf(spec)}`
+    const checkRuleId = context.registry.get(detector.kind)?.checkRuleId
+    for (const [ruleId, value] of Object.entries(data.context_by_rule)) {
+      const prefix = `context_by_rule.${ruleId}: `
+      const problem = checkRuleId?.(detector.config, ruleId) ?? null
+      if (problem !== null) return `${prefix}${problem}`
+      const root = input.contextByRuleRoot ?? input.contextRoot
+      const specs = await compileReferences(Array.isArray(value) ? value : [value], context, root, prefix)
+      if (typeof specs === "string") return specs
+      contextByRule.set(ruleId, specs)
     }
-    references.push(spec)
   }
 
   // A fix is applied without anyone reading it first, so it has to have been seen to work: a rule
@@ -275,10 +292,73 @@ export async function compileRule(
     detector,
     message: data.message ?? null,
     context: references,
+    contextByRule,
     fixable: hasFix && bad.length > 0,
     examples: data.examples ?? null,
   }
   return { rule, warnings }
+}
+
+/**
+ * References parsed and checked against their root: each file exists and each anchor is a section
+ * in it. The first problem, prefixed with `prefix`, when there is one.
+ */
+async function compileReferences(
+  inputs: readonly ReferenceInput[],
+  context: RuleContext,
+  root: ReferenceRoot,
+  prefix: string,
+): Promise<ReferenceSpec[] | string> {
+  const specs: ReferenceSpec[] = []
+  for (const reference of inputs) {
+    let spec: ReferenceSpec
+    try {
+      spec = parseReference(reference, context.config.context.mode, root)
+    } catch (error) {
+      if (error instanceof ReferenceSyntaxError) return `${prefix}${error.message}`
+      throw error
+    }
+    const text = await context.read(path.resolve(root.dir, spec.path))
+    if (text === null) return `${prefix}referenced file not found: ${fileOf(spec)}`
+    if (spec.anchor !== null && !sectionRange(text, spec.anchor)) {
+      return `${prefix}anchor "#${spec.anchor}" not found in ${fileOf(spec)}`
+    }
+    specs.push(spec)
+  }
+  return specs
+}
+
+/** `specs` in order, each `ref` once. */
+function uniqueRefs(specs: Iterable<ReferenceSpec>): ReferenceSpec[] {
+  const seen = new Map<string, ReferenceSpec>()
+  for (const spec of specs) if (!seen.has(spec.ref)) seen.set(spec.ref, spec)
+  return [...seen.values()]
+}
+
+/**
+ * The references a rule delivers with these findings of it: its own `context`, then the
+ * `context_by_rule` sections of each lint rule among them, in the order they first fired. Each ref
+ * once.
+ */
+export function ruleContextFor(rule: CompiledRule, matches: readonly Match[]): ReferenceSpec[] {
+  if (rule.contextByRule.size === 0) return rule.context
+  const fired = new Set(matches.map((match) => match.captures.ruleId ?? ""))
+  return uniqueRefs([rule.context, ...[...fired].map((ruleId) => rule.contextByRule.get(ruleId) ?? [])].flat())
+}
+
+/** Every reference the rule can deliver, with no findings to pick by: for `list` and SARIF. */
+export function allRuleContext(rule: CompiledRule): ReferenceSpec[] {
+  return uniqueRefs([rule.context, ...rule.contextByRule.values()].flat())
+}
+
+/**
+ * What one finding points to: the project's section for its lint rule when `context_by_rule` maps
+ * one, else the tool's own page, else nothing.
+ */
+export function findingDocs(rule: CompiledRule, match: Match): { spec: ReferenceSpec } | { url: string } | null {
+  const mapped = rule.contextByRule.get(match.captures.ruleId ?? "")?.[0]
+  if (mapped !== undefined) return { spec: mapped }
+  return match.docs !== undefined ? { url: match.docs } : null
 }
 
 /**
