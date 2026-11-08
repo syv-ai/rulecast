@@ -450,11 +450,22 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   // \u003c rather than <: the agent pastes this into setup-page.html's script data block, which a
   // literal "</script>" in a file's content would end early.
   if (flags.format === "json") io.stdout(`${JSON.stringify(report, null, 2).replaceAll("<", "\\u003c")}\n`)
-  else io.stdout(terminalText(report, detection, scan, report.written ? [...flags.hooks, ...flags.catalog] : []))
+  else io.stdout(terminalText(report, detection, scan, report.written ? adoptedNames(flags) : []))
   if (report.validate === null) return 0
   return report.validate.errors > 0 || !fetched ? 2 : 0
 }
 
+/** The hook ids, catalog rule ids and paths a run wrote: no longer offered in its text. */
+function adoptedNames(flags: Flags): string[] {
+  return [
+    ...flags.hooks,
+    ...flags.catalog,
+    ...(flags.generated.length > 0 ? [GENERATED_RULE, ...flags.generated] : []),
+    ...(flags.vendored.length > 0 ? [VENDORED_RULE, ...flags.vendored] : []),
+  ]
+}
+
+/** `wrapped`: what this run wrote (adoptedNames), left out of what it offers. */
 function terminalText(report: InitReport, detection: Detection, scan: HookScan, wrapped: readonly string[]): string {
   const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
   const offered = report.hooks.offered.filter((hook) => !hook.configured && !wrapped.includes(hook.id))
@@ -476,12 +487,14 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
       out.push(`Catalog (${report.catalog.label})`, `Fits, with --catalog: ${named.join(", ")}`, "")
     }
   }
-  const paths = (offered: readonly OfferedPath[]) =>
-    offered.map((entry) => (entry.kind === "dir" ? `${entry.path} (${plural(entry.files, "file")})` : entry.path))
-  const generated = [
-    ...(report.generated.length > 0 ? [`Offered with --generated: ${paths(report.generated).join(", ")}`] : []),
-    ...(report.vendored.length > 0 ? [`Offered with --vendored: ${paths(report.vendored).join(", ")}`] : []),
-  ]
+  const paths = (flag: string, offered: readonly OfferedPath[]) => {
+    const left = offered.filter((entry) => !wrapped.includes(entry.path))
+    const named = left.map((entry) =>
+      entry.kind === "dir" ? `${entry.path} (${plural(entry.files, "file")})` : entry.path,
+    )
+    return left.length === 0 ? [] : [`Offered with ${flag}: ${named.join(", ")}`]
+  }
+  const generated = [...paths("--generated", report.generated), ...paths("--vendored", report.vendored)]
   if (generated.length > 0) out.push("Generated", ...generated, "")
   const planned = report.changes as PlannedChange[]
   out.push(

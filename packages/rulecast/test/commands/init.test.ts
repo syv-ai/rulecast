@@ -397,7 +397,11 @@ describe("rulecast init", () => {
       "--generated",
       "frontend/src/client/",
     ]
-    expect((await init(root, ...args)).code).toBe(0)
+    const first = await init(root, ...args)
+    expect(first.code).toBe(0)
+    // What it just wrote is not offered again.
+    expect(first.stdout).not.toContain("Fits, with --catalog")
+    expect(first.stdout).not.toContain("Offered with --generated")
     const again = await report(root, ...args, "--dry-run")
     expect(again.report.changes).toEqual([])
     const fit = (again.report.catalog as { rules: CatalogFit[] }).rules.find((rule) => rule.id === "generated-code")!
