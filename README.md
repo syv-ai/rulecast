@@ -344,7 +344,7 @@ The rulecast plugin sets rulecast up and adds one rule at a time, from inside a 
 - `/rulecast:add-rule` with nothing after it looks back over the session for a correction or a mistake that should not happen again.
 - `/rulecast:add-rule services never raise HTTPException` starts from the convention you name.
 
-Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. If a catalog rule already checks it, the agent offers that one. Otherwise it writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) describes, and changes nothing without your approval. The agent may also offer the skill itself after you correct a mistake; it says why and asks first.
+Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. If a catalog rule already checks it, the agent offers that one. Otherwise it writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) describes, and changes nothing without your approval. When you correct the agent on how code here should be written, it may ask once whether to add a rulecast rule for it, and changes nothing unless you say yes.
 
 The plugin's version follows the CLI's, so each release reaches you as a plugin update.
 
