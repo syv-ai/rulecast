@@ -55,7 +55,7 @@ describe("the Claude Code plugin", () => {
     const { when_to_use } = frontmatter(SKILL).meta
     expect(when_to_use).toMatch(/do not start this skill/)
     expect(when_to_use).toMatch(/only after a yes/)
-    expect(when_to_use).toMatch(/never again after a no/)
+    expect(when_to_use).toMatch(/never again for that convention after a no/)
     expect(when_to_use).toMatch(/at most once per reply/)
   })
 

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: no-reoffer-after-no
-description: After the developer said no to a rule for a convention, the agent does not offer it again.
+description: After the developer said no to a rule for a convention, a fresh correction of it gets no second offer.
 context:
   scaffold_script: scaffold.sh
   history_file: history.jsonl

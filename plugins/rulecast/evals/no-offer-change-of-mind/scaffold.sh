@@ -39,6 +39,19 @@ def get(user_id: int) -> str:
     return USERS[user_id]
 PY
 
+# The history's first exchange already changed users.py.
+cat > app/services/users.py <<'PY'
+from app.errors import NotFound
+
+USERS = {1: "ada", 2: "grace"}
+
+
+def get(user_id: int) -> str:
+    if user_id not in USERS:
+        raise NotFound()
+    return USERS[user_id]
+PY
+
 cat > app/services/orders.py <<'PY'
 from fastapi import HTTPException
 

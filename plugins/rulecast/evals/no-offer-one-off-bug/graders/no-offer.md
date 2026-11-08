@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: 'rulecast rule'
+pattern: 'rulecast|add a rule'
 flags: i
 match: not_contains
 target: last_message

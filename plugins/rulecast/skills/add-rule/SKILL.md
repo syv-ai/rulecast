@@ -1,7 +1,7 @@
 ---
 name: add-rule
 description: Turns one convention into a rulecast rule, with the developer approving every change. The convention is the one the developer names, or, with nothing named, the one the session just showed. Use when the developer asks to add a rulecast rule, to make rulecast catch something, or to stop a mistake from recurring.
-when_to_use: 'Also when, in a rulecast project with the developer there to answer, they correct you and the correction says how code here should always or never be written. Then do not start this skill. Finish the fix and end that reply with one line: Want me to add a rulecast rule for this? "<the convention, in one sentence about the code>". Offer once per convention per session, never again after a no, and at most once per reply. Do not offer for a change of mind about this task, a one-off bug, or a mistake a rulecast finding already caught. Start this skill only after a yes, passing that sentence.'
+when_to_use: 'Also when, in a rulecast project with the developer there to answer, they correct you and the correction says how code here should always or never be written. Then do not start this skill. Finish the fix and end that reply with one line: Want me to add a rulecast rule for this? "<the convention, in one sentence about the code>". Offer once per convention per session, never again for that convention after a no, and at most once per reply. Do not offer for a change of mind about this task, a one-off bug, or a mistake a rulecast finding already caught. Start this skill only after a yes, passing that sentence.'
 argument-hint: "[the convention, or nothing for what just happened]"
 ---
 
