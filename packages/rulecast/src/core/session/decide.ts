@@ -390,6 +390,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
 
   return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels, ruleRefs }
 }
+
 export interface Trimmed {
   delivery: Delivery
   /** The untrimmed delivery, when the budget had to cut whole rules out; null when it cut none. */
