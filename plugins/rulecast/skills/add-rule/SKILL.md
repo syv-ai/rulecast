@@ -1,6 +1,7 @@
 ---
 name: add-rule
-description: Turns one convention into a rulecast rule, with the developer approving every change. The convention is the one the developer names, or, with nothing named, the one the session just showed: a correction they made, or a mistake that should not happen again. Use when the developer asks to add a rulecast rule, to make rulecast catch something, or to stop a mistake from recurring, and in a rulecast project when the developer corrects a mistake that code could show and that should not happen again.
+description: Turns one convention into a rulecast rule, with the developer approving every change. The convention is the one the developer names, or, with nothing named, the one the session just showed. Use when the developer asks to add a rulecast rule, to make rulecast catch something, or to stop a mistake from recurring.
+when_to_use: 'Also when, in a rulecast project with the developer there to answer, they correct you and the correction says how code here should always or never be written. Then do not start this skill. Finish the fix and end that reply with one line: Want me to add a rulecast rule for this? "<the convention, in one sentence about the code>". Offer once per convention per session, never again after a no, and at most once per reply. Do not offer for a change of mind about this task, a one-off bug, or a mistake a rulecast finding already caught. Start this skill only after a yes, passing that sentence.'
 argument-hint: "[the convention, or nothing for what just happened]"
 ---
 
@@ -10,9 +11,13 @@ Turn one convention into a rulecast rule. The developer decides what the convent
 
 The developer asked for: $ARGUMENTS
 
-If you started this yourself, without the developer asking, say so before anything else: name the mistake or correction that made you think a rule would help, and ask whether they want one. Stop if they don't.
-
 Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
+
+## If you were not asked
+
+- **The developer said yes to your offer of a rule.** They asked for the convention as you worded it. Take it as confirmed in step 1, unless they reworded it, and go on to step 2. Do not ask again whether they want a rule.
+- **You started this yourself, without offering first.** Say so before anything else: name the correction that made you think a rule would help, and ask whether they want one. Stop if they don't.
+- **You were told to work without the developer.** Stop and say why: only the developer can choose a convention.
 
 ## 1. Name the convention
 
