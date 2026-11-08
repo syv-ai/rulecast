@@ -6,7 +6,7 @@
 
 Your project's conventions, delivered to your coding agent when it breaks one.
 
-[![npm](https://img.shields.io/npm/v/%40syv-ai%2Frulecast?color=7fa4d6&label=npm)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
+[![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
 
 [Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](guides/claude-code-plugin.md) · [Changelog](packages/rulecast/CHANGELOG.md)
 
