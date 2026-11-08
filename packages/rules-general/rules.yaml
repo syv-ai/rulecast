@@ -19,3 +19,22 @@
       - path: src/__generated__/schema.ts
         code: |
           export type Query = { users: User[] }
+- id: vendored-code
+  name: Vendored code is never edited in place
+  description: "Flags edits to vendored code: vendor/ and third_party/ directories."
+  files: '(^|/)(vendor|third_party)/'
+  severity: error
+  detect:
+    path: {}
+  message: "{{file}} is vendored. Update the dependency and re-vendor it (or patch it upstream); never edit it in place."
+  context:
+    - "@vendored-code.md"
+  # As with generated-code: every file `files` matches is a violation, so only bad examples.
+  examples:
+    bad:
+      - path: vendor/github.com/acme/lib/lib.go
+        code: |
+          package lib
+      - path: third_party/zlib/inflate.c
+        code: |
+          int inflate(void);

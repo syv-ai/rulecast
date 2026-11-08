@@ -35,6 +35,7 @@ function skippedForRuff(rule: CompiledRule | undefined): boolean {
 
 const CATALOG = [
   "generated-code",
+  "vendored-code",
   "loop-safety/no-skipped-tests-python",
   "loop-safety/no-skipped-tests-ts",
   "loop-safety/no-skipped-tests-js",
@@ -189,6 +190,21 @@ const cases: Case[] = [
   },
   { rule: "generated-code", kind: "verify", file: "src/__generated__/schema.ts", content: "export {}\n", fires: true },
   { rule: "generated-code", kind: "verify", file: "frontend/src/client.ts", content: "export {}\n", fires: false },
+  {
+    rule: "vendored-code",
+    kind: "verify",
+    file: "vendor/github.com/acme/lib/lib.go",
+    content: "package lib\n",
+    fires: true,
+  },
+  {
+    rule: "vendored-code",
+    kind: "verify",
+    file: "native/third_party/zlib/inflate.c",
+    content: "int x;\n",
+    fires: true,
+  },
+  { rule: "vendored-code", kind: "verify", file: "src/vendors/list.ts", content: "export {}\n", fires: false },
   {
     rule: "python/no-silent-except",
     kind: "verify",
