@@ -9,6 +9,7 @@ import {
   type CommittedBaseline,
   readCommittedBaseline,
 } from "../core/baseline/committed"
+import { currentBinaryPath, installOneLiner } from "../core/binary-home"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
@@ -28,12 +29,43 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
-import { configLabel, hookCommandResolves, hookConfigs, hookState, reachableConfigs, settingsDir } from "./install"
+import { isOlder, VERSION } from "../core/version"
+import {
+  configLabel,
+  type HookRulecast,
+  hookConfigs,
+  hookRulecasts,
+  hookState,
+  reachableConfigs,
+  settingsDir,
+} from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
 
-type Level = "ok" | "warning" | "error" | "skipped"
+/** `info` is said and not counted: it changes no exit code. */
+type Level = "ok" | "warning" | "error" | "skipped" | "info"
+
+/** Which rulecast the hooks run, and its version when it printed one. */
+function runsLabel(runs: HookRulecast): string {
+  const label =
+    runs.via === "project"
+      ? "node_modules/.bin/rulecast"
+      : runs.via === "binary"
+        ? `the standalone binary at ${runs.path}`
+        : `rulecast on the PATH (${runs.path})`
+  return runs.version === null ? label : `${label} ${runs.version}`
+}
+
+/**
+ * How to update the rulecast the hooks run, by where it came from. For the binary, the one-liner
+ * for the newest version doctor knows of. Printed, never run: installing is the developer's step.
+ */
+function updateRemedy(runs: HookRulecast, minimum: string): string {
+  if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
+  if (runs.via === "path") return "update the global install"
+  return `install a newer binary: ${installOneLiner(isOlder(VERSION, minimum) ? minimum : VERSION)}`
+}
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
 const CHECK_TIMEOUT_MS = 30_000
@@ -193,7 +225,10 @@ export async function doctorCommand(
   // The settings in this directory: an agent reads them only where its session starts.
   io.stdout(dir === root ? "\nhooks\n" : `\nhooks in ${dir}\n`)
   // Asked once, not per adapter: every adapter's hook runs the same rulecast.
-  const runs = await hookCommandResolves(dir, io.env)
+  const found = await hookRulecasts(dir, io.env)
+  const runs = found[0] ?? null
+  const minimum = project.config.minimumRulecastVersion
+  const tooOld = runs?.version != null && minimum !== null && isOlder(runs.version, minimum)
   // The timeout the hooks here need, as install sizes it: the largest of every config they serve.
   // A config that does not load is reported where it is compiled, not here.
   const verifyMs =
@@ -211,7 +246,11 @@ export async function doctorCommand(
     // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
     // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
     const level: Level =
-      file !== null && !runs && ci ? "error" : file === null || !runs || stale || missing.length > 0 ? "warning" : "ok"
+      file !== null && !runs && ci
+        ? "error"
+        : file === null || !runs || stale || missing.length > 0 || (file !== null && tooOld)
+          ? "warning"
+          : "ok"
     count(level)
     const detail =
       file === null
@@ -221,9 +260,22 @@ export async function doctorCommand(
           : stale
             ? `${file} — but the hooks are out of date; run rulecast install`
             : runs
-              ? file
-              : `${file} — but rulecast is in neither node_modules/.bin nor on the PATH, so no rules run. Add it to the project (pnpm add -D @syv-ai/rulecast), or install it globally.`
+              ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
+              : `${file} — but rulecast is not in node_modules/.bin, at ${currentBinaryPath(home)} or on the PATH, so no rules run. ` +
+                `Install the standalone binary: ${installOneLiner(VERSION)}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     io.stdout(line(level, adapter.label, detail))
+  }
+  // A devDependency wins over the installed binary: say so when they differ, as nothing else will.
+  const local = found.find((entry) => entry.via === "project")
+  const binary = found.find((entry) => entry.via === "binary")
+  if (local && binary && local.version !== binary.version) {
+    io.stdout(
+      line(
+        "info",
+        "rulecast",
+        `the hooks run node_modules/.bin/rulecast ${local.version ?? "(unknown version)"}, not the standalone binary at ${binary.path} ${binary.version ?? "(unknown version)"}`,
+      ),
+    )
   }
 
   io.stdout("\ncache\n")

@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { access, constants, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { ADAPTERS, adapterByName } from "../adapters"
+import { currentBinaryPath, probeRulecast } from "../core/binary-home"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
@@ -13,7 +13,7 @@ import { configRootsAbove, configRootsBelow, displayPath } from "../core/project
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import type { Adapter, InstallScope } from "../core/types"
-import { onPath } from "../core/which"
+import { commandPath } from "../core/which"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
 
@@ -43,22 +43,51 @@ function isEmptyObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
 }
 
+/** A rulecast the hooks can run: where it was found, its path, and what `--version` printed. */
+export interface HookRulecast {
+  via: "project" | "binary" | "path"
+  path: string
+  version: string | null
+}
+
 /**
- * Can the command an installed hook runs actually find rulecast?
- *
- * The hook runs the project's `node_modules/.bin/rulecast`, else one on the PATH. A project with
- * neither has hooks that are installed and run no rules — which `doctor` exists to catch, and did
- * not until a self-install on this repository walked into it.
+ * Every rulecast the hook command would consider, in the order it tries them: the project's
+ * `node_modules/.bin/rulecast`, the installed binary's current link, then the PATH. Executable is
+ * enough for the first two (the hook execs them); one on the PATH that cannot run (126, 127)
+ * counts as none, as in the hook. A project with none has hooks that are installed and run no
+ * rules, which `doctor` exists to catch.
  *
  * `env`'s PATH, without the bins of package runners (TEMPORARY_BIN): the setup docs run doctor as
  * `npx @syv-ai/rulecast doctor`, which puts its own rulecast on the PATH it runs doctor with, and
  * the hooks never run under npx (plan 21).
  */
-export async function hookCommandResolves(root: string, env: Env, signal?: AbortSignal): Promise<boolean> {
-  if (existsSync(path.join(root, "node_modules", ".bin", "rulecast"))) return true
+export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal): Promise<HookRulecast[]> {
+  const found: HookRulecast[] = []
+  const fixed = [
+    ["project", path.join(root, "node_modules", ".bin", "rulecast")],
+    ["binary", currentBinaryPath(cacheHome(env))],
+  ] as const
+  for (const [via, file] of fixed) {
+    if (
+      !(await access(file, constants.X_OK).then(
+        () => true,
+        () => false,
+      ))
+    )
+      continue
+    found.push({ via, path: file, version: (await probeRulecast(file, signal))?.version ?? null })
+  }
   const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
   const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
-  return onPath("rulecast", signal, PATH)
+  const onPath = await commandPath("rulecast", signal, PATH)
+  const probe = onPath === null ? null : await probeRulecast(onPath, signal)
+  if (onPath !== null && probe !== null) found.push({ via: "path", path: onPath, version: probe.version })
+  return found
+}
+
+/** The rulecast the installed hooks run, or null when they would find none. */
+export async function hookRulecast(root: string, env: Env, signal?: AbortSignal): Promise<HookRulecast | null> {
+  return (await hookRulecasts(root, env, signal))[0] ?? null
 }
 
 /**

@@ -5,12 +5,15 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { stringify } from "yaml"
 
+import { installOneLiner } from "../../src/core/binary-home"
+import { VERSION } from "../../src/core/version"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo, git } from "../helpers/git"
 import { stateDirFor, TEST_HOME, testEnv } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
+import { LOOKUP_FIXTURES, lookupSetup, type Place } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -77,6 +80,7 @@ describe("rulecast doctor", () => {
       "src/x.ts": "const x = 1\n",
       "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
     })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
     expect(result.stdout).toContain(`project    ${root}`)
@@ -250,11 +254,66 @@ describe("rulecast doctor", () => {
       ".rulecast-config.yaml": localConfig([RULE("a")]),
       "src/x.ts": "const x = 1\n",
       // The hook command resolves from here, which is what makes it ok rather than a warning.
-      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\necho 0.8.2\n",
     })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
-    expect(result.stdout).toContain("ok       Claude Code — .claude/settings.json")
+    expect(result.stdout).toContain(
+      "ok       Claude Code — .claude/settings.json — runs node_modules/.bin/rulecast 0.8.2\n",
+    )
+  })
+
+  /** doctor with a stub rulecast in each of `places`, the installed binary in a cache home of its own. */
+  async function doctorWith(places: Place[], settings: Record<string, unknown> = {}, versions = {}) {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")], settings), "src/x.ts": "" })
+    const setup = lookupSetup(places, root, versions)
+    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
+    return { ...(await runCli(root, ["doctor"], "", env)), setup }
+  }
+
+  test.each(LOOKUP_FIXTURES)("doctor names the rulecast the hooks run: $name", async ({ places, runs }) => {
+    const { stdout, setup } = await doctorWith(places)
+    const label = {
+      project: "node_modules/.bin/rulecast",
+      binary: `the standalone binary at ${setup.file.binary}`,
+      path: `rulecast on the PATH (${setup.file.path})`,
+    }[runs]
+    expect(stdout).toContain(`ok       Claude Code — .claude/settings.json — runs ${label} 0.8.2\n`)
+  })
+
+  test("an installed binary runs the hooks, and doctor names it with its version", async () => {
+    const { stdout, code, setup } = await doctorWith(["binary"], {}, { binary: "0.8.1" })
+    expect(stdout).toContain(`runs the standalone binary at ${setup.file.binary} 0.8.1\n`)
+    expect(code).toBe(0)
+  })
+
+  test("a hook rulecast older than minimum_rulecast_version is a warning with the command that would update it", async () => {
+    const { stdout, setup } = await doctorWith(["binary"], { minimum_rulecast_version: "0.8.0" }, { binary: "0.1.0" })
+    const before = await readdir(setup.home, { recursive: true })
+    expect(stdout).toContain(
+      `warning  Claude Code — .claude/settings.json — runs the standalone binary at ${setup.file.binary} 0.1.0, ` +
+        `older than minimum_rulecast_version 0.8.0; install a newer binary: ${installOneLiner(VERSION)}\n`,
+    )
+    // doctor says what to run, and runs nothing: the cache is as it was.
+    expect(await readdir(setup.home, { recursive: true })).toEqual(before)
+    // A devDependency or a global install is updated where it came from.
+    const local = await doctorWith(["project"], { minimum_rulecast_version: "0.8.0" }, { project: "0.1.0" })
+    expect(local.stdout).toContain("older than minimum_rulecast_version 0.8.0; update @syv-ai/rulecast in package.json")
+    const global = await doctorWith(["path"], { minimum_rulecast_version: "0.8.0" }, { path: "0.1.0" })
+    expect(global.stdout).toContain("older than minimum_rulecast_version 0.8.0; update the global install")
+  })
+
+  test("a project rulecast and a different installed binary are both named", async () => {
+    const { stdout, code, setup } = await doctorWith(["project", "binary"], {}, { project: "0.8.2", binary: "0.7.0" })
+    expect(stdout).toContain("ok       Claude Code — .claude/settings.json — runs node_modules/.bin/rulecast 0.8.2\n")
+    expect(stdout).toContain(
+      `info     rulecast — the hooks run node_modules/.bin/rulecast 0.8.2, not the standalone binary at ${setup.file.binary} 0.7.0\n`,
+    )
+    expect(code).toBe(0)
+    // The same version twice is nothing to say.
+    expect((await doctorWith(["project", "binary"])).stdout).not.toContain("info     rulecast")
   })
 
   test("an install from before the Bash hooks names what is missing, and install fixes it", async () => {
@@ -263,6 +322,7 @@ describe("rulecast doctor", () => {
       "src/x.ts": "const x = 1\n",
       "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
     })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const file = path.join(root, ".claude/settings.json")
     const settings = JSON.parse(await readFile(file, "utf8"))
@@ -287,8 +347,10 @@ describe("rulecast doctor", () => {
     })
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     const result = await doctor(root)
-    expect(result.stdout).toContain("warning  Claude Code — .claude/settings.json")
-    expect(result.stdout).toContain("so no rules run")
+    expect(result.stdout).toContain(
+      `warning  Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, at ${path.join(TEST_HOME, "bin", "rulecast")} or on the PATH, so no rules run. ` +
+        `Install the standalone binary: ${installOneLiner(VERSION)}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
+    )
     // A warning, not an error: the installation is wrong, not broken beyond use.
     expect(result.code).toBe(0)
   })
@@ -373,10 +435,12 @@ describe("rulecast doctor", () => {
       await chmod(path.join(bin, "rulecast"), 0o755)
       vi.stubEnv("PATH", `${bin}:/usr/bin:/bin`)
       const global = await ci(root)
-      expect(global.stdout).toContain("ok       Claude Code — .claude/settings.json\n")
+      expect(global.stdout).toContain(
+        `ok       Claude Code — .claude/settings.json — runs rulecast on the PATH (${path.join(bin, "rulecast")})\n`,
+      )
       vi.stubEnv("PATH", "/usr/bin:/bin")
       const neither = await ci(root)
-      expect(neither.stdout).toMatch(/error {4}Claude Code — \.claude\/settings\.json — but rulecast is in neither/)
+      expect(neither.stdout).toMatch(/error {4}Claude Code — \.claude\/settings\.json — but rulecast is not in/)
       expect(neither.code).toBe(2)
     })
 
