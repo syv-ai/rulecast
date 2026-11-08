@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: yes-starts-skill
+description: After a yes to the offer, the agent starts the add-rule skill and does not ask again whether to add a rule.
+context:
+  scaffold_script: scaffold.sh
+  history_file: history.jsonl

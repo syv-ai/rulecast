@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
@@ -57,6 +57,18 @@ describe("the Claude Code plugin", () => {
     expect(when_to_use).toMatch(/only after a yes/)
     expect(when_to_use).toMatch(/never again after a no/)
     expect(when_to_use).toMatch(/at most once per reply/)
+  })
+
+  test("every eval case has a prompt and the no-rule-writes grader", () => {
+    const evals = path.join(repoRoot, "plugins/rulecast/evals")
+    const cases = readdirSync(evals, { withFileTypes: true }).filter(
+      (entry) => entry.isDirectory() && entry.name !== "results",
+    )
+    expect(cases.length).toBeGreaterThan(0)
+    for (const { name } of cases) {
+      expect(existsSync(path.join(evals, name, "prompt.md")), name).toBe(true)
+      expect(existsSync(path.join(evals, name, "graders/no-rule-writes.md")), name).toBe(true)
+    }
   })
 
   test("a yes to an offer is not asked again", () => {
