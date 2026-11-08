@@ -105,23 +105,17 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast init` | Set rulecast up: config, settings, your existing git hooks as rules, agent hooks |
 | `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
-| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones |
 | `rulecast fix` | Apply regex and ast-grep rules' fixes; `--dry-run` prints the diff |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
 | `rulecast add` | Add catalog rules or packs, such as loop-safety, to the nearest config |
 | `rulecast test` | Run each rule's good/bad examples; `--against` and `--history` say how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
-| `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
-| `rulecast autoupdate` | Move pinned rule repos to their latest tag |
-| `rulecast try-repo` | Run a rule repo against your project without configuring it |
-| `rulecast clean` | Delete the cache; the installed binary stays |
-| `rulecast warm` | Build detector caches ahead of time |
-| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
-| `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
-`rulecast <command> --help` prints a command's flags; `rulecast --version` prints the version.
+`rulecast <command> --help` prints a command's flags; `rulecast help --all` lists every command, the advanced ones too; `rulecast --version` prints the version.
+
+If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
 
 ### Exit codes
 
@@ -135,6 +129,21 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
 
 On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. `rulecast test` exits `1` when an example fails, and `rulecast baseline` exits `3` when a rule could not run. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md).
+
+### Advanced commands
+
+Most projects never run these by hand.
+
+| Command | Does |
+|---|---|
+| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](#a-committed-baseline)) |
+| `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
+| `rulecast autoupdate` | Move pinned rule repos to their latest tag |
+| `rulecast try-repo` | Run a rule repo against your project without configuring it |
+| `rulecast clean` | Delete the cache; the installed binary stays |
+| `rulecast warm` | Build detector caches ahead of time |
+| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
+| `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
 ## Git hooks and CI
 
@@ -283,8 +292,6 @@ rulecast run --all-files     # exits 0 unless something got worse
 - `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
 
 Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
-
-If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
 
 ## Agents
 
