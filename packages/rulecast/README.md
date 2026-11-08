@@ -152,7 +152,7 @@ rulecast installs no git hooks itself: lefthook, husky and pre-commit already ow
 minimum_pre_commit_version: "3.2.0"
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.8.0
+    rev: v0.8.1
     hooks:
       - id: rulecast
       - id: rulecast-push
