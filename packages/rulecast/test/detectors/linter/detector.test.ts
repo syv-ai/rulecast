@@ -4,6 +4,7 @@ import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { memoryCache } from "../../../src/core/detection/cache"
+import { findingIds } from "../../../src/core/finding-id"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
@@ -42,7 +43,12 @@ describe("linter detector", () => {
   })
 
   test("runs the real oxlint once over the union of its rules' files", async () => {
-    const root = await createProject({ "src/a.js": JS, "src/b.js": "debugger\n" })
+    // The config makes no-debugger an error and leaves the rest of oxlint's defaults at warn.
+    const root = await createProject({
+      "src/a.js": JS,
+      "src/b.js": "debugger\n",
+      ".oxlintrc.json": '{ "rules": { "no-debugger": "error" } }\n',
+    })
     await linkTool(root, "oxlint")
     const result = await run(root, [
       ruleFor("no-debugger", { tool: "oxlint", rules: ["no-debugger"] }, ["src/a.js", "src/b.js"]),
@@ -58,15 +64,72 @@ describe("linter detector", () => {
     const inA = debuggerFindings.find((finding) => finding.match.file === "src/a.js")!
     expect(inA.match.captures).toEqual({ ruleId: "no-debugger", message: "`debugger` statement is not allowed" })
     expect(inA.match.text).toBe("debugger")
-    // "everything" has no rules list, so it gets every diagnostic oxlint reported — but only for
-    // the one file it selects. Asserted as a superset rather than a count: oxlint's default rule
-    // set changes between releases, and this test is not about which rules it ships.
+    // "everything" has no rules list, so it gets what the project's config makes an error, and
+    // only for the one file it selects. no-unused-vars fires at oxlint's default level, warn.
     const all = result.findings.filter((finding) => finding.rule === "everything")
-    expect(all.every((finding) => finding.match.file === "src/a.js")).toBe(true)
-    // More than the filtered rule's one id, which is the whole point of omitting `rules`.
-    const allIds = all.map((finding) => finding.match.captures.ruleId)
-    expect(allIds).toContain("no-debugger")
-    expect(allIds).toContain("no-unused-vars")
+    expect(all.map((finding) => [finding.match.file, finding.match.captures.ruleId])).toEqual([
+      ["src/a.js", "no-debugger"],
+    ])
+    expect(inA.match.docs).toMatch(/^https:\/\/oxc\.rs\//)
+  })
+
+  test("a rule without rules takes only the findings the project's config makes errors", async () => {
+    // The recording has no-console at error and no-debugger at warn.
+    const root = await createProject({ "src/a.js": JS })
+    await stubTool(root, "eslint")
+    const result = await run(root, [ruleFor("all", { tool: "eslint" }, ["src/a.js"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((finding) => finding.match.captures.ruleId)).toEqual(["no-console"])
+  })
+
+  test("a named rule still gets its rules whatever level the config gives them", async () => {
+    const root = await createProject({ "src/a.js": JS })
+    await stubTool(root, "eslint")
+    const result = await run(root, [ruleFor("named", { tool: "eslint", rules: ["no-debugger"] }, ["src/a.js"])])
+    expect(result.findings.map((finding) => finding.match.captures.ruleId)).toEqual(["no-debugger"])
+  })
+
+  test("eslint's ignored-file notice is never a finding", async () => {
+    const root = await createProject({ "src/a.js": JS })
+    await stubTool(root, "eslint")
+    const notice = {
+      results: [
+        {
+          filePath: path.join(root, "src/a.js"),
+          messages: [
+            {
+              ruleId: null,
+              fatal: false,
+              severity: 1,
+              message: "File ignored because no matching configuration was supplied.",
+            },
+          ],
+        },
+      ],
+      metadata: { rulesMeta: {} },
+    }
+    await writeFile(path.join(root, "node_modules", ".bin", "eslint.recording.json"), JSON.stringify(notice))
+    const result = await run(root, [ruleFor("all", { tool: "eslint" }, ["src/a.js"])])
+    expect(result).toEqual({ findings: [], errors: [] })
+  })
+
+  test("a match carries the tool's doc url, and its id does not depend on it", async () => {
+    const root = await createProject({ "src/a.js": JS })
+    await stubTool(root, "eslint")
+    const result = await run(root, [ruleFor("all", { tool: "eslint" }, ["src/a.js"])])
+    const match = result.findings[0]!.match
+    expect(match.docs).toBe("https://eslint.org/docs/latest/rules/no-console")
+    expect(match.captures).toEqual({ message: "Unexpected console statement.", ruleId: "no-console" })
+    const rule = { id: "all", detector: { kind: "linter" } }
+    const idOf = async (one: typeof match) =>
+      (
+        await findingIds(
+          [{ rule, match: one }],
+          () => ({}),
+          async () => null,
+        )
+      )[0]
+    expect(await idOf({ ...match, docs: "https://example.com/elsewhere" })).toBe(await idOf(match))
   })
 
   test("passes the union of files to the tool exactly once", async () => {

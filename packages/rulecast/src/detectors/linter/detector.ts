@@ -143,9 +143,13 @@ export const linterDetector: Detector<LinterConfig> = {
               text: TOOLS[tool].redacts ? "[redacted]" : excerpt(await read(finding.file), finding),
               captures: { message: finding.message, ruleId: finding.ruleId },
               ...(TOOLS[tool].redacts && { redacted: true }),
+              ...(finding.docs && { docs: finding.docs }),
             }
             for (const rule of rules) {
               if (!rule.files.includes(finding.file)) continue
+              // A rule that names no lint rules delivers what the project's config makes an error.
+              // A named rule's ids run as errors anyway, and the line below decides.
+              if (finding.level !== "error" && !rule.config.rules) continue
               if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
               result.findings.push({ rule: rule.id, match })
             }

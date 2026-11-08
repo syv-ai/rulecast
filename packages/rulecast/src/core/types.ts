@@ -111,6 +111,11 @@ export interface Match {
    * them out, as it does a detector's own volatile captures.
    */
   volatileCaptures?: readonly string[]
+  /**
+   * The tool's own page for the lint rule behind the match, as the tool's output gave it; absent
+   * when it gave none. Not a capture and not part of what the finding is: no id hashes it.
+   */
+  docs?: string
 }
 
 export interface ChangeSet {
