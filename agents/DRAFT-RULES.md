@@ -7,7 +7,7 @@ Load these when you need them. Relative links resolve against this file's own UR
 - [reference/rule-format.md](reference/rule-format.md): config and rule keys.
 - [reference/detectors.md](reference/detectors.md): the detectors this rulecast version has, their config and template variables.
 
-Commands below say `rulecast`. If it is not on the PATH, use `npx @syv-ai/rulecast`.
+Commands below say `rulecast`. If `rulecast` is not on the PATH, use `~/.cache/rulecast/bin/rulecast` if it exists, else `npx @syv-ai/rulecast`.
 
 The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them. The gates in steps 5 and 6 do not change that. Passing them makes a rule ready to show the developer, not to adopt. The developer decides.
 

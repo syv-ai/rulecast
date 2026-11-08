@@ -2,6 +2,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { installOneLiner } from "../src/core/binary-home"
+
 /**
  * `VERSION` is a literal because it has to survive bundling into dist/ and into a
  * `bun build --compile` binary, so it cannot read package.json at run time. changesets writes only
@@ -77,10 +79,34 @@ export function withReadmeVersion(source: string, version: string): string {
   return source.replace(README_REV, `$1v${version}`).replace(README_STATUS, `${major}.${minor}.$1`)
 }
 
+/** installOneLiner for any X.Y.Z, so a stale copy of it is found and rewritten. */
+const INSTALL_ONE_LINER = new RegExp(
+  installOneLiner("0.0.0")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("0\\.0\\.0", "\\d+\\.\\d+\\.\\d+"),
+  "g",
+)
+
+/**
+ * README.md and agents/SETUP.md show the install one-liner for this version. Throws unless each
+ * holds it exactly once, so it cannot go stale or be edited out of step with installOneLiner.
+ */
+export function withInstallVersion(source: string, version: string): string {
+  const found = (source.match(INSTALL_ONE_LINER) ?? []).length
+  if (found !== 1) throw new Error(`expected the install one-liner exactly once, found ${found}`)
+  return source.replace(INSTALL_ONE_LINER, () => installOneLiner(version))
+}
+
 /** The root README; `pnpm readme` mirrors it into the package afterwards. */
 export async function generateReadme(): Promise<{ target: string; source: string }> {
   const target = path.join(repoRoot, "README.md")
-  return { target, source: withReadmeVersion(await readFile(target, "utf8"), await packageVersion()) }
+  const version = await packageVersion()
+  return { target, source: withInstallVersion(withReadmeVersion(await readFile(target, "utf8"), version), version) }
+}
+
+export async function generateSetup(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, "agents/SETUP.md")
+  return { target, source: withInstallVersion(await readFile(target, "utf8"), await packageVersion()) }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -89,6 +115,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generatePluginManifest(),
     ...(await generateSkillFiles()),
     await generateReadme(),
+    await generateSetup(),
   ]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {
