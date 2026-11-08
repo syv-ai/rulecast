@@ -1,7 +1,7 @@
 import { chmod, copyFile, mkdir, readdir, readlink, realpath, rename, rm, stat, symlink } from "node:fs/promises"
 import path from "node:path"
 
-import { binaryPath, currentBinaryPath, installOneLiner, platformKey, probeRulecast } from "../core/binary-home"
+import { binaryPath, currentBinaryPath, INSTALL_COMMAND, platformKey, probeRulecast } from "../core/binary-home"
 import { errorMessage } from "../core/errors"
 import { cacheHome } from "../core/home"
 import { installLabel } from "../core/self"
@@ -13,8 +13,8 @@ import { UsageError } from "./usage"
 
 /**
  * `rulecast binary install` and `rulecast binary path`. Install puts this standalone binary where
- * the agent hooks and git hooks look for it. Only the developer runs it, by hand or through the
- * one-liner in the README; nothing in a hook does.
+ * the agent hooks and git hooks look for it. Only the developer runs it, by hand or through
+ * install.sh; nothing in a hook does.
  */
 export async function binaryCommand(args: string[], io: CliIo): Promise<number> {
   const [sub, ...rest] = args
@@ -28,7 +28,7 @@ async function install(io: CliIo): Promise<number> {
   if (!isStandaloneBinary()) {
     io.stderr(
       `rulecast binary install is for the standalone binary; this rulecast runs on node from ${installLabel()}. ` +
-        `To install the binary, run:\n\n  ${installOneLiner(VERSION)}\n`,
+        `To install the binary, run:\n\n  ${INSTALL_COMMAND}\n`,
     )
     return 2
   }

@@ -5,13 +5,12 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { sectionRange } from "../src/core/anchors"
-import { gitHookCommand, installOneLiner } from "../src/core/binary-home"
-import { VERSION } from "../src/core/version"
+import { gitHookCommand, INSTALL_COMMAND } from "../src/core/binary-home"
 
 describe("the install docs", () => {
-  test("README and SETUP.md show the install one-liner for this version", async () => {
+  test("README and SETUP.md show the install command", async () => {
     for (const file of ["README.md", "agents/SETUP.md"]) {
-      expect(await readFile(path.join(repoRoot, file), "utf8"), file).toContain(installOneLiner(VERSION))
+      expect(await readFile(path.join(repoRoot, file), "utf8"), file).toContain(INSTALL_COMMAND)
     }
   })
 

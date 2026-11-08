@@ -4,8 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { installOneLiner } from "../../src/core/binary-home"
-import { VERSION } from "../../src/core/version"
+import { INSTALL_COMMAND } from "../../src/core/binary-home"
 import { runCli } from "../helpers/cli"
 import { breakInstalledBinary, lookupSetup } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
@@ -16,7 +15,7 @@ describe("rulecast binary", () => {
     const result = await runCli(await createProject({}), ["binary", "install"], "", { RULECAST_HOME: home })
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("rulecast binary install is for the standalone binary; this rulecast runs on node")
-    expect(result.stderr).toContain(installOneLiner(VERSION))
+    expect(result.stderr).toContain(INSTALL_COMMAND)
     expect(await readdir(home)).toEqual([])
   })
 

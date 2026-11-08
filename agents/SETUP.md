@@ -99,10 +99,10 @@ In the same turn, ask every question on the page with your question tool, severa
 
 Only after the developer approves. First, install rulecast as approved, by running exactly the command the page showed. If the developer would rather run it themselves, give them the command and wait. Never install anything the page did not show.
 
-- **The standalone binary:** this downloads the binary for this machine and its checksum from the release, checks them, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`:
+- **The standalone binary:** this downloads the binary for this machine and its checksum from the latest release, checks them, installs it as `~/.local/bin/rulecast`, and puts that directory on the PATH. It prints every shell startup file it changed:
 
   ```sh
-  sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+  curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
   ```
 
   Everyone whose sessions run here installs it the same way. Tell the developer.

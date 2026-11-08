@@ -6,7 +6,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
-import { hostTarget } from "../scripts/build-binary"
+import { BINARY_TARGETS, hostTarget } from "../scripts/build-binary"
 
 /**
  * install.sh, run as a developer runs it: `sh install.sh`, with a stub `curl` serving a fake release
@@ -191,6 +191,30 @@ describe("install.sh", () => {
       encoding: "utf8",
     })
     expect(result.stdout).toBe(`${bin(run.home)}:/usr/bin:/bin`)
+  })
+
+  test("maps every shipped target, and only those", () => {
+    const unames: [string, string | null][] = [
+      ["Linux x86_64", "linux-x64"],
+      ["Linux aarch64", "linux-arm64"],
+      ["Linux arm64", "linux-arm64"],
+      ["Darwin arm64", "darwin-arm64"],
+      ["Darwin x86_64", "darwin-x64"],
+      ["MINGW64_NT-10.0 x86_64", null],
+    ]
+    const named = new Set<string>()
+    for (const [uname, target] of unames) {
+      // The fake release only has this machine's asset: any other download fails, naming its URL.
+      const run = install({ uname })
+      expect(run.status).toBe(target === hostTarget() ? 0 : 1)
+      if (target === null) {
+        expect(run.stderr).toContain(`no standalone binary for ${uname}`)
+        continue
+      }
+      if (target !== hostTarget()) expect(run.stderr).toContain(`/rulecast-${target};`)
+      named.add(target)
+    }
+    expect([...named].sort()).toEqual([...BINARY_TARGETS].sort())
   })
 
   test("an unknown platform exits 1 naming it, writing nothing", () => {

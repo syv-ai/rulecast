@@ -121,11 +121,13 @@ Setup installs rulecast for you, after you approve the command. To do it by hand
 
 ### Standalone binary
 
-No Node needed. Downloads this version's binary and its checksum from [Releases](https://github.com/syv-ai/rulecast/releases), checks them, and installs it to `~/.cache/rulecast/bin/`. Run it again with a newer version to update.
+No Node needed. Installs the latest release as `~/.local/bin/rulecast` and puts it on your PATH, as uv's installer does:
 
 ```sh
-sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
+curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
 ```
+
+The script checks the download against its checksum and prints every shell startup file it changed. For a fixed version, use the script attached to that release: `https://github.com/syv-ai/rulecast/releases/download/vX.Y.Z/install.sh`. `RULECAST_INSTALL_DIR` picks another directory; `RULECAST_NO_MODIFY_PATH=1` changes no startup file. Run it again to update.
 
 ### npm
 

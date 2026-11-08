@@ -9,7 +9,7 @@ import {
   type CommittedBaseline,
   readCommittedBaseline,
 } from "../core/baseline/committed"
-import { currentBinaryPath, installOneLiner } from "../core/binary-home"
+import { currentBinaryPath, INSTALL_COMMAND, pinnedInstallCommand } from "../core/binary-home"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
@@ -58,13 +58,14 @@ function runsLabel(runs: HookRulecast): string {
 }
 
 /**
- * How to update the rulecast the hooks run, by where it came from. For the binary, the one-liner
- * for the newest version doctor knows of. Printed, never run: installing is the developer's step.
+ * How to update the rulecast the hooks run, by where it came from. For the binary, the install
+ * command: the release that minimum_rulecast_version names when it is newer than this rulecast,
+ * else the latest. Printed, never run: installing is the developer's step.
  */
 function updateRemedy(runs: HookRulecast, minimum: string): string {
   if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
   if (runs.via === "path") return "update the global install"
-  return `install a newer binary: ${installOneLiner(isOlder(VERSION, minimum) ? minimum : VERSION)}`
+  return `install a newer binary: ${isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND}`
 }
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
@@ -262,7 +263,7 @@ export async function doctorCommand(
             : runs
               ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
               : `${file} — but rulecast is not in node_modules/.bin, at ${currentBinaryPath(home)} or on the PATH, so no rules run. ` +
-                `Install the standalone binary: ${installOneLiner(VERSION)}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+                `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     io.stdout(line(level, adapter.label, detail))
   }
   // A devDependency wins over the installed binary: say so when they differ, as nothing else will.

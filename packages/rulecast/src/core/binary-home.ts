@@ -8,7 +8,7 @@ import { VERSION } from "./version"
 /**
  * Where the standalone binary lives once installed, in TypeScript and as the shell fragments the
  * hooks run. `rulecast binary install` is the one thing that writes here, and only when the
- * developer runs it (directly, or through the one-liner below). No hook downloads or installs.
+ * developer runs it (directly, or through install.sh). No hook downloads or installs.
  *
  * Layout: `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, plus
  * `<cache home>/bin/rulecast-<platform>-<arch>`, a link to the one installed last for that platform.
@@ -60,8 +60,7 @@ export function hookCacheHome(env: Env): string | null {
 
 /**
  * Sets `T` to this machine's release target, as scripts/build-binary.ts names them, from one
- * `uname -sm`; anything else runs `otherwise`. The one mapping behind the one-liner (TARGET_SH)
- * and the hooks' choice of link (runInstalledBinarySh).
+ * `uname -sm`; anything else runs `otherwise`. The hooks' choice of link (runInstalledBinarySh).
  */
 function targetCase(otherwise: string): string {
   return (
@@ -95,32 +94,15 @@ export function exitUnlessUnrunnable(name: string): string {
   return `[ "$${name}" -ne 126 ] && [ "$${name}" -ne 127 ] && exit "$${name}"`
 }
 
-export const RELEASE_REPO = "syv-ai/rulecast"
-
-/** A release asset: `rulecast-<target>` or its `.sha256`, for a bare `vX.Y.Z` tag. */
-export function releaseAssetUrl(version: string, asset: string): string {
-  return `https://github.com/${RELEASE_REPO}/releases/download/v${version}/${asset}`
-}
-
-/** Sets `T` to the release target for this machine, as scripts/build-binary.ts names them, or exits 1. */
-export const TARGET_SH = targetCase('echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1')
-
 /**
- * The command a developer runs to install the binary of `version`. It downloads the release asset
- * for this machine and its `.sha256` into a new temp directory, checks one against the other, and
- * only then runs the download's own `binary install`. Any failing step stops it, and the temp
- * directory is removed either way. The checksum catches a truncated or corrupted download; it is
- * the same trust as the binary itself (GitHub Releases over TLS).
+ * The command that installs the latest release's binary: install.sh at the repository root, served
+ * by the docs site. It verifies the download and puts `rulecast` on the PATH.
  */
-export function installOneLiner(version: string): string {
-  const asset = releaseAssetUrl(version, "rulecast-$T")
-  const check =
-    "if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi"
-  return (
-    `sh -c '${TARGET_SH}; D=$(mktemp -d) && cd "$D" && ` +
-    `curl --proto =https -fsSLO ${asset} && curl --proto =https -fsSLO ${asset}.sha256 && ${check} && ` +
-    `chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'`
-  )
+export const INSTALL_COMMAND = "curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh"
+
+/** The same for one release: the install.sh attached to it installs that version. */
+export function pinnedInstallCommand(version: string): string {
+  return `curl -LsSf https://github.com/syv-ai/rulecast/releases/download/v${version}/install.sh | sh`
 }
 
 /**

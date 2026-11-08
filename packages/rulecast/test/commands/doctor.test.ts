@@ -5,8 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { stringify } from "yaml"
 
-import { currentBinaryPath, installOneLiner } from "../../src/core/binary-home"
-import { VERSION } from "../../src/core/version"
+import { currentBinaryPath, INSTALL_COMMAND, pinnedInstallCommand } from "../../src/core/binary-home"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo, git } from "../helpers/git"
@@ -306,10 +305,15 @@ describe("rulecast doctor", () => {
     const before = await readdir(setup.home, { recursive: true })
     expect(stdout).toContain(
       `warning  Claude Code — .claude/settings.json — runs the standalone binary at ${setup.file.binary} 0.1.0, ` +
-        `older than minimum_rulecast_version 0.8.0; install a newer binary: ${installOneLiner(VERSION)}\n`,
+        `older than minimum_rulecast_version 0.8.0; install a newer binary: ${INSTALL_COMMAND}\n`,
     )
     // doctor says what to run, and runs nothing: the cache is as it was.
     expect(await readdir(setup.home, { recursive: true })).toEqual(before)
+    // A minimum newer than this rulecast: the install command of that release.
+    const newer = await doctorWith(["binary"], { minimum_rulecast_version: "99.0.0" }, { binary: "0.1.0" })
+    expect(newer.stdout).toContain(
+      `older than minimum_rulecast_version 99.0.0; install a newer binary: ${pinnedInstallCommand("99.0.0")}\n`,
+    )
     // A devDependency or a global install is updated where it came from.
     const local = await doctorWith(["project"], { minimum_rulecast_version: "0.8.0" }, { project: "0.1.0" })
     expect(local.stdout).toContain("older than minimum_rulecast_version 0.8.0; update @syv-ai/rulecast in package.json")
@@ -361,7 +365,7 @@ describe("rulecast doctor", () => {
     const result = await doctor(root)
     expect(result.stdout).toContain(
       `warning  Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, at ${currentBinaryPath(TEST_HOME)} or on the PATH, so no rules run. ` +
-        `Install the standalone binary: ${installOneLiner(VERSION)}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
+        `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
     )
     // A warning, not an error: the installation is wrong, not broken beyond use.
     expect(result.code).toBe(0)
