@@ -26,7 +26,8 @@ CI checks each of these with `--check`:
 - `pnpm manifest` → `.rulecast-rules.yaml`, the catalog manifest built from `packages/rules-*/rules.yaml`.
 - `pnpm lenses` → `agents/lenses/`, the pages agents read from the lens catalog in `packages/lenses/` (it validates the catalog first).
 - `pnpm readme` → `packages/rulecast/README.md` and `LICENSE`, mirrored from the root ones. Edit the root `README.md`, then run this.
-- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`.
+- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`, and the version in the README, `guides/git-hooks-ci.md`, `agents/SETUP.md` and the plugin.
+- `pnpm demo` → `.github/assets/demo.svg`, the README's terminal demo, from the README's opening output and a renderer golden.
 
 ### Git hooks
 
@@ -58,7 +59,7 @@ Tests sit under `packages/rulecast/test/` and mirror `src/`. Renderer and baseli
 
 ### Docs site (`packages/site`)
 
-Pages are generated at build time from `README.md` and `agents/` (`scripts/sources.ts` maps README sections)
+Pages are generated at build time from `README.md`, `guides/` and `agents/` (`scripts/sources.ts` maps them). The README stays short; anything longer than a section goes in `guides/`, written for people.
 
 ## Conventions
 

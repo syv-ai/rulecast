@@ -6,13 +6,13 @@ Each recipe was run once, on small scratch repositories. What happened, where th
 
 ## Before any loop
 
-A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the README's [Fresh environments](../../README.md#fresh-environments) checklist first. For loops, three things on it matter most:
+A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [Fresh environments](../../guides/advanced.md#fresh-environments) checklist first. For loops, three things on it matter most:
 
 - **Unattended mode.** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`. The stop gate then blocks up to `unattended.max_blocks` (10) stops per prompt instead of one, a finding that has blocked twice is reported instead of retried, and the agent is held once more at the end to report what is left. See [Unattended mode](rule-format.md#unattended-mode). `/goal` sends one prompt for the whole run, so there the 10 blocks are a budget for the run.
 - **`npx rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
 - **The `loop-safety` pack:** `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
 
-Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Several agents at once](../../README.md#several-agents-at-once)).
+Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Several agents at once](../../guides/advanced.md#several-agents-at-once)).
 
 ## A goal that rulecast decides
 
@@ -37,7 +37,7 @@ Not measured: whether a rulecast block counts as "no progress" for `/goal`. In t
 
 ## A convention-drift sweep
 
-A scheduled job (GitHub Actions `on: schedule`, cron, or Claude Code's `/schedule`) takes one rule's new findings as one batch, fixes them, and opens a draft pull request. It needs a committed baseline ([A committed baseline](../../README.md#a-committed-baseline)). Without one, every legacy finding is new and every run fails. It also needs `jq`, `gh` and the fresh-environment steps above.
+A scheduled job (GitHub Actions `on: schedule`, cron, or Claude Code's `/schedule`) takes one rule's new findings as one batch, fixes them, and opens a draft pull request. It needs a committed baseline ([A committed baseline](../../guides/advanced.md#a-committed-baseline)). Without one, every legacy finding is new and every run fails. It also needs `jq`, `gh` and the fresh-environment steps above.
 
 ```sh
 #!/bin/sh
@@ -111,7 +111,7 @@ again until it exits 0, then commit and push. On exit 0, say so in one line. On 
 output as a PR comment once and stop the loop. When the PR is merged or closed, stop the loop.
 ```
 
-- `--from-ref origin/main` is what the README's GitHub Actions job runs, so a clean iteration means a clean CI check. Add `--to-ref HEAD` to check the commits only, not the working tree.
+- `--from-ref origin/main` is what the [GitHub Actions job](../../guides/git-hooks-ci.md#github-actions) runs, so a clean iteration means a clean CI check. Add `--to-ref HEAD` to check the commits only, not the working tree.
 - Each finding has an [id](output.md#finding-ids) that stays the same while its code does, so the loop can tell the same finding from a new one between iterations.
 - Run it in the pull request's own worktree, not in a tree another agent is editing.
 - **`/loop` needs an open session.** Under `claude -p`, `/loop` schedules its job, runs the prompt once, and the job ends with the process. For a schedule nobody watches, run the prompt's body with `claude -p` from cron or CI instead.

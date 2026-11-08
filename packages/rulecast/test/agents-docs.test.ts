@@ -15,9 +15,9 @@ describe("the install docs", () => {
     }
   })
 
-  test("the README's lefthook snippet runs rulecast as the agent hooks find it", async () => {
-    const readme = await readFile(path.join(repoRoot, "README.md"), "utf8")
-    const lefthook = readme.slice(readme.indexOf("### lefthook"), readme.indexOf("### GitHub Actions"))
+  test("the Git hooks guide's lefthook snippet runs rulecast as the agent hooks find it", async () => {
+    const readme = await readFile(path.join(repoRoot, "guides/git-hooks-ci.md"), "utf8")
+    const lefthook = readme.slice(readme.indexOf("## lefthook"), readme.indexOf("## GitHub Actions"))
     expect(lefthook).toContain(`run: ${gitHookCommand("run")}\n`)
     expect(lefthook).toContain(
       `run: ${gitHookCommand('run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD')}\n`,
@@ -122,6 +122,7 @@ describe("agent docs", () => {
     // blob/main/ by pnpm readme, which is a different thing and not a doc reference.
     const files = [
       path.join(repoRoot, "README.md"),
+      ...(await filesUnder("guides", ".md")),
       ...(await filesUnder("agents", ".md")),
       ...(await filesUnder("plugins", ".md")),
       ...(await filesUnder("packages/rulecast/src", ".ts")),

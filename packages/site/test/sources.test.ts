@@ -78,29 +78,36 @@ describe("pageBody", () => {
   })
 })
 
-describe("the advanced page", () => {
+describe("the guides", () => {
   const sections = readme()
   const page = (route: string) => PAGES.find((candidate) => candidate.route === route)!
 
-  it("holds the moved subsections, and the first-tier pages no longer do", () => {
+  it("hold what moved out of the README, each on its own page", () => {
     const advanced = pageBody(page("guides/advanced"), sections)
     for (const heading of [
-      "### Several agents at once",
-      "### Git operations during a turn",
-      "### Fresh environments",
-      "### A committed baseline",
-      "### Agents with nobody watching",
+      "## Several agents at once",
+      "## Git operations during a turn",
+      "## Fresh environments",
+      "## A committed baseline",
+      "## Agents with nobody watching",
     ]) {
       expect(advanced).toContain(heading)
     }
-    expect(advanced).toContain("isolation: worktree")
-    expect(advanced.startsWith("## Advanced")).toBe(false)
-    expect(pageBody(page("guides/git-hooks-ci"), sections)).not.toMatch(/^### Fresh environments$/m)
-    expect(pageBody(page("guides/adopting-rules"), sections)).not.toContain("### A committed baseline")
+    expect(advanced).not.toMatch(/^# Advanced$/m)
     expect(pageBody(page("guides/agents"), sections)).not.toContain("isolation: worktree")
     const commands = pageBody(page("reference/commands"), sections)
-    expect(commands).toContain("### Advanced commands")
+    expect(commands).toContain("## Advanced commands")
     expect(commands).toContain("`rulecast replay claude-code`")
+    expect(commands).toContain("## Exit codes")
+    const rules = pageBody(page("guides/writing-rules"), sections)
+    expect(rules).toContain("## A rule")
+    expect(rules).toContain("## Refusing a write")
+  })
+
+  it("leave the README's centered blocks off the site and unwrap its <details>", () => {
+    const lead = sections.get(LEAD) ?? ""
+    expect(lead).not.toMatch(/<div|<img|<details|<summary|shields\.io/)
+    expect(lead).toContain("rulecast: 1 rule violated")
   })
 })
 

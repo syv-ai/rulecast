@@ -122,7 +122,7 @@ Pass `--weekly-summary` where the developer turned on the weekly stats summary. 
 Then, as the page says:
 
 - **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there.
-- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as the README's [Git hooks and CI](https://github.com/syv-ai/rulecast#git-hooks-and-ci) shows. Show the change first.
+- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows. Show the change first.
 - **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
 - **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.

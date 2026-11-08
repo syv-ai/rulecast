@@ -22,18 +22,23 @@ describe("rewriteLinks", () => {
   })
 
   it("sends a link to a README heading to the page that section is on", () => {
-    expect(rewriteLinks("[f](../../README.md#fresh-environments)", "agents/reference/loops.md")).toBe(
-      "[f](/rulecast/guides/advanced/#fresh-environments)",
-    )
-    expect(rewriteLinks("[b](../../README.md#a-committed-baseline)", "agents/reference/loops.md")).toBe(
-      "[b](/rulecast/guides/advanced/#a-committed-baseline)",
-    )
-    expect(rewriteLinks("[a](README.md#advanced)", "README.md")).toBe("[a](/rulecast/guides/advanced/)")
     // Performance is a fragment, imported by how-it-works under its own heading.
     expect(rewriteLinks("[p](README.md#performance)", "README.md")).toBe("[p](/rulecast/how-it-works/#performance)")
-    expect(rewriteLinks("[a](README.md#agents)", "README.md")).toBe("[a](/rulecast/guides/agents/)")
     expect(rewriteLinks("[g](README.md#getting-started)", "README.md")).toBe("[g](/rulecast/getting-started/)")
+    expect(rewriteLinks("[i](../README.md#install)", "guides/advanced.md")).toBe(
+      "[i](/rulecast/getting-started/#install)",
+    )
     expect(rewriteLinks("[r](README.md)", "README.md")).toBe("[r](/rulecast/)")
+  })
+
+  it("sends a link to a guide to its page, anchor kept", () => {
+    expect(rewriteLinks("[f](../../guides/advanced.md#fresh-environments)", "agents/reference/loops.md")).toBe(
+      "[f](/rulecast/guides/advanced/#fresh-environments)",
+    )
+    expect(rewriteLinks("[a](guides/advanced.md)", "README.md")).toBe("[a](/rulecast/guides/advanced/)")
+    expect(rewriteLinks("[b](advanced.md#a-committed-baseline)", "guides/adopting-rules.md")).toBe(
+      "[b](/rulecast/guides/advanced/#a-committed-baseline)",
+    )
   })
 
   it("leaves absolute URLs and same-page anchors alone", () => {

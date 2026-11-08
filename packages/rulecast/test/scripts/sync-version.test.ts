@@ -4,11 +4,14 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import {
+  GIT_HOOKS_GUIDE,
+  generateGitHooksGuide,
   generatePreCommitHooks,
   generateReadme,
   generateSetup,
   generateVersionFile,
   withInstallVersion,
+  withPreCommitRev,
   withReadmeVersion,
   withVersion,
 } from "../../scripts/sync-version"
@@ -66,25 +69,28 @@ describe("sync-version", () => {
     expect(() => withVersion(`${SOURCE}\n${SOURCE}`, "1.2.3")).toThrow(/found 2/)
   })
 
-  test("the README's pre-commit rev and status follow the version (plan 21, #7)", () => {
+  test("the pre-commit rev and the README's status follow the version (plan 21, #7)", () => {
     // Both said 0.4 at 0.7.0: nothing kept them in step.
-    const readme = [
+    const guide = [
       "repos:",
       "  - repo: https://github.com/syv-ai/rulecast",
       "    rev: v0.4.0",
       "  - repo: https://github.com/other/tool",
       "    rev: v0.4.0",
       "",
-      "## Status",
-      "",
-      "0.4. Everything above works and is tested.",
-      "",
     ].join("\n")
-    const result = withReadmeVersion(readme, "1.2.3")
-    expect(result).toContain("  - repo: https://github.com/syv-ai/rulecast\n    rev: v1.2.3\n")
-    expect(result).toContain("  - repo: https://github.com/other/tool\n    rev: v0.4.0\n")
-    expect(result).toContain("\n1.2. Everything above works and is tested.\n")
-    expect(() => withReadmeVersion("# no snippet\n", "1.2.3")).toThrow(/rev/)
+    const pinned = withPreCommitRev(guide, "1.2.3")
+    expect(pinned).toContain("  - repo: https://github.com/syv-ai/rulecast\n    rev: v1.2.3\n")
+    expect(pinned).toContain("  - repo: https://github.com/other/tool\n    rev: v0.4.0\n")
+    expect(() => withPreCommitRev("# no snippet\n", "1.2.3")).toThrow(/rev/)
+    const status = withReadmeVersion("## Status\n\n0.4. Everything above works and is tested.\n", "1.2.3")
+    expect(status).toContain("\n1.2. Everything above works and is tested.\n")
+    expect(() => withReadmeVersion("# no status\n", "1.2.3")).toThrow(/Status/)
+  })
+
+  test("the committed Git hooks guide already matches package.json", async () => {
+    const { target, source } = await generateGitHooksGuide()
+    expect(await readFile(target, "utf8"), `${GIT_HOOKS_GUIDE} is stale: run pnpm sync-version`).toBe(source)
   })
 
   test("the committed README already matches package.json", async () => {

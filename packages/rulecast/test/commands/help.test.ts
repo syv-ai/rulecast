@@ -118,27 +118,35 @@ test("check is gone", async () => {
   expect(result.stderr).toContain('unknown command "check"')
 })
 
-/** The README's two command tables and COMMANDS name the same commands, tier by tier, in both directions. */
-test("the README's two command tables list each tier's commands", () => {
-  const readme = readFileSync(fileURLToPath(new URL("../../../../README.md", import.meta.url)), "utf8")
+const repoFile = (file: string) => readFileSync(fileURLToPath(new URL(`../../../../${file}`, import.meta.url)), "utf8")
+
+/** The commands a Markdown table's rows name, sorted. */
+function tableCommands(text: string): string[] {
+  const rows = text.split("\n").filter((line) => line.startsWith("| `rulecast "))
+  return [
+    ...new Set(
+      rows.flatMap((row) => [...row.split("|")[1]!.matchAll(/`(?:rulecast )?([a-z-]+)/g)].map((match) => match[1]!)),
+    ),
+  ].sort()
+}
+
+/**
+ * The README's command table names the basic tier and the commands guide's the advanced one, as
+ * COMMANDS does, in both directions.
+ */
+test("the README and the commands guide list each tier's commands", () => {
+  const readme = repoFile("README.md")
   const start = readme.indexOf("\n## Commands\n")
   const end = readme.indexOf("\n## ", start + 1)
-  const section = readme.slice(start, end)
-  const split = section.indexOf("### Advanced commands")
   expect(start).toBeGreaterThan(-1)
-  expect(split).toBeGreaterThan(-1)
-  const named = (text: string) => {
-    const rows = text.split("\n").filter((line) => line.startsWith("| `rulecast "))
-    return [
-      ...new Set(
-        rows.flatMap((row) => [...row.split("|")[1]!.matchAll(/`(?:rulecast )?([a-z-]+)/g)].map((match) => match[1]!)),
-      ),
-    ].sort()
-  }
   const names = (commands: typeof COMMANDS) => commands.map((command) => command.name).sort()
-  expect(named(section.slice(0, split))).toEqual(names(basic))
-  expect(named(section.slice(split))).toEqual(names(advanced))
-  expect(named(readme.slice(0, start) + readme.slice(end))).toEqual([])
+  expect(tableCommands(readme.slice(start, end))).toEqual(names(basic))
+  expect(tableCommands(readme.slice(0, start) + readme.slice(end))).toEqual([])
+  const guide = repoFile("guides/commands.md")
+  const advancedStart = guide.indexOf("## Advanced commands")
+  expect(advancedStart).toBeGreaterThan(-1)
+  expect(tableCommands(guide.slice(advancedStart))).toEqual(names(advanced))
+  expect(tableCommands(guide.slice(0, advancedStart))).toEqual([])
 })
 
 test("run --help and try-repo --help print the exit codes", async () => {
@@ -153,10 +161,10 @@ test("run --help and try-repo --help print the exit codes", async () => {
   }
 })
 
-/** The README's exit-code table says exactly what EXIT_CODES says, so the two cannot drift apart. */
-test("the README's exit-code table matches the codes rulecast exits with", () => {
-  const readme = readFileSync(fileURLToPath(new URL("../../../../README.md", import.meta.url)), "utf8")
-  const section = readme.slice(readme.indexOf("### Exit codes"))
+/** The commands guide's exit-code table says exactly what EXIT_CODES says, so the two cannot drift apart. */
+test("the commands guide's exit-code table matches the codes rulecast exits with", () => {
+  const guide = repoFile("guides/commands.md")
+  const section = guide.slice(guide.indexOf("## Exit codes"))
   const rows = section
     .split("\n")
     .filter((line) => /^\| `\d+` \|/.test(line))

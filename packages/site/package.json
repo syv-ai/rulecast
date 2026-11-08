@@ -11,7 +11,8 @@
     "preview": "astro preview",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.scripts.json",
-    "content-from": "tsx scripts/content-from.ts"
+    "content-from": "tsx scripts/content-from.ts",
+    "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.6",

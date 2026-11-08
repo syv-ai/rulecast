@@ -61,22 +61,25 @@ export async function generateSkillFiles(): Promise<{ target: string; source: st
   )
 }
 
-const README_REV = /(- repo: https:\/\/github\.com\/syv-ai\/rulecast\n\s+rev: )v\d+\.\d+\.\d+/g
+const PRE_COMMIT_REV = /(- repo: https:\/\/github\.com\/syv-ai\/rulecast\n\s+rev: )v\d+\.\d+\.\d+/g
 const README_STATUS = /^\d+\.\d+\.( Everything above works)/gm
 
-/**
- * The README's pre-commit snippet pins this repository by tag, and its Status names the minor
- * version: both said 0.4 at 0.7.0. Throws when either is not there, rather than go stale quietly.
- */
+/** Throws unless `pattern` matches `source` exactly once, rather than go stale quietly. */
+function once(source: string, pattern: RegExp, file: string, name: string): void {
+  if ((source.match(pattern) ?? []).length !== 1) throw new Error(`${file}: expected one match for ${name}`)
+}
+
+/** The README's Status names the minor version: it said 0.4 at 0.7.0. */
 export function withReadmeVersion(source: string, version: string): string {
   const [major, minor] = version.split(".")
-  for (const [name, pattern] of [
-    ["the pre-commit snippet's rev", README_REV],
-    ["the Status line", README_STATUS],
-  ] as const) {
-    if ((source.match(pattern) ?? []).length !== 1) throw new Error(`README.md: expected one match for ${name}`)
-  }
-  return source.replace(README_REV, `$1v${version}`).replace(README_STATUS, `${major}.${minor}.$1`)
+  once(source, README_STATUS, "README.md", "the Status line")
+  return source.replace(README_STATUS, `${major}.${minor}.$1`)
+}
+
+/** The Git hooks guide's pre-commit snippet pins this repository by tag: it said v0.4.0 at 0.7.0. */
+export function withPreCommitRev(source: string, version: string): string {
+  once(source, PRE_COMMIT_REV, GIT_HOOKS_GUIDE, "the pre-commit snippet's rev")
+  return source.replace(PRE_COMMIT_REV, `$1v${version}`)
 }
 
 /**
@@ -113,13 +116,13 @@ function withCommandLines(source: string, prefix: string, commands: string[], wh
   return source.replace(pattern, (_, start: string) => `${start}${commands[next++]}`)
 }
 
-/** The README's lefthook snippet runs gitHookCommand, the order the agent hooks use. */
+/** The Git hooks guide's lefthook snippet runs gitHookCommand, the order the agent hooks use. */
 export function withLefthookCommands(source: string): string {
   return withCommandLines(
     source,
     "      run: ",
     [gitHookCommand(GIT_HOOK_ARGS.preCommit), gitHookCommand(GIT_HOOK_ARGS.lefthookPush)],
-    "README.md",
+    GIT_HOOKS_GUIDE,
   )
 }
 
@@ -137,8 +140,16 @@ export async function generatePreCommitHooks(): Promise<{ target: string; source
 export async function generateReadme(): Promise<{ target: string; source: string }> {
   const target = path.join(repoRoot, "README.md")
   const version = await packageVersion()
-  const source = withReadmeVersion(await readFile(target, "utf8"), version)
-  return { target, source: withLefthookCommands(withInstallVersion(source, version)) }
+  return { target, source: withInstallVersion(withReadmeVersion(await readFile(target, "utf8"), version), version) }
+}
+
+/** The guide with the pre-commit and lefthook snippets. */
+export const GIT_HOOKS_GUIDE = "guides/git-hooks-ci.md"
+
+export async function generateGitHooksGuide(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, GIT_HOOKS_GUIDE)
+  const source = withPreCommitRev(await readFile(target, "utf8"), await packageVersion())
+  return { target, source: withLefthookCommands(source) }
 }
 
 export async function generateSetup(): Promise<{ target: string; source: string }> {
@@ -152,6 +163,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generatePluginManifest(),
     ...(await generateSkillFiles()),
     await generateReadme(),
+    await generateGitHooksGuide(),
     await generateSetup(),
     await generatePreCommitHooks(),
   ]

@@ -7,6 +7,7 @@
     "binary": "pnpm --filter @syv-ai/rulecast binary",
     "build": "pnpm --filter @syv-ai/rulecast build",
     "changeset": "changeset",
+    "demo": "pnpm --filter @syv-ai/rulecast-site demo",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
     "lenses": "pnpm --filter @syv-ai/rulecast lenses",

@@ -23,7 +23,7 @@ function repoRoot(): string {
 export type PageSource =
   /** README sections, in this order, by their `##` heading. `LEAD` is the text above the first one. */
   | { readme: string[]; file?: string }
-  /** One file under agents/, whole. */
+  /** One file under agents/ or guides/, whole. */
   | { file: string }
   /** A hand-written page in src/content/docs/<route>.mdx. */
   | { hand: true }
@@ -58,6 +58,7 @@ function forAgents(file: string): string {
 export const CONTENT_PATHS = [
   "README.md",
   "agents",
+  "guides",
   "packages/rulecast/package.json",
   "packages/rulecast/test/goldens/delivery",
 ]
@@ -96,35 +97,35 @@ export const PAGES: Page[] = [
     title: "Writing rules",
     description: "A rule pairs a check with a message and the doc section it enforces.",
     group: "Guides",
-    source: { readme: ["A rule", "Refusing a write", "Turning a rule off"] },
+    source: { readme: ["A rule"], file: "guides/writing-rules.md" },
   },
   {
     route: "guides/adopting-rules",
     title: "Adopting rules",
     description: "Adopt a rule on a codebase that already breaks it.",
     group: "Guides",
-    source: { readme: ["Adopting a rule on a codebase that already breaks it"] },
+    source: { file: "guides/adopting-rules.md" },
   },
   {
     route: "guides/git-hooks-ci",
     title: "Git hooks and CI",
     description: "The same rules in pre-commit, pre-push and CI.",
     group: "Guides",
-    source: { readme: ["Git hooks and CI"] },
+    source: { file: "guides/git-hooks-ci.md" },
   },
   {
     route: "guides/agents",
     title: "Agents",
     description: "Let your agent set rulecast up and draft rules from your docs.",
     group: "Guides",
-    source: { readme: ["Agents"] },
+    source: { file: "guides/agents.md" },
   },
   {
     route: "guides/claude-code-plugin",
     title: "Claude Code plugin",
     description: "Add one rule at a time from inside a Claude Code session.",
     group: "Guides",
-    source: { readme: ["Claude Code plugin"] },
+    source: { file: "guides/claude-code-plugin.md" },
   },
   {
     route: "guides/agent-loops",
@@ -138,14 +139,14 @@ export const PAGES: Page[] = [
     title: "Advanced",
     description: "Several agents at once, git operations, fresh environments and committed baselines.",
     group: "Guides",
-    source: { readme: ["Advanced"] },
+    source: { file: "guides/advanced.md" },
   },
   {
     route: "reference/commands",
     title: "Commands",
     description: "Every rulecast command.",
     group: "Reference",
-    source: { readme: ["Commands"] },
+    source: { readme: ["Commands"], file: "guides/commands.md" },
   },
   {
     route: "reference/rule-format",
@@ -204,19 +205,20 @@ export const PAGES: Page[] = [
 
 /**
  * README sections that are not a page of their own. The lead and Performance are imported by
- * how-it-works.mdx; the license is linked from the footer.
+ * how-it-works.mdx; the license is linked from the footer, and "Learn more" is the sidebar's job.
  */
 export const FRAGMENTS: Record<string, string> = { lead: LEAD, performance: "Performance" }
 /** The page that imports FRAGMENTS, so the page a link to one of their headings goes to. */
 export const FRAGMENT_PAGE = "how-it-works"
-export const DROPPED = ["License"]
+export const DROPPED = ["Learn more", "License"]
 
 const FENCE = /^(```|~~~)/
 
 /**
  * The README's lead and its `##` sections by heading. A `##` inside a fenced block is not a heading.
- * The README's header (logo, title, badges and links, centered in a `<div align="center">` at the
- * top) is GitHub's and npm's: the site has its own, so it is dropped.
+ * What the README centers in a `<div align="center">` (its header of logo, title, badges and links,
+ * and the demo) is GitHub's and npm's: the site has its own, so it is dropped. A `<details>` is
+ * unwrapped, so what it hides on GitHub shows on the site.
  */
 export function readmeSections(markdown: string): Map<string, string> {
   const sections = new Map<string, string>()
@@ -240,10 +242,11 @@ export function readmeSections(markdown: string): Map<string, string> {
       if (line.trim() === "</div>") header = false
       continue
     }
-    if (heading === LEAD && lines.length === 0 && line.trim() === '<div align="center">') {
+    if (!fenced && line.trim() === '<div align="center">') {
       header = true
       continue
     }
+    if (!fenced && /^<\/?details>$|^<summary>.*<\/summary>$/.test(line.trim())) continue
     if (FENCE.test(line)) fenced = !fenced
     const match = fenced ? null : /^## (.+)$/.exec(line)
     if (match) {
@@ -345,7 +348,10 @@ export function exampleRule(sections = readme()): string {
 
 /** The prompt the README gives a developer to paste into their agent, so it sets rulecast up. */
 export function agentPrompt(sections = readme()): string {
-  return firstFence(sections.get("Agents") ?? "", "text")
+  const blocks = [...(sections.get("Getting started") ?? "").matchAll(/^```text\n([\s\S]*?)\n```/gm)]
+  const prompt = blocks.map((match) => match[1]!).find((block) => block.includes("SETUP.md"))
+  if (prompt === undefined) throw new Error("README.md: Getting started has no prompt that names SETUP.md")
+  return prompt
 }
 
 /** The README's opening output, which it says is real output. */

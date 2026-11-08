@@ -10,13 +10,20 @@ Your project's conventions, delivered to your coding agent when it breaks one.
 
 [![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](https://github.com/syv-ai/rulecast/blob/main/LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
 
-[Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](#claude-code-plugin) · [Changelog](https://github.com/syv-ai/rulecast/blob/main/packages/rulecast/CHANGELOG.md)
+[Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](https://github.com/syv-ai/rulecast/blob/main/guides/claude-code-plugin.md) · [Changelog](https://github.com/syv-ai/rulecast/blob/main/packages/rulecast/CHANGELOG.md)
 
 </div>
 
-Your project's conventions are written down in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them once, forty tool calls ago. rulecast delivers them again at the moment they matter: when the agent is about to break one.
+Your conventions are in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them forty tool calls ago. rulecast runs as an agent hook: when an edit breaks a rule, the agent gets the finding and the doc section that explains it, in the same turn.
 
-A rule pairs a check with a message and a pointer to the doc section it enforces. rulecast runs as an agent hook, so when the agent changes a file that breaks a rule — with its edit tools or with Bash — it gets told, in the same turn, before it moves on.
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/syv-ai/rulecast/main/.github/assets/demo.svg" alt="An agent edits a file; rulecast reports the broken rule with the doc section it cites; a later Bash edit is caught too" width="100%">
+
+</div>
+
+<details>
+<summary>The same output as text</summary>
 
 ```
 rulecast: 1 rule violated in app/services/users.py
@@ -30,24 +37,28 @@ error backend/no-httpexception
 Services raise domain exceptions. `app/api/errors.py` maps each one to a status code.
 ```
 
-That is real output. The agent sees the finding *and* the paragraph of your documentation that explains it, without having to go looking.
-
-A file the agent rewrites with `sed -i` or a script is checked like one it changes with `Edit`: rulecast compares the working tree before and after each Bash call. A change no call explains — your own editor, a formatter, a job the agent left running — is reported when the agent stops, and never blocks it.
+</details>
 
 ## Getting started
 
-Your coding agent sets rulecast up with you. In Claude Code, install the plugin and run its setup:
+In Claude Code:
 
 ```text
 /plugin install rulecast --marketplace syv-ai/rulecast
 /rulecast:setup
 ```
 
-With another agent, paste the prompt under [Agents](https://github.com/syv-ai/rulecast/blob/main/README.md#agents).
+With another agent, paste this:
 
-The agent reads the repository first and shows you one page of defaults drawn from it: who works on it, where configs go and sessions start, how rulecast is installed, your git hooks as rules, generated and vendored code, the catalog rules that fit, and the conventions your AGENTS.md already states. You strike or change items by number and answer the few questions only you can, such as whether rules that ask a model are OK. It writes nothing until you approve. Then it installs rulecast the way the page says (the standalone binary, or a devDependency) and runs `rulecast init` with your answers. You review the changes and commit them.
+```text
+Set up rulecast in this project with me. Read
+https://syv-ai.github.io/rulecast/agents/SETUP.md
+and follow it.
+```
 
-Most rules come later, one at a time. When an agent makes a mistake that should not happen again, run `/rulecast:add-rule`, or accept when the agent offers it. If you would rather work out your conventions up front, say so during setup.
+The agent reads your repository and shows you one page of defaults: your linters and git hooks as rules, generated code, where configs go, how to install rulecast. You change what you like; nothing is written until you approve.
+
+Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
 
 ## A rule
 
@@ -68,75 +79,25 @@ repos:
           - "@conventions/backend.md#errors"
 ```
 
-- `files` selects what the rule applies to; `detect` names one detector and its config.
+- `files` selects what the rule applies to; `detect` names a detector.
 - `message` is what the agent reads. Named capture groups become template variables.
-- `context` points at the doc section that explains the rule — delivered alongside the finding.
+- `context` is the doc section delivered with the finding.
 
-A rule with `context` and no `detect` delivers guidance the first time an agent touches a matching file, with nothing to catch. That is how you carry over a convention no pattern can express.
-
-The full format is in [`agents/reference/rule-format.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md).
+More in [Writing rules](https://github.com/syv-ai/rulecast/blob/main/guides/writing-rules.md): refusing a write, linters with their docs, turning a rule off.
 
 ## Detectors
 
 | Detector | Catches | Runs on |
 |---|---|---|
 | `regex` | A pattern in the file's text | every edit |
-| `path` | The file's path alone — "never edit `src/client/`" | every edit |
+| `path` | The file's path alone: "never edit `src/client/`" | every edit |
 | `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
-| `command` | Whatever a tool or your own script reports: SARIF, JSON, checkstyle, code-quality JSON, rdjson or `file:line:` lines. Type checkers, dead-code finders and scanners [by config](https://github.com/syv-ai/rulecast/blob/main/agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
+| `command` | Whatever a tool or script reports (SARIF, JSON, checkstyle, `file:line:` lines…): type checkers, dead-code finders, scanners [by config](https://github.com/syv-ai/rulecast/blob/main/agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
 | `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | verify |
-| `linter` | errors from ruff, oxlint, eslint or gitleaks under the project's own config, or the lint rules you name, each with its doc section | edit (eslint: verify) |
-| `llm` | Conventions nothing mechanical expresses, judged by a model | verify |
+| `linter` | Errors from ruff, oxlint, eslint or gitleaks under the project's own config, each with its doc section | edit (eslint: verify) |
+| `llm` | Conventions nothing mechanical expresses, judged by a model. Opt-in | verify |
 
-`llm` rules are opt-in, use the rule's model or the config's `llm.model`, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md).
-
-### The linters you already run
-
-A `linter` rule without `rules` delivers what the project's own linter config makes an error, and only the errors the agent's edit caused. Warnings are not delivered: to have one reach the agent, make it an error in the linter's config. Each finding says where its lint rule is explained: a section of your docs, mapped to that lint rule with `context_by_rule`, or else the linter's own page for it.
-
-```yaml
-- id: linter/eslint
-  name: ESLint errors
-  types_or: [javascript, jsx, ts, tsx]
-  detect:
-    linter: { tool: eslint }
-  message: "{{message}} ({{ruleId}})"
-  context_by_rule:
-    eqeqeq: "@docs/conventions.md#comparisons"
-```
-
-A mapped section is delivered only with the findings of its lint rule. The mapping lives in `.rulecast-config.yaml`, so your docs stay free of rulecast syntax. Setup offers one rule per linter it finds; the mappings are proposed one at a time after setup, and you agree each one. See [Per lint rule](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md#per-lint-rule).
-
-## Refusing a write
-
-Some rules are not advice. `refuse_write: true` refuses the edit before it happens, and the agent gets your message and the doc section in place of the tool's result:
-
-```yaml
-- id: codegen/no-edit-client
-  name: The generated client is not edited by hand
-  files: '^src/client/'
-  detect:
-    path: {}
-  refuse_write: true
-  message: "{{file}} is generated from openapi.yaml. Edit the schema and run `pnpm codegen`."
-```
-
-A refusal only ever rests on the text the agent is writing, never on a reconstruction rulecast is unsure of, and it happens once per file per session — so a rule can stop a mistake without trapping the agent. Generated code, vendored directories, files that must not change. Everything else is better reported after the write, which is what the other rules do.
-
-That covers the edit tools. A write through Bash cannot be refused before it runs, because nothing knows what a command will write, so rulecast catches it right after: the agent is told the file is protected and how to revert it, its stop is held until it has (up to the stop limit: once per prompt by default), and you are told which file it changed.
-
-## Turning a rule off
-
-- **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the line.
-- **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax. The reason is required; an ignore without one suppresses nothing.
-
-  ```python
-  except Exception:
-      # rulecast-ignore: python/no-silent-except best-effort cache cleanup
-      pass
-  ```
-
-`rulecast run --all-files --summary` counts the ignores, and an ignore or a config change made during an agent session is reported to you when the agent stops: the agent cannot quietly edit its way past a rule.
+`verify` runs when the agent stops; a rule can opt into the edit hook with `stages: [edit, verify]`. See [`agents/reference/detectors.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md).
 
 ## Commands
 
@@ -153,266 +114,41 @@ That covers the edit tools. A write through Bash cannot be refused before it run
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
 
-`rulecast <command> --help` prints a command's flags; `rulecast help --all` lists every command, the advanced ones too; `rulecast --version` prints the version.
-
-If something is configured but quiet, `rulecast doctor` says why: it compiles the config, reports whether each rule's linter, parser, script or API key is actually there, says where the hooks and caches live, and runs every rule against one file it matches.
-
-### Exit codes
-
-`rulecast run`, `rulecast try-repo` and `rulecast fix` (after its fixes) exit with:
-
-| Code | Meaning |
-|---|---|
-| `0` | Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed) |
-| `1` | Every rule ran; at least one new error-severity finding |
-| `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error |
-| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 |
-
-On `2` nothing is printed to stdout. `try-repo` also exits `2` when the repo it tries cannot be fetched. `rulecast test` exits `1` when an example fails, and `rulecast baseline` exits `3` when a rule could not run. Other commands use `2` for the problems they find. `--format json` and `--format sarif` are a stable contract, with an id per finding that survives code moving around: see [`agents/reference/output.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md).
-
-### Advanced commands
-
-Most projects never run these by hand.
-
-| Command | Does |
-|---|---|
-| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](https://github.com/syv-ai/rulecast/blob/main/README.md#a-committed-baseline)) |
-| `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
-| `rulecast autoupdate` | Move pinned rule repos to their latest tag |
-| `rulecast try-repo` | Run a rule repo against your project without configuring it |
-| `rulecast clean` | Delete the cache; the installed binary stays |
-| `rulecast warm` | Build detector caches ahead of time |
-| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
-| `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
-
-## Git hooks and CI
-
-The same rule reports the same line the same way in an agent hook, a git hook and CI. What counts as new is a match on a line you changed; a violation that was already there is backlog, shown and never failing.
-
-- **Pre-commit:** `rulecast run` with no file flags checks the staged files, reads their content from the index (what is being committed, not the working tree), and judges it against `HEAD`. `llm` rules are skipped unless you pass `--llm`, and one line says so: a commit should not cost money.
-- **Pre-push and CI:** `rulecast run --from-ref A --to-ref B` checks the files changed between the merge base with `A` and `B`, reading them at `B`. Without `--to-ref` it reads the working tree.
-- `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
-- **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse. Recipes for `/goal`, `/loop` and scheduled sweeps: [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md).
-
-rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Wire it into the one you use. Git hooks run the rulecast the agent hooks run: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install)).
-
-### pre-commit
-
-In `.pre-commit-config.yaml`:
-
-```yaml
-minimum_pre_commit_version: "3.2.0"
-repos:
-  - repo: https://github.com/syv-ai/rulecast
-    rev: v0.9.0
-    hooks:
-      - id: rulecast
-      - id: rulecast-push
-```
-
-### lefthook
-
-In `lefthook.yml`:
-
-```yaml
-pre-commit:
-  jobs:
-    - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run' --
-pre-push:
-  jobs:
-    - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
-```
-
-### GitHub Actions
-
-```yaml
-on: pull_request
-jobs:
-  rulecast:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # rulecast needs the merge base with the target branch
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - run: npm ci
-      - run: npx rulecast run --from-ref origin/${{ github.base_ref }} --format sarif > rulecast.sarif
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always() # rulecast exits 1 on findings and 3 when a rule could not run, which is when the upload matters
-        with:
-          sarif_file: rulecast.sarif
-```
-
-In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` (the binary for the runner's platform) where the example runs `npx rulecast`.
-
-A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
-
-## Adopting a rule on a codebase that already breaks it
-
-`rulecast run --all-files --summary` tells you how much you already owe:
-
-```text
-backlog: 57 violations in 31 files
-
-  rule                            violations  files
-  python/routes-never-call-crud           57     31
-
-  worst files                     violations
-  app/api/routes/orders.py                12
-  app/api/routes/users.py                  9
-```
-
-Watch the count, not the rate. Here is one real codebase on one rule, on `main`:
-
-| date | violating / total |
-|---|---|
-| 2026-01-15 | 61 / 80 |
-| 2026-06-01 | 58 / 143 |
-| 2026-09-25 | 57 / 194 |
-
-The rate fell from 76% to 29% and the count did not move. New code complied; the old violations were never fixed, only diluted. A team watching the percentage would have believed it was winning.
-
-Per-edit enforcement does not touch that stock — it only stops it growing. Fix it a file at a time: edits to files that already followed the rule broke it 2% of the time, against 37% in files that mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not proven.)
-
-When the fix is mechanical, give the rule a [`fix`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md#fixes) and burn the stock down in one go: `rulecast fix <rule> --all-files --dry-run` shows the diff, and without `--dry-run` it writes it. Hooks never apply a fix; only that command does.
-
-A scheduled full-repository run, which has no ref to diff against, needs a [committed baseline](https://github.com/syv-ai/rulecast/blob/main/README.md#a-committed-baseline).
-
-## Agents
-
-rulecast ships docs written for coding agents, not for people. Paste this to yours and it will set rulecast up itself:
-
-```text
-Set up rulecast in this project with me. Read
-https://syv-ai.github.io/rulecast/agents/SETUP.md
-and follow it.
-```
-
-If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through what it found with you, install rulecast (the standalone binary, or `@syv-ai/rulecast` as a devDependency), and run `rulecast init` with the flags you agree on (`rulecast init --help` lists them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
-
-Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) with the one convention you want checked.
-
-- [`agents/SETUP.md`](https://github.com/syv-ai/rulecast/blob/main/agents/SETUP.md) — your agent sets rulecast up with you: it shows you a page of defaults from the repository, asks only what it can't tell, and writes it when you approve.
-- [`agents/CONVENTIONS.md`](https://github.com/syv-ai/rulecast/blob/main/agents/CONVENTIONS.md) — for working out your conventions up front. It reads the code, then interviews you one question at a time about what matters in this kind of project. You review the result on one page, and nothing goes into your docs that you didn't choose.
-- [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
-
-As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, which never fire, and whether a rule fires less over the weeks: once the log spans two weeks, it shows each rule's weekly rate and the files it keeps firing on. The trend covers what the log holds, about 8 MiB; set `stats.weekly_summary: true` in the config (`rulecast init --weekly-summary`) to keep 26 weeks of per-week counts as well. `rulecast clean` deletes it.
-
-Several agents in one working tree, git operations during a turn, and agents with nobody watching are covered under [Advanced](https://github.com/syv-ai/rulecast/blob/main/README.md#advanced).
-
-Claude Code is the supported agent today. Codex, Cursor and OpenCode are next; rulecast is agent-neutral by design, and only the adapter knows about a specific agent.
-
-## Claude Code plugin
-
-The rulecast plugin sets rulecast up and adds one rule at a time, from inside a session:
-
-```text
-/plugin install rulecast --marketplace syv-ai/rulecast
-```
-
-- `/rulecast:setup` sets rulecast up with you, as [Getting started](https://github.com/syv-ai/rulecast/blob/main/README.md#getting-started) describes.
-- `/rulecast:add-rule` with nothing after it looks back over the session for a correction or a mistake that should not happen again.
-- `/rulecast:add-rule services never raise HTTPException` starts from the convention you name.
-
-Either way, the agent recommends the rule it would add and asks you to confirm or pick before it drafts anything. If a catalog rule already checks it, the agent offers that one. Otherwise it writes the convention into your docs if no section states it, drafts and measures the rule as [`agents/DRAFT-RULES.md`](https://github.com/syv-ai/rulecast/blob/main/agents/DRAFT-RULES.md) describes, and changes nothing without your approval. When you correct the agent on how code here should be written, it may ask once whether to add a rulecast rule for it, and changes nothing unless you say yes.
-
-The plugin's version follows the CLI's, so each release reaches you as a plugin update.
+If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists the [advanced commands](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md) too, and the exit codes are [there](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md#exit-codes).
 
 ## Install
 
+Setup installs rulecast for you, after you approve the command. To do it by hand:
+
 ### Standalone binary
 
-No Node needed.
+No Node needed. Downloads this version's binary and its checksum from [Releases](https://github.com/syv-ai/rulecast/releases), checks them, and installs it to `~/.cache/rulecast/bin/`. Run it again with a newer version to update.
 
 ```sh
 sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
 ```
 
-This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.
-
 ### npm
 
-For a project that wants one pinned version for everyone:
+For one pinned version for everyone (needs Node ≥ 20.12):
 
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
 
-The agent hooks and git hooks run the project's `node_modules/.bin/rulecast` first, then the installed binary, then one on the PATH (such as `npm install -g @syv-ai/rulecast`). With none, they only say once per session that rulecast is not installed. Nothing installs rulecast by itself: setup shows you the command, and runs it only when you approve.
-
-The npm package needs Node ≥ 20.12. Linux and macOS; Windows is not supported.
+Hooks run the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 ## Performance
 
-The edit hook is budgeted to finish in under 500 ms at p95, measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The hook before every Bash call only records the working tree, and is held to 150 ms over a hook that does nothing. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget. `pnpm perf` checks both budgets.
+The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm caches, `llm` rules aside, and the hook before each Bash call at 150 ms over a hook that does nothing. `pnpm perf` checks both. There is no daemon: every hook is a fresh process with caches on disk.
 
-A new worktree, a new session or an empty per-project detector cache needs no preparation. Hooks never fetch, so rules from a rule repo that is not in the cache do not run until `rulecast install` (see [Fresh environments](https://github.com/syv-ai/rulecast/blob/main/README.md#fresh-environments)). On macOS, the first edit in a new worktree is slower than later ones: macOS checks each executable the first time it runs from a new path, such as the project's own `command` script or a `node_modules/.bin` linter shim. Run them once beforehand and the first edit costs the same as later ones.
+## Learn more
 
-The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
-
-## Advanced
-
-Most projects need none of this. It covers particular setups: several agents in one working tree, git operations during a turn, fresh CI and cloud environments, and full-repository runs with no ref to diff against. The commands for them are under [Advanced commands](https://github.com/syv-ai/rulecast/blob/main/README.md#advanced-commands).
-
-### Several agents at once
-
-With subagents, each one's stop checks only the files it edited, so it is never asked to fix another agent's code. The main agent's stop checks everything the session changed: a problem that only shows when two subagents' changes meet is caught there. A file two subagents both edit can block either of them. A change no agent's tool call made, such as your own edit, is reported at the main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
-
-When agents run in parallel in one working tree, in one session or several, and one of them changes files with the shell, a file another agent changed with Edit or Write while the command ran stays that agent's. What two agents' shell commands change at the same time can't be told apart: both are held to it, each is told once, and neither is told to `git checkout` a protected file the other may have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with `isolation: worktree`).
-
-### Git operations during a turn
-
-A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull or merge brings lines into a file the agent edited, those lines are not counted as the agent's, as long as their commits were made before the operation. The agent's own commits stay its own. One gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only as a git operation, so files it alone changed are not checked.
-
-### Fresh environments
-
-A CI job, a cloud agent session or a new container starts with nothing installed. rulecast does not fail quietly there: in unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and the agent is held once per prompt to put that in its final report. `rulecast run` says `incomplete` and lists them under `disabled` in JSON. To have nothing to report:
-
-1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
-2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
-3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else the installed binary in `~/.cache/rulecast/bin/`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
-4. Check out with `fetch-depth: 0` if you use `--from-ref`.
-5. Under `CI` or `GITHUB_ACTIONS` unattended mode is on by itself. Elsewhere set `RULECAST_MODE=unattended`. The hook command's not-installed guard reads only the environment, never the config's `mode:`.
-6. End the loop with `rulecast run --from-ref …`. It is the gate that counts, and a non-zero exit with `incomplete` means some rules did not run.
-7. Optionally cache `~/.cache/rulecast/repos` between jobs (for example `actions/cache` keyed on `.rulecast-config.yaml`). It saves a clone per job.
-
-A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
-
-A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](https://github.com/syv-ai/rulecast/blob/main/README.md#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
-
-### Tools in staged and `--to-ref` runs
-
-`command` scripts, and `oxlint`, are handed a scratch copy of each file in staged and `--to-ref` runs, because the content to judge is not the file on disk. `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies, and `gitleaks` gets it on stdin too. Whole-project tools (`scope: project`, `hook` rules) need the real project: they run on the working tree when the rule's files there match what is being committed, and are skipped with a warning naming the files when they don't. rulecast never stashes.
-
-### A committed baseline
-
-`--from-ref` needs a ref. A scheduled full-repository run, such as a nightly convention sweep or an agent loop told to keep `main` clean, has none, so every legacy violation is new and the run always fails. For those, record what is there today:
-
-```sh
-rulecast baseline            # writes .rulecast/baseline.json
-git add .rulecast/baseline.json && git commit -m "rulecast baseline"
-rulecast run --all-files     # exits 0 unless something got worse
-```
-
-- `run --all-files` and `run --files` treat the findings listed in the file as pre-existing, and fail only on new ones. Sessions, `--from-ref` and staged commits keep their own baseline, and hooks never read the file.
-- The file lists finding ids ([what an id is](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md#finding-ids)), so editing a baselined line's offending text, or moving its file, makes the finding new.
-- When a run no longer finds an entry it says so: `baseline: 3 entries no longer found (fixed or changed); rulecast baseline --prune drops them`. Run `--prune` in the same pull request that fixes them. It only ever removes entries, never adds one, and keeps the entries of rules that did not run.
-- Recording new findings means rewriting the file with `rulecast baseline --force`. That is an amnesty, and it shows in review as one.
-- `rulecast doctor` reports its size, when it was added and when it last changed.
-- `llm` rules are included unless you pass `--no-llm`. A model's matches can drift between runs, so expect those entries to churn.
-
-Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining and never turns into an amnesty file.
-
-### Agents with nobody watching
-
-If your agent runs with nobody watching, such as Claude Code's `/goal`, `claude -p` or a scheduled task, add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](https://github.com/syv-ai/rulecast/blob/main/packages/rules-loop-safety/loop-safety.md). [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md) has recipes for `/goal`, `/loop`, scheduled sweeps and learning from `rulecast stats`.
+- [Git hooks and CI](https://github.com/syv-ai/rulecast/blob/main/guides/git-hooks-ci.md): the same rules in pre-commit, pre-push and GitHub Actions
+- [Adopting a rule on a codebase that already breaks it](https://github.com/syv-ai/rulecast/blob/main/guides/adopting-rules.md)
+- [Agents](https://github.com/syv-ai/rulecast/blob/main/guides/agents.md) and the [Claude Code plugin](https://github.com/syv-ai/rulecast/blob/main/guides/claude-code-plugin.md)
+- [Advanced](https://github.com/syv-ai/rulecast/blob/main/guides/advanced.md): several agents at once, fresh CI environments, committed baselines, unattended loops
+- Reference: [rule format](https://github.com/syv-ai/rulecast/blob/main/agents/reference/rule-format.md), [detectors](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md), [output and finding ids](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md)
 
 ## Status
 
@@ -422,4 +158,4 @@ Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/syv-ai/rulecast/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/syv-ai/rulecast/blob/main/LICENSE).
