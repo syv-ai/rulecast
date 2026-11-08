@@ -123,6 +123,7 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `count` | How many matches this finding stands for. Findings of one rule in one file with the same rendered message are merged into one; that only happens when the message has no `{{line}}`. A merged finding shows its earliest match, and carries that match's id. |
 | `captures` | The values the message template names, when it names any. |
 | `fixable` | `true` when `rulecast fix` can apply this rule's fix; absent otherwise. Route these to `rulecast fix`, the rest to an agent. |
+| `docs` | What the finding's lint rule points to: `{ "ref": "docs/x.md#y" }`, the project's section for it from the rule's `context_by_rule`, else `{ "url": "…" }`, the tool's own page for it. Absent when there is neither. |
 
 ### `rulecast fix`
 

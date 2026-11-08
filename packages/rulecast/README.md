@@ -75,7 +75,7 @@ The full format is in [`agents/reference/rule-format.md`](https://github.com/syv
 | `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
 | `command` | Whatever a tool or your own script reports: SARIF, JSON, checkstyle, code-quality JSON, rdjson or `file:line:` lines. Type checkers, dead-code finders and scanners [by config](https://github.com/syv-ai/rulecast/blob/main/agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
 | `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | verify |
-| `linter` | ruff, oxlint, eslint or gitleaks findings, narrowed to the rules you care about | edit (eslint: verify) |
+| `linter` | errors from ruff, oxlint, eslint or gitleaks under the project's own config, or the lint rules you name, each with its doc section | edit (eslint: verify) |
 | `llm` | Conventions nothing mechanical expresses, judged by a model | verify |
 
 `llm` rules are opt-in, use the rule's model or the config's `llm.model`, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/detectors.md).

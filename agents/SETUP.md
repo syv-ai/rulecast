@@ -26,7 +26,8 @@ It writes nothing in the project. To show which catalog rules fit, it fetches th
 - `sessions`: directories below this one where an agent's settings already sit (`.claude/`);
 - `gitHooks`: pre-commit, lefthook or husky, and whether rulecast is already in each;
 - `ci`: workflow files that run a coding agent;
-- the project's own hooks it can run as rules (and the ones it can't, with why);
+- `linters`: the linters the project already runs (ESLint, Ruff, oxlint, gitleaks), each with the rules its own config makes errors (`errorRules`), how many warnings a rule would not deliver (`warningRules`), and `candidates`: doc sections that name one of those rules;
+- the project's own hooks it can run as rules (and the ones it can't, with why). A hook that runs one of those linters has `sameAs: "linter/<tool>"`;
 - `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence: a directory, a `.gitattributes` pattern, or a file (past 20 files, `notListed` counts the rest). They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`);
 - `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether it is configured;
 - the config's current settings, and every file it would write.
@@ -51,7 +52,8 @@ Each item on the page gets a default from what you found. Only the items below m
 | Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
 | CI | `ci` | an aside in the footer: rulecast never edits CI | never |
 | Conventions location | the config's `conventions`, else an existing folder such as `docs/conventions/`, else `primaryDoc` | that path | none of the three exists |
-| Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script | you cannot read the script |
+| Linter rules | `linters.offered` | each on, with `--linters`: the errors the linter's own config reports reach the agent after each edit (ESLint's when it stops), and only the ones its edit caused. The row says how many rules the config makes errors and how many warnings will not be delivered | never |
+| Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script; one with `sameAs` off, because the linter rule it names runs the same linter, after each edit | you cannot read the script |
 | Generated paths | `generated` | each on, with `--generated` | never |
 | Vendored paths | `vendored` | each on, with `--vendored` | never |
 | Catalog rules | `catalog.rules` with `matching` above 0, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
@@ -62,6 +64,8 @@ Each item on the page gets a default from what you found. Only the items below m
 | **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
 The weekly stats summary row says what turning it on keeps: 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside this config's findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. It applies to this config only.
+
+A linter rule delivers only errors: to have a warning delivered, the developer makes it an error in the linter's config. Each finding carries the linter's own page for its lint rule as a link, until a doc section is mapped to that rule after setup (step 7).
 
 A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off.
 
@@ -75,7 +79,7 @@ Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON
 
 - `questions`: the open questions from step 3, with their options and why they are asked.
 - `tree`: the repository as setup touches it. Configs, where sessions start, the conventions file or folder, generated and vendored paths, the files that change (`package.json` and its lockfile too, when rulecast is added as a devDependency), and what is not touched.
-- `rules`: hook rules, catalog rules, generated and vendored paths, each with its state.
+- `rules`: linter rules, hook rules, catalog rules, generated and vendored paths, each with its state. A linter rule's `text` gives its counts ("2 error rules, 1 warning not delivered"); a hook that is `off` for `sameAs` says which linter rule runs it instead.
 - `decisions`: the setup rows from step 3. `found` is what step 2 showed, or null. `value` is the default. `why` says what it means here. `detail` shows exactly what changes: run the dry run again with the default flags and take the file contents from its `changes[].content`. For the install row, `detail` is the exact command step 6 will run (for the standalone binary, the whole command shown there).
 - `candidates`: the stated conventions and memory corrections to draft as rules after setup.
 - `footer`: what to say ("**go ahead**, or name numbers to strike or change"), which questions need an answer either way, and what the developer does themselves, such as CI.
@@ -108,7 +112,7 @@ Only after the developer approves. First, install rulecast as approved, by runni
 These are the install row's three options. The hooks look in that order: the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Then, in each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--linters linter/eslint,linter/ruff] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
 ```
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
@@ -124,6 +128,8 @@ Then, as the page says:
 - **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.
 
 ## 7. Then
+
+**Doc sections for the linter rules.** init writes each linter rule without any. For each `candidates` entry the dry run listed, and each error rule you find discussed in the docs by reading them, propose one mapping, one at a time, with the section quoted in a line. The developer agrees or rejects each one; a rule left unmapped keeps the linter's own link. Add the agreed ones under that rule's `context_by_rule` in the config, keyed by the lint rule's id as the dry run listed it (`eqeqeq: "@docs/conventions.md#comparisons"`), then run `rulecast validate`. The mappings go in the config only, never in the docs.
 
 Draft each candidate the developer kept, one at a time: in Claude Code with `/rulecast:add-rule`, elsewhere with [DRAFT-RULES.md](DRAFT-RULES.md) for that one convention. Show each draft and get it approved on its own.
 

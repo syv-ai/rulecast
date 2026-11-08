@@ -102,8 +102,8 @@ export const linterDetector: Detector<LinterConfig> = {
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
     // One run per tool for the rules that name their linter rules, with those rules turned on, and
-    // one for the rules that take every finding, which must see only what the project's own config
-    // reports. Most configs have only one kind, so most tools still run once.
+    // one for the rules that name none, which must see only what the project's own config reports
+    // (and of that, only its errors). Most configs have only one kind, so most tools still run once.
     const runs = new Map<string, { tool: ToolName; select: string[]; rules: DetectorRuleInput<LinterConfig>[] }>()
     for (const rule of input.rules) {
       const key = `${rule.config.tool}:${rule.config.rules ? "named" : "all"}`
