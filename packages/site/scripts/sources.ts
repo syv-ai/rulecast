@@ -50,6 +50,9 @@ function forAgents(file: string): string {
   return `:::note[Written for coding agents]\nThis page is the file your agent reads. Give it the raw file, from the latest release: <${agentDocUrl(file)}>\n:::`
 }
 
+/** The installer, served at the site's root as `/install.sh`: the latest release's. */
+export const INSTALL_SCRIPT = "install.sh"
+
 /**
  * Everything the site is built from, as repository paths. The site's own code is always main's;
  * these come from the latest release tag (scripts/content-from.ts), so the site documents what
@@ -59,6 +62,7 @@ export const CONTENT_PATHS = [
   "README.md",
   "agents",
   "guides",
+  INSTALL_SCRIPT,
   "packages/rulecast/package.json",
   "packages/rulecast/test/goldens/delivery",
 ]

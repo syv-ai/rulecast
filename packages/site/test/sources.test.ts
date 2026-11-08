@@ -1,17 +1,23 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   agentDocUrl,
   agentPrompt,
   assertPlaced,
+  CONTENT_PATHS,
   exampleBinding,
   exampleSection,
+  INSTALL_SCRIPT,
   LEAD,
   PAGES,
   pageBody,
+  REPO_ROOT,
   readme,
   readmeSections,
   splitTitle,
 } from "../scripts/sources"
+import { publicInstaller, sync } from "../scripts/sync"
 
 describe("readmeSections", () => {
   it("splits on ## outside fenced code, and drops the README's own title", () => {
@@ -138,5 +144,16 @@ describe("exampleSection", () => {
       file: "conventions/backend.md",
       text: expect.stringMatching(/^## Errors\n\nServices raise domain exceptions\./),
     })
+  })
+})
+
+describe("install.sh", () => {
+  it("is site content, taken from the release like the docs", () => {
+    expect(CONTENT_PATHS).toContain(INSTALL_SCRIPT)
+  })
+
+  it("is served at the site's root, byte for byte", async () => {
+    await sync()
+    expect(readFileSync(publicInstaller, "utf8")).toBe(readFileSync(path.join(REPO_ROOT, INSTALL_SCRIPT), "utf8"))
   })
 })

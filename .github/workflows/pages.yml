@@ -8,6 +8,9 @@ name: pages
 # workflow run, so it calls this directly once a release is tagged (as it does binaries.yml).
 # workflow_dispatch redeploys by hand: "latest" for the newest tag, or "main" for a docs fix that
 # cannot wait for a release.
+#
+# The site's code is main's, so it needs content as new as its own: a tag from before guides/ and
+# install.sh (plan 28) fails content-from. Redeploy those with "main", or wait for the next release.
 on:
   workflow_call:
     inputs:

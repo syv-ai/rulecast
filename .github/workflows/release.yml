@@ -129,7 +129,7 @@ jobs:
 
   # The docs site is built from the release's content, so it is redeployed when, and only when, a
   # release is tagged. Called for the same reason as binaries above. After the binaries, too: the
-  # site shows the install one-liner for this version, which fails until its assets are uploaded.
+  # site serves this release's install.sh, which fails until its assets are uploaded.
   pages:
     needs: [release, binaries]
     if: needs.release.outputs.tag != ''

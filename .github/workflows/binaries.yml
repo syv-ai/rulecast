@@ -66,3 +66,21 @@ jobs:
             --clobber --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The release's own install.sh, so `…/releases/download/vX.Y.Z/install.sh | sh` installs that
+  # version. After every binary, so it never points at a missing asset. A tag from before plan 28
+  # has no install.sh: nothing to attach.
+  installer:
+    needs: attach
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Attach install.sh to the release
+        if: hashFiles('install.sh') != ''
+        run: gh release upload "${{ inputs.tag }}" install.sh --clobber --repo "${{ github.repository }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
