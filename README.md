@@ -137,7 +137,7 @@ For one pinned version for everyone (needs Node ≥ 20.12):
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
 
-Hooks run the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the script's install directory (for an agent started from the Dock or an IDE, whose PATH may lack it). Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
+The agent hooks run `.claude/hooks/rulecast.sh`, a short script `rulecast install` writes and you commit with `.claude/settings.json`. It runs the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the script's install directory (for an agent started from the Dock or an IDE, whose PATH may lack it). Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 ## Performance
 

@@ -239,6 +239,7 @@ details.row.struck .d, details.row.struck .f, details.row.struck .l { color: var
   "tree": [
     { "depth": 0, "name": "tidewater/", "highlight": true, "marks": [{ "kind": "session", "text": "sessions start here" }, { "kind": "config", "text": "config" }] },
     { "depth": 1, "name": ".claude/settings.json", "marks": [{ "kind": "note", "text": "hooks, shared" }] },
+    { "depth": 1, "name": ".claude/hooks/rulecast.sh", "marks": [{ "kind": "note", "text": "the script they run" }] },
     { "depth": 1, "name": ".pre-commit-config.yaml", "marks": [{ "kind": "note", "text": "+ rulecast run" }] },
     { "depth": 1, "name": "AGENTS.md", "dim": true },
     { "depth": 1, "name": "docs/conventions/", "highlight": true, "marks": [{ "kind": "conventions", "text": "new conventions go here" }] },
@@ -259,7 +260,7 @@ details.row.struck .d, details.row.struck .f, details.row.struck .l { color: var
   "decisions": [
     { "n": 9, "state": "default", "decision": "Who it's for", "found": "4 committers in the last six months", "value": "Team: hooks in the shared settings, config committed.", "lands": "`--scope shared`",
       "why": ["Four people committed in the last six months, so everyone's agent gets the same hooks and rules."],
-      "detail": { "label": "What changes", "code": "# .claude/settings.json\n+ rulecast's hooks, shared" } },
+      "detail": { "label": "What changes", "code": "# .claude/settings.json\n+ rulecast's hooks, shared\n# .claude/hooks/rulecast.sh\n+ the script they run" } },
     { "n": 10, "state": "default", "decision": "Install", "found": "`package.json` pins the tools, pnpm; none installed", "value": "A devDependency.", "lands": "`package.json`",
       "why": ["The project pins its tools in `package.json`, so rulecast goes there too and everyone runs the same version. The agent hooks and git hooks run it first.", "The other options: the standalone binary, which needs no Node (say 10: binary, and the row shows its install command), or a global `npm install -g @syv-ai/rulecast`. Nothing is installed before you approve."],
       "detail": { "label": "What changes", "code": "# runs\npnpm add -D @syv-ai/rulecast" } },

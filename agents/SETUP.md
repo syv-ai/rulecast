@@ -143,6 +143,6 @@ With none kept, tell the developer in two sentences how to add a rule later, and
 - Never write an item the developer has not seen on the page.
 - Never take "go ahead" as an answer to a question on the page.
 - Never add a `rulecast-ignore` comment or set `enabled: false` on a rule without the developer's agreement. Ignores added during a session are reported to the developer when you stop.
-- Never edit agent hook settings (such as `.claude/settings.json`) by hand: `rulecast init`, `install` and `uninstall` manage them.
+- Never edit agent hook settings (such as `.claude/settings.json` and the `.claude/hooks/rulecast.sh` it runs) by hand: `rulecast init`, `install` and `uninstall` manage them.
 - Never set rulecast up without the developer.
 - Never commit. The developer reviews and commits.

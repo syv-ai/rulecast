@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -425,7 +424,6 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     {
       configText,
       verifyMs: reached.verifyMs,
-      local: existsSync(path.join(root, "node_modules", ".bin", "rulecast")),
       readText: (file) => readSourceFile(root, file),
     },
   )
@@ -586,11 +584,15 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   const toCommit = report.changes.filter((change) => change.commit).map((change) => change.file)
   if (!report.written) out.push("Nothing written (--dry-run).")
   else if ((report.validate?.errors ?? 0) > 0) out.push("Not ready to commit: fix what validate reports above.")
-  else out.push(toCommit.length === 0 ? "Done." : `Commit ${toCommit.join(" and ")}.`)
+  else out.push(toCommit.length === 0 ? "Done." : `Commit ${listed(toCommit)}.`)
   return `${out.join("\n")}\n`
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
+
+/** "a", "a and b", "a, b and c". */
+const listed = (items: readonly string[]) =>
+  items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 
 /** How init's text says whether an offered hook changes files. */
 function writesNote(hook: { modifies: boolean | null; runs?: string; sameAs?: string }): string {

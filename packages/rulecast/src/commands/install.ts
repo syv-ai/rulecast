@@ -1,4 +1,4 @@
-import { access, constants, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { access, constants, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -8,7 +8,7 @@ import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
 import { cacheHome, type Env } from "../core/home"
-import { type HookState, inFile, installOf, planHooks, projectRulecast, ScopeError } from "../core/hook-plan"
+import { type FileReader, type HookState, inFile, installOf, planHooks, ScopeError } from "../core/hook-plan"
 import { configRootsAbove, configRootsBelow, displayPath } from "../core/projects"
 import { cachedRepo, ensureRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
@@ -17,27 +17,32 @@ import { commandPath } from "../core/which"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
 
+/** A file's text, relative to `root`, or null when it does not exist. */
+const reader =
+  (root: string): FileReader =>
+  async (file) => {
+    try {
+      return { text: await readFile(path.join(root, file), "utf8") }
+    } catch (error) {
+      if (isNotFound(error)) return null
+      throw error
+    }
+  }
+
 /** Parsed settings, or null when the file does not exist. */
 async function readSettings(root: string, file: string): Promise<{ value: unknown } | null> {
-  let text: string
-  try {
-    text = await readFile(path.join(root, file), "utf8")
-  } catch (error) {
-    if (isNotFound(error)) return null
-    throw error
-  }
-  try {
-    return { value: JSON.parse(text) }
-  } catch (error) {
-    throw new Error(`${file}: ${errorMessage(error)}`)
-  }
+  const current = await reader(root)(file)
+  return current === null ? null : { value: inFile(file, () => JSON.parse(current.text) as unknown) }
 }
 
-async function writeSettings(root: string, file: string, settings: unknown): Promise<void> {
+async function writeText(root: string, file: string, text: string, mode?: number): Promise<void> {
   const full = path.join(root, file)
   await mkdir(path.dirname(full), { recursive: true })
-  await writeFile(full, `${JSON.stringify(settings, null, 2)}\n`)
+  await writeFile(full, text, { mode })
 }
+
+const writeSettings = (root: string, file: string, settings: unknown) =>
+  writeText(root, file, `${JSON.stringify(settings, null, 2)}\n`)
 
 function isEmptyObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
@@ -51,7 +56,7 @@ export interface HookRulecast {
 }
 
 /**
- * Every rulecast the hook command would consider, in the order it tries them: the project's
+ * Every rulecast the agent hooks' script would consider, in the order it tries them: the project's
  * `node_modules/.bin/rulecast`, then the PATH, then install.sh's in its directory (installDir).
  * Executable is enough for the project's (the hook execs it); one that cannot run (126, 127, a
  * binary for another machine) counts as none, as in the hook. A project with none has hooks that are installed and run no rules, which
@@ -104,37 +109,51 @@ export async function hooksInstalled(root: string, adapter: Adapter, verifyMs: n
 export type { HookState }
 
 export async function hookState(root: string, adapter: Adapter, verifyMs: number): Promise<HookState | null> {
-  return (await planHooks((file) => readSettings(root, file), adapter, "shared", verifyMs, projectRulecast(root))).state
+  return (await planHooks(reader(root), adapter, "shared", verifyMs)).state
+}
+
+/** What installHooks did: the settings file, the hooks added and rewritten there, and the files written beside it. */
+export interface InstallResult {
+  file: string
+  added: string[]
+  updated?: string[]
+  wrote: string[]
 }
 
 /**
- * Adds the adapter's hooks to its settings file for `scope`. Hooks already present in any of the
- * adapter's settings files count as installed: then nothing is written and `added` is empty.
+ * Adds the adapter's hooks to its settings file for `scope`, and writes the files they need. Hooks
+ * already present in any of the adapter's settings files count as installed: then the settings are
+ * not written and `added` is empty. The files are written whenever they are missing or differ.
  */
 export async function installHooks(
   root: string,
   adapter: Adapter,
   scope: InstallScope,
   verifyMs: number,
-): Promise<{ file: string; added: string[]; updated?: string[] }> {
-  const plan = await planHooks(
-    (file) => readSettings(root, file),
-    adapter,
-    scope,
-    verifyMs,
-    projectRulecast(root),
-  ).catch((error: unknown) => {
+): Promise<InstallResult> {
+  const plan = await planHooks(reader(root), adapter, scope, verifyMs).catch((error: unknown) => {
     throw error instanceof ScopeError ? new UsageError(error.message) : error
   })
-  if (plan.write === null) return { file: plan.state!.file, added: [] }
-  await writeSettings(root, plan.write.file, plan.write.settings)
+  if (plan.write === null) return { file: plan.state!.file, added: [], wrote: [] }
+  const { write } = plan
+  if (write.settings !== null) await writeSettings(root, write.file, write.settings)
+  // Not executable: the hooks run each file through its interpreter, as `sh <file>`.
+  for (const { file, content } of write.files) await writeText(root, file, content, 0o644)
+  const wrote = write.files.map(({ file }) => file)
   return plan.state === null
-    ? { file: plan.write.file, added: plan.write.added }
-    : { file: plan.write.file, added: plan.write.added, updated: plan.write.updated }
+    ? { file: write.file, added: write.added, wrote }
+    : { file: write.file, added: write.added, updated: write.updated, wrote }
 }
 
-/** Removes the adapter's hooks from every settings file of it that exists. */
-export async function uninstallHooks(root: string, adapter: Adapter): Promise<{ file: string; removed: string[] }[]> {
+/**
+ * Removes the adapter's hooks from every settings file of it that exists, and the files install
+ * wrote for them: no settings file here runs them any more. A directory those files leave empty
+ * goes too; one with anything else in it stays.
+ */
+export async function uninstallHooks(
+  root: string,
+  adapter: Adapter,
+): Promise<{ settings: { file: string; removed: string[] }[]; files: string[] }> {
   const install = installOf(adapter)
   const results: { file: string; removed: string[] }[] = []
   for (const { file } of install.scopes) {
@@ -148,7 +167,20 @@ export async function uninstallHooks(root: string, adapter: Adapter): Promise<{ 
     else await writeSettings(root, file, settings)
     results.push({ file, removed })
   }
-  return results
+  const files: string[] = []
+  for (const { file } of install.files) {
+    const full = path.join(root, file)
+    try {
+      await rm(full)
+    } catch (error) {
+      if (isNotFound(error)) continue
+      throw error
+    }
+    files.push(file)
+    const dir = path.dirname(full)
+    if ((await readdir(dir)).length === 0) await rmdir(dir)
+  }
+  return { settings: results, files }
 }
 
 function selectAdapters(names: string[] | undefined): Adapter[] {
@@ -168,11 +200,7 @@ export async function loadProjectConfig(root: string, command: string): Promise<
   return config.value
 }
 
-export function printInstall(
-  io: CliIo,
-  adapter: Adapter,
-  result: { file: string; added: string[]; updated?: string[] },
-): void {
+export function printInstall(io: CliIo, adapter: Adapter, result: InstallResult): void {
   const updated = result.updated ?? []
   if (updated.length > 0) {
     io.stdout(`updated ${adapter.label} hooks in ${result.file}: ${updated.join(", ")}\n`)
@@ -180,7 +208,8 @@ export function printInstall(
   if (result.added.length > 0) {
     io.stdout(`installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`)
   }
-  if (updated.length === 0 && result.added.length === 0) {
+  for (const file of result.wrote) io.stdout(`wrote ${file}\n`)
+  if (updated.length === 0 && result.added.length === 0 && result.wrote.length === 0) {
     io.stdout(`${adapter.label} hooks already installed in ${result.file}\n`)
   }
 }
@@ -297,11 +326,12 @@ export async function uninstallCommand(args: string[], io: CliIo): Promise<numbe
   const { values } = parseArgs({ args, options: { agent: { type: "string", multiple: true } } })
   const dir = settingsDir(io.cwd)
   for (const adapter of selectAdapters(values.agent)) {
-    const results = await uninstallHooks(dir, adapter)
-    if (results.length === 0) io.stdout(`no ${adapter.label} hooks to remove\n`)
-    for (const { file, removed } of results) {
+    const { settings, files } = await uninstallHooks(dir, adapter)
+    if (settings.length === 0 && files.length === 0) io.stdout(`no ${adapter.label} hooks to remove\n`)
+    for (const { file, removed } of settings) {
       io.stdout(`removed ${adapter.label} hooks from ${file}: ${removed.join(", ")}\n`)
     }
+    for (const file of files) io.stdout(`removed ${file}\n`)
   }
   return 0
 }

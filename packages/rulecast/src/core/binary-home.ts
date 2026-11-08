@@ -23,11 +23,6 @@ export function nativeDir(home: string, version: string = VERSION): string {
   return path.join(home, "native", platformKey(version))
 }
 
-/** Exits with `$<name>` unless it is 126 or 127, the shell's "could not run it". */
-export function exitUnlessUnrunnable(name: string): string {
-  return `[ "$${name}" -ne 126 ] && [ "$${name}" -ne 127 ] && exit "$${name}"`
-}
-
 /**
  * The command that installs the latest release's binary: install.sh at the repository root, served
  * by the docs site. It verifies the download and puts `rulecast` on the PATH.
@@ -49,10 +44,10 @@ export function installDir(env: Env): string {
 }
 
 /**
- * install.sh's rulecast as the hook commands name it: installDir's rule in shell. The hooks' last
- * resort, after the PATH: an agent started from the Dock or an IDE may run its hooks with a PATH
- * that never read the shell's startup files, where install.sh put the directory. No single quotes,
- * so it can go inside `sh -c '…'`.
+ * install.sh's rulecast as the hook script and the git hooks name it: installDir's rule in shell.
+ * The hooks' last resort, after the PATH: an agent started from the Dock or an IDE may run its
+ * hooks with a PATH that never read the shell's startup files, where install.sh put the directory.
+ * No single quotes, so it can go inside `sh -c '…'`.
  */
 // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template.
 export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"'

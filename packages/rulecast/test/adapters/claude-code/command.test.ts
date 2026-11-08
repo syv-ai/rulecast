@@ -3,14 +3,25 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { HOOK_COMMAND, NOT_INSTALLED, NOT_INSTALLED_UNATTENDED } from "../../../src/adapters/claude-code/adapter"
+import {
+  HOOK_COMMAND,
+  HOOK_SCRIPT,
+  HOOK_SCRIPT_FILE,
+  NOT_INSTALLED,
+  NOT_INSTALLED_UNATTENDED,
+} from "../../../src/adapters/claude-code/hook-script"
 import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
-/** Runs the committed hook command the way Claude Code does: through a shell, payload on stdin. */
-function hook(root: string, payload: Record<string, unknown>, env: Record<string, string> = {}) {
+/**
+ * Runs the committed hook the way Claude Code does: the script where install writes it, and the
+ * settings' command through a shell, payload on stdin.
+ */
+function hook(root: string, payload: Record<string, unknown> | string, env: Record<string, string> = {}) {
+  mkdirSync(path.join(root, path.dirname(HOOK_SCRIPT_FILE)), { recursive: true })
+  writeFileSync(path.join(root, HOOK_SCRIPT_FILE), HOOK_SCRIPT)
   const result = spawnSync("sh", ["-c", HOOK_COMMAND], {
-    input: JSON.stringify(payload),
+    input: typeof payload === "string" ? payload : JSON.stringify(payload),
     env: { PATH: "/usr/bin:/bin", CLAUDE_PROJECT_DIR: root, ...env },
     encoding: "utf8",
   })
@@ -18,7 +29,15 @@ function hook(root: string, payload: Record<string, unknown>, env: Record<string
 }
 
 /** Plan 10, A3: a clone that has not run npm install yet. */
-describe("the committed hook command", () => {
+describe("the committed hook script", () => {
+  test("is valid sh with Unix line endings, run by a command that names no rulecast itself", () => {
+    const check = spawnSync("sh", ["-n"], { input: HOOK_SCRIPT, encoding: "utf8" })
+    expect(check).toMatchObject({ status: 0, stderr: "" })
+    expect(HOOK_SCRIPT).not.toContain("\r")
+    expect(HOOK_COMMAND).toBe('sh "$CLAUDE_PROJECT_DIR"/.claude/hooks/rulecast.sh')
+    expect(HOOK_COMMAND).not.toContain("rulecast hook claude-code")
+  })
+
   test("without rulecast installed, every event exits 0 silently", async () => {
     const root = await createProject({})
     for (const event of ["PostToolUse", "PreToolUse", "Stop", "UserPromptSubmit"]) {
@@ -68,7 +87,7 @@ describe("the committed hook command", () => {
     }
   })
 
-  test("the messages fit inside the command's single quotes", () => {
+  test("the messages fit inside the script's single quotes", () => {
     expect(NOT_INSTALLED).not.toContain("'")
     expect(NOT_INSTALLED_UNATTENDED).not.toContain("'")
   })
@@ -197,5 +216,32 @@ describe("the committed hook command", () => {
     stub(path.join(root, "global-bin"), path.join(root, "global.txt"), '{"global":true}')
     const result = hook(root, { hook_event_name: "Stop" }, { PATH: `${path.join(root, "global-bin")}:/usr/bin:/bin` })
     expect(result.stdout).toBe('{"local":true}\n')
+  })
+
+  test("a large payload reaches the PATH's rulecast unchanged", async () => {
+    // A Write of a 200 KB file: past the project's own rulecast, the script holds the payload in a variable.
+    const root = await createProject({})
+    const setup = lookupSetup(["path"], root)
+    const payload = JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_input: { content: "x'\" $y\n".repeat(40_000) },
+    })
+    const result = hook(root, payload, { PATH: `${setup.pathDir}:/usr/bin:/bin` })
+    expect(result.stdout).toBe('{"path":true}\n')
+    expect(readFileSync(path.join(root, "ran-path"), "utf8")).toBe(`hook claude-code\n${payload}`)
+  })
+
+  test("a project path with a space and a single quote still finds each rulecast", async () => {
+    const parent = await createProject({})
+    for (const places of [["project"], ["path"], ["installed"]] as const) {
+      const root = path.join(parent, `it's a ${places[0]}`)
+      mkdirSync(root, { recursive: true })
+      const { pathDir, installDir } = lookupSetup([...places], root)
+      const env = { PATH: `${pathDir}:/usr/bin:/bin`, RULECAST_INSTALL_DIR: installDir }
+      expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe(`{"${places[0]}":true}\n`)
+    }
+    const bare = path.join(parent, "it's bare")
+    mkdirSync(bare, { recursive: true })
+    expect(JSON.parse(hook(bare, { hook_event_name: "SessionStart" }).stdout)).toEqual({ systemMessage: NOT_INSTALLED })
   })
 })

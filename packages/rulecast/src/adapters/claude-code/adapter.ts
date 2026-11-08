@@ -1,7 +1,7 @@
-import { exitUnlessUnrunnable, INSTALL_COMMAND, INSTALLED_SH } from "../../core/binary-home"
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
+import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "./hook-script"
 import { parseClaudeCode } from "./parse"
 import { mergeHooks, removeHooks } from "./settings"
 
@@ -64,54 +64,6 @@ const SWEPT_PREAMBLE =
 
 const DENY_PREAMBLE = ({ source }: Configs) =>
   `${source} refuse this write. Change what you are writing, or the file you are writing it to, and try again.`
-
-/**
- * What the user sees, once per session, when the project's hooks are committed and rulecast is not
- * installed yet — a fresh clone before `npm install`. Every other event says nothing.
- */
-export const NOT_INSTALLED = `rulecast is configured in this project but not installed. Install it (${INSTALL_COMMAND}) or add @syv-ai/rulecast to the project (pnpm add -D), then run rulecast doctor.`
-
-/**
- * What every stop says when rulecast is not installed and the run is unattended as the shell can
- * see it (#29): nobody reads the SessionStart message in a loop, and "no findings" is not "checked".
- */
-export const NOT_INSTALLED_UNATTENDED = `rulecast is configured in this project but not installed: no rules ran this session. Install rulecast before starting the agent: npm ci (or pnpm install), or ${INSTALL_COMMAND}.`
-
-/**
- * Unattended as the shell sees it: RULECAST_MODE, else CI or GITHUB_ACTIONS set and not false or 0,
- * as config/mode.ts resolves it. The config's `mode:` is out of its reach, and RULECAST_MODE is
- * matched lowercase only.
- */
-const SHELL_UNATTENDED =
-  'U=; case "$CI" in ""|false|0) ;; *) U=1;; esac; case "$GITHUB_ACTIONS" in ""|false|0) ;; *) U=1;; esac; ' +
-  'case "$RULECAST_MODE" in unattended) U=1;; attended|interactive) U=;; esac; '
-
-/**
- * The hook command, guarded, wherever it is installed. A command naming a rulecast that is not
- * there exits 127, which Claude Code shows as a hook error on every Read and Edit (recorded in
- * test/payloads/claude-code/README.md): a clone before `npm install`, or a setup run through npx
- * with nothing installed (plan 21).
- *
- * Guarded, it runs the project's own rulecast, else one on the PATH (install.sh's or a global npm
- * install), else install.sh's in its directory (INSTALLED_SH), for an agent whose PATH lacks it. A devDependency is a version the project committed to, so it wins for everyone. The
- * command only looks: it never downloads or installs anything. A PATH rulecast that cannot execute
- * (126 or 127: a binary built for another machine, or a version-manager shim with no rulecast
- * behind it) counts as none. With none, it exits 0, after telling the user on
- * `SessionStart`, and — unattended — at every stop. Never a block: without session state it could
- * not hold the agent only once per prompt.
- *
- * The project's own rulecast gets stdin through `exec`, untouched; past that the payload is read
- * once and piped to the PATH's, then to install.sh's. One string for every event, and it still contains
- * "rulecast hook claude-code", which is how settings.ts recognises its own hooks.
- */
-export const HOOK_COMMAND =
-  'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
-  "P=$(cat); " +
-  `if command -v rulecast >/dev/null 2>&1; then printf '%s' "$P" | rulecast hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
-  `L=${INSTALLED_SH}; if [ -x "$L" ]; then printf '%s' "$P" | "$L" hook claude-code; R=$?; ${exitUnlessUnrunnable("R")}; fi; ` +
-  SHELL_UNATTENDED +
-  `if printf '%s' "$P" | grep -q '"hook_event_name": *"SessionStart"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED })}'; ` +
-  `elif [ -n "$U" ] && printf '%s' "$P" | grep -qE '"hook_event_name": *"(Subagent)?Stop"'; then printf '%s' '${JSON.stringify({ systemMessage: NOT_INSTALLED_UNATTENDED })}'; fi; exit 0`
 
 /**
  * Findings in files changed outside the agent's tool calls never block, and a Stop hook reaches the
@@ -266,12 +218,10 @@ export const claudeCodeAdapter: Adapter = {
       { scope: "shared", file: ".claude/settings.json" },
       { scope: "personal", file: ".claude/settings.local.json" },
     ],
-    // The guard is right with or without the project's own rulecast (plan 21).
-    command: () => HOOK_COMMAND,
-    // The guarded command is never rewritten to the bare one. It is right with or without
-    // node_modules, and `install` in a clone that has not installed yet would otherwise swap the
-    // committed command for one that exits 127 on every hook.
-    merge: (settings, command, verifyMs) => mergeHooks(settings, command, verifyMs, HOOK_COMMAND),
+    // Every entry runs the script; the script finds a rulecast, or says none is installed.
+    command: HOOK_COMMAND,
+    files: [{ file: HOOK_SCRIPT_FILE, content: HOOK_SCRIPT }],
+    merge: mergeHooks,
     remove: removeHooks,
   },
 }

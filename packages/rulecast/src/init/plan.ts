@@ -47,8 +47,6 @@ export interface PlanContext {
   /** The current .rulecast-config.yaml; null when the project has none. */
   configText: string | null
   verifyMs: number
-  /** rulecast is installed in the project's node_modules. */
-  local: boolean
   /** Reads a repo-relative file; null when missing. */
   readText(file: string): Promise<string | null>
 }
@@ -56,14 +54,6 @@ export interface PlanContext {
 export class PlanError extends Error {}
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
-
-function parseSettings(text: string, file: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch (error) {
-    throw new PlanError(`${file}: ${errorMessage(error)}`)
-  }
-}
 
 /** "+llm.model haiku", or "llm.model sonnet → haiku" when an existing value is replaced. */
 function settingText(change: SettingChange): string {
@@ -109,35 +99,44 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
 
 /**
  * The agent's hooks, planned exactly as `rulecast install` plans them (core/hook-plan.ts): hooks
- * already anywhere count, and are upgraded where they are, a partial install included.
+ * already anywhere count, and are upgraded where they are, a partial install included. The settings
+ * change, then one change per file the hooks need; those are for committing when the settings are.
  */
-async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange | null> {
+async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange[]> {
   const install = choice.adapter.install
-  if (install === null) return null
+  if (install === null) return []
   const read = async (file: string) => {
     const text = await context.readText(file)
-    return text === null ? null : { value: parseSettings(text, file) }
+    return text === null ? null : { text }
   }
   let plan: Awaited<ReturnType<typeof planHooks>>
   try {
-    plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs, context.local)
+    plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs)
   } catch (error) {
-    throw error instanceof PlanError ? error : new PlanError(errorMessage(error))
+    throw new PlanError(errorMessage(error))
   }
   const write = plan.write
-  if (write === null) return null
+  if (write === null) return []
   const label = choice.adapter.label
-  const parts = [
-    ...(write.added.length > 0 ? [`+${plural(write.added.length, "hook")}`] : []),
-    ...(write.updated.length > 0 ? [`~${plural(write.updated.length, "hook")} updated`] : []),
-  ]
-  return {
-    file: write.file,
-    content: `${JSON.stringify(write.settings, null, 2)}\n`,
-    created: write.created,
-    summary: `${parts.join(", ")} (${label})`,
-    commit: install.scopes.find((entry) => entry.file === write.file)?.scope === "shared",
+  const commit = install.scopes.find((entry) => entry.file === write.file)?.scope === "shared"
+  const changes: PlannedChange[] = []
+  if (write.settings !== null) {
+    const parts = [
+      ...(write.added.length > 0 ? [`+${plural(write.added.length, "hook")}`] : []),
+      ...(write.updated.length > 0 ? [`~${plural(write.updated.length, "hook")} updated`] : []),
+    ]
+    changes.push({
+      file: write.file,
+      content: `${JSON.stringify(write.settings, null, 2)}\n`,
+      created: write.created,
+      summary: `${parts.join(", ")} (${label})`,
+      commit,
+    })
   }
+  for (const { file, content, created } of write.files) {
+    changes.push({ file, content, created, summary: `hook script (${label})`, commit })
+  }
+  return changes
 }
 
 /** Every file init would create or change, with its full new content. Nothing is written here. */
@@ -146,8 +145,7 @@ export async function planInit(selections: InitSelections, context: PlanContext)
   const config = planConfig(selections, context.configText)
   if (config !== null) changes.push(config)
   for (const choice of selections.agents) {
-    const change = await planAgent(choice, context)
-    if (change !== null) changes.push(change)
+    changes.push(...(await planAgent(choice, context)))
   }
   return changes
 }

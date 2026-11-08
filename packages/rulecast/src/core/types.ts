@@ -479,11 +479,13 @@ export interface AdapterInstall {
   markers: string[]
   /** Settings files, repo-relative, that hooks can be written to. */
   scopes: { scope: InstallScope; file: string }[]
+  /** The command every hook entry runs. */
+  command: string
   /**
-   * The hook command; local: rulecast is installed in the project's node_modules. An adapter may
-   * return the same command either way, as Claude Code's guard does.
+   * Files the hooks need beside the settings, relative to the settings' directory, with the content
+   * install writes. Generated: one that differs is rewritten.
    */
-  command(local: boolean): string
+  files: { file: string; content: string }[]
   /**
    * Adds the hooks. `updated` (optional, for adapters that can tell): the adapter's own hooks whose
    * command differed from `command` and were rewritten — an older install upgraded in place.

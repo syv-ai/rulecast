@@ -246,26 +246,34 @@ export async function doctorCommand(
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0
     const missing = state?.missing ?? []
+    // A file the hooks run that is not there fails every hook (sh exits 127): settings committed
+    // without the script. One that differs still runs, as an older rulecast's would.
+    const gone = state?.files.find((each) => each.problem === "missing") ?? null
+    const differs = state?.files.find((each) => each.problem === "differs") ?? null
     // Under --ci, installed but unrunnable is the fresh clone without node_modules: an agent there
     // runs unchecked. Not installed at all stays a warning: a CI job may only run `rulecast run`.
     const level: Level =
-      file !== null && !runs && ci
+      gone !== null || (file !== null && !runs && ci)
         ? "error"
-        : file === null || !runs || stale || missing.length > 0 || (file !== null && tooOld)
+        : file === null || !runs || stale || missing.length > 0 || differs !== null || (file !== null && tooOld)
           ? "warning"
           : "ok"
     count(level)
     const detail =
       file === null
         ? "not installed (run rulecast install)"
-        : missing.length > 0
-          ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
-          : stale
-            ? `${file} — but the hooks are out of date; run rulecast install`
-            : runs
-              ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
-              : `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
-                `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+        : gone !== null
+          ? `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install`
+          : missing.length > 0
+            ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
+            : stale
+              ? `${file} — but the hooks are out of date; run rulecast install`
+              : differs !== null
+                ? `${file} — but ${differs.file} is out of date; run rulecast install`
+                : runs
+                  ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
+                  : `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
+                    `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     io.stdout(line(level, adapter.label, detail))
   }
   io.stdout("\ncache\n")

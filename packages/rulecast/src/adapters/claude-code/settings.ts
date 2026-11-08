@@ -1,17 +1,23 @@
+import { HOOK_SCRIPT_FILE } from "./hook-script"
+
 type JsonObject = Record<string, unknown>
 
 export class SettingsError extends Error {}
 
+/**
+ * rulecast's own hook commands: one that runs the hook script, and every older form, which ran
+ * `rulecast hook claude-code` inline. The older forms are how an upgrade finds what to replace:
+ * Claude Code runs every matching handler, so an entry left behind would run rulecast twice.
+ */
 const RULECAST_HOOK = /\brulecast\b.*\bhook claude-code\b/
-
-/** A command that runs the project's own rulecast: the guard of any release, or the bare path before it. */
-const PROJECT_RULECAST = /node_modules\/\.bin\/rulecast\b/
 
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isRulecastHook = (hook: unknown): boolean =>
-  isObject(hook) && typeof hook.command === "string" && RULECAST_HOOK.test(hook.command)
+  isObject(hook) &&
+  typeof hook.command === "string" &&
+  (hook.command.includes(HOOK_SCRIPT_FILE) || RULECAST_HOOK.test(hook.command))
 
 /** The hook groups rulecast needs (spec §12). Timeouts are in seconds. */
 function hookGroups(verifyMs: number): { event: string; matcher?: string; timeout: number }[] {
@@ -54,17 +60,13 @@ function hooksOf(settings: unknown): JsonObject {
 /**
  * Adds rulecast's hooks to Claude Code settings. Entries that are not rulecast's are never modified
  * or removed. rulecast's own, when their command is not the current one, are rewritten in place and
- * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. An entry
- * whose command is `keep` is current whatever `command` is, and one that runs the project's own
- * rulecast in an older form is rewritten to `keep`, never to `command`: in a clone without
- * node_modules `command` is the bare one, which exits 127 on every hook. One whose timeout is below
- * what `verifyMs` needs gets that timeout, and is reported as `updated` too.
+ * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. One
+ * whose timeout is below what `verifyMs` needs gets that timeout, and is reported as `updated` too.
  */
 export function mergeHooks(
   settings: unknown,
   command: string,
   verifyMs: number,
-  keep?: string,
 ): { settings: JsonObject; added: string[]; updated: string[] } {
   const merged: JsonObject = { ...hooksOf(settings) }
   const added: string[] = []
@@ -80,17 +82,14 @@ export function mergeHooks(
           ...group,
           hooks: group.hooks.map((hook) => {
             if (!isRulecastHook(hook)) return hook
-            const current = (hook as JsonObject).command
-            const currentCommand = current === command || current === keep
+            const currentCommand = (hook as JsonObject).command === command
             // Claude Code kills a hook at its timeout. One lower than the stop check's budget skips
             // that check silently; a higher one is kept, since install sizes it for every config.
             const old = (hook as JsonObject).timeout
             const tooShort = typeof old !== "number" || old < timeout
             if (currentCommand && !tooShort) return hook
             changed = true
-            const local = keep !== undefined && PROJECT_RULECAST.test(current as string)
-            const next = currentCommand ? current : local ? keep : command
-            return { ...(hook as JsonObject), command: next, ...(tooShort ? { timeout } : {}) }
+            return { ...(hook as JsonObject), command, ...(tooShort ? { timeout } : {}) }
           }),
         }
       })
@@ -108,7 +107,7 @@ export function mergeHooks(
 }
 
 /**
- * Removes the hooks rulecast added (commands running `rulecast hook claude-code`). Groups and events that only
+ * Removes the hooks rulecast added (any command isRulecastHook knows). Groups and events that only
  * held rulecast hooks go too, and so does a `hooks` object left empty. Everything else is kept as it is.
  */
 export function removeHooks(settings: unknown): { settings: JsonObject; removed: string[] } {

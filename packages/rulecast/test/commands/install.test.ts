@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
-import { claudeCodeAdapter, HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
+import { claudeCodeAdapter } from "../../src/adapters/claude-code/adapter"
+import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "../../src/adapters/claude-code/hook-script"
 import { hookConfigs, hooksInstalled } from "../../src/commands/install"
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
@@ -15,16 +16,21 @@ import { createRuleRepo } from "../helpers/rule-repo"
 
 const SHARED = ".claude/settings.json"
 const PERSONAL = ".claude/settings.local.json"
+const WROTE = `wrote ${HOOK_SCRIPT_FILE}\n`
 const read = (root: string, file: string) => readFile(path.join(root, file), "utf8")
 const settingsOf = async (root: string, file = SHARED) => JSON.parse(await read(root, file))
 const repoConfig = (url: string) => `repos:\n  - repo: ${url}\n    rev: v1.0.0\n    rules: []\n`
 
 describe("rulecast install", () => {
-  test("installs the Claude Code hooks in the shared settings; a second run changes nothing", async () => {
+  test("installs the Claude Code hooks in the shared settings and writes their script; a second run changes nothing", async () => {
     const root = await createFixture()
     const first = await runCli(root, ["install"])
     expect(first.code).toBe(0)
     expect(first.stdout).toContain("installed Claude Code hooks in .claude/settings.json: PreToolUse (Edit|Write)")
+    expect(first.stdout).toContain(WROTE)
+    expect(await read(root, HOOK_SCRIPT_FILE)).toBe(HOOK_SCRIPT)
+    // Run as `sh <file>`: it needs no executable bit, and is not given one.
+    expect((await stat(path.join(root, HOOK_SCRIPT_FILE))).mode & 0o777).toBe(0o644 & ~process.umask())
     const settings = await settingsOf(root)
     expect(Object.keys(settings.hooks).sort()).toEqual([
       "PostToolUse",
@@ -49,6 +55,31 @@ describe("rulecast install", () => {
     expect(await read(root, SHARED)).toBe(before)
   })
 
+  test("settings current and the script missing: install writes the script alone", async () => {
+    // Someone committed settings.json without the script: every hook exits 127 until it is back.
+    const root = await createFixture()
+    await runCli(root, ["install"])
+    const before = await read(root, SHARED)
+    await rm(path.join(root, HOOK_SCRIPT_FILE))
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0, stdout: WROTE })
+    expect(await read(root, HOOK_SCRIPT_FILE)).toBe(HOOK_SCRIPT)
+    expect(await read(root, SHARED)).toBe(before)
+  })
+
+  test("a hand-edited script is rewritten", async () => {
+    const root = await createFixture()
+    await runCli(root, ["install"])
+    await writeFile(path.join(root, HOOK_SCRIPT_FILE), `${HOOK_SCRIPT}echo edited\n`)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0, stdout: WROTE })
+    expect(await read(root, HOOK_SCRIPT_FILE)).toBe(HOOK_SCRIPT)
+  })
+
+  test("--scope personal writes the script too", async () => {
+    const root = await createFixture()
+    expect((await runCli(root, ["install", "--scope", "personal"])).stdout).toContain(WROTE)
+    expect(await read(root, HOOK_SCRIPT_FILE)).toBe(HOOK_SCRIPT)
+  })
+
   test("--scope personal writes the personal settings, and hooks there count as installed", async () => {
     const root = await createFixture()
     expect((await runCli(root, ["install", "--scope", "personal"])).stdout).toContain(
@@ -60,8 +91,8 @@ describe("rulecast install", () => {
     expect(existsSync(path.join(root, SHARED))).toBe(false)
   })
 
-  test("writes the guarded command with or without the project's own rulecast, never the bare one", async () => {
-    // The bare command exits 127 on every tool call where rulecast is not on the PATH: the plugin's
+  test("writes the script command with or without the project's own rulecast, never a bare one", async () => {
+    // A bare command exits 127 on every tool call where rulecast is not on the PATH: the plugin's
     // setup runs init through npx, so that was every first setup (plan 21, #1).
     const root = await createFixture()
     await runCli(root, ["install"])
@@ -69,7 +100,7 @@ describe("rulecast install", () => {
     const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
     await runCli(local, ["install"])
     expect((await settingsOf(local)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
-    expect(claudeCodeAdapter.install?.command(true)).toBe(HOOK_COMMAND)
+    expect(claudeCodeAdapter.install?.command).toBe(HOOK_COMMAND)
   })
 
   test("re-running install upgrades rulecast's own hooks from an older command, and nothing else", async () => {
@@ -118,42 +149,18 @@ describe("rulecast install", () => {
     expect((await runCli(root, ["install"])).stdout).toContain("already installed")
   })
 
-  test("a clone without node_modules keeps the committed guarded command", async () => {
-    // The guarded form is right with or without the binary. Rewriting it to the bare command in a
-    // clone before `npm install` would bring back the exit 127 on every hook that it exists to stop.
+  test("a clone with committed settings and script prints already installed", async () => {
     const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
     await runCli(local, ["install"])
-    const committed = await settingsOf(local)
     const clone = await createProject({
       ".rulecast-config.yaml": "repos: []\n",
-      ".claude/settings.json": JSON.stringify(committed),
+      [SHARED]: await read(local, SHARED),
+      [HOOK_SCRIPT_FILE]: await read(local, HOOK_SCRIPT_FILE),
     })
-    expect((await runCli(clone, ["doctor"])).stdout).not.toContain("old command")
-    expect((await runCli(clone, ["install"])).stdout).toContain("already installed")
+    expect((await runCli(clone, ["install"])).stdout).toBe(
+      "Claude Code hooks already installed in .claude/settings.json\n",
+    )
     expect((await settingsOf(clone)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
-  })
-
-  test("a clone without node_modules upgrades a released guard to the current guard, not the bare command", async () => {
-    const released =
-      'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
-      `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
-    const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
-    await runCli(local, ["install"])
-    const committed = JSON.parse(
-      (await read(local, SHARED)).replaceAll(JSON.stringify(HOOK_COMMAND), JSON.stringify(released)),
-    )
-    const clone = await createProject({
-      ".rulecast-config.yaml": "repos: []\n",
-      ".claude/settings.json": JSON.stringify(committed),
-    })
-    expect((await runCli(clone, ["doctor"])).stdout).toContain("the hooks are out of date; run rulecast install")
-    expect((await runCli(clone, ["install"])).code).toBe(0)
-    const commands = Object.values(
-      (await settingsOf(clone)).hooks as Record<string, { hooks: { command: string }[] }[]>,
-    )
-      .flat()
-      .flatMap((group) => group.hooks.map((hook) => hook.command))
-    expect(new Set(commands)).toEqual(new Set([HOOK_COMMAND]))
   })
 
   test("fetches rule repos missing from the cache", async () => {
@@ -320,5 +327,28 @@ describe("rulecast uninstall", () => {
     await runCli(root, ["install"])
     await runCli(root, ["uninstall"])
     expect(existsSync(path.join(root, SHARED))).toBe(false)
+  })
+
+  test("removes the script, and .claude/hooks/ only when that empties it", async () => {
+    const root = await createFixture()
+    await runCli(root, ["install"])
+    const result = await runCli(root, ["uninstall"])
+    expect(result.stdout).toContain(`removed ${HOOK_SCRIPT_FILE}\n`)
+    expect(existsSync(path.join(root, HOOK_SCRIPT_FILE))).toBe(false)
+    expect(existsSync(path.join(root, ".claude/hooks"))).toBe(false)
+
+    await runCli(root, ["install"])
+    await writeFile(path.join(root, ".claude/hooks/own.sh"), "echo own\n")
+    await runCli(root, ["uninstall"])
+    expect(existsSync(path.join(root, HOOK_SCRIPT_FILE))).toBe(false)
+    expect(await read(root, ".claude/hooks/own.sh")).toBe("echo own\n")
+  })
+
+  test("a script left without hooks is removed too", async () => {
+    const root = await createFixture()
+    await runCli(root, ["install"])
+    await rm(path.join(root, SHARED))
+    expect(await runCli(root, ["uninstall"])).toMatchObject({ code: 0, stdout: `removed ${HOOK_SCRIPT_FILE}\n` })
+    expect(existsSync(path.join(root, HOOK_SCRIPT_FILE))).toBe(false)
   })
 })

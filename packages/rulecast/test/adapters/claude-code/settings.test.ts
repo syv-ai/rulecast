@@ -1,10 +1,30 @@
 import { describe, expect, test } from "vitest"
 
-import { HOOK_COMMAND } from "../../../src/adapters/claude-code/adapter"
+import { HOOK_COMMAND } from "../../../src/adapters/claude-code/hook-script"
 import { mergeHooks, removeHooks, SettingsError } from "../../../src/adapters/claude-code/settings"
 
 const COMMAND = "rulecast hook claude-code"
 const hook = (timeout: number) => ({ type: "command", command: COMMAND, timeout })
+
+/** The inline command 0.10 installed, pasted as it was released: settings committed then still run it. */
+const V0_10_COMMAND =
+  'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; P=$(cat); ' +
+  "if command -v rulecast >/dev/null 2>&1; then printf '%s' \"$P\" | rulecast hook claude-code; R=$?; " +
+  '[ "$R" -ne 126 ] && [ "$R" -ne 127 ] && exit "$R"; fi; ' +
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template.
+  'L="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; ' +
+  'if [ -x "$L" ]; then printf \'%s\' "$P" | "$L" hook claude-code; R=$?; ' +
+  '[ "$R" -ne 126 ] && [ "$R" -ne 127 ] && exit "$R"; fi; ' +
+  'U=; case "$CI" in ""|false|0) ;; *) U=1;; esac; case "$GITHUB_ACTIONS" in ""|false|0) ;; *) U=1;; esac; ' +
+  'case "$RULECAST_MODE" in unattended) U=1;; attended|interactive) U=;; esac; ' +
+  "if printf '%s' \"$P\" | grep -q '\"hook_event_name\": *\"SessionStart\"'; then printf '%s' " +
+  '\'{"systemMessage":"rulecast is configured in this project but not installed. Install it ' +
+  "(curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh) or add @syv-ai/rulecast to the project " +
+  "(pnpm add -D), then run rulecast doctor.\"}'; " +
+  'elif [ -n "$U" ] && printf \'%s\' "$P" | grep -qE \'"hook_event_name": *"(Subagent)?Stop"\'; then printf \'%s\' ' +
+  '\'{"systemMessage":"rulecast is configured in this project but not installed: no rules ran this session. ' +
+  "Install rulecast before starting the agent: npm ci (or pnpm install), or " +
+  "curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh.\"}'; fi; exit 0"
 
 describe("Claude Code settings: mergeHooks", () => {
   test("installs every rulecast hook into empty settings", () => {
@@ -94,30 +114,65 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(upgraded.settings).toEqual(once)
   })
 
-  test("the guard from before #29 is rewritten in place to the current one", () => {
+  test("the guard from before #29 is rewritten in place to HOOK_COMMAND", () => {
     const previous =
       'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
       "grep -q '\"hook_event_name\": *\"SessionStart\"' && printf '%s' '{}'; exit 0"
     const older = mergeHooks({}, previous, 60_000).settings
-    const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000, HOOK_COMMAND)
+    const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000)
     expect(upgraded.added).toEqual([])
     expect(upgraded.updated).toContain("Stop")
     expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
   })
 
-  test("a released guard is rewritten to the current guard, never to the bare command, without node_modules", () => {
-    // v0.4 and v0.5 committed this. `install` in a clone that has not installed yet asks for the bare
-    // command; swapping the guard for it would exit 127 on every hook.
+  test("a released guard and a bare node_modules command are rewritten to HOOK_COMMAND", () => {
+    // v0.4 and v0.5 committed the first; the second is from before any guard.
     const released =
       'B="$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast; [ -x "$B" ] && exec "$B" hook claude-code; ' +
       `grep -q '"hook_event_name": *"SessionStart"' && printf '%s' '{"systemMessage":"not installed"}'; exit 0`
     const unguarded = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
-    for (const older of [released, unguarded]) {
-      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, COMMAND, 60_000, HOOK_COMMAND)
+    for (const older of [released, unguarded, COMMAND]) {
+      const upgraded = mergeHooks(mergeHooks({}, older, 60_000).settings, HOOK_COMMAND, 60_000)
       expect(upgraded.added).toEqual([])
       expect(upgraded.updated).toContain("Stop")
       expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
     }
+  })
+
+  test("0.10's inline command is rewritten to the script command in every group", () => {
+    const older = mergeHooks({}, V0_10_COMMAND, 60_000).settings
+    const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000)
+    expect(upgraded.added).toEqual([])
+    expect(upgraded.updated).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).added)
+    expect(upgraded.updated).toHaveLength(11)
+    expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
+    expect(JSON.stringify(upgraded.settings)).not.toContain("P=$(cat)")
+    expect(mergeHooks(upgraded.settings, HOOK_COMMAND, 60_000)).toEqual({
+      settings: upgraded.settings,
+      added: [],
+      updated: [],
+    })
+  })
+
+  test("a user's own hook in the same group is kept when rulecast's is rewritten", () => {
+    const own = { type: "command", command: "dash-hook stop" }
+    const older = {
+      hooks: {
+        ...(mergeHooks({}, V0_10_COMMAND, 60_000).settings.hooks as Record<string, unknown>),
+        Stop: [{ hooks: [own, { type: "command", command: V0_10_COMMAND, timeout: 70 }] }],
+      },
+    }
+    const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000)
+    expect(upgraded.added).toEqual([])
+    expect((upgraded.settings.hooks as Record<string, unknown>).Stop).toEqual([
+      { hooks: [own, { type: "command", command: HOOK_COMMAND, timeout: 70 }] },
+    ])
+  })
+
+  test("the script command counts as rulecast's, and removeHooks takes it out", () => {
+    const once = mergeHooks({}, HOOK_COMMAND, 60_000).settings
+    expect(mergeHooks(once, COMMAND, 60_000).added).toEqual([])
+    expect(removeHooks(once).settings).toEqual({})
   })
 
   test.each([[[]], [{ hooks: [] }], [{ hooks: { Stop: {} } }], ["text"]])("rejects settings shaped like %j", (bad) => {

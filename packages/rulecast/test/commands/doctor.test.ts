@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { stringify } from "yaml"
 
+import { HOOK_COMMAND } from "../../src/adapters/claude-code/hook-script"
 import { INSTALL_COMMAND, pinnedInstallCommand } from "../../src/core/binary-home"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
@@ -339,6 +340,57 @@ describe("rulecast doctor", () => {
     )
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
+  })
+
+  /** A project with rulecast in node_modules and the hooks installed, so only the hook files decide. */
+  async function installed() {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\necho 0.8.2\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    return root
+  }
+
+  test("settings committed without the script is an error: every hook fails", async () => {
+    const root = await installed()
+    await rm(path.join(root, ".claude/hooks/rulecast.sh"))
+    const result = await doctor(root)
+    expect(result.stdout).toContain(
+      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install\n",
+    )
+    expect(result.code).toBe(2)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json — runs")
+  })
+
+  test("a script that differs from what install writes is a warning", async () => {
+    const root = await installed()
+    await writeFile(path.join(root, ".claude/hooks/rulecast.sh"), "#!/bin/sh\nexit 0\n")
+    const result = await doctor(root)
+    expect(result.stdout).toContain(
+      "warning  Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is out of date; run rulecast install\n",
+    )
+    expect(result.code).toBe(0)
+  })
+
+  test("0.10's settings and no script: the hooks are out of date, and nothing worse, even under --ci", async () => {
+    const root = await installed()
+    await rm(path.join(root, ".claude/hooks"), { recursive: true })
+    const file = path.join(root, ".claude/settings.json")
+    const older = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const text = await readFile(file, "utf8")
+    await writeFile(file, text.replaceAll(JSON.stringify(HOOK_COMMAND), JSON.stringify(older)))
+    for (const args of [[], ["--ci"]]) {
+      const result = await runCli(root, ["doctor", ...args])
+      expect(result.stdout).toContain(
+        "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install\n",
+      )
+      expect(result.stdout).not.toContain("rulecast.sh")
+      expect(result.stdout).not.toMatch(/error {4}Claude Code/)
+    }
   })
 
   test("hooks installed but pointing at a rulecast nothing can find are a warning", async () => {

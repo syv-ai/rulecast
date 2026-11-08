@@ -4,7 +4,7 @@ import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
+import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "../../src/adapters/claude-code/hook-script"
 import type { CatalogFit, InitReport } from "../../src/commands/init"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import type { Env } from "../../src/core/home"
@@ -102,7 +102,11 @@ describe("rulecast init", () => {
     expect(settings.hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     expect(result.stdout).toContain("python · AGENTS.md (imported by CLAUDE.md) · Claude Code (CLAUDE.md)")
     expect(result.stdout).toContain("rulecast validate: 0 rules valid")
-    expect(result.stdout).toContain("Commit .rulecast-config.yaml and .claude/settings.json.")
+    expect(await read(root, HOOK_SCRIPT_FILE)).toBe(HOOK_SCRIPT)
+    expect(result.stdout).toContain(`${HOOK_SCRIPT_FILE}  hook script (Claude Code)`)
+    expect(result.stdout).toContain(
+      "Commit .rulecast-config.yaml, .claude/settings.json and .claude/hooks/rulecast.sh.",
+    )
   })
 
   test("the interview's answers become the config's settings", async () => {
@@ -144,7 +148,11 @@ describe("rulecast init", () => {
     expect(real.report.written).toBe(true)
     expect(real.report.validate!.errors).toBe(0)
     for (const change of dry.report.changes) expect(await read(root, change.file)).toBe(change.content)
-    expect(dry.report.changes.map((change) => change.file)).toEqual([CONFIG_FILE, ".claude/settings.json"])
+    expect(dry.report.changes.map((change) => change.file)).toEqual([
+      CONFIG_FILE,
+      ".claude/settings.json",
+      HOOK_SCRIPT_FILE,
+    ])
   })
 
   test("init --weekly-summary --dry-run --format json shows +stats.weekly_summary true", async () => {

@@ -9,7 +9,7 @@ import path from "node:path"
 export type Place = "project" | "path" | "installed"
 
 /**
- * The fixtures every lookup of rulecast is held to: the agent hooks' command, the git hooks'
+ * The fixtures every lookup of rulecast is held to: the agent hooks' script, the git hooks'
  * command and doctor's hookRulecast. Each names the places that have a rulecast and the one that
  * must run.
  */

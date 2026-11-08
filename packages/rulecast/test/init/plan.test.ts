@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
 import { adapterByName } from "../../src/adapters"
+import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "../../src/adapters/claude-code/hook-script"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import { addCatalogRules, newConfigText, setSettings } from "../../src/init/config-text"
 import { type PlanContext, PlanError, planInit, reviewText } from "../../src/init/plan"
@@ -11,14 +12,22 @@ const install = claude.install!
 const settings = { conventions: "docs/conventions/", llmModel: "haiku" }
 
 /** Settings as install.merge would write them. */
-const merged = (settings: unknown, local = false) =>
-  `${JSON.stringify(install.merge(settings, install.command(local), 60000).settings, null, 2)}\n`
+const merged = (settings: unknown) =>
+  `${JSON.stringify(install.merge(settings, install.command, 60000).settings, null, 2)}\n`
+
+/** The hook script, as init plans it beside the settings. */
+const script = (commit: boolean) => ({
+  file: HOOK_SCRIPT_FILE,
+  content: HOOK_SCRIPT,
+  created: true,
+  summary: "hook script (Claude Code)",
+  commit,
+})
 
 function context(files: Record<string, string>, overrides: Partial<PlanContext> = {}): PlanContext {
   return {
     configText: files[CONFIG_FILE] ?? null,
     verifyMs: 60000,
-    local: false,
     readText: async (file) => files[file] ?? null,
     ...overrides,
   }
@@ -45,6 +54,7 @@ describe("planInit", () => {
         summary: "+11 hooks (Claude Code)",
         commit: true,
       },
+      script(true),
     ])
   })
 
@@ -56,24 +66,34 @@ describe("planInit", () => {
     }
     const changes = await planInit(
       { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "personal" }] },
-      context(files, { local: true }),
+      context(files),
     )
     expect(changes).toEqual([
       {
         file: ".claude/settings.local.json",
-        content: merged(existing, true),
+        content: merged(existing),
         created: false,
         summary: "+11 hooks (Claude Code)",
         commit: false,
       },
+      script(false),
     ])
-    expect(changes[0]!.content).toContain("node_modules/.bin/rulecast; [ -x")
+    expect(changes[0]!.content).toContain(JSON.stringify(HOOK_COMMAND))
+  })
+
+  test("settings current and the script missing: only the script is planned", async () => {
+    const files = { [CONFIG_FILE]: newConfigText([], settings), ".claude/settings.json": merged({}) }
+    const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
+    expect(await planInit(selections, context(files))).toEqual([script(true)])
+    const edited = await planInit(selections, context({ ...files, [HOOK_SCRIPT_FILE]: "echo edited\n" }))
+    expect(edited).toEqual([{ ...script(true), created: false }])
   })
 
   test("re-running changes nothing that is already there", async () => {
     const files = {
       [CONFIG_FILE]: newConfigText([], settings),
       ".claude/settings.local.json": merged({}),
+      [HOOK_SCRIPT_FILE]: HOOK_SCRIPT,
     }
     const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
     expect(await planInit(selections, context(files))).toEqual([])
@@ -171,6 +191,11 @@ test("reviewText aligns one line per file", () => {
     reviewText([
       { file: CONFIG_FILE, content: "", created: true, summary: "new, 2 rules", commit: true },
       { file: ".claude/settings.json", content: "", created: true, summary: "+7 hooks (Claude Code)", commit: true },
+      script(true),
     ]),
-  ).toBe(".rulecast-config.yaml  new, 2 rules\n.claude/settings.json  +7 hooks (Claude Code)")
+  ).toBe(
+    ".rulecast-config.yaml      new, 2 rules\n" +
+      ".claude/settings.json      +7 hooks (Claude Code)\n" +
+      ".claude/hooks/rulecast.sh  hook script (Claude Code)",
+  )
 })

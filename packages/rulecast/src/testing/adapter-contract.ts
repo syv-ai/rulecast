@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import path from "node:path"
 
 import { type Adapter, type AdapterInput, type Delivery, type Event, emptyDelivery } from "../core/types"
 import type { ContractCase } from "./contract"
@@ -101,18 +102,24 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
   if (install) {
     cases.push(
       {
-        name: "install declares markers, scopes and a command",
+        name: "install declares markers, scopes, a command and its files",
         async run() {
           assert.ok(install.markers.length > 0, "markers must not be empty")
           assert.ok(install.scopes.length > 0, "scopes must not be empty")
           for (const { file } of install.scopes) assert.ok(file.length > 0, "a scope needs a settings file")
-          for (const local of [true, false]) assert.ok(install.command(local).length > 0, "the hook command is empty")
+          assert.ok(install.command.length > 0, "the hook command is empty")
+          for (const { file, content } of install.files) {
+            // Written beside the settings, so relative to their directory and inside it.
+            const inside = file.length > 0 && !path.isAbsolute(file) && !path.normalize(file).startsWith("..")
+            assert.ok(inside, `${file}: a hook file must be relative to the settings' directory`)
+            assert.ok(content.length > 0, `${file}: a hook file must not be empty`)
+          }
         },
       },
       {
         name: "merge is idempotent and remove undoes it",
         async run() {
-          const command = install.command(false)
+          const command = install.command
           for (const settings of fixture.settings ?? [{}]) {
             const original = structuredClone(settings)
             const once = install.merge(structuredClone(original), command, 5_000)
@@ -121,18 +128,6 @@ export function adapterContract(adapter: Adapter, fixture: AdapterFixture): Cont
             assert.deepEqual(twice.settings, once.settings, "merging twice must change nothing")
             assert.deepEqual(twice.added, [], "merging twice must add nothing")
             if (twice.updated !== undefined) assert.deepEqual(twice.updated, [], "merging twice must update nothing")
-            // A different command over hooks already installed: rewritten in place, never added twice.
-            // Only for an adapter with two commands; one guard for both has nothing to switch to.
-            const other = install.command(true)
-            const upgraded = install.merge(structuredClone(once.settings), other, 5_000)
-            assert.deepEqual(upgraded.added, [], "merging another command over installed hooks must add nothing")
-            if (upgraded.updated !== undefined && other !== command) {
-              assert.deepEqual(
-                [...upgraded.updated].sort(),
-                [...once.added].sort(),
-                "merging another command must report every hook it rewrote",
-              )
-            }
             const removed = install.remove(structuredClone(once.settings))
             assert.deepEqual(removed.settings, original, "remove must return the settings merge was given")
             assert.deepEqual([...removed.removed].sort(), [...once.added].sort(), "remove must name what merge added")
