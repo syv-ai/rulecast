@@ -18,7 +18,7 @@ Run init's dry run first, in each directory a config might go:
 rulecast init --dry-run --format json
 ```
 
-It writes nothing. It reports:
+It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports:
 
 - the stack, the docs and their headings, and the agents it detects;
 - `committers`: how many people committed in the last six months, bots left out (null when there is no history);
@@ -27,7 +27,7 @@ It writes nothing. It reports:
 - `gitHooks`: pre-commit, lefthook or husky, and whether rulecast is already in each;
 - `ci`: workflow files that run a coding agent;
 - the project's own hooks it can run as rules (and the ones it can't, with why);
-- `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence;
+- `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence: a directory, a `.gitattributes` pattern, or a file (past 20 files, `notListed` counts the rest). They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`);
 - `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether it is configured;
 - the config's current settings, and every file it would write.
 
@@ -117,8 +117,8 @@ Pass `--weekly-summary` where the developer turned on the weekly stats summary. 
 Then, as the page says:
 
 - **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there.
-- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as the README's [Git hooks and CI](https://github.com/syv-ai/rulecast#git-hooks-and-ci) shows.
-- **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it.
+- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as the README's [Git hooks and CI](https://github.com/syv-ai/rulecast#git-hooks-and-ci) shows. Show the change first.
+- **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
 - **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.
 

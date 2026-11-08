@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 import { parse } from "yaml"
@@ -8,11 +8,12 @@ import { HOOK_COMMAND } from "../../src/adapters/claude-code/adapter"
 import type { CatalogFit, InitReport } from "../../src/commands/init"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import type { Env } from "../../src/core/home"
-import { createCatalogRepo } from "../helpers/catalog"
+import { catalogFiles, createCatalogRepo } from "../helpers/catalog"
 import { runCli } from "../helpers/cli"
 import { createRepo, git } from "../helpers/git"
 import { testEnv } from "../helpers/home"
 import { createProject } from "../helpers/project"
+import { createRuleRepo } from "../helpers/rule-repo"
 
 /** A Python project whose CLAUDE.md imports AGENTS.md (so Claude Code is detected). */
 const PROJECT: Record<string, string> = {
@@ -426,6 +427,10 @@ describe("rulecast init", () => {
       [["--catalog", "python/nope"], '"python/nope" is not a catalog rule in'],
       [["--catalog", "loop-safety"], '"loop-safety" is a pack: adopt it with rulecast add loop-safety'],
       [
+        ["--catalog", "loop-safety/no-skipped-tests-python"],
+        '"loop-safety/no-skipped-tests-python" is in the loop-safety pack: adopt the pack with rulecast add loop-safety',
+      ],
+      [
         ["--generated", "frontend/src/"],
         '"frontend/src/" is not a path --generated is offered here (offered: frontend/src/client/)',
       ],
@@ -446,16 +451,60 @@ describe("rulecast init", () => {
     const found = JSON.parse(dry.stdout) as InitReport
     expect(found.catalog).toMatchObject({ error: expect.any(String) })
     expect(found.detected.committers).toEqual({ count: 1, since: "6 months" })
-    // Without the catalog, its default is unknown: every generated path is offered.
-    expect(found.generated.map((entry) => entry.path)).toEqual(["frontend/src/client/"])
+    // Without the catalog there is no rule to adopt them with: no path is offered.
+    expect(found.generated).toEqual([])
+    expect(found.vendored).toEqual([])
     const real = await runCli(root, ["init", "--catalog", "python/no-silent-except"], "", offline)
     expect(real.code).not.toBe(0)
     expect(real.stderr).toContain("the catalog could not be loaded")
     expect(existsSync(path.join(root, CONFIG_FILE))).toBe(false)
-    // A run that does not need it does not load it.
+    // A run that does not need it does not load it, and offers no paths.
     const plain = await runCli(root, ["init", "--no-agents", "--format", "json"], "", offline)
     expect(plain.code).toBe(0)
-    expect((JSON.parse(plain.stdout) as InitReport).catalog).toBeNull()
+    const written = JSON.parse(plain.stdout) as InitReport
+    expect(written.catalog).toBeNull()
+    expect([written.generated, written.vendored]).toEqual([[], []])
+  })
+
+  test("offline, the dry run uses the newest catalog already in the cache, and says so", async () => {
+    const root = await createRepo(FULLSTACK)
+    const home = await createProject({})
+    const moved = await createProject({})
+    const url = path.join(moved, "catalog.git")
+    await cp(catalog, url, { recursive: true })
+    const env = { RULECAST_HOME: home, RULECAST_CATALOG: url }
+    expect((await runCli(root, ["init", "--dry-run", "--format", "json"], "", env)).code).toBe(0)
+    await rm(url, { recursive: true, force: true })
+    const offline = await runCli(root, ["init", "--dry-run", "--format", "json"], "", env)
+    expect(offline.code).toBe(0)
+    const found = JSON.parse(offline.stdout) as InitReport
+    expect((found.catalog as { label: string }).label).toMatch(/@v0\.2\.0$/)
+    expect(found.notes.join("\n")).toMatch(/could not be reached .*; using the cached v0\.2\.0/)
+  })
+
+  test("paths are offered only for a rule the loaded catalog has", async () => {
+    const files = catalogFiles()
+    const manifest = files[".rulecast-rules.yaml"]!
+    const start = manifest.indexOf("- id: vendored-code")
+    const end = manifest.indexOf("\n- id: ", start + 1)
+    files[".rulecast-rules.yaml"] = manifest.slice(0, start) + manifest.slice(end + 1)
+    const older = await createRuleRepo([{ tag: "v0.1.0", files }])
+    const project = {
+      ...FULLSTACK,
+      ".gitattributes": "static/lib/** linguist-vendored\n",
+      "static/lib/jquery.js": "x\n",
+      "static/app.js": "x\n",
+    }
+    const root = await createRepo(project)
+    const olderEnv = { ...testEnv, RULECAST_CATALOG: older }
+    const dry = JSON.parse((await runCli(root, ["init", "--dry-run", "--format", "json"], "", olderEnv)).stdout)
+    expect(dry.generated.map((entry: { path: string }) => entry.path)).toEqual(["frontend/src/client/"])
+    expect(dry.vendored).toEqual([])
+    const refused = await runCli(root, ["init", "--vendored", "static/lib/"], "", olderEnv)
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain('"static/lib/" is not a path --vendored is offered here (none are)')
+    // With vendored-code in the catalog, the same path is offered.
+    expect((await report(root, "--dry-run")).report.vendored.map((entry) => entry.path)).toEqual(["static/lib/"])
   })
 
   test("in a fresh repository with no commits, committers is null and init still works", async () => {

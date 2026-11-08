@@ -42,7 +42,10 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm-provider <name>", "claude-code (default), opencode, anthropic or openai-compatible"],
       ["--conventions <path>", "The file or folder where new conventions are written"],
       ["--weekly-summary", "Keep 26 weeks of per-week counts for rulecast stats beside this config's findings log"],
-      ["--dry-run", "Write nothing; show what was found and every file that would be written"],
+      [
+        "--dry-run",
+        "Write nothing; show what was found and every file that would be written. Fetches the catalog's rule data at its latest tag (or the config's pin) to show which rules fit",
+      ],
       ["--format", "terminal or json"],
     ],
     notes: [

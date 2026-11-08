@@ -13,9 +13,9 @@ export interface Tag {
 const TAG_REF = "refs/tags/"
 const PEELED = "^{}"
 
-/** Every tag of a remote repository, sorted by name. */
-export async function remoteTags(url: string): Promise<Tag[]> {
-  const result = await git(tmpdir(), ["ls-remote", "--tags", url], NO_PROMPT)
+/** Every tag of a remote repository, sorted by name. Past `timeoutMs` it fails, as offline. */
+export async function remoteTags(url: string, options: { timeoutMs?: number } = {}): Promise<Tag[]> {
+  const result = await git(tmpdir(), ["ls-remote", "--tags", url], NO_PROMPT, options)
   if (!result.ok) throw new RepoFetchError(result.stderr.trim() || `git ls-remote ${url} failed`)
   const tags = new Map<string, { sha: string; peeled: boolean }>()
   for (const line of result.stdout.split("\n")) {
