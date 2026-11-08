@@ -8,7 +8,7 @@ import { compileFilter, type FileFilter } from "../files"
 import { parseReference, type ReferenceRoot, type ReferenceSpec, ReferenceSyntaxError } from "../references"
 import { CORE_VARIABLES, REMOVED_VARIABLES, templateVariables } from "../template"
 import type { Severity } from "../types"
-import { isOlder, VERSION } from "../version"
+import { isOlder, requiresNewerMessage, VERSION } from "../version"
 
 export interface CompiledDetector {
   kind: string
@@ -105,7 +105,7 @@ function fileOf(spec: ReferenceSpec): string {
 export function requiresNewer(raw: unknown): string | null {
   const minimum = (raw as { minimum_rulecast_version?: unknown } | null)?.minimum_rulecast_version
   if (typeof minimum !== "string" || !isOlder(VERSION, minimum)) return null
-  return `requires rulecast ${minimum} or newer (running ${VERSION})`
+  return requiresNewerMessage(minimum)
 }
 
 /** What `fix` on a rule with no `bad` example becomes: the fix is dropped, the rule still runs. */

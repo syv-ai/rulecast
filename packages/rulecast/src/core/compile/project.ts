@@ -12,7 +12,7 @@ import { compileFilter } from "../files"
 import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
 import type { RepoProvider } from "../repos/provider"
-import { isOlder, VERSION } from "../version"
+import { isOlder, requiresNewerMessage, VERSION } from "../version"
 import { type CompiledRule, compileRule, type RuleContext, type RuleInput, requiresNewer } from "./rule"
 
 export interface Diagnostic {
@@ -137,7 +137,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   if (!parsed.ok) return configFailure(parsed.message)
   const config = parsed.value
   if (config.minimumRulecastVersion !== null && isOlder(VERSION, config.minimumRulecastVersion)) {
-    return configFailure(`requires rulecast ${config.minimumRulecastVersion} or newer (running ${VERSION})`, config)
+    return configFailure(requiresNewerMessage(config.minimumRulecastVersion), config)
   }
   const filter = compileFilter({
     files: config.files,

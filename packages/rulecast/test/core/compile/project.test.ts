@@ -7,7 +7,7 @@ import { createRegistry } from "../../../src/core/detection/registry"
 import { repoDir, repoLabel } from "../../../src/core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../../../src/core/repos/provider"
 import type { Detector } from "../../../src/core/types"
-import { VERSION } from "../../../src/core/version"
+import { requiresNewerMessage } from "../../../src/core/version"
 import { TEST_HOME } from "../../helpers/home"
 import { createProject } from "../../helpers/project"
 import { createRuleRepo } from "../../helpers/rule-repo"
@@ -339,8 +339,8 @@ describe("compile: local rules", () => {
       ["missing-anchor", 'anchor "#nope" not found in docs/api.md'],
       ["bad-syntax", 'reference "docs/api.md" must start with "@"'],
       ["escapes", 'reference "@../secrets.md" leaves its root'],
-      ["too-new", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
-      ["too-new-key", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
+      ["too-new", requiresNewerMessage("99.0.0")],
+      ["too-new-key", requiresNewerMessage("99.0.0")],
       ["no-name", "name: required"],
       ["Bad Id", "id: must be lowercase segments separated by /"],
       [null, "Expected object, received string"],
@@ -439,7 +439,7 @@ describe("compile: the config", () => {
     expect(tooNew.diagnostics.map((d) => d.message)).toEqual([
       // Not the literal version: `changeset version` bumps it, and a literal here fails the
       // suite inside the release job and blocks the version commit from being pushed.
-      `requires rulecast 99.0.0 or newer (running ${VERSION})`,
+      requiresNewerMessage("99.0.0"),
     ])
     const badRegex = await compileConfig({ ...local(detectRule("a")), files: "(" })
     expect(badRegex.rules).toEqual([])
@@ -598,7 +598,7 @@ describe("compile: rule repos", () => {
     ])
     const project = await compileConfig({ repos: [{ repo: url, rev: "v1.0.0", rules: [{ id: "later" }] }] })
     expect(project.diagnostics.map((d) => [d.source, d.rule, d.message])).toEqual([
-      [`${url}@v1.0.0`, "later", `requires rulecast 99.0.0 or newer (running ${VERSION})`],
+      [`${url}@v1.0.0`, "later", requiresNewerMessage("99.0.0")],
     ])
     const dir = await createProject({
       ".rulecast-rules.yaml": stringify([
@@ -606,7 +606,7 @@ describe("compile: rule repos", () => {
       ]),
     })
     expect((await compileManifest(dir, registry)).diagnostics.map((d) => d.message)).toEqual([
-      `requires rulecast 99.0.0 or newer (running ${VERSION})`,
+      requiresNewerMessage("99.0.0"),
     ])
   })
 

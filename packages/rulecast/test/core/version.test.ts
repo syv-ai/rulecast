@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs"
 import { expect, test } from "vitest"
 
-import { isOlder, parseVersion, VERSION } from "../../src/core/version"
+import { installLabel } from "../../src/core/self"
+import { isOlder, parseVersion, requiresNewerMessage, VERSION } from "../../src/core/version"
+
+test("the message names the running install", () => {
+  expect(requiresNewerMessage("99.0.0")).toBe(
+    `requires rulecast 99.0.0 or newer (running ${VERSION}, ${installLabel()})`,
+  )
+  expect(installLabel({ execPath: "/c/rulecast", argv: [] }, true)).toBe("the standalone binary at /c/rulecast")
+})
 
 test("VERSION matches package.json", () => {
   const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }
