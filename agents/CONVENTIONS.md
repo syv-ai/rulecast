@@ -4,7 +4,7 @@ Use this when the developer chose to review their conventions up front during se
 
 You bring the knowledge: named principles, practices and the standards for this kind of project. The developer brings what the code can't tell you: what the project is for, what matters, which way it should go. **The code shows what the project does, not what it wants.** Never present what the code does as what the project wants, and never write down a convention the developer didn't choose.
 
-Relative links resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
+Relative links resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use `npx @syv-ai/rulecast`.
 
 ## 1. The developer is there
 

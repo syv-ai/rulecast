@@ -4,7 +4,7 @@ Use this when the developer asks you to set up rulecast. rulecast delivers a pro
 
 Setup is short. You read what the repository can tell you, show the developer one page of defaults with the few questions only they can answer, and write it once they approve. More rules come later, one at a time: with `/rulecast:add-rule` from the rulecast plugin in Claude Code, or with [DRAFT-RULES.md](DRAFT-RULES.md) for one convention elsewhere.
 
-Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
+Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use `npx @syv-ai/rulecast`.
 
 ## 1. The developer is there
 
@@ -37,7 +37,7 @@ Then read what needs judgement:
 - The docs: `README`, `AGENTS.md` or `CLAUDE.md`, `CONTRIBUTING`, anything under `docs/`. Note the conventions they state that code could show, such as "never edit `src/client/` by hand".
 - Your own memory of this project, if you keep one (in Claude Code, `~/.claude/projects/<project>/memory/`). Corrections the developer made before are the best candidates for rules.
 - The script of any hook with `modifies: null`, named in `runs`, to see whether it changes files.
-- Whether rulecast is installed: `rulecast binary path` names an installed standalone binary, and `node_modules/.bin/rulecast` is a devDependency. Note whether there is a `package.json`, and whether the project pins its tools there.
+- Whether rulecast is installed: `node_modules/.bin/rulecast` is a devDependency, and `command -v rulecast` finds one on the PATH (the standalone binary, or a global install). Note whether there is a `package.json`, and whether the project pins its tools there.
 
 ## 3. Defaults and questions
 
@@ -46,7 +46,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Item | Default from | Default | Becomes a question when |
 |---|---|---|---|
 | Who it's for | `committers.count` | 2 or more: a team. 1: solo. Hooks `--scope shared` either way: with one committer the shared file affects only them, and the next person to join gets the hooks. Say they can keep them personal with "*N*: personal" | `committers` is null |
-| Install | `rulecast binary path`, `node_modules/.bin/rulecast`, and whether `package.json` pins the project's tools | the one already installed, if any; else the devDependency when `package.json` pins the tools, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
+| Install | `node_modules/.bin/rulecast`, `command -v rulecast`, and whether `package.json` pins the project's tools | the one already installed, if any; else the devDependency when `package.json` pins the tools, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
 | Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
 | Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
 | Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
@@ -107,9 +107,9 @@ Only after the developer approves. First, install rulecast as approved, by runni
 
   Everyone whose sessions run here installs it the same way. Tell the developer.
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
-- **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is neither a devDependency nor the installed binary. Everyone whose sessions run here installs it the same way.
+- **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is no devDependency. Everyone whose sessions run here installs it the same way.
 
-These are the install row's three options. The hooks look in that order: the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Then, in each config's directory:
+These are the install row's three options. The hooks look for the project's `node_modules/.bin/rulecast` first, then for `rulecast` on the PATH, where the standalone binary and a global install both are. Then, in each config's directory:
 
 ```sh
 rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--linters linter/eslint,linter/ruff] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
@@ -125,7 +125,7 @@ Then, as the page says:
 - **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows. Show the change first.
 - **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
-- **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above, and they run `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` in place of `npx rulecast`. Don't edit CI yourself.
+- **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above (in GitHub Actions it adds its directory to `$GITHUB_PATH`), and they run `rulecast` in place of `npx rulecast`. Don't edit CI yourself.
 
 ## 7. Then
 

@@ -10,7 +10,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 
 `rulecast run --files F...` judges files whole, like `--all-files`. From a hook manager, use the hooks below instead.
 
-rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](../README.md#install)).
+rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH ([Install](../README.md#install)).
 
 ## pre-commit
 
@@ -66,6 +66,6 @@ jobs:
           sarif_file: rulecast.sarif
 ```
 
-Without Node, replace `setup-node` and `npm ci` with the install command from [Install](../README.md#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` where the example runs `npx rulecast`.
+Without Node, replace `setup-node` and `npm ci` with the install command from [Install](../README.md#install), which puts `rulecast` on the job's PATH, and run `rulecast` where the example runs `npx rulecast`.
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`.

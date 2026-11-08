@@ -11,7 +11,7 @@ Turn one convention into a rulecast rule. The developer decides what the convent
 
 The developer asked for: $ARGUMENTS
 
-Commands below say `rulecast`. If `rulecast` is not on the PATH, use this machine's installed binary, `~/.cache/rulecast/bin/rulecast-<platform>-<arch>` (such as `rulecast-darwin-arm64`), if it exists, else `npx @syv-ai/rulecast`.
+Commands below say `rulecast`. If `rulecast` is not on the PATH, use `npx @syv-ai/rulecast`.
 
 ## If you were not asked
 

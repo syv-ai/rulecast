@@ -14,6 +14,24 @@ describe("the install docs", () => {
     }
   })
 
+  test("no doc points at the old install: the cache home's bin, or rulecast binary", async () => {
+    const files = [
+      path.join(repoRoot, "README.md"),
+      ...(await filesUnder("guides", ".md")),
+      ...(await filesUnder("agents", ".md")).filter((file) => !file.includes(`${path.sep}lenses${path.sep}`)),
+      ...(await filesUnder("agents", ".html")),
+      ...(await filesUnder("plugins", ".md")),
+    ]
+    const stale: string[] = []
+    for (const file of files) {
+      const text = await readFile(file, "utf8")
+      for (const old of [".cache/rulecast/bin", "rulecast binary", "binary install"]) {
+        if (text.includes(old)) stale.push(`${path.relative(repoRoot, file)}: ${old}`)
+      }
+    }
+    expect(stale).toEqual([])
+  })
+
   test("the Git hooks guide's lefthook snippet runs rulecast as the agent hooks find it", async () => {
     const readme = await readFile(path.join(repoRoot, "guides/git-hooks-ci.md"), "utf8")
     const lefthook = readme.slice(readme.indexOf("## lefthook"), readme.indexOf("## GitHub Actions"))

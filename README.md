@@ -137,7 +137,7 @@ For one pinned version for everyone (needs Node ≥ 20.12):
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
 
-Hooks run the project's `node_modules/.bin/rulecast`, then the installed binary, then one on the PATH. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
+Hooks run the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 ## Performance
 
