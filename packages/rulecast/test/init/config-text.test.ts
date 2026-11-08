@@ -44,6 +44,13 @@ describe("newConfigText", () => {
       llm: { model: "haiku", provider: "opencode" },
     })
   })
+
+  test("a new config with the weekly summary on", () => {
+    const text = newConfigText([], { llmModel: "haiku", weeklySummary: true })
+    expect(text).toContain("llm:\n  model: haiku\nstats:\n  weekly_summary: true\nrepos:\n")
+    expect(parse(text)).toMatchObject({ stats: { weekly_summary: true } })
+    expect(newConfigText([], { weeklySummary: false })).not.toContain("stats")
+  })
 })
 
 describe("setSettings", () => {
@@ -117,6 +124,23 @@ describe("setSettings", () => {
     expect(() => setSettings("llm: { provider: opencode }\nrepos: []\n", { llmModel: "haiku" })).toThrow(
       ConfigTextError,
     )
+    expect(() => setSettings("stats: { weekly_summary: false }\nrepos: []\n", { weeklySummary: true })).toThrow(
+      ConfigTextError,
+    )
+  })
+
+  test("setSettings adds stats.weekly_summary to a config without stats, replaces false, and leaves true alone", () => {
+    const added = setSettings("# mine\nrepos: []\n", { weeklySummary: true })
+    expect(added.text).toBe("# mine\nstats:\n  weekly_summary: true\nrepos: []\n")
+    expect(added.changes).toEqual([{ key: "stats.weekly_summary", from: null, to: "true" }])
+
+    const replaced = setSettings("stats:\n  weekly_summary: false   # later\nrepos: []\n", { weeklySummary: true })
+    expect(replaced.text).toBe("stats:\n  weekly_summary: true   # later\nrepos: []\n")
+    expect(replaced.changes).toEqual([{ key: "stats.weekly_summary", from: "false", to: "true" }])
+
+    expect(setSettings(replaced.text, { weeklySummary: true })).toEqual({ text: replaced.text, changes: [] })
+    // Without the flag init never writes or removes the key.
+    expect(setSettings(replaced.text, { weeklySummary: false })).toEqual({ text: replaced.text, changes: [] })
   })
 })
 

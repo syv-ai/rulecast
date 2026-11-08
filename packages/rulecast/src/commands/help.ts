@@ -28,7 +28,7 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "init",
     synopsis:
-      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--dry-run] [--format terminal|json]",
+      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
     summary: "Set rulecast up: config, settings, your existing git hooks as rules, agent hooks",
     flags: [
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable. Default: the agents detected"],
@@ -38,6 +38,7 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm-model <name>", "Allow llm rules, and run those that name no model on this one (e.g. haiku)"],
       ["--llm-provider <name>", "claude-code (default), opencode, anthropic or openai-compatible"],
       ["--conventions <path>", "The file or folder where new conventions are written"],
+      ["--weekly-summary", "Keep 26 weeks of per-week counts for rulecast stats beside this config's findings log"],
       ["--dry-run", "Write nothing; show what was found and every file that would be written"],
       ["--format", "terminal or json"],
     ],

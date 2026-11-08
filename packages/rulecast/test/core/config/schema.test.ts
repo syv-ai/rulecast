@@ -24,6 +24,7 @@ const DEFAULTS = {
     apiKeyEnv: "ANTHROPIC_API_KEY",
     maxFilesPerVerify: 10,
   },
+  stats: { weeklySummary: false },
 }
 
 describe("configSchema", () => {
@@ -52,6 +53,7 @@ describe("configSchema", () => {
         api_key_env: "KEY",
         max_files_per_verify: 4,
       },
+      stats: { weekly_summary: true },
       repos: [
         { repo: "https://github.com/syv-ai/rulecast", rev: "v0.2.0", rules: [{ id: "generated-code" }] },
         { repo: "local", rules: [] },
@@ -82,6 +84,7 @@ describe("configSchema", () => {
         apiKeyEnv: "KEY",
         maxFilesPerVerify: 4,
       },
+      stats: { weeklySummary: true },
     })
   })
 
@@ -112,6 +115,13 @@ describe("configSchema", () => {
     expect(configSchema.parse({ repos: [], llm: { model: "haiku" } }).llm.model).toBe("haiku")
     expect(configSchema.parse({ repos: [] }).llm.model).toBeNull()
     expect(configSchema.safeParse({ repos: [], llm: { model: " " } }).success).toBe(false)
+  })
+
+  test("stats.weekly_summary defaults to off and rejects unknown keys", () => {
+    expect(configSchema.parse({ repos: [] }).stats.weeklySummary).toBe(false)
+    expect(configSchema.parse({ repos: [], stats: { weekly_summary: true } }).stats.weeklySummary).toBe(true)
+    expect(configSchema.safeParse({ repos: [], stats: { weekly_summary: "yes" } }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], stats: { keep_weeks: 26 } }).success).toBe(false)
   })
 
   test("conventions names a file or a folder, relative to the config; absolute paths are rejected", () => {

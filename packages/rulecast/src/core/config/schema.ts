@@ -217,6 +217,16 @@ export const configSchema = z
       })
       .strict()
       .default({}),
+    stats: z
+      .object({
+        /**
+         * Keep 26 weeks of per-week counts for `rulecast stats` beside this config's own findings log
+         * (core/stats/log.ts). Per config and never inherited: each config governs its own log.
+         */
+        weekly_summary: z.boolean().default(false),
+      })
+      .strict()
+      .default({}),
   })
   .strict()
   .transform((input) => ({
@@ -241,6 +251,7 @@ export const configSchema = z
       apiKeyEnv: input.llm.api_key_env,
       maxFilesPerVerify: input.llm.max_files_per_verify,
     },
+    stats: { weeklySummary: input.stats.weekly_summary },
   }))
 
 export type Config = z.output<typeof configSchema>

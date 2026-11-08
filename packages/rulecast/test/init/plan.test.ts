@@ -82,6 +82,14 @@ describe("planInit", () => {
     expect(change!.content).toContain("model: haiku")
   })
 
+  test("the weekly summary is named for a new config, and as a change for an existing one", async () => {
+    const created = await planInit({ hooks: [], settings: { weeklySummary: true }, agents: [] }, context({}))
+    expect(created[0]).toMatchObject({ created: true, summary: "new, stats" })
+    const files = { [CONFIG_FILE]: "stats:\n  weekly_summary: false\nrepos: []\n" }
+    const [change] = await planInit({ hooks: [], settings: { weeklySummary: true }, agents: [] }, context(files))
+    expect(change!.summary).toBe("stats.weekly_summary false → true")
+  })
+
   test("a replaced setting is named with its old value; an unchanged one is not named", async () => {
     const files = { [CONFIG_FILE]: newConfigText([], { conventions: "docs/old/", llmModel: "haiku" }) }
     const [change] = await planInit(
