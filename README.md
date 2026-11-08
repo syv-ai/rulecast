@@ -12,7 +12,7 @@ Your project conventions, enforced.
 
 </div>
 
-Your conventions are fragmented acrosss `AGENTS.md` agent memories, `/docs`, specs, linter rules and old agent transcripts. Your coding agent is sort of aware of some of it. For the stuff it does know, it read it forty tool calls ago and keeps forgetting. Rulecast helps formalize conventions as rules and enforce them through agent hooks: when an edit breaks a rule, the agent is informed along with the relevant doc section, in the same turn.
+Your conventions are fragmented across `AGENTS.md` agent memories, `/docs`, specs, linter rules and old agent transcripts. Your coding agent is sort of aware of some of it. For the stuff it does know, it read it forty tool calls ago and keeps forgetting. Rulecast helps formalize conventions as rules and enforce them through agent hooks: when an edit breaks a rule, the agent is informed along with the relevant doc section, in the same turn.
 
 <div align="center">
 
@@ -56,7 +56,7 @@ and follow it.
 
 The agent reads your repo, agent memories, docs and grills you a bit on the project's context. It will then serve you some relevant default rules, e.g., via linters, git hooks, for generated code and so on. You add what you agree with.
 
-Ever tried to to sit down and write your Christmas wish list? It's difficult, isn't it? Conventions are the same way. Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
+Ever tried to sit down and write your Christmas wish list? It's difficult, isn't it? Conventions are the same way. Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
 
 
 ## A rule

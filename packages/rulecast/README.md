@@ -6,7 +6,7 @@
 
 # rulecast
 
-Your project's conventions, delivered to your coding agent when it breaks one.
+Your project conventions, enforced.
 
 [![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](https://github.com/syv-ai/rulecast/blob/main/LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
 
@@ -14,7 +14,7 @@ Your project's conventions, delivered to your coding agent when it breaks one.
 
 </div>
 
-Your conventions are in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them forty tool calls ago. rulecast runs as an agent hook: when an edit breaks a rule, the agent gets the finding and the doc section that explains it, in the same turn.
+Your conventions are fragmented across `AGENTS.md` agent memories, `/docs`, specs, linter rules and old agent transcripts. Your coding agent is sort of aware of some of it. For the stuff it does know, it read it forty tool calls ago and keeps forgetting. Rulecast helps formalize conventions as rules and enforce them through agent hooks: when an edit breaks a rule, the agent is informed along with the relevant doc section, in the same turn.
 
 <div align="center">
 
@@ -56,9 +56,10 @@ https://syv-ai.github.io/rulecast/agents/SETUP.md
 and follow it.
 ```
 
-The agent reads your repository and shows you one page of defaults: your linters and git hooks as rules, generated code, where configs go, how to install rulecast. You change what you like; nothing is written until you approve.
+The agent reads your repo, agent memories, docs and grills you a bit on the project's context. It will then serve you some relevant default rules, e.g., via linters, git hooks, for generated code and so on. You add what you agree with.
 
-Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
+Ever tried to sit down and write your Christmas wish list? It's difficult, isn't it? Conventions are the same way. Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
+
 
 ## A rule
 
