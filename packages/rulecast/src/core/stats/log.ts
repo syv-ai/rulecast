@@ -304,9 +304,12 @@ export async function readWeeklyRollup(stateDir: string): Promise<WeeklyRollup> 
 
 /**
  * Adds the per-week counts of `dropped`, the log file a rotation is about to delete, to the weekly
- * summary, and prunes weeks more than WEEKLY_KEEP_WEEKS before `now`. A file is counted whole or
- * not at all, marked by its fingerprint: one summarised already (a crash before the rename, then
- * another rotation) adds nothing. Times decide nothing here, since a record's time is taken before
+ * summary, and prunes weeks more than WEEKLY_KEEP_WEEKS before `now`, unless that would remove every
+ * existing row (a clock far ahead). A file is counted whole or not at all, marked by its
+ * fingerprint: one summarised already (a crash before the rename, then another rotation) adds
+ * nothing, and a line appended to it after it was summarised is not counted, which takes a writer
+ * stalled for a whole 4 MiB file. Each file is counted on its own: a session that spans a rotation
+ * counts in both files' `sessions`, and a finding open across it fires in both. Times decide nothing here, since a record's time is taken before
  * it is appended and a clock can be wrong. Never throws: a hook must not fail, or lose its record,
  * over statistics.
  */
@@ -326,9 +329,10 @@ export async function rollUpDropped(
     const rows = weekRows(read.records, derive(read.records))
     if (rows.length === 0) return
     const keepFrom = addWeeks(weekOf(now.toISOString()), -WEEKLY_KEEP_WEEKS)
-    const kept = [...lines, ...rows.map((row): WeeklyLine => ({ v: 1, log: fingerprint, to: newest, ...row }))].filter(
-      (line) => line.week >= keepFrom,
-    )
+    const all = [...lines, ...rows.map((row): WeeklyLine => ({ v: 1, log: fingerprint, to: newest, ...row }))]
+    // A prune that would remove every existing row is a clock far ahead, not 26 weeks gone by.
+    const prune = lines.some((line) => line.week >= keepFrom) || lines.length === 0
+    const kept = prune ? all.filter((line) => line.week >= keepFrom) : all
     const file = path.join(stateDir, FINDINGS_WEEKLY)
     await writeFile(`${file}.tmp`, kept.map((line) => `${JSON.stringify(line)}\n`).join(""))
     await rename(`${file}.tmp`, file)

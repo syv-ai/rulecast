@@ -459,11 +459,11 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
 | `weekly` | Per rule, its findings by week, to see over weeks whether it fires less. Always present. See [Reading the trend](#reading-the-trend). |
 | `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
-| `weekly.rolledUpTo` | The newest record the weekly summary counts. `null` when there is no summary. The summary counts whole log files, the ones rotations dropped, and the trend adds the log's own files to it, so a record is counted once whatever its time. |
+| `weekly.rolledUpTo` | The newest record the weekly summary counts. `null` when there is no summary. The summary counts whole log files, the ones rotations dropped, and the trend adds the log's own files to it, so a record is counted once whatever its time. Each file is counted on its own, so a session that spans a rotation has its counts split across the files and summed: per rotation, about one extra session, and one extra `fired` for each finding still open when the file was dropped and reported again after. |
 | `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds, plus any summary written while it was on. |
 | `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
 
-Per rule, every count is of findings, and a finding is counted once per session however many times it was reported:
+Per rule, every count is of findings, and a finding is counted once per session however many times it was reported (in `weekly`, once per session and log file: see `weekly.rolledUpTo`):
 
 | Key | Meaning |
 |---|---|

@@ -318,6 +318,18 @@ describe("the weekly summary", () => {
     expect((await summaryLines(stateDir)).map((row) => row.week)).toEqual(["2026-03-30", "2026-09-21", "2026-09-28"])
   })
 
+  test("a prune that would remove every existing row prunes nothing (a clock far ahead)", async () => {
+    const stateDir = await dir()
+    const dropped = path.join(stateDir, FINDINGS_LOG_ROTATED)
+    await writeFile(dropped, OLD_ROTATED.map(line).join(""))
+    await rollUpDropped(stateDir, dropped, () => {}, new Date("2026-09-30T00:00:00.000Z"))
+    const next = [record("2026-10-01T00:00:00.000Z")]
+    await writeFile(dropped, next.map(line).join(""))
+    // 26 weeks and more past every row.
+    await rollUpDropped(stateDir, dropped, () => {}, new Date("2027-09-30T00:00:00.000Z"))
+    expect((await summaryLines(stateDir)).map((row) => row.week)).toEqual(["2026-09-21", "2026-09-28", "2026-09-28"])
+  })
+
   test("a file whose records are older than the summary's newest is still counted (the rotation race)", async () => {
     // The hook that wins the rotate lock writes its record after the rollup, while others append
     // newer ones to the file that becomes .1: a time cutoff then dropped the winner's record.
