@@ -22,7 +22,7 @@ test("help lists the basic commands and names the advanced ones", async () => {
     }
     for (const command of advanced) expect(result.stdout).not.toContain(command.summary)
     expect(result.stdout).toContain(
-      "\nAdvanced: baseline, replay, autoupdate, try-repo, clean, warm, binary, hook (rulecast help --all)\n",
+      "\nAdvanced: baseline, replay, autoupdate, try-repo, clean, warm, hook (rulecast help --all)\n",
     )
   }
 })

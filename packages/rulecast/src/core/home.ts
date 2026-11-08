@@ -7,7 +7,7 @@ export type Env = Readonly<Record<string, string | undefined>>
 
 /**
  * $RULECAST_HOME, else $XDG_CACHE_HOME/rulecast, else $HOME/.cache/rulecast. Empty values count as
- * unset. `CACHE_HOME_SH` (core/binary-home.ts) is the same rule in shell, for the hook commands.
+ * unset.
  */
 export function cacheHome(env: Env): string {
   if (env.RULECAST_HOME) return path.resolve(env.RULECAST_HOME)

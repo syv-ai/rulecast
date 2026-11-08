@@ -1,20 +1,10 @@
 import { spawnSync } from "node:child_process"
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { HOOK_COMMAND, NOT_INSTALLED, NOT_INSTALLED_UNATTENDED } from "../../../src/adapters/claude-code/adapter"
-import { currentBinaryPath } from "../../../src/core/binary-home"
-import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
+import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
 /** Runs the committed hook command the way Claude Code does: through a shell, payload on stdin. */
@@ -149,110 +139,39 @@ describe("the committed hook command", () => {
     expect(result).toEqual({ code: 2, stdout: '{"x":1}\n', stderr: "blocked\n" })
   })
 
-  test("with only the installed binary, it is run with the payload untouched", async () => {
-    const root = await createProject({})
-    const { home } = lookupSetup(["binary"], root)
-    const payload = { hook_event_name: "PostToolUse", tool_name: "Edit" }
-    expect(hook(root, payload, { RULECAST_HOME: home })).toEqual({ code: 0, stdout: '{"binary":true}\n', stderr: "" })
-    expect(readFileSync(path.join(root, "ran-binary"), "utf8")).toBe(`hook claude-code\n${JSON.stringify(payload)}`)
-  })
-
   test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs }) => {
     const root = await createProject({})
-    const { home, pathDir } = lookupSetup(places, root)
-    const result = hook(root, { hook_event_name: "Stop" }, { RULECAST_HOME: home, PATH: `${pathDir}:/usr/bin:/bin` })
+    const { pathDir } = lookupSetup(places, root)
+    const result = hook(root, { hook_event_name: "Stop" }, { PATH: `${pathDir}:/usr/bin:/bin` })
     expect(result.stdout).toBe(`{"${runs}":true}\n`)
   })
 
-  test("the installed binary is found through XDG_CACHE_HOME and HOME as well", async () => {
+  test("a PATH rulecast that cannot run on this machine counts as none: not installed", async () => {
+    // A binary for another machine, or one the OS refuses.
     const root = await createProject({})
-    const { home } = lookupSetup(["binary"], root)
-    // lookupSetup's home is <scratch>/home: as XDG_CACHE_HOME it would be <scratch>/home/rulecast.
-    const xdg = path.join(path.dirname(home), "xdg")
-    mkdirSync(xdg)
-    symlinkSync(home, path.join(xdg, "rulecast"))
-    expect(hook(root, { hook_event_name: "Stop" }, { XDG_CACHE_HOME: xdg }).stdout).toBe('{"binary":true}\n')
-    const user = path.join(path.dirname(home), "user")
-    mkdirSync(user)
-    symlinkSync(xdg, path.join(user, ".cache"))
-    expect(hook(root, { hook_event_name: "Stop" }, { HOME: user }).stdout).toBe('{"binary":true}\n')
-  })
-
-  test("a link to a missing binary counts as none", async () => {
-    const root = await createProject({})
-    const { home, file } = lookupSetup(["binary"], root)
-    rmSync(realpathSync(file.binary))
-    const env = { RULECAST_HOME: home }
-    expect(hook(root, { hook_event_name: "PostToolUse" }, env)).toEqual({ code: 0, stdout: "", stderr: "" })
+    const setup = lookupSetup(["path"], root)
+    breakPathRulecast(setup)
+    const env = { PATH: `${setup.pathDir}:/usr/bin:/bin` }
+    // The shell's own "cannot execute" goes to stderr, which Claude Code shows only in verbose mode.
+    expect(hook(root, { hook_event_name: "PostToolUse", tool_name: "Edit" }, env)).toMatchObject({
+      code: 0,
+      stdout: "",
+    })
     const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, env)
-    expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
-  })
-
-  test("an installed binary that cannot run on this machine falls through to the PATH, then to not installed", async () => {
-    // A shared cache home with another machine's binary in it, or one the OS refuses.
-    const root = await createProject({})
-    const setup = lookupSetup(["binary", "path"], root)
-    breakInstalledBinary(setup)
-    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
-    const payload = { hook_event_name: "PostToolUse", tool_name: "Edit" }
-    expect(hook(root, payload, env)).toMatchObject({ code: 0, stdout: '{"path":true}\n' })
-    expect(readFileSync(path.join(root, "ran-path"), "utf8")).toBe(`hook claude-code\n${JSON.stringify(payload)}`)
-    rmSync(setup.file.path)
-    const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, { RULECAST_HOME: setup.home })
     expect(start.code).toBe(0)
     expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
   })
 
-  test("an installed binary that crashes or is killed is the answer: the PATH rulecast does not run too", async () => {
-    const root = await createProject({})
-    const setup = lookupSetup(["binary", "path"], root)
-    writeFileSync(realpathSync(setup.file.binary), "#!/bin/sh\ncat > /dev/null\nkill -KILL $$\n")
-    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
-    const result = hook(root, { hook_event_name: "PostToolUse" }, env)
-    expect(result.code).toBe(137)
-    expect(result.stdout).toBe("")
-    expect(existsSync(path.join(root, "ran-path"))).toBe(false)
-  })
-
-  test("a home holding only another platform's binary falls through to the PATH", async () => {
-    // A cache home shared with another machine: its link is never run here, by any shell.
+  test("a PATH rulecast that crashes or is killed is the answer: the not-installed message does not follow", async () => {
     const root = await createProject({})
     const setup = lookupSetup(["path"], root)
-    const foreign = currentBinaryPath(setup.home, process.platform === "linux" ? "darwin" : "linux", "x64")
-    mkdirSync(path.dirname(foreign), { recursive: true })
-    writeFileSync(foreign, "#!/bin/sh\necho '{\"foreign\":true}'\n")
-    chmodSync(foreign, 0o755)
-    const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
-    expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe('{"path":true}\n')
+    writeFileSync(setup.file.path, "#!/bin/sh\ncat > /dev/null\nkill -KILL $$\n")
+    const result = hook(root, { hook_event_name: "SessionStart" }, { PATH: `${setup.pathDir}:/usr/bin:/bin` })
+    expect(result.code).toBe(137)
+    expect(result.stdout).toBe("")
   })
 
-  test("on a platform with no standalone binary, the PATH rulecast runs with no error", async () => {
-    const root = await createProject({})
-    const setup = lookupSetup(["binary", "path"], root)
-    const stubs = path.join(root, "uname-bin")
-    mkdirSync(stubs)
-    writeFileSync(path.join(stubs, "uname"), "#!/bin/sh\necho 'Linux riscv64'\n")
-    chmodSync(path.join(stubs, "uname"), 0o755)
-    const env = { RULECAST_HOME: setup.home, PATH: `${stubs}:${setup.pathDir}:/usr/bin:/bin` }
-    expect(hook(root, { hook_event_name: "Stop" }, env)).toEqual({ code: 0, stdout: '{"path":true}\n', stderr: "" })
-    expect(existsSync(path.join(root, "ran-binary"))).toBe(false)
-  })
-
-  test("the installed binary keeps its own exit code and output", async () => {
-    const root = await createProject({})
-    const setup = lookupSetup(["binary"], root)
-    writeFileSync(
-      realpathSync(setup.file.binary),
-      "#!/bin/sh\ncat > /dev/null\necho '{\"x\":1}'\necho blocked >&2\nexit 2\n",
-    )
-    expect(hook(root, { hook_event_name: "Stop" }, { RULECAST_HOME: setup.home })).toEqual({
-      code: 2,
-      stdout: '{"x":1}\n',
-      stderr: "blocked\n",
-    })
-  })
-
-  test("with HOME unset and no RULECAST_HOME it still exits 0", async () => {
+  test("with HOME unset it still exits 0", async () => {
     const root = await createProject({})
     // hook() passes no HOME: the command's environment is PATH and CLAUDE_PROJECT_DIR alone.
     expect(hook(root, { hook_event_name: "PostToolUse" })).toEqual({ code: 0, stdout: "", stderr: "" })

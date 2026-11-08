@@ -1,3 +1,4 @@
+import { existsSync, realpathSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -9,7 +10,7 @@ import {
   type CommittedBaseline,
   readCommittedBaseline,
 } from "../core/baseline/committed"
-import { currentBinaryPath, INSTALL_COMMAND, pinnedInstallCommand } from "../core/binary-home"
+import { INSTALL_COMMAND, installDir, pinnedInstallCommand } from "../core/binary-home"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
@@ -48,24 +49,29 @@ type Level = "ok" | "warning" | "error" | "skipped" | "info"
 
 /** Which rulecast the hooks run, and its version when it printed one. */
 function runsLabel(runs: HookRulecast): string {
-  const label =
-    runs.via === "project"
-      ? "node_modules/.bin/rulecast"
-      : runs.via === "binary"
-        ? `the standalone binary at ${runs.path}`
-        : `rulecast on the PATH (${runs.path})`
+  const label = runs.via === "project" ? "node_modules/.bin/rulecast" : `rulecast on the PATH (${runs.path})`
   return runs.version === null ? label : `${label} ${runs.version}`
 }
 
 /**
- * How to update the rulecast the hooks run, by where it came from. For the binary, the install
- * command: the release that minimum_rulecast_version names when it is newer than this rulecast,
- * else the latest. Printed, never run: installing is the developer's step.
+ * How to update the rulecast the hooks run, by where it came from. On the PATH it is install.sh's
+ * or a global npm install: the install command, for the release minimum_rulecast_version names
+ * when that is newer than this rulecast, else the latest. Printed, never run: installing is the
+ * developer's step.
  */
 function updateRemedy(runs: HookRulecast, minimum: string): string {
   if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
-  if (runs.via === "path") return "update the global install"
-  return `install a newer binary: ${isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND}`
+  const install = isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
+  return `install a newer one: ${install}, or update the global npm install`
+}
+
+/** Whether two paths name the same file, links followed. False when either is missing. */
+function sameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b)
+  } catch {
+    return false
+  }
 }
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
@@ -262,19 +268,20 @@ export async function doctorCommand(
             ? `${file} — but the hooks are out of date; run rulecast install`
             : runs
               ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
-              : `${file} — but rulecast is not in node_modules/.bin, at ${currentBinaryPath(home)} or on the PATH, so no rules run. ` +
+              : `${file} — but rulecast is not in node_modules/.bin or on the PATH, so no rules run. ` +
                 `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     io.stdout(line(level, adapter.label, detail))
   }
-  // A devDependency wins over the installed binary: say so when they differ, as nothing else will.
-  const local = found.find((entry) => entry.via === "project")
-  const binary = found.find((entry) => entry.via === "binary")
-  if (local && binary && local.version !== binary.version) {
+  // install.sh's rulecast, in a directory the hooks' PATH lacks: installed, and never run. The
+  // usual cause is an agent started from a GUI or IDE that did not read the shell's startup files.
+  const installed = path.join(installDir(io.env), "rulecast")
+  if (existsSync(installed) && !found.some((entry) => entry.via === "path" && sameFile(entry.path, installed))) {
     io.stdout(
       line(
         "info",
         "rulecast",
-        `the hooks run node_modules/.bin/rulecast ${local.version ?? "(unknown version)"}, not the standalone binary at ${binary.path} ${binary.version ?? "(unknown version)"}`,
+        `${installed} is installed, but ${path.dirname(installed)} is not on the PATH the hooks run with. ` +
+          `Add it to the PATH the agent starts with (. "${path.dirname(installed)}/env" in your shell's startup file), then restart the agent.`,
       ),
     )
   }

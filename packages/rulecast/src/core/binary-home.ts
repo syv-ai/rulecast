@@ -1,19 +1,16 @@
 import { execFile } from "node:child_process"
+import { homedir } from "node:os"
 import path from "node:path"
 
 import { childEnv } from "./child-env"
-import { cacheHome, type Env } from "./home"
+import type { Env } from "./home"
 import { VERSION } from "./version"
 
 /**
- * Where the standalone binary lives once installed, in TypeScript and as the shell fragments the
- * hooks run. `rulecast binary install` is the one thing that writes here, and only when the
- * developer runs it (directly, or through install.sh). No hook downloads or installs.
- *
- * Layout: `<cache home>/bin/<version>-<platform>-<arch>/rulecast`, plus
- * `<cache home>/bin/rulecast-<platform>-<arch>`, a link to the one installed last for that platform.
- * Both are keyed by platform: a cache home can be shared between machines (a mounted home
- * directory), one machine's binary does not run on another, and each machine has its own current one.
+ * The standalone binary: how it is installed, and how the hooks find a rulecast. install.sh (at the
+ * repository root) installs it as `<install dir>/rulecast`, on the PATH, and only when the developer
+ * runs it. No hook downloads or installs. The hooks run the project's `node_modules/.bin/rulecast`,
+ * else `rulecast` on the PATH.
  */
 
 /** `<version>-<platform>-<arch>`: what a binary or its native files are built for. */
@@ -21,72 +18,9 @@ export function platformKey(version: string, platform: string = process.platform
   return `${version}-${platform}-${arch}`
 }
 
-export function binaryPath(home: string, version: string): string {
-  return path.join(home, "bin", platformKey(version), "rulecast")
-}
-
-/** This machine's current link; the hooks' shell finds the same one through runInstalledBinarySh. */
-export function currentBinaryPath(
-  home: string,
-  platform: string = process.platform,
-  arch: string = process.arch,
-): string {
-  return path.join(home, "bin", `rulecast-${platform}-${arch}`)
-}
-
 /** Where this version's standalone binary unpacks its native files (detectors/ast-grep/embedded.ts). */
 export function nativeDir(home: string, version: string = VERSION): string {
   return path.join(home, "native", platformKey(version))
-}
-
-/**
- * Sets `H` to the home `cacheHome()` (core/home.ts) resolves: $RULECAST_HOME, else
- * $XDG_CACHE_HOME/rulecast, else $HOME/.cache/rulecast, empty values counting as unset. With all
- * three unset, `H` is empty and the hooks do not look for the installed binary (cacheHome falls
- * back to the OS's home directory, which the shell cannot see). No single quotes, so it can go
- * inside `sh -c '…'`. test/core/binary-home.test.ts runs it against cacheHome.
- */
-export const CACHE_HOME_SH =
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template.
-  "H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}"
-
-/**
- * The cache home the hook commands look for the installed binary in, as CACHE_HOME_SH resolves it:
- * cacheHome(env), or null when RULECAST_HOME, XDG_CACHE_HOME and HOME are all unset or empty.
- */
-export function hookCacheHome(env: Env): string | null {
-  return env.RULECAST_HOME || env.XDG_CACHE_HOME || env.HOME ? cacheHome(env) : null
-}
-
-/**
- * Sets `T` to this machine's release target, as scripts/build-binary.ts names them, from one
- * `uname -sm`; anything else runs `otherwise`. The hooks' choice of link (runInstalledBinarySh).
- */
-function targetCase(otherwise: string): string {
-  return (
-    'case "$(uname -sm)" in ' +
-    '"Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; ' +
-    '"Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; ' +
-    `*) ${otherwise};; esac`
-  )
-}
-
-/**
- * After CACHE_HOME_SH: runs this machine's installed binary (`<home>/bin/rulecast-<target>`) with
- * `args` when there is one, and exits with its code. Only this machine's link is ever run: a shell
- * such as busybox's runs a binary it cannot execute as a script, which could end in any exit code.
- * One that still cannot run (126 or 127, such as one the OS refuses) counts as none, so the command
- * goes on to the PATH; every other code, a crash or a kill (128+N) too, is the answer. Not `exec`:
- * then a broken binary would be the end. The input is `stdin`, a shell word (the agent hook's
- * payload, read once).
- */
-export function runInstalledBinarySh(args: string, stdin?: string): string {
-  const bin = '"$H/bin/rulecast-$T"'
-  const run = stdin === undefined ? `${bin} ${args}` : `printf '%s' ${stdin} | ${bin} ${args}`
-  return (
-    `T=; [ -n "$H" ] && ${targetCase("T=")}; ` +
-    `if [ -n "$T" ] && [ -x ${bin} ]; then ${run}; S=$?; ${exitUnlessUnrunnable("S")}; fi`
-  )
 }
 
 /** Exits with `$<name>` unless it is 126 or 127, the shell's "could not run it". */
@@ -106,14 +40,20 @@ export function pinnedInstallCommand(version: string): string {
 }
 
 /**
- * The git hooks' command: the project's own rulecast, else the installed binary, else the PATH,
- * the order the agent hooks use. Git hooks run from the repository's root.
+ * The directory install.sh installs into, as it decides: $RULECAST_INSTALL_DIR, else $XDG_BIN_HOME,
+ * else $HOME/.local/bin, empty values counting as unset. test/install-script.test.ts holds the two
+ * to the same answer.
+ */
+export function installDir(env: Env): string {
+  return env.RULECAST_INSTALL_DIR || env.XDG_BIN_HOME || path.join(env.HOME || homedir(), ".local", "bin")
+}
+
+/**
+ * The git hooks' command: the project's own rulecast, else the PATH's, the order the agent hooks
+ * use. Git hooks run from the repository's root.
  */
 export function gitHookCommand(args: string): string {
-  return (
-    `sh -c '${CACHE_HOME_SH}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
-    `${runInstalledBinarySh(args)}; exec rulecast ${args}' --`
-  )
+  return `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; exec rulecast ${args}' --`
 }
 
 /**

@@ -1,11 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { binaryPath, currentBinaryPath } from "../../src/core/binary-home"
-
-/** Where a rulecast can be: the project's node_modules/.bin, the installed binary, the PATH. */
-export type Place = "project" | "binary" | "path"
+/** Where a rulecast can be: the project's node_modules/.bin, or the PATH (install.sh's or npm's). */
+export type Place = "project" | "path"
 
 /**
  * The fixtures every lookup of rulecast is held to: the agent hooks' command, the git hooks'
@@ -13,9 +11,9 @@ export type Place = "project" | "binary" | "path"
  * must run.
  */
 export const LOOKUP_FIXTURES: { name: string; places: Place[]; runs: Place }[] = [
-  { name: "only the installed binary", places: ["binary"], runs: "binary" },
-  { name: "the project's own rulecast wins over the installed binary", places: ["project", "binary"], runs: "project" },
-  { name: "the installed binary wins over one on the PATH", places: ["binary", "path"], runs: "binary" },
+  { name: "only the project's own rulecast", places: ["project"], runs: "project" },
+  { name: "only one on the PATH", places: ["path"], runs: "path" },
+  { name: "the project's own rulecast wins over one on the PATH", places: ["project", "path"], runs: "project" },
 ]
 
 export interface LookupSetup {
@@ -55,31 +53,22 @@ export function lookupSetup(
   mkdirSync(pathDir, { recursive: true })
   const file: Record<Place, string> = {
     project: path.join(root, "node_modules", ".bin", "rulecast"),
-    binary: currentBinaryPath(home),
     path: path.join(pathDir, "rulecast"),
   }
   for (const place of places) {
-    const v = versions[place] ?? version
-    if (place === "binary") {
-      const placed = binaryPath(home, v)
-      stub(placed, place, root, v)
-      symlinkSync(path.relative(path.dirname(file.binary), placed), file.binary)
-    } else {
-      stub(file[place], place, root, v)
-    }
+    stub(file[place], place, root, versions[place] ?? version)
   }
   return { root, home, pathDir, file }
 }
 
 /**
- * Replaces the installed binary with one the OS cannot run: executable, but not a program for this
- * machine, as a binary built for another platform in a shared cache home is.
+ * Replaces the PATH's rulecast with one the OS cannot run: executable, but not a program for this
+ * machine, as a binary built for another platform is.
  */
-export function breakInstalledBinary(setup: LookupSetup): void {
-  const target = realpathSync(setup.file.binary)
+export function breakPathRulecast(setup: LookupSetup): void {
   writeFileSync(
-    target,
+    setup.file.path,
     Buffer.from("\u007fELF\u0002\u0001\u0001\u0000not a program for this machine\u0000\u0001", "latin1"),
   )
-  chmodSync(target, 0o755)
+  chmodSync(setup.file.path, 0o755)
 }

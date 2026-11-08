@@ -2,13 +2,13 @@
 # minimum_pre_commit_version: "3.2.0", and the README snippet does.
 #
 # language: system, running the rulecast the agent hooks run: the project's own
-# node_modules/.bin/rulecast, else the standalone binary installed in the cache home
-# (rulecast binary install), else one on the PATH. The entries are gitHookCommand() in
-# packages/rulecast/src/core/binary-home.ts, and a test holds them to it.
+# node_modules/.bin/rulecast, else rulecast on the PATH (install.sh's, or a global npm install).
+# The entries are gitHookCommand() in packages/rulecast/src/core/binary-home.ts, and a test holds
+# them to it. A mirror repository that lets pre-commit install rulecast itself is issue #61.
 - id: rulecast
   name: rulecast
   description: Check staged files against the project's rulecast rules.
-  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run' --
+  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; exec rulecast run' --
   language: system
   pass_filenames: false
   always_run: true
@@ -18,7 +18,7 @@
   description: Check the commits being pushed.
   # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
   # from-ref on a branch's first push, which @{upstream} does not have.
-  entry: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
+  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; exec rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"' --
   language: system
   pass_filenames: false
   always_run: true

@@ -10,9 +10,8 @@ import type { CliIo } from "./main"
 import { hasProject } from "./project"
 
 /**
- * Deletes rulecast's cache, or only the current project's directory in it. The installed binary
- * (`<home>/bin`) and the native files this version loads are not cache: removing them would
- * uninstall rulecast as a side effect. Removing the binary is deleting `<home>/bin`.
+ * Deletes rulecast's cache, or only the current project's directory in it. The native files this
+ * version of the standalone binary loads stay: a running binary may have them loaded.
  */
 export async function cleanCommand(root: string, args: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({ args, options: { project: { type: "boolean", default: false } } })
@@ -28,17 +27,13 @@ export async function cleanCommand(root: string, args: string[], io: CliIo): Pro
     io.stdout(`removed ${target}\n`)
     return 0
   }
-  const keep = [path.join(home, "bin"), nativeDir(home)].filter((dir) => existsSync(dir))
+  const keep = [nativeDir(home)].filter((dir) => existsSync(dir))
   const removed = await removeAllBut(home, keep)
   if (removed === 0) {
     io.stdout("nothing to clean\n")
     return 0
   }
-  io.stdout(
-    keep.length === 0
-      ? `removed ${home}\n`
-      : `removed ${home}, keeping ${keep.join(" and ")} (delete ${path.join(home, "bin")} to remove the installed binary)\n`,
-  )
+  io.stdout(keep.length === 0 ? `removed ${home}\n` : `removed ${home}, keeping ${keep.join(" and ")}\n`)
   return 0
 }
 

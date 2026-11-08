@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import { BINARY_TARGETS, hostTarget } from "../scripts/build-binary"
+import { installDir } from "../src/core/binary-home"
 
 /**
  * install.sh, run as a developer runs it: `sh install.sh`, with a stub `curl` serving a fake release
@@ -130,6 +131,18 @@ describe("install.sh", () => {
     expect(existsSync(path.join(xdg, "rulecast"))).toBe(true)
     const home = install()
     expect(existsSync(path.join(bin(home.home), "rulecast"))).toBe(true)
+  })
+
+  test("installs where installDir says, so doctor looks where the script put it", () => {
+    for (const env of <Record<string, string>[]>[
+      { RULECAST_INSTALL_DIR: scratch("own"), XDG_BIN_HOME: scratch("xdg") },
+      { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: scratch("xdg") },
+      {},
+    ]) {
+      const home = scratch("home")
+      expect(install({ home, env }).status).toBe(0)
+      expect(existsSync(path.join(installDir({ HOME: home, ...env }), "rulecast"))).toBe(true)
+    }
   })
 
   test("sets up the PATH once, in .profile and the shells' startup files that exist", () => {

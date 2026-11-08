@@ -12,9 +12,8 @@ Most projects never run these by hand.
 | `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
-| `rulecast clean` | Delete the cache; the installed binary stays |
+| `rulecast clean` | Delete the cache |
 | `rulecast warm` | Build detector caches ahead of time |
-| `rulecast binary` | Put this standalone binary where the agent hooks and git hooks find it |
 | `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
 ## Exit codes

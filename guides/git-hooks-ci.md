@@ -34,11 +34,11 @@ In `lefthook.yml`:
 pre-commit:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; exec rulecast run' --
 pre-push:
   jobs:
     - name: rulecast
-      run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
 ## GitHub Actions

@@ -1,51 +1,25 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { CACHE_HOME_SH, gitHookCommand, hookCacheHome, probeRulecast } from "../../src/core/binary-home"
+import { gitHookCommand, probeRulecast } from "../../src/core/binary-home"
 import { childEnv, markOwnEnv, unmarkOwnEnv } from "../../src/core/child-env"
-import { cacheHome, type Env } from "../../src/core/home"
-import { breakInstalledBinary, LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
+import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url))
 
 const BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-function sh(script: string, env: Env): { stdout: string; stderr: string; status: number | null } {
-  const result = spawnSync("/bin/sh", ["-c", script], { env: env as NodeJS.ProcessEnv, encoding: "utf8" })
-  return { stdout: result.stdout, stderr: result.stderr, status: result.status }
-}
-
-function _scratch(name: string): string {
-  return mkdtempSync(path.join(tmpdir(), `rulecast-${name}-`))
-}
-
-describe("CACHE_HOME_SH", () => {
-  test.each<Env>([
-    {},
-    { RULECAST_HOME: "/r" },
-    { XDG_CACHE_HOME: "/x" },
-    { RULECAST_HOME: "", XDG_CACHE_HOME: "/x" },
-    { RULECAST_HOME: "/r", XDG_CACHE_HOME: "/x" },
-    { HOME: "/h" },
-  ])("CACHE_HOME_SH resolves the home cacheHome does: %o", (env) => {
-    // A hook always has the user's HOME; the case sets its own to show it is the one used.
-    const full = { PATH: BASE_PATH, HOME: homedir(), ...env }
-    expect(sh(`${CACHE_HOME_SH}; printf %s "$H"`, full).stdout).toBe(cacheHome(full))
-  })
-})
-
 describe("probeRulecast", () => {
   test("a file the OS cannot execute is none, not a crash", async () => {
-    const setup = lookupSetup(["binary"], await createProject({}))
-    expect(await probeRulecast(setup.file.binary)).toEqual({ version: "0.8.2" })
-    breakInstalledBinary(setup)
-    expect(await probeRulecast(setup.file.binary)).toBeNull()
+    const setup = lookupSetup(["path"], await createProject({}))
+    expect(await probeRulecast(setup.file.path)).toEqual({ version: "0.8.2" })
+    breakPathRulecast(setup)
+    expect(await probeRulecast(setup.file.path)).toBeNull()
   })
 })
 
@@ -66,17 +40,6 @@ describe("childEnv", () => {
   })
 })
 
-describe("hookCacheHome", () => {
-  test("with HOME, XDG_CACHE_HOME and RULECAST_HOME all unset the shell names no home, and neither does hookCacheHome", () => {
-    expect(sh(`${CACHE_HOME_SH}; printf %s "$H"`, { PATH: BASE_PATH }).stdout).toBe("")
-    expect(hookCacheHome({})).toBeNull()
-    expect(hookCacheHome({ HOME: "", XDG_CACHE_HOME: "" })).toBeNull()
-    for (const env of [{ HOME: "/h" }, { XDG_CACHE_HOME: "/x" }, { RULECAST_HOME: "/r" }]) {
-      expect(hookCacheHome(env)).toBe(sh(`${CACHE_HOME_SH}; printf %s "$H"`, { PATH: BASE_PATH, ...env }).stdout)
-    }
-  })
-})
-
 describe("gitHookCommand", () => {
   test(".pre-commit-hooks.yaml runs rulecast as the agent hooks find it", () => {
     const hooks = parse(readFileSync(path.join(repoRoot, ".pre-commit-hooks.yaml"), "utf8")) as {
@@ -90,46 +53,19 @@ describe("gitHookCommand", () => {
   })
 
   test.each(LOOKUP_FIXTURES)(
-    "the git-hook resolver prefers the project's, then the installed binary, then the PATH: $name",
+    "the git-hook resolver prefers the project's, then the PATH: $name",
     async ({ places, runs }) => {
       const root = await createProject({})
-      const { home, pathDir } = lookupSetup(places, root)
+      const { pathDir } = lookupSetup(places, root)
       // pre-commit's entry is split like a shell would; the command is `sh -c <script> --`.
       const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
       const result = spawnSync("/bin/sh", ["-c", script, "--"], {
         cwd: root,
-        env: { PATH: `${pathDir}:${BASE_PATH}`, RULECAST_HOME: home },
+        env: { PATH: `${pathDir}:${BASE_PATH}` },
         encoding: "utf8",
       })
       expect(result.stdout).toBe(`{"${runs}":true}\n`)
       expect(readFileSync(path.join(root, `ran-${runs}`), "utf8")).toBe("run\n")
     },
   )
-
-  test("an installed binary killed by a signal fails the git hook: the PATH rulecast does not run too", async () => {
-    const root = await createProject({})
-    const setup = lookupSetup(["binary", "path"], root)
-    writeFileSync(realpathSync(setup.file.binary), "#!/bin/sh\nkill -SEGV $$\n")
-    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
-    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
-      cwd: root,
-      env: { PATH: `${setup.pathDir}:${BASE_PATH}`, RULECAST_HOME: setup.home },
-      encoding: "utf8",
-    })
-    expect(result.status).toBe(139)
-    expect(existsSync(path.join(root, "ran-path"))).toBe(false)
-  })
-
-  test("an installed binary that cannot run on this machine falls through to the PATH", async () => {
-    const root = await createProject({})
-    const setup = lookupSetup(["binary", "path"], root)
-    breakInstalledBinary(setup)
-    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
-    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
-      cwd: root,
-      env: { PATH: `${setup.pathDir}:${BASE_PATH}`, RULECAST_HOME: setup.home },
-      encoding: "utf8",
-    })
-    expect(result.stdout).toBe('{"path":true}\n')
-  })
 })

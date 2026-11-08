@@ -3,7 +3,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { ADAPTERS, adapterByName } from "../adapters"
-import { currentBinaryPath, hookCacheHome, probeRulecast } from "../core/binary-home"
+import { probeRulecast } from "../core/binary-home"
 import { CONFIG_FILE, parseConfig, readConfigData } from "../core/config/load"
 import { type Config, defaultConfig } from "../core/config/schema"
 import { errorMessage, isNotFound } from "../core/errors"
@@ -45,18 +45,17 @@ function isEmptyObject(value: unknown): boolean {
 
 /** A rulecast the hooks can run: where it was found, its path, and what `--version` printed. */
 export interface HookRulecast {
-  via: "project" | "binary" | "path"
+  via: "project" | "path"
   path: string
   version: string | null
 }
 
 /**
  * Every rulecast the hook command would consider, in the order it tries them: the project's
- * `node_modules/.bin/rulecast`, the installed binary's current link, then the PATH. Executable is
- * enough for the project's (the hook execs it); an installed binary or one on the PATH that cannot
- * run (126, 127, a binary for another machine) counts as none, as in the hook, and so does the
- * binary when the hook's environment names no home (hookCacheHome). A project with none has hooks
- * that are installed and run no rules, which `doctor` exists to catch.
+ * `node_modules/.bin/rulecast`, then the PATH. Executable is enough for the project's (the hook
+ * execs it); one on the PATH that cannot run (126, 127, a binary for another machine) counts as
+ * none, as in the hook. A project with none has hooks that are installed and run no rules, which
+ * `doctor` exists to catch.
  *
  * `env`'s PATH, without the bins of package runners (TEMPORARY_BIN): the setup docs run doctor as
  * `npx @syv-ai/rulecast doctor`, which puts its own rulecast on the PATH it runs doctor with, and
@@ -72,12 +71,6 @@ export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal
   const project = path.join(root, "node_modules", ".bin", "rulecast")
   if (await executable(project)) {
     found.push({ via: "project", path: project, version: (await probeRulecast(project, signal))?.version ?? null })
-  }
-  const home = hookCacheHome(env)
-  const binary = home === null ? null : currentBinaryPath(home)
-  if (binary !== null && (await executable(binary))) {
-    const probe = await probeRulecast(binary, signal)
-    if (probe !== null) found.push({ via: "binary", path: binary, version: probe.version })
   }
   const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
   const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
