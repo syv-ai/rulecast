@@ -25,8 +25,19 @@ describe("the package README", () => {
     )
   })
 
+  test("a relative image in the README's HTML becomes the raw file on main", () => {
+    expect(absoluteLinks('<img src="packages/site/src/assets/logo.svg" alt="logo">')).toBe(
+      '<img src="https://raw.githubusercontent.com/syv-ai/rulecast/main/packages/site/src/assets/logo.svg" alt="logo">',
+    )
+    expect(absoluteLinks('<img src="https://example.invalid/x.svg">')).toBe('<img src="https://example.invalid/x.svg">')
+  })
+
   test("the published README has no relative link left", async () => {
-    const relative = [...(await packageReadme()).matchAll(/\]\((?!https?:|#)([^)]+)\)/g)].map((m) => m[1])
+    const published = await packageReadme()
+    const relative = [
+      ...published.matchAll(/\]\((?!https?:|#)([^)]+)\)/g),
+      ...published.matchAll(/\bsrc="(?!https?:)([^"]+)"/g),
+    ].map((m) => m[1])
     expect(relative).toEqual([])
   })
 

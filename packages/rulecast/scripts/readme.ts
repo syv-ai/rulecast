@@ -15,10 +15,13 @@ const packageDir = fileURLToPath(new URL("../", import.meta.url))
 /**
  * npmjs.com resolves a README's relative links against the package's own directory — which, with
  * `repository.directory` set to packages/rulecast, means `agents/SETUP.md` and `LICENSE` both 404
- * on the package page. Absolute blob URLs are the only form that works in both places.
+ * on the package page. Absolute blob URLs are the only form that works in both places. An image in
+ * the README's HTML header is the raw file, which npm can show; a blob URL is GitHub's page for it.
  */
 export function absoluteLinks(markdown: string): string {
-  return markdown.replace(/\]\((?!https?:|#)([^)]+)\)/g, "](https://github.com/syv-ai/rulecast/blob/main/$1)")
+  return markdown
+    .replace(/\]\((?!https?:|#)([^)]+)\)/g, "](https://github.com/syv-ai/rulecast/blob/main/$1)")
+    .replace(/(<img [^>]*\bsrc=")(?!https?:)([^"]+)"/g, '$1https://raw.githubusercontent.com/syv-ai/rulecast/main/$2"')
 }
 
 export async function packageReadme(): Promise<string> {

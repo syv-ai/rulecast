@@ -17,7 +17,7 @@ describe("the install docs", () => {
 
   test("the README's lefthook snippet runs rulecast as the agent hooks find it", async () => {
     const readme = await readFile(path.join(repoRoot, "README.md"), "utf8")
-    const lefthook = readme.slice(readme.indexOf("**lefthook**"), readme.indexOf("**GitHub Actions:**"))
+    const lefthook = readme.slice(readme.indexOf("### lefthook"), readme.indexOf("### GitHub Actions"))
     expect(lefthook).toContain(`run: ${gitHookCommand("run")}\n`)
     expect(lefthook).toContain(
       `run: ${gitHookCommand('run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD')}\n`,

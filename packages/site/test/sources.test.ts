@@ -21,6 +21,14 @@ describe("readmeSections", () => {
     expect(sections.get("One")).toContain("## not a heading")
   })
 
+  it("drops the README's centered header, title and badges included", () => {
+    const sections = readmeSections(
+      '<div align="center">\n\n<img src="logo.svg">\n\n# rulecast\n\n[![npm](https://img.shields.io/x)](https://npmjs.com)\n\n</div>\n\nLead.\n\n## One\n\nText.',
+    )
+    expect([...sections.keys()]).toEqual([LEAD, "One"])
+    expect(sections.get(LEAD)).toBe("Lead.")
+  })
+
   it("drops the README's pointer to the site, and keeps text that only names a page on it", () => {
     const sections = readmeSections(
       "# rulecast\n\n**Docs: [the site](https://syv-ai.github.io/rulecast/)**\n\nLead.\n\n## Agents\n\nRead https://syv-ai.github.io/rulecast/agents/SETUP.md",

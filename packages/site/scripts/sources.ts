@@ -213,12 +213,17 @@ export const DROPPED = ["License"]
 
 const FENCE = /^(```|~~~)/
 
-/** The README's lead and its `##` sections by heading. A `##` inside a fenced block is not a heading. */
+/**
+ * The README's lead and its `##` sections by heading. A `##` inside a fenced block is not a heading.
+ * The README's header (logo, title, badges and links, centered in a `<div align="center">` at the
+ * top) is GitHub's and npm's: the site has its own, so it is dropped.
+ */
 export function readmeSections(markdown: string): Map<string, string> {
   const sections = new Map<string, string>()
   let heading = LEAD
   let lines: string[] = []
   let fenced = false
+  let header = false
   // The README's pointer to the site (a link to its home page) is no part of the site.
   const flush = () =>
     sections.set(
@@ -231,6 +236,14 @@ export function readmeSections(markdown: string): Map<string, string> {
         .trim(),
     )
   for (const line of markdown.split("\n")) {
+    if (header) {
+      if (line.trim() === "</div>") header = false
+      continue
+    }
+    if (heading === LEAD && lines.length === 0 && line.trim() === '<div align="center">') {
+      header = true
+      continue
+    }
     if (FENCE.test(line)) fenced = !fenced
     const match = fenced ? null : /^## (.+)$/.exec(line)
     if (match) {

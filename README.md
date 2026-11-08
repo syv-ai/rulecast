@@ -1,6 +1,16 @@
+<div align="center">
+
+<img src="packages/site/src/assets/logo.svg" alt="rulecast logo" width="88" height="88">
+
 # rulecast
 
-**Documentation: [syv-ai.github.io/rulecast](https://syv-ai.github.io/rulecast/)**
+Your project's conventions, delivered to your coding agent when it breaks one.
+
+[![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
+
+[Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](#claude-code-plugin) · [Changelog](packages/rulecast/CHANGELOG.md)
+
+</div>
 
 Your project's conventions are written down in `AGENTS.md` or `CLAUDE.md`, and your coding agent read them once, forty tool calls ago. rulecast delivers them again at the moment they matter: when the agent is about to break one.
 
@@ -77,6 +87,23 @@ The full format is in [`agents/reference/rule-format.md`](agents/reference/rule-
 | `llm` | Conventions nothing mechanical expresses, judged by a model | verify |
 
 `llm` rules are opt-in, use the rule's model or the config's `llm.model`, and by default run only when the agent stops, not on every edit, and so do `hook` rules and whole-project tools. A rule can ask for the edit hook with `stages: [edit, verify]`. Everything else is fast enough to run on every file the agent writes. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
+
+### The linters you already run
+
+A `linter` rule without `rules` delivers what the project's own linter config makes an error, and only the errors the agent's edit caused. Warnings are not delivered: to have one reach the agent, make it an error in the linter's config. Each finding says where its lint rule is explained: a section of your docs, mapped to that lint rule with `context_by_rule`, or else the linter's own page for it.
+
+```yaml
+- id: linter/eslint
+  name: ESLint errors
+  types_or: [javascript, jsx, ts, tsx]
+  detect:
+    linter: { tool: eslint }
+  message: "{{message}} ({{ruleId}})"
+  context_by_rule:
+    eqeqeq: "@docs/conventions.md#comparisons"
+```
+
+A mapped section is delivered only with the findings of its lint rule. The mapping lives in `.rulecast-config.yaml`, so your docs stay free of rulecast syntax. Setup offers one rule per linter it finds; the mappings are proposed one at a time after setup, and you agree each one. See [Per lint rule](agents/reference/rule-format.md#per-lint-rule).
 
 ## Refusing a write
 
@@ -167,7 +194,9 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 
 rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Wire it into the one you use. Git hooks run the rulecast the agent hooks run: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](README.md#install)).
 
-**pre-commit** (`.pre-commit-config.yaml`):
+### pre-commit
+
+In `.pre-commit-config.yaml`:
 
 ```yaml
 minimum_pre_commit_version: "3.2.0"
@@ -179,7 +208,9 @@ repos:
       - id: rulecast-push
 ```
 
-**lefthook** (`lefthook.yml`):
+### lefthook
+
+In `lefthook.yml`:
 
 ```yaml
 pre-commit:
@@ -192,7 +223,7 @@ pre-push:
       run: sh -c 'H=${RULECAST_HOME:-${XDG_CACHE_HOME:+$XDG_CACHE_HOME/rulecast}}; H=${H:-${HOME:+$HOME/.cache/rulecast}}; [ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; T=; [ -n "$H" ] && case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) T=;; esac; if [ -n "$T" ] && [ -x "$H/bin/rulecast-$T" ]; then "$H/bin/rulecast-$T" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; S=$?; [ "$S" -ne 126 ] && [ "$S" -ne 127 ] && exit "$S"; fi; exec rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
 ```
 
-**GitHub Actions:**
+### GitHub Actions
 
 ```yaml
 on: pull_request
@@ -203,15 +234,15 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # rulecast needs the merge base with the target branch
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - run: npm ci
       - run: npx rulecast run --from-ref origin/${{ github.base_ref }} --format sarif > rulecast.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always() # rulecast exits 1 on findings and 3 when a rule could not run, which is when the upload matters
         with:
           sarif_file: rulecast.sarif
@@ -244,13 +275,9 @@ Watch the count, not the rate. Here is one real codebase on one rule, on `main`:
 | 2026-06-01 | 58 / 143 |
 | 2026-09-25 | 57 / 194 |
 
-The rate fell from 76% to 29% and the count did not move. New code complied; the old violations were
-never fixed, only diluted. A team watching the percentage would have believed it was winning.
+The rate fell from 76% to 29% and the count did not move. New code complied; the old violations were never fixed, only diluted. A team watching the percentage would have believed it was winning.
 
-Per-edit enforcement does not touch that stock — it only stops it growing. Fix it a file at a time:
-edits to files that already followed the rule broke it 2% of the time, against 37% in files that
-mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not
-proven.)
+Per-edit enforcement does not touch that stock — it only stops it growing. Fix it a file at a time: edits to files that already followed the rule broke it 2% of the time, against 37% in files that mostly did not, so a file you clean tends to stay clean. (One rule across 19 files: suggestive, not proven.)
 
 When the fix is mechanical, give the rule a [`fix`](agents/reference/rule-format.md#fixes) and burn the stock down in one go: `rulecast fix <rule> --all-files --dry-run` shows the diff, and without `--dry-run` it writes it. Hooks never apply a fix; only that command does.
 
@@ -258,8 +285,7 @@ A scheduled full-repository run, which has no ref to diff against, needs a [comm
 
 ## Agents
 
-rulecast ships docs written for coding agents, not for people. Paste this to yours and it will set
-rulecast up itself:
+rulecast ships docs written for coding agents, not for people. Paste this to yours and it will set rulecast up itself:
 
 ```text
 Set up rulecast in this project with me. Read
@@ -267,19 +293,15 @@ https://syv-ai.github.io/rulecast/agents/SETUP.md
 and follow it.
 ```
 
-If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through
-what it found with you, install rulecast (the standalone binary, or `@syv-ai/rulecast` as a
-devDependency), and run `rulecast init` with the flags you agree on (`rulecast init --help`
-lists them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
+If your agent cannot fetch a URL: have it run `npx @syv-ai/rulecast init --dry-run`, go through what it found with you, install rulecast (the standalone binary, or `@syv-ai/rulecast` as a devDependency), and run `rulecast init` with the flags you agree on (`rulecast init --help` lists them). Never edit hook settings by hand: `rulecast init`, `install` and `uninstall` own them.
 
-Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md)
-with the one convention you want checked.
+Afterwards, add rules as you go: give the agent [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) with the one convention you want checked.
 
 - [`agents/SETUP.md`](agents/SETUP.md) — your agent sets rulecast up with you: it shows you a page of defaults from the repository, asks only what it can't tell, and writes it when you approve.
 - [`agents/CONVENTIONS.md`](agents/CONVENTIONS.md) — for working out your conventions up front. It reads the code, then interviews you one question at a time about what matters in this kind of project. You review the result on one page, and nothing goes into your docs that you didn't choose.
 - [`agents/DRAFT-RULES.md`](agents/DRAFT-RULES.md) — it reads your `AGENTS.md`, proposes one rule per convention that code can visibly break, shows you what each would flag today, and asks you to keep, edit or drop it.
 
-As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, which never fire, and whether a rule fires less over the weeks. `rulecast clean` deletes it.
+As the hooks run, rulecast keeps a local log of the findings it reported — finding ids, rule ids, files and lines, never code — so `rulecast stats` can show which rules the agent fixes, which it keeps hitting or silencing, which never fire, and whether a rule fires less over the weeks: once the log spans two weeks, it shows each rule's weekly rate and the files it keeps firing on. The trend covers what the log holds, about 8 MiB; set `stats.weekly_summary: true` in the config (`rulecast init --weekly-summary`) to keep 26 weeks of per-week counts as well. `rulecast clean` deletes it.
 
 Several agents in one working tree, git operations during a turn, and agents with nobody watching are covered under [Advanced](README.md#advanced).
 
@@ -303,7 +325,9 @@ The plugin's version follows the CLI's, so each release reaches you as a plugin 
 
 ## Install
 
-**Standalone binary (no Node).**
+### Standalone binary
+
+No Node needed.
 
 ```sh
 sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Linux arm64") T=linux-arm64;; "Darwin arm64") T=darwin-arm64;; "Darwin x86_64") T=darwin-x64;; *) echo "rulecast: no standalone binary for $(uname -sm)" >&2; exit 1;; esac; D=$(mktemp -d) && cd "$D" && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T && curl --proto =https -fsSLO https://github.com/syv-ai/rulecast/releases/download/v0.9.0/rulecast-$T.sha256 && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -c rulecast-$T.sha256; else sha256sum -c rulecast-$T.sha256; fi && chmod +x rulecast-$T && ./rulecast-$T binary install; R=$?; cd / && rm -rf "$D"; exit $R'
@@ -311,7 +335,9 @@ sh -c 'case "$(uname -sm)" in "Linux x86_64") T=linux-x64;; "Linux aarch64"|"Lin
 
 This downloads this version's binary for your machine and its `.sha256` from [Releases](https://github.com/syv-ai/rulecast/releases), checks one against the other, and runs `rulecast binary install`, which puts it in `~/.cache/rulecast/bin/`. The checksum catches a truncated or corrupted download. It comes from the same release as the binary, so it is the same trust as the binary itself: GitHub Releases over TLS. To update, run it again with a newer version: the new one replaces the old. `rulecast doctor` says when the config needs one. `rulecast clean` leaves the binary alone; to remove it, delete `~/.cache/rulecast/bin`.
 
-**npm**, for a project that wants one pinned version for everyone:
+### npm
+
+For a project that wants one pinned version for everyone:
 
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
@@ -335,26 +361,13 @@ Most projects need none of this. It covers particular setups: several agents in 
 
 ### Several agents at once
 
-With subagents, each one's stop checks only the files it edited, so it is never asked to fix
-another agent's code. The main agent's stop checks everything the session changed: a problem that
-only shows when two subagents' changes meet is caught there. A file two subagents both edit can
-block either of them. A change no agent's tool call made, such as your own edit, is reported at the
-main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
+With subagents, each one's stop checks only the files it edited, so it is never asked to fix another agent's code. The main agent's stop checks everything the session changed: a problem that only shows when two subagents' changes meet is caught there. A file two subagents both edit can block either of them. A change no agent's tool call made, such as your own edit, is reported at the main agent's stop, and at a subagent's only when that subagent's own shell calls came across it.
 
-When agents run in parallel in one working tree, in one session or several, and one of them changes
-files with the shell, a file another agent changed with Edit or Write while the command ran stays
-that agent's. What two agents' shell commands change at the same time can't be told apart: both are
-held to it, each is told once, and neither is told to `git checkout` a protected file the other may
-have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with
-`isolation: worktree`).
+When agents run in parallel in one working tree, in one session or several, and one of them changes files with the shell, a file another agent changed with Edit or Write while the command ran stays that agent's. What two agents' shell commands change at the same time can't be told apart: both are held to it, each is told once, and neither is told to `git checkout` a protected file the other may have written to. For parallel agents, give each its own worktree (in Claude Code, a subagent with `isolation: worktree`).
 
 ### Git operations during a turn
 
-A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull
-or merge brings lines into a file the agent edited, those lines are not counted as the agent's,
-as long as their commits were made before the operation. The agent's own commits stay its own. One
-gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only
-as a git operation, so files it alone changed are not checked.
+A git operation during a turn, such as a commit, pull, merge or checkout, is not an edit. When a pull or merge brings lines into a file the agent edited, those lines are not counted as the agent's, as long as their commits were made before the operation. The agent's own commits stay its own. One gap remains: a command that edits files and commits them in one go (`fmt && git commit`) counts only as a git operation, so files it alone changed are not checked.
 
 ### Fresh environments
 
