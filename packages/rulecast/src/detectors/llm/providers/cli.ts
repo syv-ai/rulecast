@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { access, constants } from "node:fs/promises"
 import path from "node:path"
 
+import { childEnv } from "../../../core/child-env"
 import { isNotFound } from "../../../core/errors"
 import { onPath } from "../../../core/which"
 import { type LlmAvailability, LlmUnavailableError } from "./types"
@@ -39,7 +40,7 @@ export function runCli(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: options.env,
+      env: childEnv(options.env),
       signal: options.signal,
       stdio: ["pipe", "pipe", "pipe"],
     })

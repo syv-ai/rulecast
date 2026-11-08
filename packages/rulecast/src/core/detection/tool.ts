@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 
+import { childEnv } from "../child-env"
 import { isNotFound } from "../errors"
 
 const exec = promisify(execFile)
@@ -35,6 +36,7 @@ export async function runTool(
     const running = exec(command, [...args], {
       cwd: options.cwd,
       signal: options.signal,
+      env: childEnv(),
       // A whole-repository run of a linter on a large project prints megabytes of JSON.
       maxBuffer: 64 * 1024 * 1024,
     })

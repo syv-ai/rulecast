@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import path from "node:path"
 import { promisify } from "node:util"
+import { childEnv } from "./child-env"
 import { isNotFound } from "./errors"
 
 const exec = promisify(execFile)
@@ -36,7 +37,7 @@ export function withoutInheritedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
 function environment(extra?: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
   // No optional locks: `git status` would otherwise refresh the index under .git/index.lock, and an
   // agent's own `git commit` running at that moment fails with "index.lock exists".
-  return withoutInheritedGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", ...extra })
+  return withoutInheritedGitEnv({ ...childEnv(), GIT_OPTIONAL_LOCKS: "0", ...extra })
 }
 
 /**
