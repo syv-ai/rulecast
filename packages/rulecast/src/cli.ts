@@ -3,8 +3,9 @@ import { text as readAll } from "node:stream/consumers"
 
 import { main } from "./commands/main"
 import { spawnDetached } from "./commands/spawn"
+import { selfCommand } from "./core/self"
 
-const script = process.argv[1]!
+const [command, ...self] = selfCommand()
 
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
@@ -13,5 +14,5 @@ process.exitCode = await main(process.argv.slice(2), {
   stderr: (text) => process.stderr.write(text),
   readStdin: () => readAll(process.stdin),
   startWarm: (root, kinds) =>
-    spawnDetached(process.execPath, [script, "warm", ...kinds.flatMap((kind) => ["--detector", kind])], root),
+    spawnDetached(command, [...self, "warm", ...kinds.flatMap((kind) => ["--detector", kind])], root),
 })

@@ -22,6 +22,11 @@ export interface EmbeddedLanguage {
   expandoChar?: string
 }
 
+/** Whether this process is the standalone binary: its entry sets the embedded globals before the CLI starts. */
+export function isStandaloneBinary(): boolean {
+  return (globalThis as Record<string, unknown>)[EMBEDDED_KEY] !== undefined
+}
+
 /** The embedded registration for a language, or undefined outside the binary. */
 export function embeddedLanguage(name: string): EmbeddedLanguage | undefined {
   const all = (globalThis as Record<string, unknown>)[EMBEDDED_KEY] as Record<string, EmbeddedLanguage> | undefined
