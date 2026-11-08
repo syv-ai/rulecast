@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { HOOK_COMMAND, NOT_INSTALLED, NOT_INSTALLED_UNATTENDED } from "../../../src/adapters/claude-code/adapter"
+import { LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
 /** Runs the committed hook command the way Claude Code does: through a shell, payload on stdin. */
@@ -136,6 +137,52 @@ describe("the committed hook command", () => {
     chmodSync(path.join(global, "rulecast"), 0o755)
     const result = hook(root, { hook_event_name: "Stop" }, { PATH: `${global}:/usr/bin:/bin` })
     expect(result).toEqual({ code: 2, stdout: '{"x":1}\n', stderr: "blocked\n" })
+  })
+
+  test("with only the installed binary, it is run with the payload untouched", async () => {
+    const root = await createProject({})
+    const { home } = lookupSetup(["binary"], root)
+    const payload = { hook_event_name: "PostToolUse", tool_name: "Edit" }
+    expect(hook(root, payload, { RULECAST_HOME: home })).toEqual({ code: 0, stdout: '{"binary":true}\n', stderr: "" })
+    expect(readFileSync(path.join(root, "ran-binary"), "utf8")).toBe(`hook claude-code\n${JSON.stringify(payload)}`)
+  })
+
+  test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs }) => {
+    const root = await createProject({})
+    const { home, pathDir } = lookupSetup(places, root)
+    const result = hook(root, { hook_event_name: "Stop" }, { RULECAST_HOME: home, PATH: `${pathDir}:/usr/bin:/bin` })
+    expect(result.stdout).toBe(`{"${runs}":true}\n`)
+  })
+
+  test("the installed binary is found through XDG_CACHE_HOME and HOME as well", async () => {
+    const root = await createProject({})
+    const { home } = lookupSetup(["binary"], root)
+    // lookupSetup's home is <scratch>/home: as XDG_CACHE_HOME it would be <scratch>/home/rulecast.
+    const xdg = path.join(path.dirname(home), "xdg")
+    mkdirSync(xdg)
+    symlinkSync(home, path.join(xdg, "rulecast"))
+    expect(hook(root, { hook_event_name: "Stop" }, { XDG_CACHE_HOME: xdg }).stdout).toBe('{"binary":true}\n')
+    const user = path.join(path.dirname(home), "user")
+    mkdirSync(user)
+    symlinkSync(xdg, path.join(user, ".cache"))
+    expect(hook(root, { hook_event_name: "Stop" }, { HOME: user }).stdout).toBe('{"binary":true}\n')
+  })
+
+  test("a link to a missing binary counts as none", async () => {
+    const root = await createProject({})
+    const { home, file } = lookupSetup(["binary"], root)
+    rmSync(realpathSync(file.binary))
+    const env = { RULECAST_HOME: home }
+    expect(hook(root, { hook_event_name: "PostToolUse" }, env)).toEqual({ code: 0, stdout: "", stderr: "" })
+    const start = hook(root, { hook_event_name: "SessionStart", source: "startup" }, env)
+    expect(JSON.parse(start.stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  test("with HOME unset and no RULECAST_HOME it still exits 0", async () => {
+    const root = await createProject({})
+    // hook() passes no HOME: the command's environment is PATH and CLAUDE_PROJECT_DIR alone.
+    expect(hook(root, { hook_event_name: "PostToolUse" })).toEqual({ code: 0, stdout: "", stderr: "" })
+    expect(hook(root, { hook_event_name: "SessionStart" }).code).toBe(0)
   })
 
   test("the project's own rulecast wins over one on the PATH", async () => {
