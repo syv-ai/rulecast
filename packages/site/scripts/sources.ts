@@ -207,6 +207,8 @@ export const PAGES: Page[] = [
  * how-it-works.mdx; the license is linked from the footer.
  */
 export const FRAGMENTS: Record<string, string> = { lead: LEAD, performance: "Performance" }
+/** The page that imports FRAGMENTS, so the page a link to one of their headings goes to. */
+export const FRAGMENT_PAGE = "how-it-works"
 export const DROPPED = ["License"]
 
 const FENCE = /^(```|~~~)/

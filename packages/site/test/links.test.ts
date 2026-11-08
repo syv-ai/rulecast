@@ -29,6 +29,8 @@ describe("rewriteLinks", () => {
       "[b](/rulecast/guides/advanced/#a-committed-baseline)",
     )
     expect(rewriteLinks("[a](README.md#advanced)", "README.md")).toBe("[a](/rulecast/guides/advanced/)")
+    // Performance is a fragment, imported by how-it-works under its own heading.
+    expect(rewriteLinks("[p](README.md#performance)", "README.md")).toBe("[p](/rulecast/how-it-works/#performance)")
     expect(rewriteLinks("[a](README.md#agents)", "README.md")).toBe("[a](/rulecast/guides/agents/)")
     expect(rewriteLinks("[g](README.md#getting-started)", "README.md")).toBe("[g](/rulecast/getting-started/)")
     expect(rewriteLinks("[r](README.md)", "README.md")).toBe("[r](/rulecast/)")

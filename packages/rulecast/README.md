@@ -167,7 +167,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 - `rulecast run --files F...` and `--all-files` judge files whole: against a committed `.rulecast/baseline.json` when there is one, else with no baseline. Use the hook below rather than `--files` from a hook manager.
 - **A nightly sweep or a scheduled agent loop** over the whole repository has no ref to diff against: commit a baseline once, and `rulecast run --all-files` exits 0 unless something got worse. Recipes for `/goal`, `/loop` and scheduled sweeps: [`agents/reference/loops.md`](https://github.com/syv-ai/rulecast/blob/main/agents/reference/loops.md).
 
-rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Wire it into the one you use. Git hooks run the rulecast the agent hooks run: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](#install)).
+rulecast installs no git hooks itself: lefthook, husky and pre-commit already own `.git/hooks`. Wire it into the one you use. Git hooks run the rulecast the agent hooks run: the project's `node_modules/.bin/rulecast`, else the installed binary, else one on the PATH ([Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install)).
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
@@ -219,7 +219,7 @@ jobs:
           sarif_file: rulecast.sarif
 ```
 
-In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` (the binary for the runner's platform) where the example runs `npx rulecast`.
+In a project without Node, replace the `setup-node` and `npm ci` steps with one that runs the install command from [Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install), and run `~/.cache/rulecast/bin/rulecast-linux-x64` (the binary for the runner's platform) where the example runs `npx rulecast`.
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`. `--from-ref` runs `llm` rules, which judge changed files only.
 
@@ -327,7 +327,7 @@ The npm package needs Node ≥ 20.12. Linux and macOS; Windows is not supported.
 
 The edit hook is budgeted to finish in under 500 ms at p95, measured from process start to exit, on a 30-rule project with warm caches, excluding `llm` rules. The hook before every Bash call only records the working tree, and is held to 150 ms over a hook that does nothing. The hook after a Bash call that changed a file is an edit event, under the same 500 ms budget. `pnpm perf` checks both budgets.
 
-A new worktree, a new session or an empty per-project detector cache needs no preparation. Hooks never fetch, so rules from a rule repo that is not in the cache do not run until `rulecast install` (see [Fresh environments](#fresh-environments)). On macOS, the first edit in a new worktree is slower than later ones: macOS checks each executable the first time it runs from a new path, such as the project's own `command` script or a `node_modules/.bin` linter shim. Run them once beforehand and the first edit costs the same as later ones.
+A new worktree, a new session or an empty per-project detector cache needs no preparation. Hooks never fetch, so rules from a rule repo that is not in the cache do not run until `rulecast install` (see [Fresh environments](https://github.com/syv-ai/rulecast/blob/main/README.md#fresh-environments)). On macOS, the first edit in a new worktree is slower than later ones: macOS checks each executable the first time it runs from a new path, such as the project's own `command` script or a `node_modules/.bin` linter shim. Run them once beforehand and the first edit costs the same as later ones.
 
 The budget is what shapes the design: one detector run per kind per event, kinds in parallel, slow tools defaulted to `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished and builds the rest in the background rather than making the agent wait.
 
@@ -362,7 +362,7 @@ as a git operation, so files it alone changed are not checked.
 
 A CI job, a cloud agent session or a new container starts with nothing installed. rulecast does not fail quietly there: in unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and the agent is held once per prompt to put that in its final report. `rulecast run` says `incomplete` and lists them under `disabled` in JSON. To have nothing to report:
 
-1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
+1. Install rulecast where the hooks find it before the agent starts: `npm ci` (or `pnpm install`) for a devDependency, or the install command under [Install](https://github.com/syv-ai/rulecast/blob/main/README.md#install). Without it the agent hooks do nothing, and in unattended mode every stop says so.
 2. Run `npx rulecast install`. It fetches the pinned rule repos; hooks never fetch.
 3. Run `npx rulecast doctor --ci` before the agent step. It reads the cache as the hooks do and fetches nothing. It exits 2 if a rule repo is missing from the cache, a rule's tool is not installed, or the hooks cannot run (they run the project's `node_modules/.bin/rulecast`, else the installed binary in `~/.cache/rulecast/bin/`, else one on the PATH; the temporary one `npx` runs doctor with does not count). Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
 4. Check out with `fetch-depth: 0` if you use `--from-ref`.
@@ -372,7 +372,7 @@ A CI job, a cloud agent session or a new container starts with nothing installed
 
 A cache home whose `native/` can't be written still works: the binary unpacks its native files into a private directory in the temp directory instead.
 
-A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
+A new git worktree on the same machine needs none of this beyond step 1. Rule repos are cached per user, not per checkout, and nothing on the edit path reads a per-project cache ([Performance](https://github.com/syv-ai/rulecast/blob/main/README.md#performance)). `rulecast warm` only matters for plugin detectors that warm, and SessionStart starts it for you.
 
 ### Tools in staged and `--to-ref` runs
 
