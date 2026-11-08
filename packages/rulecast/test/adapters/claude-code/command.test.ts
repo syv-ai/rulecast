@@ -226,6 +226,18 @@ describe("the committed hook command", () => {
     expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe('{"path":true}\n')
   })
 
+  test("on a platform with no standalone binary, the PATH rulecast runs with no error", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["binary", "path"], root)
+    const stubs = path.join(root, "uname-bin")
+    mkdirSync(stubs)
+    writeFileSync(path.join(stubs, "uname"), "#!/bin/sh\necho 'Linux riscv64'\n")
+    chmodSync(path.join(stubs, "uname"), 0o755)
+    const env = { RULECAST_HOME: setup.home, PATH: `${stubs}:${setup.pathDir}:/usr/bin:/bin` }
+    expect(hook(root, { hook_event_name: "Stop" }, env)).toEqual({ code: 0, stdout: '{"path":true}\n', stderr: "" })
+    expect(existsSync(path.join(root, "ran-binary"))).toBe(false)
+  })
+
   test("the installed binary keeps its own exit code and output", async () => {
     const root = await createProject({})
     const setup = lookupSetup(["binary"], root)
