@@ -12,6 +12,7 @@
     "lenses": "pnpm --filter @syv-ai/rulecast lenses",
     "manifest": "pnpm --filter @syv-ai/rulecast manifest",
     "perf": "pnpm --filter @syv-ai/rulecast perf",
+    "plugin-eval": "pnpm --filter @syv-ai/rulecast plugin-eval",
     "prepare": "lefthook install",
     "readme": "pnpm --filter @syv-ai/rulecast readme",
     "release": "pnpm build && changeset publish --no-git-tag",

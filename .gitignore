@@ -37,8 +37,5 @@ packages/site/public/agents/
 docs/plans/
 docs/specs/
 
-# plugin eval runs (claude plugin eval plugins/rulecast)
-plugins/rulecast/evals/results/
-# a replayed history writes the resumed session (and its subagents) beside history.jsonl
-plugins/rulecast/evals/*/*-*-*-*-*.jsonl
-plugins/rulecast/evals/*/*-*-*-*-*/
+# plugin eval results (pnpm plugin-eval)
+evals/rulecast-plugin/results/

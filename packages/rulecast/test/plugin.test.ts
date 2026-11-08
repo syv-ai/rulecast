@@ -60,7 +60,7 @@ describe("the Claude Code plugin", () => {
   })
 
   test("every eval case has a prompt and the no-rule-writes grader", () => {
-    const evals = path.join(repoRoot, "plugins/rulecast/evals")
+    const evals = path.join(repoRoot, "evals/rulecast-plugin")
     const cases = readdirSync(evals, { withFileTypes: true }).filter(
       (entry) => entry.isDirectory() && entry.name !== "results",
     )

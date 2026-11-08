@@ -7,6 +7,7 @@ rulecast delivers a project's conventions to coding agents while they work. It r
 ```sh
 All standard pnpm commands, like install, build etc.
 pnpm perf               # edit-hook latency budget (p95 < 500 ms)
+pnpm plugin-eval        # the plugin's eval suite (evals/rulecast-plugin/), by hand: pnpm plugin-eval --scaffold --allow-tools Edit Write
 pnpm binary             # standalone binary with bun
 ```
 

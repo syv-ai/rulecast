@@ -51,6 +51,7 @@
     "lenses": "tsx scripts/lenses.ts",
     "manifest": "tsx scripts/generate-manifest.ts",
     "perf": "tsx scripts/perf.ts",
+    "plugin-eval": "tsx scripts/plugin-eval.ts",
     "readme": "tsx scripts/readme.ts",
     "release-notes": "tsx scripts/release-notes.ts",
     "stress": "tsx scripts/stress.ts",
