@@ -46,6 +46,38 @@ describe("setupFacts", () => {
     expect(found.packages).toEqual([])
   })
 
+  test("committers is null when nobody but bots committed", async () => {
+    const root = await createProject({})
+    await git(root, "init", "-q", "-b", "main")
+    await commit(root, "a.txt", "dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>")
+    expect((await facts(root)).committers).toBeNull()
+  })
+
+  test("committers is null in a shallow clone, whose history undercounts", async () => {
+    const origin = await createProject({})
+    await git(origin, "init", "-q", "-b", "main")
+    await commit(origin, "a.txt", "A <a@x>")
+    await commit(origin, "b.txt", "B <b@x>")
+    const parent = await createProject({})
+    await git(parent, "clone", "-q", "--depth", "1", `file://${origin}`, "shallow")
+    expect((await facts(path.join(parent, "shallow"))).committers).toBeNull()
+  })
+
+  test("an unreadable manifest reads as missing", async () => {
+    const root = await createRepo({ "backend/pyproject.toml": "[project]\n", "backend/app.py": "x = 1\n" })
+    const found = await setupFacts({
+      root,
+      files: await allFiles(root),
+      read: async (file) => {
+        if (file === "package.json" || file.endsWith(".toml")) throw new Error("EACCES")
+        return readSourceFile(root, file)
+      },
+      exists: markerExists(root),
+      adapters: ADAPTERS,
+    })
+    expect(found.packages.map((entry) => entry.dir)).toEqual(["backend/"])
+  })
+
   test("in a package, committers counts only commits touching it", async () => {
     const root = await createProject({})
     await git(root, "init", "-q", "-b", "main")

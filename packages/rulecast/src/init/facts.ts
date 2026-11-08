@@ -3,7 +3,7 @@ import path from "node:path"
 import { parse } from "yaml"
 
 import { readSourceFile } from "../core/detection/per-rule"
-import { git, repositoryTop } from "../core/git"
+import { git, isShallow, repositoryTop } from "../core/git"
 import type { Adapter } from "../core/types"
 import { PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
 import { detectStack } from "./detect"
@@ -12,7 +12,7 @@ import { globToRegex, LEFTHOOK_CONFIGS } from "./hooks"
 
 /** What setup needs to know about a project that a few lines of code find the same way every time (plan 24). */
 export interface SetupFacts {
-  /** Distinct author emails in the last six months, for this directory; bots left out. null: no commits. */
+  /** Distinct author emails in the last six months, for this directory; bots left out. null: none, or a shallow clone. */
   committers: { count: number; since: "6 months" } | null
   /** Declared workspaces, plus top-level dirs holding a manifest. Relative to the project, "/"-terminated. */
   packages: { dir: string; manifest: string; stack: string[]; agentDoc: boolean; config: boolean }[]
@@ -50,7 +50,12 @@ const CI_AGENTS: readonly { agent: string; pattern: RegExp }[] = [
   { agent: "codex", pattern: /openai\/codex-action|\bcodex\s+exec\b/ },
 ]
 
+/**
+ * null when the history can't say: no commits, none in six months, or a shallow clone (CI's
+ * checkout, a `--depth 1` clone), whose few commits undercount the people.
+ */
 async function committers(root: string): Promise<SetupFacts["committers"]> {
+  if (await isShallow(root)) return null
   const log = await git(root, ["log", "--since=6 months ago", "--format=%ae%x09%an", "--", "."])
   if (!log.ok) return null
   const emails = new Set<string>()
@@ -59,7 +64,7 @@ async function committers(root: string): Promise<SetupFacts["committers"]> {
     if (email === "" || BOT.test(name) || BOT_EMAIL.test(email)) continue
     emails.add(email.toLowerCase())
   }
-  return { count: emails.size, since: "6 months" }
+  return emails.size === 0 ? null : { count: emails.size, since: "6 months" }
 }
 
 const asStrings = (value: unknown): string[] =>
@@ -164,7 +169,7 @@ function sessions(input: FactsInput, packageDirs: readonly string[]): string[] {
 async function gitHooks(root: string, top: string): Promise<SetupFacts["gitHooks"]> {
   const project = path.relative(top, root)
   const up = project === "" ? "" : "../".repeat(project.split(path.sep).length)
-  const read = (file: string) => readSourceFile(top, file)
+  const read = (file: string) => readSourceFile(top, file).catch(() => null)
   const hooks: SetupFacts["gitHooks"] = []
   const preCommit = await read(PRE_COMMIT_CONFIG)
   if (preCommit !== null) {
@@ -210,12 +215,15 @@ async function ci(root: string, top: string): Promise<SetupFacts["ci"]> {
 /** The facts setup's page of defaults is drawn from (plan 24). Nothing here writes. */
 export async function setupFacts(input: FactsInput): Promise<SetupFacts> {
   const top = await repositoryTop(input.root)
-  const found = await packages(input)
+  // A file that can't be read (a broken symlink, a device, no permission) reads as missing: these
+  // facts are defaults, and none of them is worth failing the dry run over.
+  const safe: FactsInput = { ...input, read: (file) => input.read(file).catch(() => null) }
+  const found = await packages(safe)
   return {
     committers: await committers(input.root),
     packages: found,
     sessions: sessions(
-      input,
+      safe,
       found.map((entry) => entry.dir),
     ),
     gitHooks: await gitHooks(input.root, top),
