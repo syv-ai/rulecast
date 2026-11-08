@@ -58,36 +58,52 @@ main() {
     [ -n "${HOME:-}" ] || fail "HOME is not set; set RULECAST_INSTALL_DIR to where rulecast should go"
     dir="$HOME/.local/bin"
   fi
+  case "$dir" in
+    /*) ;;
+    *) fail "the install directory must be an absolute path, not $dir" ;;
+  esac
+  # <dir> as the startup files name it: under $HOME, through $HOME, so a shared dotfile works
+  # anywhere. What is written literally goes inside double quotes there.
+  case "$dir" in
+    "${HOME:-/nonexistent}"/*) shown="\$HOME${dir#"$HOME"}" literal="${dir#"$HOME"}" ;;
+    *) shown="$dir" literal="$dir" ;;
+  esac
+  case "$literal" in
+    *[\"\$\`\\]*) fail "the install directory cannot contain \", \$, \` or \\: $dir" ;;
+  esac
   base="${RULECAST_DOWNLOAD_URL:-https://github.com/syv-ai/rulecast/releases/download/v$VERSION}"
   asset="rulecast-$target"
 
+  part=""
   tmp="$(mktemp -d)" || fail "could not create a temporary directory"
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf "$tmp"; [ -z "$part" ] || rm -f "$part"' EXIT
   trap 'exit 1' HUP INT TERM
 
   say "downloading rulecast $VERSION for $target"
   (cd "$tmp" && curl --proto '=https' --tlsv1.2 -fsSLO "$base/$asset" &&
     curl --proto '=https' --tlsv1.2 -fsSLO "$base/$asset.sha256") ||
     fail "could not download $base/$asset; nothing was installed"
-  (cd "$tmp" && $sha256 -c "$asset.sha256" >/dev/null 2>&1) ||
-    fail "the download does not match its checksum; nothing was installed"
+  # The first field of the .sha256 is the hash, compared here rather than by `-c`, which some
+  # implementations pass on an empty or garbled file.
+  read -r expected _ <"$tmp/$asset.sha256" || expected=""
+  actual="$($sha256 "$tmp/$asset")" || actual=""
+  actual="${actual%% *}"
+  case "$expected" in
+    "" | *[!0-9a-f]*) fail "the release's checksum file is not a SHA-256 hash; nothing was installed" ;;
+  esac
+  [ "$actual" = "$expected" ] || fail "the download does not match its checksum; nothing was installed"
 
-  # Written beside the old one and renamed over it, so a hook running the old rulecast never runs a
-  # half-written file.
+  # Written beside the old one, tried, and only then renamed over it: a hook running the old
+  # rulecast never runs a half-written file, and one that does not run here replaces nothing.
   mkdir -p "$dir" || fail "could not create $dir"
   part="$dir/.rulecast.$$.tmp"
-  if ! { cp "$tmp/$asset" "$part" && chmod 755 "$part" && mv -f "$part" "$dir/rulecast"; }; then
-    rm -f "$part"
-    fail "could not install $dir/rulecast"
-  fi
-  installed="$("$dir/rulecast" --version 2>/dev/null)" || fail "installed $dir/rulecast, but it does not run here"
+  { cp "$tmp/$asset" "$part" && chmod 755 "$part"; } || fail "could not write $part"
+  installed="$("$part" --version 2>/dev/null)" ||
+    fail "the $target binary does not run on this machine; nothing was installed. Use npm instead: npm install -g @syv-ai/rulecast"
+  mv -f "$part" "$dir/rulecast" || fail "could not install $dir/rulecast"
+  part=""
   say "installed rulecast $installed at $dir/rulecast"
 
-  # <dir> as the startup files name it: under $HOME, through $HOME, so a shared dotfile works anywhere.
-  case "$dir" in
-    "${HOME:-/nonexistent}"/*) shown="\$HOME${dir#"$HOME"}" ;;
-    *) shown="$dir" ;;
-  esac
   env_line=". \"$shown/env\""
   cat >"$dir/env" <<EOF || fail "could not write $dir/env"
 #!/bin/sh
@@ -123,8 +139,8 @@ EOF
   esac
   if [ -n "$changed" ]; then
     for file in $changed; do say "added $dir to the PATH in $file"; done
-    say "to use rulecast in this shell now, run: $env_line"
   fi
+  say "to use rulecast in this shell now, run: $env_line"
   return 0
 }
 

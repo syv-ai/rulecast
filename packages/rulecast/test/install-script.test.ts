@@ -1,6 +1,15 @@
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -61,14 +70,18 @@ function install(
     shell?: string
     /** Directories put on the PATH before the stubs and tools. */
     pathFirst?: string
+    /** The released binary's text: by default a script that prints 9.9.9 for --version. */
+    body?: string
+    /** The whole .sha256 file, in place of a correct one. */
+    shaFile?: string
   } = {},
 ): Run {
   const assets = scratch("release")
   const asset = `rulecast-${hostTarget()}`
-  const body = `#!/bin/sh\n[ "$1" = --version ] && echo 9.9.9\n`
+  const body = options.body ?? `#!/bin/sh\n[ "$1" = --version ] && echo 9.9.9\n`
   writeFileSync(path.join(assets, asset), body)
   const hash = options.sha256 ?? createHash("sha256").update(body).digest("hex")
-  writeFileSync(path.join(assets, `${asset}.sha256`), `${hash}  ${asset}\n`)
+  writeFileSync(path.join(assets, `${asset}.sha256`), options.shaFile ?? `${hash}  ${asset}\n`)
   const stubs = scratch("stubs")
   if (!options.omit?.includes("curl")) {
     script(
@@ -122,6 +135,48 @@ describe("install.sh", () => {
     expect(readdirSync(missing.tmp)).toEqual([])
   })
 
+  test("a checksum file that is empty or not a hash installs nothing", () => {
+    for (const shaFile of ["", "not a hash\n", "  rulecast\n"]) {
+      const run = install({ shaFile })
+      expect(run.status, JSON.stringify(shaFile)).toBe(1)
+      expect(run.stderr).toContain("checksum file is not a SHA-256 hash")
+      expect(existsSync(bin(run.home))).toBe(false)
+    }
+  })
+
+  test("a binary that does not run here replaces nothing", () => {
+    const home = scratch("home")
+    expect(install({ home }).status).toBe(0)
+    const broken = install({ home, body: "#!/bin/sh\nexit 1\n" })
+    expect(broken.status).toBe(1)
+    expect(broken.stderr).toContain("does not run on this machine; nothing was installed")
+    // The working one is still there, and nothing half-done is left beside it.
+    expect(spawnSync(path.join(bin(home), "rulecast"), ["--version"], { encoding: "utf8" }).stdout).toBe("9.9.9\n")
+    expect(readdirSync(bin(home)).sort()).toEqual(["env", "rulecast"])
+  })
+
+  test("an install directory that is relative, or would break a startup file, is refused", () => {
+    for (const dir of ["bin", "~/bin", '/tmp/a"b', "/tmp/a$b", "/tmp/a`b"]) {
+      const run = install({ env: { RULECAST_INSTALL_DIR: dir } })
+      expect(run.status, dir).toBe(1)
+      expect(run.stderr).toMatch(/must be an absolute path|cannot contain/)
+    }
+  })
+
+  test("a HOME with $, quotes or spaces still installs, its startup line naming it through $HOME", () => {
+    const home = path.join(scratch("odd"), 'a $b "c`')
+    mkdirSync(home)
+    const run = install({ home, env: { SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(count(read(path.join(home, ".zshrc")), SOURCE_LINE)).toBe(1)
+    const env = path.join(bin(home), "env")
+    const sourced = spawnSync("/bin/sh", ["-c", `. "${env.replace(/(["$`\\])/g, "\\$1")}"; printf %s "$PATH"`], {
+      env: { HOME: home, PATH: "/usr/bin:/bin" },
+      encoding: "utf8",
+    })
+    expect(sourced.stdout).toBe(`${bin(home)}:/usr/bin:/bin`)
+  })
+
   test("installs into RULECAST_INSTALL_DIR, else XDG_BIN_HOME, else ~/.local/bin", () => {
     const own = scratch("own")
     expect(install({ env: { RULECAST_INSTALL_DIR: own, XDG_BIN_HOME: scratch("xdg") } }).status).toBe(0)
@@ -163,6 +218,8 @@ describe("install.sh", () => {
     expect(second.status).toBe(0)
     expect([".profile", ".bashrc", ".zshrc"].map((file) => read(path.join(home, file)))).toEqual(before)
     expect(second.stdout).not.toContain("to the PATH in")
+    // Still not on this shell's PATH: the second run says how, too.
+    expect(second.stdout).toContain(`to use rulecast in this shell now, run: ${SOURCE_LINE}`)
   })
 
   test("a fresh account with zsh gets ~/.profile and ~/.zshrc", () => {
