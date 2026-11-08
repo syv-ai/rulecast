@@ -69,6 +69,8 @@ export interface ConfigSettings {
   /** The model for llm rules: the developer agreed to llm rules. */
   llmModel?: string | null
   llmProvider?: string | null
+  /** The developer turned the weekly stats summary on for this config. Never turned off by init. */
+  weeklySummary?: boolean
 }
 
 function settingLines(settings: ConfigSettings): string[] {
@@ -79,6 +81,7 @@ function settingLines(settings: ConfigSettings): string[] {
     ...(settings.llmModel ? [`  model: ${scalar(settings.llmModel)}`] : []),
   ]
   if (llm.length > 0) lines.push("llm:", ...llm)
+  if (settings.weeklySummary) lines.push("stats:", "  weekly_summary: true")
   return lines
 }
 
@@ -92,7 +95,7 @@ export function newConfigText(local: LocalRule[] = [], settings: ConfigSettings 
 
 /** One setting init changed: `from` is null when the config did not have it. */
 export interface SettingChange {
-  key: "conventions" | "llm.model" | "llm.provider"
+  key: "conventions" | "llm.model" | "llm.provider" | "stats.weekly_summary"
   from: string | null
   to: string
 }
@@ -143,37 +146,45 @@ export function setSettings(text: string, settings: ConfigSettings): { text: str
     }
   }
 
-  const llmKeys = (
-    [
-      ["provider", settings.llmProvider],
-      ["model", settings.llmModel],
-    ] as const
-  ).filter((entry): entry is readonly ["provider" | "model", string] => Boolean(entry[1]))
-  if (llmKeys.length > 0) {
-    const llm = root.get("llm", true)
-    if (llm === undefined || llm === null) {
-      before.push("llm:", ...llmKeys.map(([key, value]) => `  ${key}: ${scalar(value)}`))
-      for (const [key, value] of llmKeys) changes.push({ key: `llm.${key}`, from: null, to: value })
-    } else {
-      if (!isMap(llm) || llm.flow || llm.items.length === 0) {
-        throw new ConfigTextError("write llm in block style, one key per line, so rulecast can add to it")
-      }
-      const column = columnOf(text, (llm.items[0]!.key as Node).range![0])
-      const added: string[] = []
-      for (const [key, value] of llmKeys) {
-        const node = llm.get(key, true)
-        const from = current(node)
-        if (from === value) continue
-        if (node === undefined || node === null) added.push(`${" ".repeat(column)}${key}: ${scalar(value)}`)
-        else replace(node as Node, value)
-        changes.push({ key: `llm.${key}`, from, to: value })
-      }
-      if (added.length > 0) {
-        const at = lineEndAfter(text, pairKey(root, "llm")!.range![0])
-        edits.push({ start: at, end: at, insert: added.map((line) => `${line}${eol}`).join("") })
-      }
+  /** Sets keys of a block mapping under `block`, adding the block above repos when there is none. */
+  const setBlock = <K extends string>(block: string, keys: readonly (readonly [K, string])[]) => {
+    if (keys.length === 0) return
+    const changeKey = (key: K) => `${block}.${key}` as SettingChange["key"]
+    const map = root.get(block, true)
+    if (map === undefined || map === null) {
+      before.push(`${block}:`, ...keys.map(([key, value]) => `  ${key}: ${scalar(value)}`))
+      for (const [key, value] of keys) changes.push({ key: changeKey(key), from: null, to: value })
+      return
+    }
+    if (!isMap(map) || map.flow || map.items.length === 0) {
+      throw new ConfigTextError(`write ${block} in block style, one key per line, so rulecast can add to it`)
+    }
+    const column = columnOf(text, (map.items[0]!.key as Node).range![0])
+    const added: string[] = []
+    for (const [key, value] of keys) {
+      const node = map.get(key, true)
+      const from = current(node)
+      if (from === value) continue
+      if (node === undefined || node === null) added.push(`${" ".repeat(column)}${key}: ${scalar(value)}`)
+      else replace(node as Node, value)
+      changes.push({ key: changeKey(key), from, to: value })
+    }
+    if (added.length > 0) {
+      const at = lineEndAfter(text, pairKey(root, block)!.range![0])
+      edits.push({ start: at, end: at, insert: added.map((line) => `${line}${eol}`).join("") })
     }
   }
+
+  setBlock(
+    "llm",
+    (
+      [
+        ["provider", settings.llmProvider],
+        ["model", settings.llmModel],
+      ] as const
+    ).filter((entry): entry is readonly ["provider" | "model", string] => Boolean(entry[1])),
+  )
+  setBlock("stats", settings.weeklySummary ? ([["weekly_summary", "true"]] as const) : [])
 
   if (before.length > 0) {
     // New top-level keys go above repos, where a new config has them.

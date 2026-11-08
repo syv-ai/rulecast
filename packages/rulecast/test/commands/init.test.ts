@@ -118,6 +118,15 @@ describe("rulecast init", () => {
     expect(dry.report.changes.map((change) => change.file)).toEqual([CONFIG_FILE, ".claude/settings.json"])
   })
 
+  test("init --weekly-summary --dry-run --format json shows +stats.weekly_summary true", async () => {
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    const { report: dry } = await report(root, "--no-agents", "--weekly-summary", "--dry-run")
+    expect(dry.changes).toMatchObject([{ file: CONFIG_FILE, summary: "+stats.weekly_summary true" }])
+    expect(parse(dry.changes[0]!.content)).toMatchObject({ stats: { weekly_summary: true } })
+    const { report: without } = await report(root, "--no-agents", "--dry-run")
+    expect(without.changes).toEqual([])
+  })
+
   test("the JSON report writes < as \\u003c, so a closing script tag cannot end a page's data block", async () => {
     const root = await createRepo({ ...PROJECT, "AGENTS.md": "# Agents\n\n## Use </script> carefully\n" })
     const result = await init(root, "--dry-run", "--format", "json")

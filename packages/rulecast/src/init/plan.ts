@@ -65,6 +65,7 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
       ...rules,
       ...(settings.conventions ? ["conventions"] : []),
       ...(settings.llmModel || settings.llmProvider ? ["llm"] : []),
+      ...(settings.weeklySummary ? ["stats"] : []),
     ]
     const summary = named.length === 0 ? "new, no rules yet" : `new, ${named.join(", ")}`
     return { file: CONFIG_FILE, content: newConfigText(hooks, settings), created: true, summary, commit: true }

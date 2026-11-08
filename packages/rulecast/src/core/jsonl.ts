@@ -1,4 +1,4 @@
-import type { Stats } from "node:fs"
+import { existsSync, type Stats } from "node:fs"
 import { type FileHandle, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises"
 import path from "node:path"
 
@@ -41,13 +41,16 @@ export async function appendRecords(file: string, records: readonly unknown[]): 
  * push a fresh file over the full one the first rotated. A writer that does not get the lock just
  * appends; a lock left by a crashed writer is taken over once it is a minute old.
  *
+ * `beforeDrop` is given the old `rotateTo` just before the rename replaces it, under the same lock,
+ * so writers that reach the cap together call it once. It must not throw.
+ *
  * It never heals a partial last line, which would truncate under a live writer: it starts its own
  * line instead, so the log's reader must skip lines it cannot parse.
  */
 export async function appendRecordsCapped(
   file: string,
   records: readonly unknown[],
-  cap: { maxBytes: number; rotateTo: string },
+  cap: { maxBytes: number; rotateTo: string; beforeDrop?: (rotateTo: string) => Promise<void> },
 ): Promise<void> {
   if (records.length === 0) return
   await mkdir(path.dirname(file), { recursive: true })
@@ -58,7 +61,7 @@ export async function appendRecordsCapped(
       const full = handle
       handle = null
       await full.close()
-      await rotate(file, opened, cap.rotateTo)
+      await rotate(file, opened, cap.rotateTo, cap.beforeDrop)
       handle = await open(file, "a+")
     }
     const { size } = await handle.stat()
@@ -73,7 +76,12 @@ export async function appendRecordsCapped(
 
 const STALE_LOCK_MS = 60_000
 
-async function rotate(file: string, opened: Stats, rotateTo: string): Promise<void> {
+async function rotate(
+  file: string,
+  opened: Stats,
+  rotateTo: string,
+  beforeDrop?: (rotateTo: string) => Promise<void>,
+): Promise<void> {
   const lock = `${rotateTo}.lock`
   let held: FileHandle
   try {
@@ -86,10 +94,14 @@ async function rotate(file: string, opened: Stats, rotateTo: string): Promise<vo
     )
     if (age < STALE_LOCK_MS) return
     await rm(lock, { force: true })
-    return rotate(file, opened, rotateTo)
+    return rotate(file, opened, rotateTo, beforeDrop)
   }
   try {
-    if (await names(file, opened)) await rename(file, rotateTo)
+    if (await names(file, opened)) {
+      // Under the lock, so writers that reach the cap together call it once.
+      if (beforeDrop !== undefined && existsSync(rotateTo)) await beforeDrop(rotateTo)
+      await rename(file, rotateTo)
+    }
   } finally {
     await held.close()
     await rm(lock, { force: true })

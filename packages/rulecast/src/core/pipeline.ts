@@ -389,6 +389,7 @@ async function guardEvent(
                 ran: new Map(),
               }),
               log,
+              { weeklySummary: run.config.stats.weeklySummary },
             ),
         }
       : {}),
@@ -551,6 +552,7 @@ async function logFindings(run: Run, outcome: Outcome, agent: string, decision: 
       ran: checked,
     }),
     run.log,
+    { weeklySummary: run.config.stats.weeklySummary },
   )
 }
 

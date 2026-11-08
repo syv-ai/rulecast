@@ -1,10 +1,13 @@
-import { readFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 
 import { errorMessage, isNotFound } from "../errors"
 import { appendRecordsCapped } from "../jsonl"
 import type { Match } from "../types"
+import { derive } from "./derive"
+import { addWeeks, WEEKLY_KEEP_WEEKS, type WeekRow, weekOf, weekRows } from "./weekly"
 
 /**
  * The findings log (`rulecast stats`): one record per checked agent event, in the project's state
@@ -12,9 +15,14 @@ import type { Match } from "../types"
  * matched text or a capture, which can all hold the project's code — and never sent anywhere.
  *
  * Its format is internal and versioned by `v`; the `stats` JSON is the contract.
+ *
+ * The weekly summary (`stats.weekly_summary`, off by default) holds even less: per week and rule,
+ * counts and the files the rule fired on. It is written only when a rotation drops the oldest file.
  */
 export const FINDINGS_LOG = "findings.jsonl"
 export const FINDINGS_LOG_ROTATED = "findings.1.jsonl"
+/** Per-week counts of log files a rotation dropped, for the last WEEKLY_KEEP_WEEKS weeks. */
+export const FINDINGS_WEEKLY = "findings-weekly.jsonl"
 
 /** The current file is rotated to `findings.1.jsonl` at this size, so the two hold about 8 MiB. */
 export const FINDINGS_LOG_MAX_BYTES = 4 * 1024 * 1024
@@ -136,12 +144,14 @@ export async function appendFindingsLog(
   stateDir: string,
   record: FindingsRecord | null,
   log: (line: string) => void,
+  options: { weeklySummary: boolean },
 ): Promise<void> {
   if (record === null) return
   try {
     await appendRecordsCapped(path.join(stateDir, FINDINGS_LOG), [record], {
       maxBytes: FINDINGS_LOG_MAX_BYTES,
       rotateTo: path.join(stateDir, FINDINGS_LOG_ROTATED),
+      ...(options.weeklySummary ? { beforeDrop: (file: string) => rollUpDropped(stateDir, file, log) } : {}),
     })
   } catch (error) {
     log(`findings log not written: ${errorMessage(error)}`)
@@ -172,33 +182,161 @@ export interface FindingsLog {
   skipped: number
   /** The log has been rotated at least once, so its oldest records may be gone. */
   rotated: boolean
+  /** `findings.1.jsonl`'s fingerprint (logFingerprint), or null when there is none or it is empty. */
+  rotatedFingerprint: string | null
+  /** How many of `records`, from the start, came from `findings.1.jsonl`. */
+  rotatedRecords: number
+}
+
+/**
+ * Which log file this is: a hash of its first line. A file's first line never changes once written,
+ * while its last lines can (a writer that opened it before a rotation still appends to it), so the
+ * weekly summary marks each file it has counted with this rather than with a time.
+ */
+const logFingerprint = (firstLine: string) => createHash("sha256").update(firstLine).digest("hex").slice(0, 16)
+
+interface ReadLines<T> {
+  values: T[]
+  skipped: number
+  /** logFingerprint of the first line, or null for an empty file. */
+  fingerprint: string | null
+}
+
+/** Lines that do not parse, or are not of a shape this version understands, are skipped and counted. */
+async function readLines<T>(file: string, schema: z.ZodType<T>): Promise<ReadLines<T> | null> {
+  let text: string
+  try {
+    text = await readFile(file, "utf8")
+  } catch (error) {
+    if (isNotFound(error)) return null
+    throw error
+  }
+  const result: ReadLines<T> = { values: [], skipped: 0, fingerprint: null }
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue
+    result.fingerprint ??= logFingerprint(line)
+    let value: unknown
+    try {
+      value = JSON.parse(line)
+    } catch {
+      result.skipped++
+      continue
+    }
+    const parsed = schema.safeParse(value)
+    if (parsed.success) result.values.push(parsed.data)
+    else result.skipped++
+  }
+  return result
+}
+
+/** Parses one log file: records, and lines skipped; null when there is no such file. */
+export async function readRecordsFile(
+  file: string,
+): Promise<{ records: FindingsRecord[]; skipped: number; fingerprint: string | null } | null> {
+  const read = await readLines(file, recordSchema)
+  return read === null ? null : { records: read.values, skipped: read.skipped, fingerprint: read.fingerprint }
 }
 
 /** Like `readRecords`, a bad line anywhere is skipped; here it is also counted. */
 export async function readFindingsLog(stateDir: string): Promise<FindingsLog> {
-  const result: FindingsLog = { records: [], skipped: 0, rotated: false }
+  const result: FindingsLog = { records: [], skipped: 0, rotated: false, rotatedFingerprint: null, rotatedRecords: 0 }
   for (const name of [FINDINGS_LOG_ROTATED, FINDINGS_LOG]) {
-    let text: string
-    try {
-      text = await readFile(path.join(stateDir, name), "utf8")
-    } catch (error) {
-      if (isNotFound(error)) continue
-      throw error
+    const read = await readRecordsFile(path.join(stateDir, name))
+    if (read === null) continue
+    if (name === FINDINGS_LOG_ROTATED) {
+      result.rotated = true
+      result.rotatedFingerprint = read.fingerprint
+      result.rotatedRecords = read.records.length
     }
-    if (name === FINDINGS_LOG_ROTATED) result.rotated = true
-    for (const line of text.split("\n")) {
-      if (line.trim() === "") continue
-      let value: unknown
-      try {
-        value = JSON.parse(line)
-      } catch {
-        result.skipped++
-        continue
-      }
-      const record = recordSchema.safeParse(value)
-      if (record.success) result.records.push(record.data)
-      else result.skipped++
-    }
+    result.records.push(...read.records)
+    result.skipped += read.skipped
   }
   return result
+}
+
+const count = z.number().int().nonnegative()
+
+/**
+ * One line of the weekly summary: a week row, the fingerprint of the log file it was counted from
+ * (`log`), and that file's newest record (`to`, shown only).
+ */
+const weeklyLineSchema = z.object({
+  v: z.literal(1),
+  log: z.string(),
+  to: z.string(),
+  week: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  rule: z.string(),
+  runs: count,
+  sessions: count,
+  fired: count,
+  files: z.record(count),
+  first: z.string(),
+})
+
+type WeeklyLine = z.infer<typeof weeklyLineSchema>
+
+export interface WeeklyRollup {
+  rows: WeekRow[]
+  /** The newest record the summary counts, or null with no summary. Shown only: nothing is cut by it. */
+  rolledUpTo: string | null
+  /** Fingerprints of the log files the summary counted: a live file among them is counted from here. */
+  logs: Set<string>
+  skipped: number
+}
+
+async function readWeeklyLines(stateDir: string): Promise<{ lines: WeeklyLine[]; skipped: number }> {
+  const read = await readLines(path.join(stateDir, FINDINGS_WEEKLY), weeklyLineSchema)
+  return read === null ? { lines: [], skipped: 0 } : { lines: read.values, skipped: read.skipped }
+}
+
+const newestTo = (lines: readonly WeeklyLine[]) =>
+  lines.reduce<string | null>((last, { to }) => (last === null || to > last ? to : last), null)
+
+export async function readWeeklyRollup(stateDir: string): Promise<WeeklyRollup> {
+  const { lines, skipped } = await readWeeklyLines(stateDir)
+  return {
+    rows: lines.map(({ v: _, log: __, to: ___, ...row }) => row),
+    rolledUpTo: newestTo(lines),
+    logs: new Set(lines.map((line) => line.log)),
+    skipped,
+  }
+}
+
+/**
+ * Adds the per-week counts of `dropped`, the log file a rotation is about to delete, to the weekly
+ * summary, and prunes weeks more than WEEKLY_KEEP_WEEKS before `now`, unless that would remove every
+ * existing row (a clock far ahead). A file is counted whole or not at all, marked by its
+ * fingerprint: one summarised already (a crash before the rename, then another rotation) adds
+ * nothing, and a line appended to it after it was summarised is not counted, which takes a writer
+ * stalled for a whole 4 MiB file. Each file is counted on its own: a session that spans a rotation
+ * counts in both files' `sessions`, and a finding open across it fires in both. Times decide nothing here, since a record's time is taken before
+ * it is appended and a clock can be wrong. Never throws: a hook must not fail, or lose its record,
+ * over statistics.
+ */
+export async function rollUpDropped(
+  stateDir: string,
+  dropped: string,
+  log: (line: string) => void,
+  now: Date = new Date(),
+): Promise<void> {
+  try {
+    const { lines } = await readWeeklyLines(stateDir)
+    const read = await readRecordsFile(dropped)
+    if (read === null || read.fingerprint === null || read.records.length === 0) return
+    const fingerprint = read.fingerprint
+    if (lines.some((line) => line.log === fingerprint)) return
+    const newest = read.records.reduce((last, { at }) => (at > last ? at : last), read.records[0]!.at)
+    const rows = weekRows(read.records, derive(read.records))
+    if (rows.length === 0) return
+    const keepFrom = addWeeks(weekOf(now.toISOString()), -WEEKLY_KEEP_WEEKS)
+    const all = [...lines, ...rows.map((row): WeeklyLine => ({ v: 1, log: fingerprint, to: newest, ...row }))]
+    // A prune that would remove every existing row is a clock far ahead, not 26 weeks gone by.
+    const prune = lines.some((line) => line.week >= keepFrom) || lines.length === 0
+    const kept = prune ? all.filter((line) => line.week >= keepFrom) : all
+    const file = path.join(stateDir, FINDINGS_WEEKLY)
+    await writeFile(`${file}.tmp`, kept.map((line) => `${JSON.stringify(line)}\n`).join(""))
+    await rename(`${file}.tmp`, file)
+  } catch (error) {
+    log(`weekly summary not written: ${errorMessage(error)}`)
+  }
 }

@@ -1,19 +1,28 @@
 import { randomUUID } from "node:crypto"
+import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { claudeCodeAdapter } from "../../src/adapters/claude-code/adapter"
+import {
+  FINDINGS_LOG,
+  FINDINGS_LOG_MAX_BYTES,
+  FINDINGS_LOG_ROTATED,
+  FINDINGS_WEEKLY,
+  readFindingsLog,
+  readWeeklyRollup,
+} from "../../src/core/stats/log"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { compileAt, fixtureFiles } from "../helpers/fixture"
 import { createRepo } from "../helpers/git"
-import { testEnv } from "../helpers/home"
+import { stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { pipelineAt } from "../helpers/pipeline"
 
 /** Rule A, in the top config: every Python file in the repository. */
-const TOP = localConfig([
+const TOP_RULES = [
   {
     id: "top/no-print",
     name: "No print",
@@ -29,7 +38,8 @@ const TOP = localConfig([
     message: "{{file}} is generated.",
     refuse_write: true,
   },
-])
+]
+const TOP = localConfig(TOP_RULES)
 
 /** Rule B, in backend's config: every Python file in backend. */
 const BACKEND = localConfig([
@@ -260,6 +270,34 @@ describe("rulecast hook claude-code: configs anywhere", () => {
       (finding: { rule: string; file: string }) => `${finding.rule} ${finding.file}`,
     )
     expect(found.sort()).toEqual(["backend/no-todo ../backend/app/x.py", "frontend/no-any a.ts"])
+  })
+
+  test("two configs, one with the summary on: only its log gets one", async () => {
+    const repo = await createRepo({
+      ...BASE,
+      ".rulecast-config.yaml": localConfig(TOP_RULES, { stats: { weekly_summary: true } }),
+      "backend/.rulecast-config.yaml": BACKEND,
+    })
+    const record = (at: string, rule: string) =>
+      `${JSON.stringify({ v: 1, at, s: "old", a: "main", ev: "edit", files: ["x.py"], ran: { [rule]: [0] }, found: [], ign: [] })}\n`
+    const roots = [repo, path.join(repo, "backend")]
+    for (const [root, rule] of [
+      [roots[0]!, "top/no-print"],
+      [roots[1]!, "backend/no-todo"],
+    ] as const) {
+      const stateDir = stateDirFor(root)
+      await mkdir(stateDir, { recursive: true })
+      const full = record("2026-10-01T00:00:00.000Z", rule)
+      await writeFile(path.join(stateDir, FINDINGS_LOG), full.repeat(Math.ceil(FINDINGS_LOG_MAX_BYTES / full.length)))
+      await writeFile(path.join(stateDir, FINDINGS_LOG_ROTATED), record("2026-09-24T00:00:00.000Z", rule))
+    }
+    await agent(repo).edit("backend/app/x.py", "print('x')  # TODO\n")
+
+    const top = await readWeeklyRollup(stateDirFor(roots[0]!))
+    expect(top.rows).toMatchObject([{ week: "2026-09-21", rule: "top/no-print", runs: 1 }])
+    expect(existsSync(path.join(stateDirFor(roots[1]!), FINDINGS_WEEKLY))).toBe(false)
+    // The package's log rotated all the same.
+    expect((await readFindingsLog(stateDirFor(roots[1]!))).records.at(0)?.at).toBe("2026-10-01T00:00:00.000Z")
   })
 
   test("a single-project repository gets exactly what one pipeline run delivers", async () => {
