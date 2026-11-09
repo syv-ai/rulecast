@@ -66,7 +66,7 @@ The uses that are already there are backlog: they are shown and never fail a hoo
 
 ## One home for each convention
 
-`AGENTS.md` is read at the start of every session, and every line in it competes for the agent's attention. A rule's doc section reaches the agent only when it is needed: when the rule fires, or when a touch rule's file is first touched. Once a rule checks a convention, move its section out of `AGENTS.md` into your conventions docs and cite it from there. Move it rather than copy it, because copies drift apart. If the type checker or a deleted API already makes a mistake impossible, it needs neither a rule nor a line.
+`AGENTS.md` is read at the start of every session, and every line in it competes for the agent's attention. A rule's doc section reaches the agent only when it is needed: when the rule fires, or when a touch rule's file is first touched. Once a rule checks a convention, move its section out of `AGENTS.md` into your conventions docs and cite it from there. Move it rather than copy it, because copies drift apart. The cost is that a convention a rule only checks reaches the agent after it has been broken, and an agent without rulecast's hooks never sees it, so if some of your agents run without them, leave the section where it is. If the type checker or a deleted API already makes a mistake impossible, it needs neither a rule nor a line.
 
 ## Turning a rule off
 
