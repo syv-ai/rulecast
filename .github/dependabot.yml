@@ -21,6 +21,13 @@ updates:
       - /packages/rulecast
     schedule:
       interval: weekly
+    ignore:
+      # 5 needs Node 22; CI still tests on Node 20 and engines promises 20.12.
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      # vitest's vite. 7 and 8 need Node 20.19, and 8 crashes on start on 20.12.
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
     groups:
       # One PR a week for everything routine, expected to be green and merged unread.
       routine:
