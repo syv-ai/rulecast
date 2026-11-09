@@ -198,7 +198,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
           error(CONFIG_FILE, idOf(raw), tooNew)
           continue
         }
-        const rule = ruleSchema.safeParse(raw)
+        const rule = ruleSchema.safeParse(raw, { reportInput: true })
         if (!rule.success) error(CONFIG_FILE, idOf(raw), formatZodError(rule.error, { schema: ruleSchema }))
         else await add({ data: rule.data, source: "local", contextRoot: project }, CONFIG_FILE)
       }
@@ -238,7 +238,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
     const repoRoot: ReferenceRoot = { dir: checkout.dir, label: checkout.label }
     for (const raw of entry.rules) {
-      const override = overrideSchema.safeParse(raw)
+      const override = overrideSchema.safeParse(raw, { reportInput: true })
       if (!override.success) {
         error(CONFIG_FILE, idOf(raw), formatZodError(override.error, { schema: overrideSchema }))
         continue
@@ -254,7 +254,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
         error(source, id, tooNew)
         continue
       }
-      const base = ruleSchema.safeParse(candidates[0])
+      const base = ruleSchema.safeParse(candidates[0], { reportInput: true })
       if (!base.success) {
         error(source, id, formatZodError(base.error, { prefix: "manifest", schema: ruleSchema }))
         continue
@@ -318,7 +318,7 @@ export async function compileManifest(
       diagnostics.push({ source, rule: idOf(raw), message: tooNew, level: "error" })
       continue
     }
-    const rule = ruleSchema.safeParse(raw)
+    const rule = ruleSchema.safeParse(raw, { reportInput: true })
     if (!rule.success) {
       diagnostics.push({
         source,

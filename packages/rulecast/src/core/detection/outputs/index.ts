@@ -52,7 +52,7 @@ const patternSchema = z
   })
 
 /** How a tool's output is read. Shared by every detector that runs a tool it does not know. */
-export const outputSchema: z.ZodType<OutputFormat, z.ZodTypeDef, unknown> = z.union([
+export const outputSchema: z.ZodType<OutputFormat, unknown> = z.union([
   z.enum(["json", "sarif", "checkstyle", "gitlab", "rdjson"]),
   z.object({ lines: z.union([z.enum(LINE_PRESETS), patternSchema]) }).strict(),
 ])

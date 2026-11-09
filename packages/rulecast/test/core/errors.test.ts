@@ -56,3 +56,44 @@ describe("formatZodError says what to do", () => {
     expect(message).not.toContain("(root)")
   })
 })
+
+/** Rule authors read these, and zod's own text changes between majors: they are rulecast's wording. */
+describe("formatZodError words a validation failure the same whatever zod says", () => {
+  const message = (schema: z.ZodType, value: unknown, options: { reportInput?: boolean } = { reportInput: true }) => {
+    const result = schema.safeParse(value, options)
+    if (result.success) throw new Error("expected a failure")
+    return formatZodError(result.error, { schema })
+  }
+
+  test.each([
+    ["wrong type", z.string(), 1, "Expected string, received number"],
+    ["a record is an object", z.record(z.string(), z.unknown()), 1, "Expected object, received number"],
+    ["not an integer", z.number().int(), 1.5, "Expected integer, received float"],
+    ["empty string", z.string().min(1), "", "String must contain at least 1 character(s)"],
+    ["empty list", z.array(z.string()).min(1), [], "Array must contain at least 1 element(s)"],
+    ["not positive", z.number().positive(), 0, "Number must be greater than 0"],
+    ["negative", z.number().nonnegative(), -1, "Number must be greater than or equal to 0"],
+    ["literal", z.literal("x"), "y", 'Invalid literal value, expected "x"'],
+    ["enum", z.enum(["a", "b"]), "c", "Invalid enum value. Expected 'a' | 'b', received 'c'"],
+    ["enum, wrong type", z.enum(["a", "b"]), 1, "Expected 'a' | 'b', received number"],
+  ])("%s", (_name, schema, value, expected) => {
+    expect(message(schema, value)).toBe(expected)
+  })
+
+  test("a missing enum key is required, and counts towards a did-you-mean", () => {
+    const schema = z.object({ mode: z.enum(["a", "b"]) }).strict()
+    expect(message(schema, { mod: "a" })).toBe('unknown key "mod" (did you mean "mode"?); mode: required')
+  })
+
+  test("a value of the wrong type is not also called too short", () => {
+    expect(message(z.string().min(1), [])).toBe("Expected string, received array")
+  })
+
+  test("a message the schema wrote is left alone", () => {
+    expect(message(z.string().min(1, "must not be blank"), "")).toBe("must not be blank")
+  })
+
+  test("without the input an enum still names its options", () => {
+    expect(message(z.enum(["a", "b"]), "c", {})).toBe("Invalid enum value. Expected 'a' | 'b'")
+  })
+})

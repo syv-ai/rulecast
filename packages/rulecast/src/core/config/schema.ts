@@ -97,7 +97,7 @@ const ruleKeys = {
   /** false: compiled and listed, selected for nothing. The way to switch a catalog rule off without deleting it. */
   enabled: z.boolean().optional(),
   detect: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .refine((value) => Object.keys(value).length === 1, "must name exactly one detector")
     .optional(),
   message: z.string().optional(),
@@ -106,7 +106,9 @@ const ruleKeys = {
    * Sections delivered with the findings of one lint rule only, keyed by the rule id exactly as
    * `{{ruleId}}` shows it. For detectors that report rule ids (linter, command, hook).
    */
-  context_by_rule: z.record(z.union([referenceInputSchema, z.array(referenceInputSchema).nonempty()])).optional(),
+  context_by_rule: z
+    .record(z.string(), z.union([referenceInputSchema, z.array(referenceInputSchema).nonempty()]))
+    .optional(),
   /**
    * Code the rule must flag (`bad`) and must not (`good`), and edits whose findings it must sort
    * into new and pre-existing (`baseline`), run by `rulecast test`.
@@ -168,7 +170,7 @@ export const configSchema = z
         max_bytes: z.number().int().positive().default(32768),
       })
       .strict()
-      .default({}),
+      .prefault({}),
     max_matches_per_rule: z.number().int().positive().default(10),
     /**
      * Files above this many bytes are skipped by the in-process detectors on edit and guard, where
@@ -183,15 +185,15 @@ export const configSchema = z
         verify_ms: z.number().int().positive().default(60000),
       })
       .strict()
-      .default({}),
+      .prefault({}),
     stop_gate: z
       .object({ max_blocks: z.number().int().nonnegative().default(1) })
       .strict()
-      .default({}),
+      .prefault({}),
     refuse_gate: z
       .object({ max_refusals: z.number().int().nonnegative().default(1) })
       .strict()
-      .default({}),
+      .prefault({}),
     /** Overrides detection from CI / GITHUB_ACTIONS; RULECAST_MODE overrides this. */
     mode: z.enum(MODES).optional(),
     unattended: z
@@ -207,7 +209,7 @@ export const configSchema = z
         escalate: z.array(idSchema).default([]),
       })
       .strict()
-      .default({}),
+      .prefault({}),
     llm: z
       .object({
         /**
@@ -221,7 +223,7 @@ export const configSchema = z
         max_files_per_verify: z.number().int().positive().default(10),
       })
       .strict()
-      .default({}),
+      .prefault({}),
     stats: z
       .object({
         /**
@@ -231,7 +233,7 @@ export const configSchema = z
         weekly_summary: z.boolean().default(false),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict()
   .transform((input) => ({

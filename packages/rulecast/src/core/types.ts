@@ -1,4 +1,4 @@
-import type { ZodType, ZodTypeDef } from "zod"
+import type { ZodType } from "zod"
 
 import type { DisabledGroup } from "./disabled"
 
@@ -258,7 +258,7 @@ export interface CheckResult {
 export interface Detector<Config> {
   kind: string
   /** Input is unknown: schemas may apply defaults and refinements. */
-  schema: ZodType<Config, ZodTypeDef, unknown>
+  schema: ZodType<Config, unknown>
   captures(config: Config): string[]
   /**
    * Whether `id` can ever be one of this rule's `{{ruleId}}` values: null when it can, else why

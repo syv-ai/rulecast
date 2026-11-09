@@ -169,7 +169,7 @@ const recordSchema = z.object({
   ev: z.enum(["edit", "stop", "guard"]),
   via: z.literal("shell").optional(),
   files: z.array(z.string()),
-  ran: z.record(z.array(z.number().int().nonnegative())),
+  ran: z.record(z.string(), z.array(z.number().int().nonnegative())),
   found: z.array(loggedMatchSchema.extend({ o: z.enum(["delivered", "blocked", "refused"]) })),
   ign: z.array(loggedMatchSchema),
   tried: z.array(loggedMatchSchema).optional(),
@@ -269,7 +269,7 @@ const weeklyLineSchema = z.object({
   runs: count,
   sessions: count,
   fired: count,
-  files: z.record(count),
+  files: z.record(z.string(), count),
   first: z.string(),
 })
 

@@ -6,23 +6,23 @@ import { LANGUAGE_NAMES } from "./languages"
 import { parserFor } from "./load"
 import { METAVARIABLE, metavariables } from "./metavars"
 
-const ruleObject = z.record(z.unknown()).refine((rule) => Object.keys(rule).length > 0, "rule must not be empty")
+const ruleObject = z
+  .record(z.string(), z.unknown())
+  .refine((rule) => Object.keys(rule).length > 0, "rule must not be empty")
 
 export const astGrepSchema = z
   .object({
     language: z.enum(LANGUAGE_NAMES),
     rule: ruleObject,
-    constraints: z.record(ruleObject).optional(),
-    utils: z.record(ruleObject).optional(),
+    constraints: z.record(z.string(), ruleObject).optional(),
+    utils: z.record(z.string(), ruleObject).optional(),
     /**
      * The match's replacement, in ast-grep's own syntax: `$NAME` and `$$$NAMES` are what they
      * matched. Only the string form: ast-grep's FixConfig object (`expandStart`, `expandEnd`),
      * `transform` and `rewriters` are not supported, and the strict schema refuses them.
      */
     fix: z
-      .string({
-        invalid_type_error: "fix must be a string: the FixConfig object (expandStart, expandEnd) is not supported",
-      })
+      .string({ error: "fix must be a string: the FixConfig object (expandStart, expandEnd) is not supported" })
       .optional(),
   })
   .strict()

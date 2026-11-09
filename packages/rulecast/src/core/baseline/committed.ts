@@ -32,9 +32,10 @@ const documentSchema = z.object({
   rulecast: z.string(),
   total: z.number().int().nonnegative(),
   rules: z.record(
+    z.string(),
     z.object({
       count: z.number().int().nonnegative(),
-      files: z.record(z.array(z.string().regex(ID, "not a finding id"))),
+      files: z.record(z.string(), z.array(z.string().regex(ID, "not a finding id"))),
     }),
   ),
 })
@@ -72,7 +73,7 @@ export async function readCommittedBaseline(root: string): Promise<CommittedBase
   } catch (error) {
     throw new BaselineFileError(`not JSON (${errorMessage(error)})`)
   }
-  const parsed = documentSchema.safeParse(data)
+  const parsed = documentSchema.safeParse(data, { reportInput: true })
   if (!parsed.success) {
     throw new BaselineFileError(formatZodError(parsed.error, { schema: documentSchema }))
   }
