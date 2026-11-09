@@ -11,10 +11,9 @@ updates:
 
   # Grouped by risk rather than by dev-vs-production, because that is the axis that decides
   # whether a PR can be merged on sight. Splitting on dependency-type put majors in with patches,
-  # so one upgrade nobody can take yet held every safe update behind it: typescript 7 broke
-  # `tsup --dts` and stranded three harmless bumps with it, and zod 4 — a real migration in
-  # config/schema.ts — stranded `diff`. Dependabot already folds both directories into one PR
-  # when an update applies to both.
+  # so one upgrade nobody can take yet held every safe update behind it, as typescript 7 and zod 4
+  # did for a while. Dependabot already folds both directories into one PR when an update applies
+  # to both.
   - package-ecosystem: npm
     directories:
       - /
@@ -27,6 +26,12 @@ updates:
         update-types: ["version-update:semver-major"]
       # vitest's vite. 7 and 8 need Node 20.19, and 8 crashes on start on 20.12.
       - dependency-name: vite
+        update-types: ["version-update:semver-major"]
+      # 9 needs Node 22. tsup only bundles the JS now; declarations come from tsc.
+      - dependency-name: tsup
+        update-types: ["version-update:semver-major"]
+      # Matches engines: newer types would accept Node APIs that crash on Node 20.
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
       # One PR a week for everything routine, expected to be green and merged unread.
