@@ -44,6 +44,30 @@ Each finding says where its lint rule is explained: a doc section you map with `
 
 Setup offers one rule per linter it finds, and proposes the mappings after setup, one at a time. The mapping lives in `.rulecast-config.yaml`, so your docs stay free of rulecast syntax. See [Per lint rule](../agents/reference/rule-format.md#per-lint-rule).
 
+## Locking in a migration
+
+Agents copy what they find. Halfway through moving off an API, the old form is still in the code, and an agent will add more of it. Give the move a rule that flags the old form and cites the doc or decision record that explains it:
+
+```yaml
+- id: frontend/no-raw-fetch
+  name: API calls go through apiClient
+  files: '^src/.*\.ts$'
+  exclude: '^src/api/client\.ts$'
+  detect:
+    ast-grep:
+      language: typescript
+      rule: { pattern: "fetch($$$)" }
+  message: "{{file}}:{{line}} calls fetch directly. Use apiClient from src/api/client.ts."
+  context:
+    - "@docs/decisions/0007-api-client.md"
+```
+
+The uses that are already there are backlog: they are shown and never fail a hook, so the rule can go in on day one ([Adopting a rule](adopting-rules.md)). Once the migration is done, a rule that never fires is the lock working. Keep it.
+
+## One home for each convention
+
+`AGENTS.md` is read at the start of every session, and every line in it competes for the agent's attention. A rule's doc section reaches the agent only when it is needed: when the rule fires, or when a touch rule's file is first touched. Once a rule checks a convention, move its section out of `AGENTS.md` into your conventions docs and cite it from there. Move it rather than copy it, because copies drift apart. The cost is that a convention a rule only checks reaches the agent after it has been broken, and an agent without rulecast's hooks never sees it, so if some of your agents run without them, leave the section where it is. If the type checker or a deleted API already makes a mistake impossible, it needs neither a rule nor a line.
+
 ## Turning a rule off
 
 - **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches that rule off.

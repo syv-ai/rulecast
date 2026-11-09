@@ -47,7 +47,7 @@ The order:
 2. **What is already enforced.** Confirm the list from step 2 in one question: keep all of it, or does something there no longer hold? Ask about suppressions that cluster in one place.
 3. **The named standards** that apply (PEP 8, a style guide, twelve-factor): how strictly to follow each. An adopted standard becomes one convention that cites it, plus the project's departures from it, not a restatement rule by rule.
 4. **What the code does, where it matters.** "You use singletons for [X] in [files]. Should agents keep doing that, or move away from it? I'd [recommendation] because [evidence]."
-5. **Reference and legacy.** Which areas are the example to follow and which are legacy, what is changing, and what goes wrong: in reviews, with agents, in production.
+5. **Reference and legacy.** Which areas are the example to follow and which are legacy, what is changing, and what goes wrong: in reviews, with agents, in production. For each thing being replaced, get both forms in the developer's words, the old and the new: agents copy the old form wherever it is still in the code, and a rule can only stop that if the doc names it. Ask for a mistake someone has actually seen, in a review, a PR comment or an agent session: a convention with one behind it earns its place first.
 
 When the developer says no to something, note their reason. It goes in `declined.md` in step 6.
 
@@ -55,7 +55,7 @@ When the developer says no to something, note their reason. It goes in `declined
 
 From the answers, draft the principles and conventions in plain language: short sentences a developer would say to a colleague, with no rulecast terms. Each one traces to an answer. Nothing goes in that the developer didn't say or choose.
 
-- **Principles** are the few things true of the whole project, the ones a newcomer most needs. They go in the project's agent doc, `AGENTS.md` (or `CLAUDE.md` if that's the one it uses).
+- **Principles** are the few things true of the whole project, the ones a newcomer most needs. They go in the project's agent doc, `AGENTS.md` (or `CLAUDE.md` if that's the one it uses). The agent reads that doc at the start of every session, and every line competes for its attention, so keep the principles few. Conventions go elsewhere because rulecast delivers each one when a file needs it.
 - **Conventions** go where the config's `conventions` points (`rulecast list` shows it). For a folder, one file per area (core, adapters, tests, the API); propose the files and let the developer choose. For a single file, one section per convention.
 - **Declined** items are what the developer said no to, each with their reason in their words. They go in `declined.md`, next to the conventions.
 
