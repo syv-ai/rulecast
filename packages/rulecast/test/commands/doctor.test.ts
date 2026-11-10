@@ -13,7 +13,14 @@ import { createRepo, git } from "../helpers/git"
 import { stateDirFor, TEST_HOME, testEnv } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
-import { breakPathRulecast, LOOKUP_FIXTURES, lookupEnv, lookupSetup, type Place } from "../helpers/lookup"
+import {
+  breakPathRulecast,
+  type InstalledOnPath,
+  LOOKUP_FIXTURES,
+  lookupEnv,
+  lookupSetup,
+  type Place,
+} from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -269,7 +276,7 @@ describe("rulecast doctor", () => {
     places: Place[],
     settings: Record<string, unknown> = {},
     versions = {},
-    installedOnPath = false,
+    installedOnPath?: InstalledOnPath,
     edit: (setup: ReturnType<typeof lookupSetup>) => void = () => {},
   ) {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")], settings), "src/x.ts": "" })
@@ -296,7 +303,7 @@ describe("rulecast doctor", () => {
   )
 
   test("a PATH rulecast that cannot run, ahead of install.sh's directory: install.sh's runs, and is on the PATH", async () => {
-    const { stdout, setup } = await doctorWith(["path", "installed"], {}, {}, true, breakPathRulecast)
+    const { stdout, setup } = await doctorWith(["path", "installed"], {}, {}, "after", breakPathRulecast)
     expect(stdout).toContain(
       `ok       Claude Code — .claude/settings.json — runs install.sh's rulecast at ${setup.file.installed}, on the PATH 0.8.2\n`,
     )
@@ -390,7 +397,12 @@ describe("rulecast doctor", () => {
       `older than minimum_rulecast_version 0.8.0; install a newer one: ${INSTALL_COMMAND}\n`,
     )
     // install.sh's, found on the PATH: still install.sh's, so the install command alone.
-    const onPath = await doctorWith(["installed"], { minimum_rulecast_version: "0.8.0" }, { installed: "0.1.0" }, true)
+    const onPath = await doctorWith(
+      ["installed"],
+      { minimum_rulecast_version: "0.8.0" },
+      { installed: "0.1.0" },
+      "after",
+    )
     expect(onPath.stdout).toContain(
       `runs install.sh's rulecast at ${onPath.setup.file.installed}, on the PATH 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
         `install a newer one: ${INSTALL_COMMAND}\n`,
@@ -401,11 +413,16 @@ describe("rulecast doctor", () => {
       ["path", "installed"],
       { minimum_rulecast_version: "0.8.0" },
       { path: "0.1.0", installed: "0.1.0" },
-      true,
+      "after",
     )
     expect(ahead.stdout).toContain(
       `runs rulecast on the PATH (${ahead.setup.file.path}) 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
         `update the global npm install: npm install -g @syv-ai/rulecast. It comes before ${ahead.setup.installDir} on the PATH, so install.sh's would not run\n`,
+    )
+    // install.sh's directory first on the PATH, and empty: what install.sh puts there runs first.
+    const behind = await doctorWith(["path"], { minimum_rulecast_version: "0.8.0" }, { path: "0.1.0" }, "before")
+    expect(behind.stdout).toContain(
+      `older than minimum_rulecast_version 0.8.0; install a newer one: ${INSTALL_COMMAND}, or update the global npm install\n`,
     )
     // A devDependency is updated where it came from.
     const local = await doctorWith(["project"], { minimum_rulecast_version: "0.8.0" }, { project: "0.1.0" })

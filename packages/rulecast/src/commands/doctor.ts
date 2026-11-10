@@ -61,7 +61,7 @@ function runsLabel(runs: HookRulecast): string {
  * How to update the rulecast the hooks run, by where it came from: the install command for
  * install.sh's, for the release minimum_rulecast_version names when that is newer than this
  * rulecast, else the latest. Another on the PATH is a global npm install as a rule. When install.sh's
- * directory is on the PATH after it, install.sh would put a newer one where the hooks never reach,
+ * directory comes after it on the PATH, install.sh would put a newer one where the hooks never reach,
  * so only npm's update is offered. Printed, never run: installing is the developer's step.
  */
 function updateRemedy(runs: HookRulecast, minimum: string, dir: string): string {
@@ -69,7 +69,7 @@ function updateRemedy(runs: HookRulecast, minimum: string, dir: string): string 
   const pinned = isOlder(VERSION, minimum)
   const install = pinned ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
   if (runs.via === "installed") return `install a newer one: ${install}`
-  if (!runs.installedOnPath) return `install a newer one: ${install}, or update the global npm install`
+  if (!runs.installedBehind) return `install a newer one: ${install}, or update the global npm install`
   const npm = `npm install -g @syv-ai/rulecast${pinned ? `@${minimum}` : ""}`
   return `update the global npm install: ${npm}. It comes before ${dir} on the PATH, so install.sh's would not run`
 }
