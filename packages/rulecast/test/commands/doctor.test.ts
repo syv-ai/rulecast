@@ -453,6 +453,23 @@ describe("rulecast doctor", () => {
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
   })
 
+  test("a settings file that is not JSON is reported on the hooks line, and the report goes on", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    await writeFile(path.join(root, ".claude/settings.local.json"), "{ not json")
+    const result = await doctor(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toMatch(
+      /warning {2}Claude Code — cannot read the hooks: \.claude\/settings\.local\.json: .+; fix it, then run rulecast install\n/,
+    )
+    expect(result.stdout).toContain("\ndry run\n")
+  })
+
   test("hooks missing in one settings file and stale in another: both files are named", async () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a")]),

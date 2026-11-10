@@ -243,7 +243,19 @@ export async function doctorCommand(
     project.config.timeouts.verifyMs
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
-    const state = await hookState(dir, adapter, verifyMs)
+    // Settings that cannot be read are a problem on this line, not the end of the report: the rest
+    // of what doctor checks does not depend on them.
+    let state: Awaited<ReturnType<typeof hookState>>
+    try {
+      state = await hookState(dir, adapter, verifyMs)
+    } catch (error) {
+      const level: Level = ci ? "error" : "warning"
+      count(level)
+      io.stdout(
+        line(level, adapter.label, `cannot read the hooks: ${errorMessage(error)}; fix it, then run rulecast install`),
+      )
+      continue
+    }
     const file = state?.file ?? null
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
@@ -288,7 +300,7 @@ export async function doctorCommand(
             (runs ? "" : `. And ${cannotRun}`)
           : !runs
             ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
-              `${file} — but ${cannotRun}` + (outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`)
+              `${file} — but ${cannotRun}${outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`}`
             : outOfDate !== null
               ? `${file} — but ${outOfDate}; run rulecast install`
               : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}` : ""}`
