@@ -5,6 +5,12 @@ import { readFileSync } from "node:fs"
  * `--rc-syn-*` tokens in theme.css, read from it at build time so the two cannot drift. Keys are
  * the muted blue, strings green, values and variables violet, punctuation and comments grey, and
  * everything else, a shell command's arguments too, the body text.
+ *
+ * Expressive Code then raises any colour below its minimum contrast (5.5:1, its default) against
+ * the block's background, and the grey is: code blocks show punctuation and comments lighter in
+ * the dark theme (#7c7c87 becomes #9c9ca4) and darker in the light one (#8a8a94 becomes #63636a).
+ * The other tokens come through as theme.css has them. That is left on, so comments stay readable;
+ * the landing page's own code (the `.rc-y-*` spans), outside Expressive Code, keeps theme.css's grey.
  */
 const THEME_CSS = new URL("../src/styles/theme.css", import.meta.url)
 

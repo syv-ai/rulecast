@@ -21,6 +21,10 @@ export default defineConfig({
   site: SITE,
   base: BASE,
   trailingSlash: "always",
+  // Pages that moved: an old link lands where its content went.
+  redirects: {
+    "/guides/claude-code-plugin/": `${BASE}/guides/agents/#claude-code`,
+  },
   integrations: [
     proseColumns,
     starlight({
@@ -38,8 +42,9 @@ export default defineConfig({
         ThemeSelect: "./src/components/ThemeSelect.astro",
       },
       // Code blocks are surfaces, not framed boxes: no borders, no window chrome. Their colours are
-      // the landing page's (scripts/code-themes.ts), on Starlight's own surfaces. Long lines wrap,
-      // continuing under their own indent, so nothing is cut off out of sight.
+      // the landing page's (scripts/code-themes.ts), on Starlight's own surfaces, except where
+      // Expressive Code raises one to its minimum contrast. Long lines wrap, continuing under their
+      // own indent, so nothing is cut off out of sight.
       expressiveCode: {
         themes: codeThemes(),
         useStarlightUiThemeColors: true,
