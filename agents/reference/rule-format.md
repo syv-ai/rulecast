@@ -62,7 +62,8 @@ A repository can hold any number of `.rulecast-config.yaml` files: one at the to
 - `files`, `exclude` and every path a rule names are relative to the config's own directory.
 - Every config above a file applies to it, each on its own: its rules, its state and its findings. Nothing is merged, and a config cannot change a rule from a config above it. To keep a rule from the top config out of a package, add `exclude` on that rule in the top config.
 - Agent hooks route each file to the configs above it, wherever the session was started. The agent sees paths relative to its own working directory.
-- `rulecast run` does the same for the files under the directory it runs in. Commands about one project, such as `list`, `stats`, `doctor`, `baseline` and `test`, act on the nearest config at or above the current directory.
+- In a git repository, `rulecast run` and `rulecast fix` choose the files in the directory they were started in and below it (with `--files`, the files named), and check each file against every config above it. Each project uses its own committed baseline, state and mode. A `RULE_ID` runs in the projects that define it, and is an error only when none does. With `--session`, and outside a git repository, only the nearest config above the directory runs. How the output combines the projects is in [output.md](output.md#several-projects).
+- Commands about one project, such as `list`, `stats`, `doctor`, `baseline` and `test`, act on the nearest config at or above the current directory.
 
 ## Repo entries
 

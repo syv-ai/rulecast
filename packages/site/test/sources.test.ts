@@ -8,6 +8,7 @@ import {
   CONTENT_PATHS,
   exampleBinding,
   exampleSection,
+  GROUPS,
   INSTALL_SCRIPT,
   LEAD,
   PAGES,
@@ -15,6 +16,7 @@ import {
   REPO_ROOT,
   readme,
   readmeSections,
+  sidebar,
   splitTitle,
 } from "../scripts/sources"
 import { publicInstaller, sync } from "../scripts/sync"
@@ -96,16 +98,16 @@ describe("the guides", () => {
 
   it("hold what moved out of the README, each on its own page", () => {
     const advanced = pageBody(page("guides/advanced"), sections)
-    for (const heading of [
-      "## Several agents at once",
-      "## Git operations during a turn",
-      "## Fresh environments",
-      "## A committed baseline",
-    ]) {
-      expect(advanced).toContain(heading)
+    expect(advanced).toContain("## Several agents at once")
+    expect(advanced).toContain("## Git operations during a turn")
+    expect(advanced).not.toMatch(/^# /m)
+    expect(pageBody(page("guides/adopting-rules"), sections)).toContain("## A committed baseline")
+    expect(pageBody(page("guides/git-hooks-ci"), sections)).toContain("## CI jobs and cloud agents")
+    const agents = pageBody(page("guides/agents"), sections)
+    for (const heading of ["## Claude Code", "## Other agents", "## What the agent gets wrong"]) {
+      expect(agents).toContain(heading)
     }
-    expect(advanced).not.toMatch(/^# Advanced$/m)
-    expect(pageBody(page("guides/agents"), sections)).not.toContain("isolation: worktree")
+    expect(agents).not.toContain("isolation: worktree")
     const commands = pageBody(page("reference/commands"), sections)
     expect(commands).toContain("## Advanced commands")
     expect(commands).toContain("`rulecast replay claude-code`")
@@ -119,6 +121,26 @@ describe("the guides", () => {
     const lead = sections.get(LEAD) ?? ""
     expect(lead).not.toMatch(/<div|<img|<details|<summary|shields\.io/)
     expect(lead).toContain("rulecast: 1 rule violated")
+  })
+})
+
+describe("sidebar", () => {
+  it("lists the groups in order, each page once, with the agent docs closed", () => {
+    const groups = sidebar()
+    expect(groups.map((group) => group.label)).toEqual([...GROUPS])
+    const links = groups.flatMap((group) => group.items.map((item) => item.link))
+    expect([...links].sort()).toEqual(PAGES.map((page) => `/${page.route}/`).sort())
+    expect(groups.filter((group) => group.collapsed).map((group) => group.label)).toEqual(["For agents"])
+    expect(groups.find((group) => group.label === "Start here")!.items.map((item) => item.label)).toEqual([
+      "Getting started",
+      "How it works",
+    ])
+    expect(groups.find((group) => group.label === "Guides")!.items.map((item) => item.label)).toEqual([
+      "Writing rules",
+      "Adopting rules",
+      "Git hooks and CI",
+      "Using it with your agent",
+    ])
   })
 })
 

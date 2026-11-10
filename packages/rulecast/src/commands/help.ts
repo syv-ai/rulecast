@@ -204,7 +204,7 @@ export const COMMANDS: CommandHelp[] = [
     ],
     notes: [
       "Read from a local log of finding ids, rule ids, files and lines that agent hooks write; never any code.",
-      "The JSON is documented in agents/reference/output.md.",
+      "The JSON is documented in agents/reference/stats.md.",
     ],
   },
   {
@@ -221,7 +221,7 @@ export const COMMANDS: CommandHelp[] = [
     notes: [
       "Reads Claude Code's transcripts under ~/.claude/projects (or CLAUDE_CONFIG_DIR) and judges each Edit and Write, and each turn, from them alone.",
       "Rules whose tool needs files on disk, and edits made through Bash, are not judged. Nothing is written to the findings log.",
-      "The JSON is documented in agents/reference/output.md.",
+      "The JSON is documented in agents/reference/stats.md.",
     ],
   },
   {

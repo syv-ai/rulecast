@@ -34,12 +34,12 @@ describe("rewriteLinks", () => {
   })
 
   it("sends a link to a guide to its page, anchor kept", () => {
-    expect(rewriteLinks("[f](../../guides/advanced.md#fresh-environments)", "agents/reference/loops.md")).toBe(
-      "[f](/rulecast/guides/advanced/#fresh-environments)",
-    )
+    expect(
+      rewriteLinks("[c](../../guides/git-hooks-ci.md#ci-jobs-and-cloud-agents)", "agents/reference/loops.md"),
+    ).toBe("[c](/rulecast/guides/git-hooks-ci/#ci-jobs-and-cloud-agents)")
     expect(rewriteLinks("[a](guides/advanced.md)", "README.md")).toBe("[a](/rulecast/guides/advanced/)")
-    expect(rewriteLinks("[b](advanced.md#a-committed-baseline)", "guides/adopting-rules.md")).toBe(
-      "[b](/rulecast/guides/advanced/#a-committed-baseline)",
+    expect(rewriteLinks("[b](adopting-rules.md#a-committed-baseline)", "guides/git-hooks-ci.md")).toBe(
+      "[b](/rulecast/guides/adopting-rules/#a-committed-baseline)",
     )
   })
 

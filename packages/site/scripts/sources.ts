@@ -78,7 +78,22 @@ export function agentDocUrl(file: string): string {
 }
 
 /** Sidebar groups, in order. */
-export const GROUPS = ["Start here", "Guides", "Reference", "For agents"] as const
+export const GROUPS = ["Start here", "Guides", "Advanced", "Reference", "For agents"] as const
+
+/** Groups the sidebar shows closed until opened: the agent docs are for agents, read raw. */
+export const COLLAPSED: readonly (typeof GROUPS)[number][] = ["For agents"]
+
+/**
+ * The Starlight sidebar: GROUPS in order, each with its PAGES in order, COLLAPSED ones closed.
+ * astro.config.ts passes it to Starlight as `sidebar`.
+ */
+export function sidebar() {
+  return GROUPS.map((label) => ({
+    label,
+    collapsed: COLLAPSED.includes(label),
+    items: PAGES.filter((page) => page.group === label).map((page) => ({ label: page.title, link: `/${page.route}/` })),
+  }))
+}
 
 /** Which source becomes which page. The sidebar, the sync and the link rewriting all read this table. */
 export const PAGES: Page[] = [
@@ -119,30 +134,23 @@ export const PAGES: Page[] = [
   },
   {
     route: "guides/agents",
-    title: "Agents",
-    description: "Let your agent set rulecast up and draft rules from your docs.",
+    title: "Using it with your agent",
+    description: "The Claude Code plugin, setup with other agents, and what the agent gets wrong.",
     group: "Guides",
     source: { file: "guides/agents.md" },
-  },
-  {
-    route: "guides/claude-code-plugin",
-    title: "Claude Code plugin",
-    description: "Add one rule at a time from inside a Claude Code session.",
-    group: "Guides",
-    source: { file: "guides/claude-code-plugin.md" },
   },
   {
     route: "guides/agent-loops",
     title: "Agent loops",
     description: "rulecast as the check in /goal, /loop, scheduled and headless agent runs.",
-    group: "Guides",
+    group: "Advanced",
     source: { file: "agents/reference/loops.md" },
   },
   {
     route: "guides/advanced",
-    title: "Advanced",
-    description: "Several agents at once, git operations, fresh environments and committed baselines.",
-    group: "Guides",
+    title: "Several agents and git",
+    description: "Subagents, parallel agents in one working tree, and git operations during a turn.",
+    group: "Advanced",
     source: { file: "guides/advanced.md" },
   },
   {
@@ -180,6 +188,13 @@ export const PAGES: Page[] = [
     description: "Exit codes, the JSON and SARIF output, and how finding ids are computed.",
     group: "Reference",
     source: { file: "agents/reference/output.md" },
+  },
+  {
+    route: "reference/stats",
+    title: "Stats and replay",
+    description: "What rulecast stats and rulecast replay print: the agent's findings over past sessions.",
+    group: "Reference",
+    source: { file: "agents/reference/stats.md" },
   },
   {
     route: "agents/setup",

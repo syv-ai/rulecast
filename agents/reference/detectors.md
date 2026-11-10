@@ -4,63 +4,22 @@ A rule's `detect` names one detector and its config. The message template of eve
 
 A detector needs things the project may not have: a linter binary, a parser, an API key. `rulecast doctor` reports what each configured rule needs and whether it is there, so run it after drafting a rule that names a tool.
 
-## `regex`
+## `linter`
 
 ```yaml
 detect:
-  regex:
-    pattern: 'raise HTTPException\((?<args>[^)]*)\)'
-    flags: m
+  linter: { tool: ruff, rules: [T201] }
 ```
 
-- `pattern`: a JavaScript regular expression, searched in the whole file. Quote it with single quotes in YAML so backslashes stay as written.
-- `flags`: any of `d`, `i`, `m`, `s`, `u`, `v`, `y`; default none. `g` is always added. Use `m` for `^` and `$` at each line, `s` for `.` across lines.
-- `\s` matches a line break. With `m`, `^\s*print\(` matches from an empty line above the `print(` and reports that empty line. Indentation is `[ \t]*`: `^[ \t]*print\(`. `rulecast test` prints what a failing example matched, line breaks included.
-- Captures: the pattern's named groups. `(?<args>…)` gives `{{args}}`, an empty string when the group did not take part in the match.
-- `fix`: optional, the replacement `rulecast fix` writes over each match, in the `{{name}}` syntax with the named groups and `{{text}}`. See [rule-format.md](rule-format.md#fixes).
-- Position: the line and column where the match starts. A match that spans lines counts as new when any of its lines changed.
-- Default stages: `edit`, `verify`.
-
-## `path`
-
-```yaml
-detect:
-  path: {}
-```
-
-- Every file the rule selects is a match at line 1, so the rule's `files` is the whole check. Use it for files that must not be edited at all, such as generated code.
-- Captures: none. `{{text}}` is the file path.
-- Default stages: `edit`, `verify`.
-
-## `ast-grep`
-
-```yaml
-detect:
-  ast-grep:
-    language: python
-    rule:
-      pattern: "raise HTTPException($$$ARGS)"
-      inside: { kind: function_definition }
-```
-
-- `language`: one of `css`, `html`, `javascript`, `python`, `tsx`, `typescript`. Use `tsx` for both `.tsx` and `.jsx`; it also parses plain TypeScript.
-- `rule`: an [ast-grep rule object](https://ast-grep.github.io/reference/rule.html) — `pattern`, `kind`, `regex`, `inside`, `has`, `all`, `any`, `not`, and the rest. It is compiled when you run `rulecast validate`, so a rule ast-grep rejects is caught before any agent sees it.
-- `constraints` and `utils`: optional, exactly as in ast-grep's own YAML.
-- `fix`: optional, the replacement `rulecast fix` writes over each match, in ast-grep's syntax (`$NAME`, `$$$NAMES`). Only the string form: no `FixConfig` object, `transform` or `rewriters`. See [rule-format.md](rule-format.md#fixes).
-- Captures: every metavariable in the config. `$NAME` gives `{{NAME}}` (one node, empty when it did not match); `$$$NAMES` gives `{{NAMES}}` with the matched nodes joined by `, `. A metavariable starting with an underscore (`$_TMP`) matches without capturing.
-- Position and `{{text}}`: the matched node's start, and its source.
-- Default stages: `edit`, `verify`.
-
-**Matching something that is not a whole statement.** A bare pattern has to parse on its own, which a JSX attribute or a lone argument does not. Give the pattern a context to parse in, and a selector for the node you actually want:
-
-```yaml
-rule:
-  pattern:
-    context: '<div style={{ $$$PROPS }}/>'
-    selector: jsx_attribute
-```
-
-That matches a `style` attribute on any element — the `<div>` is only there so the snippet parses.
+- `tool`: `ruff`, `oxlint`, `eslint` or `gitleaks`. Each file is linted from the nearest directory above it, up to the repository's top, that holds the tool's config (`pyproject.toml`, `ruff.toml` or `.ruff.toml` for ruff, `eslint.config.*`, `.oxlintrc.json`, `.gitleaks.toml`), or from the project root when there is none. rulecast looks for the tool in `node_modules/.bin` from that directory up to the repository's top. For `ruff` it then looks in `.venv/bin` and `venv/bin` over the same directories, then uses `uv run ruff` when the directory has a `pyproject.toml` and a `uv.lock` sits there or above it. Last comes `PATH`, which also covers an activated virtualenv. Without a `uv.lock`, rulecast does not use `uv`, which would create one and a `.venv` in the project. A tool that is not installed disables its own rules and nothing else.
+- `rules`: the linter's own rule ids to report. rulecast turns them on for its run (ruff `--extend-select`, oxlint `-D`, eslint `--rule`), so they fire even where the project's config leaves them off; the rule's settings, such as a maximum, still come from that config. Inline suppressions (`# noqa`, `// eslint-disable-next-line`, `// oxlint-disable-next-line`) still hold, and so do ruff's `per-file-ignores` and oxlint's `overrides`. eslint's `--rule` wins over its config's per-file settings too. A plugin rule needs its plugin loaded by the project's eslint config, and eslint needs a config file to run at all.
+- `gitleaks` finds hard-coded secrets: credential formats it knows (`aws-access-token`, `github-pat`, …) and high-entropy strings next to key-like names (`generic-api-key`). `rules` are its rule ids; without `rules`, every rule in its config runs. The project's `.gitleaks.toml`, `.gitleaksignore` and `gitleaks:allow` comments apply. `{{text}}` is always `[redacted]`, so a finding never repeats the secret into the agent's context, a log or SARIF. It is a Go binary, not an npm package: install it from your package manager (`brew install gitleaks`) or its releases.
+- Leave `rules` out to take what the project's own config makes an error: ESLint level 2 (`error`), oxlint `error` or `deny`, every rule Ruff selects (Ruff has no levels), and every gitleaks finding. Warnings are not delivered: to have one delivered, make it an error in the linter's config, or name it in `rules`. Such rules get a run of their own, so the rules other rules turn on never reach them. A file the project's ESLint config does not match gives no finding.
+- Every finding carries the tool's page for its lint rule, where the tool's output gives one (ESLint, Ruff and oxlint do; gitleaks does not). It is shown under the finding as `upstream docs: <url>`, unless the rule's `context_by_rule` maps a section for that lint rule (rule-format.md). ESLint is run with `--format=json-with-metadata`, which carries the url in the same process.
+- One process per tool and directory per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
+- Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
+- In a staged run or with `--to-ref`, the tool is handed the content to judge, not the file on disk: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
+- Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**. Its process start and config load take about 175 ms on a trivial config and seconds with type-aware plugins, and on edit a detector past the 350 ms edit deadline is dropped, so an ESLint rule on edit would usually make the edit wait and deliver nothing. Its findings reach the agent when it stops, in the same session. Write `stages: [edit, verify]` if your ESLint is fast.
 
 ## `command`
 
@@ -130,22 +89,63 @@ In a staged run (`rulecast run` with no file flags, the pre-commit check) or wit
 - A tool that runs the project's tests (coverage, mutation testing) cannot judge the copy, because the tests never import it: give such a rule `scope: project`, and let the tool pick the changed code itself.
 - `command` rules with `scope: project` and `hook` rules need the real project. They run on the working tree when its matching files equal what is being judged, and are skipped with a warning naming the files otherwise. rulecast never stashes to make them match.
 
-## `linter`
+## `ast-grep`
 
 ```yaml
 detect:
-  linter: { tool: ruff, rules: [T201] }
+  ast-grep:
+    language: python
+    rule:
+      pattern: "raise HTTPException($$$ARGS)"
+      inside: { kind: function_definition }
 ```
 
-- `tool`: `ruff`, `oxlint`, `eslint` or `gitleaks`. Each file is linted from the nearest directory above it, up to the repository's top, that holds the tool's config (`pyproject.toml`, `ruff.toml` or `.ruff.toml` for ruff, `eslint.config.*`, `.oxlintrc.json`, `.gitleaks.toml`), or from the project root when there is none. rulecast looks for the tool in `node_modules/.bin` from that directory up to the repository's top. For `ruff` it then looks in `.venv/bin` and `venv/bin` over the same directories, then uses `uv run ruff` when the directory has a `pyproject.toml` and a `uv.lock` sits there or above it. Last comes `PATH`, which also covers an activated virtualenv. Without a `uv.lock`, rulecast does not use `uv`, which would create one and a `.venv` in the project. A tool that is not installed disables its own rules and nothing else.
-- `rules`: the linter's own rule ids to report. rulecast turns them on for its run (ruff `--extend-select`, oxlint `-D`, eslint `--rule`), so they fire even where the project's config leaves them off; the rule's settings, such as a maximum, still come from that config. Inline suppressions (`# noqa`, `// eslint-disable-next-line`, `// oxlint-disable-next-line`) still hold, and so do ruff's `per-file-ignores` and oxlint's `overrides`. eslint's `--rule` wins over its config's per-file settings too. A plugin rule needs its plugin loaded by the project's eslint config, and eslint needs a config file to run at all.
-- `gitleaks` finds hard-coded secrets: credential formats it knows (`aws-access-token`, `github-pat`, …) and high-entropy strings next to key-like names (`generic-api-key`). `rules` are its rule ids; without `rules`, every rule in its config runs. The project's `.gitleaks.toml`, `.gitleaksignore` and `gitleaks:allow` comments apply. `{{text}}` is always `[redacted]`, so a finding never repeats the secret into the agent's context, a log or SARIF. It is a Go binary, not an npm package: install it from your package manager (`brew install gitleaks`) or its releases.
-- Leave `rules` out to take what the project's own config makes an error: ESLint level 2 (`error`), oxlint `error` or `deny`, every rule Ruff selects (Ruff has no levels), and every gitleaks finding. Warnings are not delivered: to have one delivered, make it an error in the linter's config, or name it in `rules`. Such rules get a run of their own, so the rules other rules turn on never reach them. A file the project's ESLint config does not match gives no finding.
-- Every finding carries the tool's page for its lint rule, where the tool's output gives one (ESLint, Ruff and oxlint do; gitleaks does not). It is shown under the finding as `upstream docs: <url>`, unless the rule's `context_by_rule` maps a section for that lint rule (rule-format.md). ESLint is run with `--format=json-with-metadata`, which carries the url in the same process.
-- One process per tool and directory per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
-- Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
-- In a staged run or with `--to-ref`, the tool is handed the content to judge, not the file on disk: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
-- Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**. Its process start and config load take about 175 ms on a trivial config and seconds with type-aware plugins, and on edit a detector past the 350 ms edit deadline is dropped, so an ESLint rule on edit would usually make the edit wait and deliver nothing. Its findings reach the agent when it stops, in the same session. Write `stages: [edit, verify]` if your ESLint is fast.
+- `language`: one of `css`, `html`, `javascript`, `python`, `tsx`, `typescript`. Use `tsx` for both `.tsx` and `.jsx`; it also parses plain TypeScript.
+- `rule`: an [ast-grep rule object](https://ast-grep.github.io/reference/rule.html) — `pattern`, `kind`, `regex`, `inside`, `has`, `all`, `any`, `not`, and the rest. It is compiled when you run `rulecast validate`, so a rule ast-grep rejects is caught before any agent sees it.
+- `constraints` and `utils`: optional, exactly as in ast-grep's own YAML.
+- `fix`: optional, the replacement `rulecast fix` writes over each match, in ast-grep's syntax (`$NAME`, `$$$NAMES`). Only the string form: no `FixConfig` object, `transform` or `rewriters`. See [rule-format.md](rule-format.md#fixes).
+- Captures: every metavariable in the config. `$NAME` gives `{{NAME}}` (one node, empty when it did not match); `$$$NAMES` gives `{{NAMES}}` with the matched nodes joined by `, `. A metavariable starting with an underscore (`$_TMP`) matches without capturing.
+- Position and `{{text}}`: the matched node's start, and its source.
+- Default stages: `edit`, `verify`.
+
+**Matching something that is not a whole statement.** A bare pattern has to parse on its own, which a JSX attribute or a lone argument does not. Give the pattern a context to parse in, and a selector for the node you actually want:
+
+```yaml
+rule:
+  pattern:
+    context: '<div style={{ $$$PROPS }}/>'
+    selector: jsx_attribute
+```
+
+That matches a `style` attribute on any element — the `<div>` is only there so the snippet parses.
+
+## `regex`
+
+```yaml
+detect:
+  regex:
+    pattern: 'raise HTTPException\((?<args>[^)]*)\)'
+    flags: m
+```
+
+- `pattern`: a JavaScript regular expression, searched in the whole file. Quote it with single quotes in YAML so backslashes stay as written.
+- `flags`: any of `d`, `i`, `m`, `s`, `u`, `v`, `y`; default none. `g` is always added. Use `m` for `^` and `$` at each line, `s` for `.` across lines.
+- `\s` matches a line break. With `m`, `^\s*print\(` matches from an empty line above the `print(` and reports that empty line. Indentation is `[ \t]*`: `^[ \t]*print\(`. `rulecast test` prints what a failing example matched, line breaks included.
+- Captures: the pattern's named groups. `(?<args>…)` gives `{{args}}`, an empty string when the group did not take part in the match.
+- `fix`: optional, the replacement `rulecast fix` writes over each match, in the `{{name}}` syntax with the named groups and `{{text}}`. See [rule-format.md](rule-format.md#fixes).
+- Position: the line and column where the match starts. A match that spans lines counts as new when any of its lines changed.
+- Default stages: `edit`, `verify`.
+
+## `path`
+
+```yaml
+detect:
+  path: {}
+```
+
+- Every file the rule selects is a match at line 1, so the rule's `files` is the whole check. Use it for files that must not be edited at all, such as generated code.
+- Captures: none. `{{text}}` is the file path.
+- Default stages: `edit`, `verify`.
 
 ## `llm`
 
@@ -189,6 +189,6 @@ The model is asked to report each line that breaks a rule, so a question works w
 - **A rule about amount** ("comment sparingly", "keep functions short") has two parts. The `llm` rule takes the concrete offence. The amount goes to a `command` rule if it can be counted, such as lines in a file or a function, and otherwise to a touch rule that delivers the section.
 - **A question about the whole change** has no answer one edit in: a helper with one caller, duplicated logic, work nobody asked for. Keep such a rule on `verify`, the default, so it judges the turn. Where a tool answers it, prefer the tool (`jscpd` for duplication, `knip` for unused code, as a [`command`](#command) rule).
 - **Ground it.** Cite the doc section with `context` and keep `grounding` on: the section carries the project's own examples, and the model judges against them instead of its own taste.
-- **Measure it before keeping it.** `rulecast test <id> --history` judges it on recent commits ([output.md](output.md#history)), and `rulecast replay claude-code --rule <id> --llm` on recent agent sessions ([output.md](output.md#rulecast-replay)). Start it as `severity: warning`, which never blocks a stop, until the developer has seen its precision and accepts it. Each file the agent changed is one more chance for a rule that is sometimes wrong to block.
+- **Measure it before keeping it.** `rulecast test <id> --history` judges it on recent commits ([output.md](output.md#history-the-rule-on-recent-commits)), and `rulecast replay claude-code --rule <id> --llm` on recent agent sessions ([stats.md](stats.md#rulecast-replay)). Start it as `severity: warning`, which never blocks a stop, until the developer has seen its precision and accepts it. Each file the agent changed is one more chance for a rule that is sometimes wrong to block.
 
 **An llm rule sends the file's contents and the rule's grounding to the configured provider, and costs money for every file that is not already cached.** So `rulecast run` with no file flags, the pre-commit check, skips llm rules unless given `--llm`, and says so in one line. `--all-files`, `--from-ref` and the agent's stop run them; `--no-llm` skips them anywhere. It is the right answer only when no pattern can express the convention. Reach first for the detectors [DRAFT-RULES.md](../DRAFT-RULES.md#2-sort-the-conventions) lists, in its order (`path` when the file is the break, else a `linter` rule, a `command`, `ast-grep`, and `regex` only for text): they cost nothing per file and give the same answer every time. If you cannot write the check mechanically but the convention still matters, a `stages: [touch]` rule that delivers the section is usually better than asking a model — it puts the convention in front of the agent before the code is written, instead of judging it afterwards.

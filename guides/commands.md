@@ -8,7 +8,7 @@ Most projects never run these by hand.
 
 | Command | Does |
 |---|---|
-| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](advanced.md#a-committed-baseline)) |
+| `rulecast baseline` | Record today's findings, so full-repo runs fail only on new ones ([A committed baseline](adopting-rules.md#a-committed-baseline)) |
 | `rulecast replay claude-code` | What your rules would have told the agent in its recent sessions, from their transcripts |
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |

@@ -53,6 +53,7 @@ const DOCS = [
   "agents/reference/detectors.md",
   "agents/reference/tool-recipes.md",
   "agents/reference/output.md",
+  "agents/reference/stats.md",
   "agents/reference/loops.md",
 ]
 

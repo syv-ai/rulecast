@@ -6,7 +6,7 @@ Each recipe was run once, on small scratch repositories. What happened, where th
 
 ## Before any loop
 
-A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [Fresh environments](../../guides/advanced.md#fresh-environments) checklist first: it installs rulecast. The commands below say `rulecast`; with rulecast as a devDependency, run them as `npx rulecast`. For loops, three things on it matter most:
+A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [CI jobs and cloud agents](../../guides/git-hooks-ci.md#ci-jobs-and-cloud-agents) checklist first: it installs rulecast. The commands below say `rulecast`; with rulecast as a devDependency, run them as `npx rulecast`. For loops, three things on it matter most:
 
 - **[Unattended mode](rule-format.md#unattended-mode).** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`.
 - **`rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
@@ -37,7 +37,7 @@ Not measured: whether a rulecast block counts as "no progress" for `/goal`. In t
 
 ## A convention-drift sweep
 
-A scheduled job (GitHub Actions `on: schedule`, cron, or Claude Code's `/schedule`) takes one rule's new findings as one batch, fixes them, and opens a draft pull request. It needs a committed baseline ([A committed baseline](../../guides/advanced.md#a-committed-baseline)). Without one, every legacy finding is new and every run fails. It also needs `jq`, `gh` and the fresh-environment steps above.
+A scheduled job (GitHub Actions `on: schedule`, cron, or Claude Code's `/schedule`) takes one rule's new findings as one batch, fixes them, and opens a draft pull request. It needs a committed baseline ([A committed baseline](../../guides/adopting-rules.md#a-committed-baseline)). Without one, every legacy finding is new and every run fails. It also needs `jq`, `gh` and the fresh-environment steps above.
 
 ```sh
 #!/bin/sh
@@ -120,7 +120,7 @@ Not measured: whether each `/loop` iteration counts as a new prompt for the stop
 
 ## Learning from what the agent hits
 
-`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never ran may have a `files` pattern that matches nothing; one that ran often and never fired may not be worth keeping. A rule whose block rate climbs with the number of files at a stop (`stopBlocks`) is sometimes wrong. `weekly` shows whether a rule fires less over the weeks, and its `recurringFiles` the files it keeps firing on. Both need enough findings to say anything, and a falling rate can come from changes rulecast does not see ([Reading the trend](output.md#reading-the-trend)).
+`rulecast stats` says, per rule, what became of the findings the agent hooks reported: fixed, kept hitting, silenced, or never fired. A rule the agent keeps hitting or silencing may need a clearer message or a tighter pattern. A rule that never ran may have a `files` pattern that matches nothing; one that ran often and never fired may not be worth keeping. A rule whose block rate climbs with the number of files at a stop (`stopBlocks`) is sometimes wrong. `weekly` shows whether a rule fires less over the weeks, and its `recurringFiles` the files it keeps firing on. Both need enough findings to say anything, and a falling rate can come from changes rulecast does not see ([Reading the trend](../../guides/agents.md#reading-the-trend)).
 
 This takes two steps, and only the first runs unattended:
 
@@ -135,7 +135,7 @@ This takes two steps, and only the first runs unattended:
      ((.neverFired // [])[] as $r | select(.runs[$r] > 0) | "- \($r): ran \(.runs[$r]) times, never fired")' stats.json > rule-review.md
    ```
 
-   The loop stops there. It can put the summary in an issue or a message for the developer. The keys are in [output.md](output.md#rulecast-stats).
+   The loop stops there. It can put the summary in an issue or a message for the developer. The keys are in [stats.md](stats.md#rulecast-stats).
 2. **The developer and an agent revise the rules.** In a session with the developer present, the agent follows [DRAFT-RULES.md](../DRAFT-RULES.md), reading the stats first, as its last section says. Each changed rule passes `rulecast test <id> --format json` and `rulecast test <id> --against . --max-rate 0.5 --format json`, and the change goes into a pull request the developer reviews. Merging it is the adoption.
 
 A loop never drafts or adopts a rule on its own. Which conventions rulecast enforces is the developer's decision, and DRAFT-RULES.md stops when nobody is there to make it.

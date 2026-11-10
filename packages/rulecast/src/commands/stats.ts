@@ -22,7 +22,7 @@ import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
 
-/** What `rulecast stats --format json` prints (agents/reference/output.md). */
+/** What `rulecast stats --format json` prints (agents/reference/stats.md). */
 export interface StatsDocument {
   schemaVersion: typeof STATS_SCHEMA_VERSION
   window: {

@@ -54,7 +54,7 @@ function parseReplayArgs(args: string[]): ReplayArgs {
   return { sessions, rules: values.rule ?? [], llm: values.llm, yes: values.yes, format: values.format }
 }
 
-/** What `rulecast replay --format json` prints (agents/reference/output.md). */
+/** What `rulecast replay --format json` prints (agents/reference/stats.md). */
 export interface ReplayDocument extends ReplayResult {
   /** Present instead of the counts when an llm replay was asked for without --yes. */
   estimate?: { calls: number }

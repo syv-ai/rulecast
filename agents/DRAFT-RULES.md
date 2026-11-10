@@ -184,7 +184,7 @@ Then summarise:
 - the examples you invented;
 - the conventions you skipped, with the reason, and the `Not checked by rulecast` lines you proposed.
 
-When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/output.md](reference/output.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping, unless it locks in a replacement (step 2), where staying quiet means the lock is working; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong. Before changing the pattern of a rule with `recurringFiles` in `weekly`, read those files: they may hold code the agent keeps copying, or be files the rule is wrong for.
+When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/stats.md](reference/stats.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping, unless it locks in a replacement (step 2), where staying quiet means the lock is working; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong. Before changing the pattern of a rule with `recurringFiles` in `weekly`, read those files: they may hold code the agent keeps copying, or be files the rule is wrong for.
 
 ## Never
 

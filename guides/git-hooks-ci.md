@@ -6,7 +6,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 |---|---|---|
 | pre-commit | `rulecast run` | Staged files, read from the index, judged against `HEAD`. `llm` rules are skipped unless you pass `--llm`: a commit should not cost money |
 | pre-push and CI | `rulecast run --from-ref A --to-ref B` | Files changed between the merge base with `A` and `B`, read at `B` (the working tree without `--to-ref`). Runs `llm` rules on changed files |
-| a scheduled sweep or agent loop | `rulecast run --all-files` | Everything, against a [committed baseline](advanced.md#a-committed-baseline); exits 0 unless something got worse. Recipes: [`agents/reference/loops.md`](../agents/reference/loops.md) |
+| a scheduled sweep or agent loop | `rulecast run --all-files` | Everything, against a [committed baseline](adopting-rules.md#a-committed-baseline); exits 0 unless something got worse. Recipes: [`agents/reference/loops.md`](../agents/reference/loops.md) |
 
 rulecast doesn't install git hooks. Add it to the hook manager you already use:
 
@@ -66,3 +66,19 @@ jobs:
 ```
 
 The example has rulecast as a devDependency. Without one, put the install command from [Install](../README.md#install) in place of `setup-node` and `npm ci` (or after them, if the job needs Node), which puts `rulecast` on the job's PATH, and run `rulecast` where the example runs `npx rulecast`.
+
+## CI jobs and cloud agents
+
+A CI job, a cloud agent session or a new container starts with nothing installed. In unattended mode every stop says which rules did not run and why ("2 rules disabled: …: not in the cache"), and `rulecast run` reports `incomplete`. To have nothing to report, in the order the job runs:
+
+1. Check out with `fetch-depth: 0` if you use `--from-ref`: a shallow clone has no merge base.
+2. Install rulecast where the hooks find it, before the agent starts: `npm ci` for a devDependency, or the command under [Install](../README.md#install).
+3. Run `rulecast install` (`npx rulecast install` for a devDependency). It fetches the pinned rule repos; hooks never fetch.
+4. Set the mode. Unattended mode is on under `CI` or `GITHUB_ACTIONS`; elsewhere set `RULECAST_MODE=unattended`.
+5. Run `rulecast doctor --ci` (`npx rulecast doctor --ci` for a devDependency). It fetches nothing, and exits 2 if a rule repo is missing from the cache, a rule's tool isn't installed, or the hooks can't run. Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
+6. Run the agent.
+7. End with `rulecast run --from-ref …`. It is the gate that counts.
+
+To save a clone per job, cache `~/.cache/rulecast/repos` between jobs, keyed on `.rulecast-config.yaml`.
+
+A new git worktree on the same machine needs only step 2: rule repos are cached per user, not per checkout. On macOS, the first edit in a new worktree is slower: macOS checks each executable the first time it runs from a new path, such as a `command` script or a `node_modules/.bin` shim. Run them once beforehand.

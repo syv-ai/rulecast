@@ -8,7 +8,7 @@ Your project conventions, enforced.
 
 [![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
 
-[Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](guides/claude-code-plugin.md) · [Changelog](packages/rulecast/CHANGELOG.md)
+[Documentation](https://syv-ai.github.io/rulecast/) · [Getting started](#getting-started) · [Claude Code plugin](guides/agents.md#claude-code) · [Changelog](packages/rulecast/CHANGELOG.md)
 
 </div>
 
@@ -90,12 +90,12 @@ More in [Writing rules](guides/writing-rules.md): refusing a write, linters with
 
 | Detector | Catches | Default stages |
 |---|---|---|
-| `regex` | A pattern in the file's text | `edit, verify` |
-| `path` | The file's path alone: "never edit `src/client/`" | `edit, verify` |
-| `ast-grep` | Structure, not text: a call shape, a swallowed exception | `edit, verify` |
+| `linter` | Errors from ruff, oxlint, eslint or gitleaks under the project's own config, each with its doc section | `edit, verify`; `verify` for eslint |
 | `command` | Whatever a tool or script reports (SARIF, JSON, checkstyle, `file:line:` lines…): type checkers, dead-code finders, scanners [by config](agents/reference/tool-recipes.md) | `edit, verify`; `verify` with `scope: project` |
 | `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | `verify` |
-| `linter` | Errors from ruff, oxlint, eslint or gitleaks under the project's own config, each with its doc section | `edit, verify`; `verify` for eslint |
+| `ast-grep` | Structure, not text: a call shape, a swallowed exception | `edit, verify` |
+| `regex` | A pattern in the file's text | `edit, verify` |
+| `path` | The file's path alone: "never edit `src/client/`" | `edit, verify` |
 | `llm` | Conventions nothing mechanical expresses, judged by a model. Opt-in | `verify` |
 
 `verify` runs when the agent stops; a rule can opt into the edit hook with `stages: [edit, verify]`. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
@@ -149,8 +149,8 @@ The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm cac
 
 - [Git hooks and CI](guides/git-hooks-ci.md): the same rules in pre-commit, pre-push and GitHub Actions
 - [Adopting a rule on a codebase that already breaks it](guides/adopting-rules.md)
-- [Agents](guides/agents.md) and the [Claude Code plugin](guides/claude-code-plugin.md)
-- [Advanced](guides/advanced.md): several agents at once, fresh CI environments, committed baselines, unattended loops
+- [Using it with your agent](guides/agents.md): the Claude Code plugin, other agents, and what the agent gets wrong
+- [Several agents and git](guides/advanced.md) and [agent loops](agents/reference/loops.md)
 - Reference: [rule format](agents/reference/rule-format.md), [detectors](agents/reference/detectors.md), [output and finding ids](agents/reference/output.md)
 
 ## Status

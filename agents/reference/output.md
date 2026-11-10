@@ -1,6 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) and [`rulecast stats`](#rulecast-stats) have their own documents. The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) has its own document below, and `rulecast stats` and `rulecast replay` theirs in [stats.md](stats.md). The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -8,12 +8,6 @@ Relative links in this file resolve against this file's own URL.
 rulecast run --from-ref origin/main --format json    # or --all-files, --files F..., staged by default
 rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 ```
-
-## Several projects
-
-Every `.rulecast-config.yaml` above a file judges it as its own project. In a git repository, `run` and `fix` choose the files in the directory they were started in and below it (with `--files`, the files named), and each file is checked by every config above it. Each project uses its own committed baseline, state and mode. The output is one document, and the exit code is the highest any project gives. A `RULE_ID` runs in the projects that define it, and is an error only when none does. With `--session`, and outside a git repository, only the nearest config above the directory runs.
-
-Paths in the output are relative to the directory `run` was started in, with `/` separators. Outside a git repository they are relative to the project root. With several projects, a warning or notice starts with the path of the config it came from, and a rule id that two configs define differently is shown as `<id> (<config dir>)` on its findings.
 
 ## Exit codes
 
@@ -33,6 +27,12 @@ A config file does not load when its YAML, its schema or its `minimum_rulecast_v
 These are not incomplete, because they are limits the project set rather than failures: a staged run skipping `llm` rules (listed in `skipped`), `llm` rules over `llm.max_files_per_verify` (a warning names the files), and a whole-project rule skipped in a staged run because its files differ from the working tree (a warning). Read `warnings` and `skipped` to see them.
 
 Other commands keep their own codes: `validate` and `doctor` exit 2 on the problems they find, `test` 1 on a failed example or a rule over `--max-rate` ([below](#rulecast-test)), and `baseline` 3 when a rule could not run (without `--prune` it then writes nothing). `rulecast init --format json` is for setup agents, not a contract: its shape may change in any release.
+
+## Several projects
+
+With several configs ([Several configs](rule-format.md#several-configs)), the output is one document, and the exit code is the highest any project gives.
+
+Paths in the output are relative to the directory `run` was started in, with `/` separators. Outside a git repository they are relative to the project root. With several projects, a warning or notice starts with the path of the config it came from, and a rule id that two configs define differently is shown as `<id> (<config dir>)` on its findings.
 
 ## JSON
 
@@ -271,8 +271,8 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `rules[].rule`, `detector`, `scope` | The rule's id, its detector kind (`null` for a touch rule) and its `scope`. |
 | `rules[].status` | `passed`; `failed` (an example failed, or the rule is over `--max-rate`); `no-examples`; `not-run` (an `llm` rule, which runs only when named, because it costs money; or, under `--against` or `--history`, a `scope: removed` rule, whose matches are what a file keeps and which has no baseline there to count a drop against); `touch` (a named touch rule: nothing to test). |
 | `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
-| `rules[].against` | With `--against`, when the rule ran (below). Otherwise `null`. |
-| `rules[].history` | Only with `--history`: what the rule found in recent commits (below), or `null` when it was not run (such as a `scope: removed` rule). |
+| `rules[].against` | With `--against`, when the rule ran ([below](#against-the-rule-on-real-files)). Otherwise `null`. |
+| `rules[].history` | Only with `--history`: what the rule found in recent commits ([below](#history-the-rule-on-recent-commits)), or `null` when it was not run (such as a `scope: removed` rule). |
 | `rules[].estimate` | Only with `--history`, for a rule that costs money per file (`llm`) run without `--yes`: `{ "commits", "calls" }`, one model call per file per commit. Nothing was run, and `status` is `not-run`. |
 
 ### An outcome
@@ -288,7 +288,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `error` | Present when the detector failed or timed out on the example. The example fails. |
 | `fix` | Only on a `bad` example of a rule with a [`fix`](rule-format.md#fixes), when the rule caught it as expected and the fix was applied: `{ "passed": true }`, or `{ "passed": false, "reason": ... }` with `reason` `stillFires` (the rule fires on the fixed code), `unresolved` (a fix left its own finding and was undone) or `differs` (the result is not the example's `fixed`; `diff` holds the diff from `fixed` to what the fix produced). A failed fix also adds a sentence to `failures`. |
 
-### `against`
+### `against`: the rule on real files
 
 ```json
 {
@@ -315,7 +315,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `smallSample` | Under 25 matching files. `--max-rate` is not applied: a share of a handful of files says nothing about the rule. |
 | `files` | Every violating file with its count, worst first. |
 
-### `history`
+### `history`: the rule on recent commits
 
 `--against` counts what a rule finds in files as they are; `--history` judges it the way a session does: against what a commit changed, at that commit's content, so only what the commit added counts. It takes the newest non-merge commits on `HEAD` that change a file the rule matches (`--commits`, default 20, or 10 for an `llm` rule), and judges each as `rulecast run --from-ref C^ --to-ref C` would. For a rule about a change rather than a whole file, and for an `llm` rule, it is the closer measure.
 
@@ -343,200 +343,3 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `smallSample` | Under 10 commits. |
 | `findings` | Every new finding, newest commit first, with the commit's subject and the rule's message. `label` is the developer's mark, when the label file has one. |
 | `labels` | From `.rulecast/history/<rule id, / as __>.json`, or `null` when there is no such file. `--label` writes the findings there with `"label": null`, keeping any mark already in it. The developer, or an agent with them, sets each to `"real"` or `"false"`. `precision` is `real / (real + false)` over this run's findings, or `null` when none is marked. |
-
-## rulecast replay
-
-`rulecast replay claude-code --format json` says what the configured rules would have told the agent in this project's recent Claude Code sessions. It reads the session transcripts under `~/.claude/projects` (or `CLAUDE_CONFIG_DIR`) and judges each Edit and Write on what it changed, as the edit hook does, and each turn on what it changed from its first edit of a file to its last, as the stop does. Content comes from the transcript alone. Nothing is written to the findings log, so `stats` never counts a replay.
-
-```sh
-rulecast replay claude-code --sessions 20 --format json   # --rule ID (repeatable); --llm, then --llm --yes
-```
-
-```json
-{
-  "sessions": 19,
-  "edits": 426,
-  "turns": 71,
-  "unknownEdits": 76,
-  "rules": [
-    { "rule": "loop-safety/protected-loop-config", "severity": "warning", "edits": 1, "editsFired": 1, "turns": 1, "turnsFired": 1, "wouldBlock": 0 }
-  ],
-  "findings": [
-    { "session": "77882c8a-…", "agent": "main", "turn": 1, "stage": "edit", "rule": "loop-safety/protected-loop-config", "file": ".rulecast-config.yaml", "line": 1, "message": ".rulecast-config.yaml configures the checks that judge this run. …" }
-  ],
-  "skippedRules": ["loop-safety/no-deleted-assertions-ts"],
-  "errors": []
-}
-```
-
-| Key | Meaning |
-|---|---|
-| `sessions`, `edits`, `turns` | Sessions read, newest first (`--sessions`, default 20), and the edits and turns judged in them, subagents' included. |
-| `unknownEdits` | Edits whose file before them the transcript never showed: about one Edit in three records no `originalFile`, and then replay uses what the same transcript last wrote or fully read. These are not judged. |
-| `rules[]` | Per rule that ran: `edits` and `turns` it was run on, those it found something new in, and `wouldBlock`, the turns whose stop an `error` finding would have blocked. |
-| `findings[]` | Every new finding. `turn` counts from 0, from the agent's first prompt. `stage` is `edit` (the edit hook would have told the agent) or `turn` (the stop would have). `agent` is `main` or a subagent's id. |
-| `skippedRules` | Rules that would have run but cannot from a transcript: their tool needs the files on disk (a `command` script, a whole-project tool), or their `scope` is `removed` or `container`, which judge against measurements of the file before the session that a replay does not take. |
-| `errors` | Rules whose detector failed or timed out, with the first message. They stop being run. |
-
-`llm` rules are left out unless `--llm` is given. With `--llm` alone, the document is `{ "estimate": { "calls": N } }`: one model call per file per event judged, and nothing is run. `--llm --yes` runs them. Edits made through Bash are not in a transcript and are not judged. The command exits 0 whatever it finds, and 2 on a usage error or a config that does not load.
-
-## rulecast stats
-
-`rulecast stats --format json` says, per rule, what became of the findings agent hooks reported: whether the agent fixed them, kept being blocked on them, or silenced them. A loop that improves rules reads it to find rules that are noisy and rules that never fire.
-
-```sh
-rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
-```
-
-A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist. For `weekly`, `--since` rounds down to the Monday of its week, so the trend holds whole weeks.
-
-```json
-{
-  "schemaVersion": 1,
-  "window": {
-    "since": "2026-09-16T12:00:00.000Z",
-    "firstRecord": "2026-10-01T10:00:00.000Z",
-    "lastRecord": "2026-10-05T09:01:00.000Z",
-    "truncated": false
-  },
-  "sessions": 2,
-  "rules": [
-    {
-      "rule": "backend/no-httpexception",
-      "fired": 1,
-      "blocked": 1,
-      "refused": 0,
-      "fixed": 1,
-      "ignored": 0,
-      "suppressed": 0,
-      "suppressAttempted": 0,
-      "prevented": 0,
-      "open": 0,
-      "repeated": 0,
-      "medianTurnsToFix": 1,
-      "repeatRate": 0,
-      "suppressionRate": 0,
-      "noisy": []
-    }
-  ],
-  "neverFired": ["frontend/no-generated-edits"],
-  "neverRan": ["frontend/no-generated-edits"],
-  "runs": { "backend/no-httpexception": 4, "frontend/no-generated-edits": 0 },
-  "stopBlocks": [
-    {
-      "rule": "backend/no-httpexception",
-      "byFiles": [
-        { "files": "1", "stops": 2, "blocked": 1 },
-        { "files": "2-5", "stops": 0, "blocked": 0 },
-        { "files": "6+", "stops": 0, "blocked": 0 }
-      ]
-    }
-  ],
-  "unknownRules": [],
-  "weekly": {
-    "from": "2026-10-01T10:00:00.000Z",
-    "rolledUpTo": null,
-    "summary": "off",
-    "rules": [
-      {
-        "rule": "backend/no-httpexception",
-        "fired": 1,
-        "enoughFindings": false,
-        "weeks": [
-          { "week": "2026-09-28", "runs": 3, "sessions": 1, "fired": 1, "firedPer100Runs": null, "partial": true },
-          { "week": "2026-10-05", "runs": 1, "sessions": 1, "fired": 0, "firedPer100Runs": null, "partial": true }
-        ],
-        "recurringFiles": [],
-        "recurringFileCount": 0
-      }
-    ]
-  }
-}
-```
-
-| Key | Meaning |
-|---|---|
-| `schemaVersion` | The version of this shape. It is versioned apart from `run`'s document, with the same policy: adding a field leaves it at `1`, and removing, renaming or changing the meaning of one bumps it. |
-| `window.since` | The `--since` cut-off, or `null` for everything in the log. Only findings first reported at or after it are counted. |
-| `window.firstRecord`, `window.lastRecord` | The oldest and newest record in the log, or `null` when it is empty. |
-| `window.truncated` | The log has been rotated and does not reach back to `since`, so older findings may be missing. |
-| `sessions` | Agent sessions with a record in the window. |
-| `rules` | One entry per rule with a finding in the window, most fired first. |
-| `neverFired` | Enabled detector rules in the current config with no finding in the window. Touch rules are left out, since they never report findings. Left out when anything in the config did not compile (see `notCompiled`). |
-| `neverRan` | Of `neverFired`, the rules no check ran at all in the window: their `files` matched nothing the agents changed. A rule that ran many times and never fired has not been broken; one that never ran may have a `files` pattern that is wrong. Left out with `neverFired`. |
-| `runs` | Per enabled detector rule in the config, how many edit checks and stops in the window ran it to completion on at least one file. Left out with `neverFired`. |
-| `stopBlocks` | Per rule that blocked a stop in the window, its stops by how many files it judged there (`1`, `2-5`, `6+`), and how many of those it blocked. A block rate that climbs with the number of files, whatever they hold, is a rule that is sometimes wrong: each file is one more chance to block. Left out with `neverFired`. |
-| `unknownRules` | Rules with findings in the window that are no longer in the config: removed, or renamed. Left out when anything in the config did not compile. |
-| `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
-| `weekly` | Per rule, its findings by week, to see over weeks whether it fires less. Always present. See [Reading the trend](#reading-the-trend). |
-| `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
-| `weekly.rolledUpTo` | The newest record the weekly summary counts, or `null` when there is no summary. |
-| `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds, plus any summary written while it was on. |
-| `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
-
-Per rule, every count is of findings, and a finding is counted once per session however many times it was reported (in `weekly`, once per session and log file):
-
-| Key | Meaning |
-|---|---|
-| `fired` | Findings first reported in the window. |
-| `blocked` | Of those, findings that kept a stop from going through at least once. In unattended mode that includes the final stop that holds the agent to report what is left, and leaves out a finding that has already blocked twice and so no longer blocks. |
-| `refused` | Findings a refused write rested on, or a shell write the agent was told to revert. |
-| `fixed` | Gone at a later check that ran the rule on the file: an edit check or a stop. |
-| `ignored` | Still there at a stop when the log ends: the agent was allowed to stop with it, after the stop gate's blocks ran out or because it is a warning. |
-| `suppressed` | Dropped by a `rulecast-ignore` comment. An id leaves a trailing `rulecast-ignore` out of the line it hashes, so a comment on the finding's own line keeps its id; for a match whose id hashes its text (a redacted or whole-file one), the same rule ignored on the line the finding was last reported on counts too. |
-| `suppressAttempted` | Findings under a `rulecast-ignore` comment the agent added or changed that silenced nothing: in unattended mode an ignore does not silence a finding on a line changed this session. Code the agent changed under a comment it left alone is not silenced either, but is not an attempt. They stay findings, so they are counted in the other keys as well, never as `suppressed`. They do count towards `suppressionRate` and `noisy`: the agent wanted them silenced. |
-| `prevented` | Only ever reported on refused writes, and the agent's next stop came without it: the agent gave up on the write, so the violation never reached the file. A refused finding that a later check of its file finds gone is `fixed` instead. |
-| `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
-| `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
-| `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
-| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. |
-| `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, under an ignore the agent added or changed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
-
-`weekly.rules` lists the rules with a finding in the trend's weeks, most fired first. Weeks start on Monday at 00:00 UTC. They run from the first week with data to the week of the newest record, with zeros for weeks without any:
-
-| Key | Meaning |
-|---|---|
-| `fired` | Findings first reported in the trend's weeks, counted as in the table above. |
-| `enoughFindings` | `fired` is at least 10. Below that the trend says little. |
-| `weeks[].week` | The week's Monday, as `YYYY-MM-DD`. |
-| `weeks[].runs` | Edit checks and stops that week that ran the rule on at least one file. It is the same count as the top-level `runs`, so rules that run only at a stop (hook rules) have a denominator too. |
-| `weeks[].sessions` | Sessions with such a check that week. |
-| `weeks[].fired` | Findings of the rule first reported that week. |
-| `weeks[].firedPer100Runs` | `fired * 100 / runs`, to one decimal. `null` when the rule ran fewer than 20 times that week: below that, one finding moves the rate by more than 5. |
-| `weeks[].partial` | The data does not cover the whole week: it starts after the week's Monday, or ends before the next one. The current week is always partial. A week with no data at all (no rule has a check that week) is partial too, and its zeros mean no data, not no findings: rulecast recorded nothing, or the log rotated past that week while the summary was off. |
-| `recurringFiles` | Files the rule fired on in 3 or more sessions, most sessions first, then by path; at most 10. |
-| `recurringFileCount` | How many files are recurring, the ones past the first 10 included. |
-
-The floors (20 checks a week, 10 findings, 3 sessions) are first guesses, to be tuned from use.
-
-Things to know when reading the counts:
-
-- A finding's identity is its [id](#finding-ids), which hashes its source line. So any edit to that line, fixing it or not, counts as one fixed finding and one new one, unless the edit only adds a trailing `rulecast-ignore`.
-- A finding the context budget kept out of a delivery still counts as reported.
-- Only agent hooks write the log. `rulecast run`, git hooks and CI do not, and findings that were there before the session or are in files the user changed during it are not counted.
-
-### Reading the trend
-
-To decide whether a rule is working, look at:
-
-- **The in-session counts in `rules`.** A high `fixed`, a `medianTurnsToFix` of 0 or 1 and a low `repeatRate` mean the finding and its doc section get the agent to fix the code. This is the main sign. An agent starts each session with no memory of the last, so a rule that works can keep firing at a flat rate: it catches the mistake each time, and the agent fixes it each time.
-- **`firedPer100Runs` over the weeks, for a rule with `enoughFindings`.** A rate that falls while `runs` holds steady means agents make the mistake less often in the files the rule checks. That usually means the codebase has fewer examples of the wrong pattern left to copy, or the convention reached the agent some other way. A rate that falls only because `runs` fell means nothing.
-- **`recurringFiles`.** A file where the rule fires in session after session. Either it holds code the agent keeps copying (often an old example of the wrong pattern, which the rule does not count, because findings that were already there are never logged), or the rule is wrong for that file. Open the file. Changing the rule's `exclude` is the developer's call.
-
-What the trend cannot tell you:
-
-- **Why the rate changed.** There is no control group. A change of model, a new section in the agent's instructions, different work (other files, other kinds of task) or an edit to the rule itself all move the rate. The log does not record rule versions: check `git log -p .rulecast-config.yaml` for edits to the rule.
-- **More than the log holds, unless the summary is on.** With `stats.weekly_summary` off, the trend reaches back only to the log's first record: about a week for a busy loop.
-- **Anything about rules with too few findings:** under 10 in the window (`enoughFindings: false`), or a week with under 20 checks (`firedPer100Runs: null`).
-- **Sessions on other machines or in other checkouts.** The log is per machine and per checkout. Each worktree has its own, so a loop that works in fresh worktrees leaves each week's data spread over logs that `stats` in the main checkout never reads.
-- **Exact counts at the edges.** A finding still open when one log file is summarised and the next one starts can be counted as fired in both. A session that runs past Sunday midnight UTC counts in both weeks. A file's recurring count can be off by one for the same reason.
-
-### The findings log
-
-The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). There is one log per config and checkout: each config runs as its own project, and the directory is keyed by the config's real path. Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
-
-The log keeps about the newest 8 MiB and drops older records: about a week for a loop that writes a record every 20 seconds around the clock, and weeks for a developer working by hand. A hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
-
-With `stats.weekly_summary: true` in the config (off by default), the per-week counts of the records the log drops are kept in `findings-weekly.jsonl` beside it, for 26 weeks. It holds rule ids, file paths, weeks and counts only. Only the config that turns it on keeps one: configs below it do not inherit the key. `rulecast clean` removes it too.
-
-Its format is internal and can change in any release. The `stats` JSON above is the contract.
