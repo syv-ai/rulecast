@@ -2,9 +2,30 @@
 
 The README's [A rule](../README.md#a-rule) shows the shape. This guide covers the rest; every key is in [`agents/reference/rule-format.md`](../agents/reference/rule-format.md).
 
+## Testing a rule
+
+A rule's `examples` hold `bad` code it must flag and `good` code it must leave alone. `rulecast test` runs them. Two more checks say how the rule would behave on your code:
+
+- `rulecast test <id> --against src/` shows how many real files it would flag.
+- `rulecast test <id> --history` shows how often recent commits would have broken it.
+
+```yaml
+examples:
+  bad:
+    - path: app/services/users.py
+      code: |
+        raise HTTPException(404)
+  good:
+    - path: app/services/users.py
+      code: |
+        raise UserNotFound(user_id)
+```
+
+The rest, such as pinning the lines a `bad` example must flag, is in [Examples](../agents/reference/rule-format.md#examples).
+
 ## Guidance with nothing to catch
 
-A rule with `context` and no `detect` delivers its doc section the first time an agent touches a matching file. Use it for a convention no pattern can express.
+A rule with `context` and no `detect` is a touch rule: it delivers its doc section the first time an agent reads or edits a matching file. Use it for a convention no pattern can express.
 
 ## Refusing a write
 
@@ -64,10 +85,6 @@ Agents copy what they find. Halfway through moving off an API, the old form is s
 
 The uses that are already there are [backlog](adopting-rules.md), so the rule can go in on day one. Once the migration is done, a rule that never fires is the lock working. Keep it.
 
-## One home for each convention
-
-`AGENTS.md` is read at the start of every session, and every line in it competes for the agent's attention. A rule's doc section reaches the agent only when it is needed: when the rule fires, or when a touch rule's file is first touched. Once a rule checks a convention, move its section out of `AGENTS.md` into your conventions docs and cite it from there. Move it rather than copy it, because copies drift apart. The cost is that a convention a rule only checks reaches the agent after it has been broken, and an agent without rulecast's hooks never sees it, so if some of your agents run without them, leave the section where it is. If the type checker or a deleted API already makes a mistake impossible, it needs neither a rule nor a line.
-
 ## Turning a rule off
 
 - **A whole rule:** `enabled: false` on the rule, or on its entry under a rule repo.
@@ -80,3 +97,7 @@ The uses that are already there are [backlog](adopting-rules.md), so the rule ca
   ```
 
 The details, and what you are told when an agent adds an ignore, are in [Turning a rule or a finding off](../agents/reference/rule-format.md#turning-a-rule-or-a-finding-off).
+
+## One home for each convention
+
+`AGENTS.md` is read at the start of every session; a rule's doc section reaches the agent only when it is needed. Once a rule checks a convention, move its section out of `AGENTS.md` into your conventions docs and cite it from the rule. Move it rather than copy it, because copies drift. If some of your agents run without rulecast's hooks, leave it where it is.
