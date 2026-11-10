@@ -1,7 +1,8 @@
 ---
 /**
- * Starlight's header, plus a menu button on pages without a sidebar (the landing page): there, the
- * docs are otherwise one link away from nowhere.
+ * Starlight's header, with SiteMenu's button in front: on every page on a phone, and on wide
+ * screens on pages without a sidebar (the landing page), where the docs are otherwise one link
+ * away from nowhere.
  */
 import Default from "@astrojs/starlight/components/Header.astro"
 import SiteMenu from "./SiteMenu.astro"
@@ -9,18 +10,12 @@ import SiteMenu from "./SiteMenu.astro"
 const { hasSidebar } = Astro.locals.starlightRoute
 ---
 
-{
-  hasSidebar ? (
+<div class:list={["rc-header", { "rc-has-sidebar": hasSidebar }]}>
+  <SiteMenu />
+  <div class="rc-header-rest">
     <Default />
-  ) : (
-    <div class="rc-header">
-      <SiteMenu />
-      <div class="rc-header-rest">
-        <Default />
-      </div>
-    </div>
-  )
-}
+  </div>
+</div>
 
 <style>
   .rc-header {
@@ -33,5 +28,21 @@ const { hasSidebar } = Astro.locals.starlightRoute
     flex: 1;
     min-width: 0;
     height: 100%;
+  }
+  /* Where the sidebar shows, it is the menu. */
+  @media (min-width: 50rem) {
+    .rc-has-sidebar {
+      gap: 0;
+    }
+    .rc-has-sidebar :global(.rc-menu-button) {
+      display: none;
+    }
+  }
+</style>
+
+<style is:global>
+  /* Starlight keeps room on the right for its own menu button, which is not shown. */
+  [data-has-sidebar] .header {
+    padding-inline-end: var(--sl-nav-pad-x);
   }
 </style>

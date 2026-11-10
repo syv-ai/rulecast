@@ -64,6 +64,12 @@
 hr {
   display: none;
 }
+/* No shadows either: Starlight lifts its cards, menus and dialogs with these three. */
+:root {
+  --sl-shadow-sm: none;
+  --sl-shadow-md: none;
+  --sl-shadow-lg: none;
+}
 
 /* The terminal is dark in both themes: it shows a terminal. */
 .rc-terminal {
@@ -92,6 +98,20 @@ h1#_top {
 }
 .sl-markdown-content h3 {
   letter-spacing: -0.015em;
+}
+/* A code word in a heading is part of the heading: its face changes, not its surface. Mono sets
+   wide, so a little smaller keeps it the heading's size to the eye. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.9em;
+  letter-spacing: normal;
+}
+/* A chip that wraps keeps its padding on each line, instead of opening at one end. */
+.sl-markdown-content :not(pre) > code {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* The bar is a material, not a strip: content scrolls under it. */
@@ -146,6 +166,57 @@ h1#_top {
 .sl-markdown-content tr:nth-child(even) td {
   background-color: var(--sl-color-gray-6);
 }
+/* A chip in a table sits on either row colour, so it takes the step above both. */
+.sl-markdown-content td code {
+  background-color: var(--sl-color-gray-5);
+}
+/* Cells break between words, never inside one: Starlight's break-anywhere is what split
+   `ast-grep` in two. Outside the prose column (marked at build, scripts/prose-column.ts) a chip is
+   a name, a command or a default, and stays on one line, as does a cell of one word such as
+   "pre-commit"; in the prose a chip may wrap at its spaces. */
+.sl-markdown-content :is(th, td) {
+  overflow-wrap: normal;
+}
+.sl-markdown-content td:not([data-prose]) code,
+.sl-markdown-content [data-word] {
+  white-space: nowrap;
+}
+/* In the full-width column a table spans it, and the prose takes all the short columns leave. In a
+   narrower one (a phone, a tablet, a window that also shows "On this page") it keeps Starlight's
+   own scrolling box, so a wide table scrolls by itself, not the page. */
+.sl-markdown-content {
+  container-type: inline-size;
+}
+@container (min-width: 45rem) {
+  .sl-markdown-content table {
+    display: table;
+    width: 100%;
+  }
+  .sl-markdown-content [data-prose] {
+    width: 100%;
+  }
+}
+
+/* An aside is one more surface, its title in the accent: no stripe, no colour of its own. */
+.starlight-aside {
+  --sl-color-asides-text-accent: var(--sl-color-accent);
+  border: 0;
+  border-radius: 0.75rem;
+  background-color: var(--sl-color-gray-6);
+}
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--rc-warning);
+}
+.starlight-aside--danger {
+  --sl-color-asides-text-accent: var(--rc-error);
+}
+
+/* The phone's "On this page" list opens over the text, so it needs a surface of its own. */
+#starlight__mobile-toc .dropdown {
+  border-radius: 0 0 0.75rem 0.75rem;
+  background-color: var(--sl-color-gray-6);
+}
+
 .pagination-links a {
   background-color: var(--sl-color-gray-6);
 }
@@ -163,6 +234,29 @@ h1#_top {
   site-search > button:hover {
     background-color: var(--sl-color-gray-5);
   }
+}
+
+/* Search results: each page is one rounded surface, its sections set apart by space alone. Pagefind
+   draws a hairline between rows and a tree of lines down the left; both go. */
+#starlight__search .pagefind-ui__result-inner {
+  gap: 0;
+  border-radius: 0.75rem;
+  background-color: var(--sl-color-black);
+}
+#starlight__search .pagefind-ui__result-nested::before {
+  content: none;
+}
+#starlight__search .pagefind-ui__result-inner > :first-child {
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+#starlight__search .pagefind-ui__result-inner > :last-child {
+  border-radius: 0 0 0.75rem 0.75rem;
+}
+/* Hovered, a row lifts by a surface step rather than gaining an outline. */
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):hover,
+#starlight__search .pagefind-ui__result-nested:hover {
+  outline: none;
+  background-color: var(--sl-color-gray-5);
 }
 
 /* The GitHub mark is GitHub's, not ours: plain text colour. */

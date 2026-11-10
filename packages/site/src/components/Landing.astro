@@ -354,13 +354,27 @@ const next = [
     color: var(--sl-color-gray-3);
     font-size: var(--sl-text-sm);
   }
+  /* The commands share one width, no wider than the screen: a command too long for a phone scrolls
+     inside its own button, and the copy pill stays in view. */
   .rc-hero-commands {
     display: inline-grid;
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 100%;
     gap: 0.5rem;
+  }
+  .rc-hero-commands .rc-install {
+    min-width: 0;
   }
   .rc-hero-commands .rc-install code {
     flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
     text-align: left;
+  }
+  .rc-install-prompt,
+  .rc-copy-state {
+    flex-shrink: 0;
   }
   .rc-hero-needs {
     margin: 1.25rem auto 0;
@@ -417,7 +431,8 @@ const next = [
   .rc-setup-cols {
     margin-top: 1.5rem;
     display: grid;
-    grid-template-columns: 1fr;
+    /* minmax(0, …): the prompt scrolls inside its box rather than widening the page. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.75rem;
     align-items: start;
   }

@@ -1,13 +1,15 @@
 ---
 /**
- * The docs, one tap away on pages without a sidebar. A panel slides in from the left, under the
- * header, so the button that opened it stays put and closes it. It can be dragged shut.
+ * The docs, one tap away: on a phone, and on pages without a sidebar. It is the only menu, so the
+ * landing page and the docs open the same panel. It slides in from the left, under the header, so
+ * the button that opened it stays put and closes it. It can be dragged shut.
  */
 import { routeUrl } from "../../scripts/links"
 import { GROUPS, PAGES } from "../../scripts/sources"
 import ThemeSelect from "./ThemeSelect.astro"
 
 const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => page.group === label) }))
+const here = Astro.url.pathname
 ---
 
 <button class="rc-menu-button" type="button" aria-expanded="false" aria-controls="rc-menu" aria-label="Menu">
@@ -25,7 +27,9 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
           <ul>
             {group.pages.map((page) => (
               <li>
-                <a href={routeUrl(page.route)}>{page.title}</a>
+                <a href={routeUrl(page.route)} aria-current={routeUrl(page.route) === here ? "page" : undefined}>
+                  {page.title}
+                </a>
               </li>
             ))}
           </ul>
@@ -235,6 +239,12 @@ const groups = GROUPS.map((label) => ({ label, pages: PAGES.filter((page) => pag
     color: var(--sl-color-gray-1);
     text-decoration: none;
     transition: background-color 120ms ease;
+  }
+  /* The page you are on, as in the sidebar: weight and a surface step. */
+  .rc-menu a[aria-current="page"] {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+    font-weight: 600;
   }
   .rc-menu a:focus-visible,
   .rc-menu a:active {
