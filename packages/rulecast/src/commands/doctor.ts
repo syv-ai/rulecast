@@ -263,21 +263,27 @@ export async function doctorCommand(
           ? "warning"
           : "ok"
     count(level)
+    const outOfDate =
+      missing.length > 0
+        ? `hooks for ${missingNames(missing)} missing`
+        : stale
+          ? `the hooks${staleWhere} are out of date`
+          : differs !== null
+            ? `${differs.file} is out of date`
+            : null
     const detail =
       file === null
         ? "not installed (run rulecast install)"
         : gone !== null
           ? `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install`
-          : missing.length > 0
-            ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
-            : stale
-              ? `${file} — but the hooks${staleWhere} are out of date; run rulecast install`
-              : differs !== null
-                ? `${file} — but ${differs.file} is out of date; run rulecast install`
-                : runs
-                  ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
-                  : `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
-                    `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+          : !runs
+            ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
+              `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
+              `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).` +
+              (outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`)
+            : outOfDate !== null
+              ? `${file} — but ${outOfDate}; run rulecast install`
+              : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
     io.stdout(line(level, adapter.label, detail))
   }
   io.stdout("\ncache\n")

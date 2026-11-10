@@ -296,6 +296,65 @@ describe("rulecast doctor", () => {
     expect((await runCli(root, ["doctor"], "", env)).stdout).toContain("so no rules run")
   })
 
+  describe("no rulecast can run and something else is wrong too", () => {
+    /** Installed hooks, then `edit` to what they are on disk, with no rulecast anywhere it could run. */
+    async function ciDoctor(edit: (root: string) => Promise<void>) {
+      const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]), "src/x.ts": "" })
+      const setup = lookupSetup([], root)
+      const env = {
+        RULECAST_HOME: setup.home,
+        RULECAST_INSTALL_DIR: setup.installDir,
+        PATH: `${setup.pathDir}:/usr/bin:/bin`,
+      }
+      expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
+      await edit(root)
+      const { stdout } = await runCli(root, ["doctor", "--ci"], "", env)
+      return { stdout, setup }
+    }
+
+    const CAN_NOT_RUN = (dir: string) =>
+      `error    Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, on the PATH or in ${dir}, so no rules run. ` +
+      `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+
+    const setCommands = async (root: string, command: string) => {
+      const settings = JSON.parse(await readFile(path.join(root, ".claude/settings.json"), "utf8"))
+      for (const groups of Object.values(settings.hooks) as { hooks: { command: string }[] }[][]) {
+        for (const group of groups) for (const hook of group.hooks) hook.command = command
+      }
+      await writeFile(path.join(root, ".claude/settings.json"), JSON.stringify(settings))
+    }
+
+    test("stale hooks: says nothing can run, then that the hooks are out of date", async () => {
+      const { stdout, setup } = await ciDoctor((root) =>
+        setCommands(root, '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'),
+      )
+      expect(stdout).toContain(
+        `${CAN_NOT_RUN(setup.installDir)} Also: the hooks are out of date; run rulecast install.\n`,
+      )
+    })
+
+    test("a script that differs: says nothing can run, then names the script", async () => {
+      const { stdout, setup } = await ciDoctor((root) =>
+        writeFile(path.join(root, ".claude/hooks/rulecast.sh"), "echo edited\n"),
+      )
+      expect(stdout).toContain(
+        `${CAN_NOT_RUN(setup.installDir)} Also: .claude/hooks/rulecast.sh is out of date; run rulecast install.\n`,
+      )
+    })
+
+    test("a missing script stays first, since every hook fails", async () => {
+      const { stdout } = await ciDoctor((root) => rm(path.join(root, ".claude/hooks/rulecast.sh")))
+      expect(stdout).toContain(
+        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install\n",
+      )
+    })
+
+    test("nothing else wrong: only the message that nothing can run", async () => {
+      const { stdout, setup } = await ciDoctor(async () => {})
+      expect(stdout).toContain(`${CAN_NOT_RUN(setup.installDir)}\n`)
+    })
+  })
+
   test("a hook rulecast older than minimum_rulecast_version is a warning with the command that would update it", async () => {
     const { stdout, setup } = await doctorWith(["path"], { minimum_rulecast_version: "0.8.0" }, { path: "0.1.0" })
     const before = await readdir(setup.home, { recursive: true })

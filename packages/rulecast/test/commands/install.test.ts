@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
@@ -124,7 +124,11 @@ describe("rulecast install", () => {
 
   test("hooks on an older command in both settings files: doctor says so, install upgrades and reports both", async () => {
     const OLD = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
-    const local = await createProject({ ".rulecast-config.yaml": "repos: []\n", "node_modules/.bin/rulecast": "" })
+    const local = await createProject({
+      ".rulecast-config.yaml": "repos: []\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\necho 0.8.2\n",
+    })
+    await chmod(path.join(local, "node_modules/.bin/rulecast"), 0o755)
     await runCli(local, ["install"])
     const shared = await settingsOf(local)
     const personal = structuredClone(shared)
