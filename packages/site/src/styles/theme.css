@@ -128,6 +128,11 @@ h1#_top {
   background-color: color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
   color: var(--sl-color-gray-1);
 }
+/* Short code (marked at build, scripts/prose-column.ts) stays whole: `--scope personal` broken at
+   its hyphen reads as two things. Longer code still wraps, so it never runs out of the column. */
+.sl-markdown-content code.rc-nowrap {
+  white-space: nowrap;
+}
 
 /* Links are the accent, the one colour of the page: the accent-high Starlight picks is nearly the
    body's white. A code word in a link is the link's colour too, or it would read as plain code. */
@@ -217,6 +222,12 @@ h1#_top {
    tablet, a window that also shows "On this page") it is as wide as its content needs. */
 .sl-markdown-content .rc-table {
   overflow-x: auto;
+}
+/* The box takes focus so a keyboard can scroll it: it shows it, as a link does. */
+.sl-markdown-content .rc-table:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
 }
 .sl-markdown-content .rc-table > table {
   display: table;
