@@ -4,7 +4,7 @@ import path from "node:path"
 import { z } from "zod"
 
 import { AGENT_DIR } from "../delivery/persist"
-import { errorMessage, formatZodError } from "../errors"
+import { errorMessage, parseReported } from "../errors"
 import { FINDING_ID_VERSION } from "../finding-id"
 import { git } from "../git"
 import { VERSION } from "../version"
@@ -73,9 +73,9 @@ export async function readCommittedBaseline(root: string): Promise<CommittedBase
   } catch (error) {
     throw new BaselineFileError(`not JSON (${errorMessage(error)})`)
   }
-  const parsed = documentSchema.safeParse(data, { reportInput: true })
+  const parsed = parseReported(documentSchema, data)
   if (!parsed.success) {
-    throw new BaselineFileError(formatZodError(parsed.error, { schema: documentSchema }))
+    throw new BaselineFileError(parsed.message)
   }
   const rules: BaselineEntries = new Map()
   for (const [rule, entry] of Object.entries(parsed.data.rules)) {

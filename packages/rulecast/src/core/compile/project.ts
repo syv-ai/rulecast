@@ -7,7 +7,7 @@ import { type ActiveMode, ATTENDED, resolveMode } from "../config/mode"
 import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../config/schema"
 import { AGENT_DIR } from "../delivery/persist"
 import type { DetectorRegistry } from "../detection/registry"
-import { formatZodError, isNotFound } from "../errors"
+import { isNotFound, parseReported } from "../errors"
 import { compileFilter } from "../files"
 import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
@@ -198,8 +198,8 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
           error(CONFIG_FILE, idOf(raw), tooNew)
           continue
         }
-        const rule = ruleSchema.safeParse(raw, { reportInput: true })
-        if (!rule.success) error(CONFIG_FILE, idOf(raw), formatZodError(rule.error, { schema: ruleSchema }))
+        const rule = parseReported(ruleSchema, raw)
+        if (!rule.success) error(CONFIG_FILE, idOf(raw), rule.message)
         else await add({ data: rule.data, source: "local", contextRoot: project }, CONFIG_FILE)
       }
       continue
@@ -238,9 +238,9 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
     const repoRoot: ReferenceRoot = { dir: checkout.dir, label: checkout.label }
     for (const raw of entry.rules) {
-      const override = overrideSchema.safeParse(raw, { reportInput: true })
+      const override = parseReported(overrideSchema, raw)
       if (!override.success) {
-        error(CONFIG_FILE, idOf(raw), formatZodError(override.error, { schema: overrideSchema }))
+        error(CONFIG_FILE, idOf(raw), override.message)
         continue
       }
       const { id } = override.data
@@ -254,9 +254,9 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
         error(source, id, tooNew)
         continue
       }
-      const base = ruleSchema.safeParse(candidates[0], { reportInput: true })
+      const base = parseReported(ruleSchema, candidates[0], "manifest")
       if (!base.success) {
-        error(source, id, formatZodError(base.error, { prefix: "manifest", schema: ruleSchema }))
+        error(source, id, base.message)
         continue
       }
       // Shallow merge (spec §4); an overridden context is written in the project, so it resolves there.
@@ -318,12 +318,12 @@ export async function compileManifest(
       diagnostics.push({ source, rule: idOf(raw), message: tooNew, level: "error" })
       continue
     }
-    const rule = ruleSchema.safeParse(raw, { reportInput: true })
+    const rule = parseReported(ruleSchema, raw)
     if (!rule.success) {
       diagnostics.push({
         source,
         rule: idOf(raw),
-        message: formatZodError(rule.error, { schema: ruleSchema }),
+        message: rule.message,
         level: "error",
       })
       continue
