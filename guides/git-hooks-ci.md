@@ -20,7 +20,7 @@ In `.pre-commit-config.yaml`:
 minimum_pre_commit_version: "3.2.0"
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.11.0
+    rev: v0.12.0
     hooks:
       - id: rulecast
       - id: rulecast-push

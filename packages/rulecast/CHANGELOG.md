@@ -1,5 +1,39 @@
 # @syv-ai/rulecast
 
+## 0.12.0
+
+### Minor Changes
+
+- cdb6bd6: Updates the libraries rulecast runs on to their current major versions: `zod` 4, which checks config files, and `diff` 9, which compares files. Config error messages keep their wording, though a config with several errors may list them in a different order.
+  
+  Things you may notice:
+  
+  - `rulecast fix --dry-run` now puts a file name containing a tab, newline or carriage return in quotes, the way git writes it, so `git apply` can read the diff. Other names are not quoted, so `å.ts` still applies with macOS's `patch`, which reads no quoted names.
+  - A whole number above 2^53 in a config, such as `max_file_bytes: 1e21`, is now refused instead of accepted.
+  - Breaking, for anyone writing a custom detector: its `schema` must now be built with zod 4, because rulecast's types and validation use it.
+  - Two exported types loosened from a non-empty tuple to an array: `RuleExamples`' `expect.lines` and `RuleEntry.stages` in `/internal`.
+  
+  The package's type declarations are now one file per module rather than a single bundle, because TypeScript 7 cannot bundle them. Importing from `@syv-ai/rulecast` works the same. zod 4 takes about 30 ms longer to load in each rulecast process. On Node 22.1 or newer rulecast now turns on Node's compile cache, kept in the system's temp directory, which wins back about half of that; on Node 20 hooks are the full 30 ms slower.
+
+### Patch Changes
+
+- f96be76: rulecast now uses ast-grep 0.51.1 (was 0.45.3) to run `ast-grep` rules. One change is visible in your rules, and only in Python ones.
+  
+  In an ast-grep pattern, `$NAME`, `$_NAME` and `$$$NAMES` are metavariables: they stand for whatever code is there. Python support comes from a separate parser, and until now ast-grep treated every `$` in a Python pattern as the start of a metavariable, even where you meant a real `$` character. So a pattern such as `Template("$name")` or `re.compile(r"^\d+$")` never matched anything. Now a `$` that does not start a metavariable is matched as you wrote it, as it already was for TypeScript, JavaScript, CSS and HTML. A Python rule with such a pattern may start reporting matches. Rules that use only metavariables match exactly what they did before.
+  
+  Nothing else changes for your rules: the parsers for the languages rulecast supports are the same versions, and so are the node kinds a rule can name.
+- 5668744: Fixes to how rulecast's agent hooks are installed and checked, to the standalone installer, and to `rulecast fix --dry-run`.
+  
+  - `rulecast install` (and `rulecast init`) can put rulecast's Claude Code hooks in the shared `.claude/settings.json` or the personal `.claude/settings.local.json`. When both files held hooks from an older rulecast, only the shared one was updated, so the personal one kept the old commands and rulecast ran twice on every event. Install now updates rulecast's hooks in every settings file that has them, says which files it changed, and leaves everything else in those files alone. `rulecast doctor` reports a settings file left on an older command as out of date. Because install and init now read every settings file, one that is not valid JSON makes them stop and name it, where before they could skip it; doctor reports it on the hooks line and carries on.
+  - When the hooks are installed but no rulecast can be found to run them, `rulecast doctor` now says so, with how to install rulecast, even when the hooks are also out of date. Before, it only said to run `rulecast install`, which does not fix it. Only a missing hook script is named before it, since the hooks that run the script fail without it.
+  - `rulecast doctor`'s line about the agent hooks now lists every problem at once, where before it named one: hooks missing, hooks out of date in each settings file (named), a hook script that is missing or out of date, no rulecast to run, and a rulecast older than `minimum_rulecast_version`.
+  - `rulecast doctor` names the rulecast the hooks run more accurately. The binary from install.sh is called that whether or not it was found through the PATH, and it is never offered a global npm update. When a global npm rulecast comes before install.sh's directory on the PATH, doctor now says to update the npm install, since a newer install.sh binary would never run.
+  - install.sh prints the `fish_add_path` command with the directory in quotes, so a directory with a space in it stays one argument when you paste the command.
+  - install.sh treats `/x/y`, `/x/y/` and `/x/y//` as the same install directory, and a PATH entry with a trailing slash as the same directory too. It no longer adds a second line to your shell's startup files, or the directory to your PATH twice, when the spelling differs.
+  - `rulecast fix --dry-run` ends a file name that contains a space with a tab in the diff header, as git does. Without it, `patch` read `my file.ts` as `my` and could not apply the diff.
+  - `rulecast init` now tells you to commit the hook script (`.claude/hooks/rulecast.sh`) whenever the shared `.claude/settings.json` runs it, including when the hooks were found in your personal settings, and when the script is on disk but was never committed. Without it in the repository, every teammate's hooks fail. In `rulecast init --format json`, a new `alsoCommit` list names such files: ones init leaves as they are that still need committing.
+  - The git hook command (in `.pre-commit-hooks.yaml` and the lefthook example in the Git hooks guide) now skips a `rulecast` on the PATH that cannot run, such as a binary built for another machine, and goes on to the one install.sh installed, as the agent hooks already did. Before, the git hook failed. If you copied the lefthook example, copy it again.
+
 ## 0.11.0
 
 ### Minor Changes
