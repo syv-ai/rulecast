@@ -61,6 +61,8 @@ describe("pages made of a README section and a file", () => {
     const commands = body("reference/commands")
     expect(commands).not.toContain("The commands most projects use are in")
     expect(commands).toContain("`rulecast <command> --help` prints a command's flags.")
+    expect(commands).toContain("`rulecast help --all` lists every command.")
+    expect(commands).not.toContain("The [advanced commands]")
     const detectors = body("reference/detectors")
     expect(detectors).not.toMatch(/See \[`agents\/reference\/detectors\.md`\]/)
     expect(detectors).toContain("a rule can opt into the edit hook with `stages: [edit, verify]`.")

@@ -12,7 +12,7 @@ If your agent can't fetch a URL, have it run `npx @syv-ai/rulecast init --dry-ru
 
 The hooks keep a local log of the findings they reported: finding ids, rule ids, files and lines, never code. `rulecast stats` reads it: which rules the agent fixes, which it keeps hitting or silencing, which never fire.
 
-Once the log spans two weeks, `stats` also shows each rule's weekly rate and the files it keeps firing on. The log holds about 8 MiB; to keep 26 weeks of per-week counts, set `stats.weekly_summary: true` (or `rulecast init --weekly-summary`). `rulecast clean` deletes the log.
+Once the log spans two weeks, `stats` also shows each rule's weekly rate and the files it keeps firing on. The log holds about 8 MiB; to keep 26 weeks of per-week counts, set `stats.weekly_summary: true` (or `rulecast init --weekly-summary`). `rulecast clean --project` deletes it, with the rest of this project's cache; `rulecast clean` deletes the whole cache, fetched rule repos included.
 
 ## Which agents
 

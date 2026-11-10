@@ -135,6 +135,14 @@ h1#_top {
 .sl-markdown-content th {
   background-color: var(--sl-color-gray-5);
 }
+/* Starlight takes the outer cells' padding away for an unshaded table; on a shaded one the text
+   would touch the edge of the shading. */
+.sl-markdown-content :is(th, td):first-child {
+  padding-inline-start: 1rem;
+}
+.sl-markdown-content :is(th, td):last-child {
+  padding-inline-end: 1rem;
+}
 .sl-markdown-content tr:nth-child(even) td {
   background-color: var(--sl-color-gray-6);
 }

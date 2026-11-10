@@ -58,6 +58,8 @@ and follow it.
 
 The agent reads your repo, agent memories, docs and grills you a bit on the project's context. It will then serve you some relevant default rules, e.g., via linters, git hooks, for generated code and so on. You add what you agree with.
 
+The agent hooks run in Claude Code today. Another agent can set up the same rules for git hooks and CI.
+
 Ever tried to sit down and write your Christmas wish list? It's difficult, isn't it? Conventions are the same way. Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
 
 
@@ -105,7 +107,7 @@ More in [Writing rules](https://github.com/syv-ai/rulecast/blob/main/guides/writ
 | Command | Does |
 |---|---|
 | `rulecast init` | Set rulecast up: config, settings, your existing git hooks as rules, agent hooks |
-| `rulecast install` / `uninstall` | Add (or upgrade) or remove the agent hooks |
+| `rulecast install` / `uninstall` | Add (or upgrade) the agent hooks and fetch missing rule repos, or remove the hooks |
 | `rulecast run` | Check staged files (the default), changed files, or everything |
 | `rulecast fix` | Apply regex and ast-grep rules' fixes; `--dry-run` prints the diff |
 | `rulecast list` | Show every configured rule: where it comes from, what it matches, what it cites |
@@ -113,11 +115,13 @@ More in [Writing rules](https://github.com/syv-ai/rulecast/blob/main/guides/writ
 | `rulecast test` | Run each rule's good/bad examples; `--against` and `--history` say how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
-| `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; `--ci` fails on a setup that would run degraded |
+| `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; exits 2 on errors, and with `--ci` also on a setup that would run degraded |
 
-If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists the [advanced commands](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md) too, and the exit codes are [there](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md#exit-codes).
+If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists every command. The [advanced commands](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md) and the exit codes are [there](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md#exit-codes).
 
 ## Install
+
+The agent hooks run `.claude/hooks/rulecast.sh`, a short script `rulecast install` writes and you commit with `.claude/settings.json`. It runs the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else `rulecast` in the directory `install.sh` installs to (`$RULECAST_INSTALL_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), for an agent started from the Dock or an IDE, whose PATH may lack it. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 Setup installs rulecast for you, after you approve the command. To do it by hand:
 
@@ -138,8 +142,6 @@ For one pinned version for everyone (needs Node ≥ 20.12):
 ```sh
 pnpm add -D @syv-ai/rulecast     # or npm / yarn
 ```
-
-The agent hooks run `.claude/hooks/rulecast.sh`, a short script `rulecast install` writes and you commit with `.claude/settings.json`. It runs the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the script's install directory (for an agent started from the Dock or an IDE, whose PATH may lack it). Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
 
 ## Performance
 

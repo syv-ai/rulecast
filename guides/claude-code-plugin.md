@@ -14,4 +14,4 @@
 
 When you correct the agent on how code here should be written, it may ask once whether to add a rule for it.
 
-The plugin's version follows the CLI's, so each release reaches you as a plugin update.
+The plugin's version follows the CLI's. Claude Code does not update a third-party marketplace by itself: for a new release, run `claude plugin marketplace update rulecast`, then `claude plugin update rulecast@rulecast`, and restart Claude Code.

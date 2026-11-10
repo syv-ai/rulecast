@@ -9,7 +9,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "rulecast",
-      description: "Your project's conventions, delivered to your coding agent at the moment it is about to break one.",
+      description: "Your project's conventions, checked while your coding agent works.",
       logo: { src: "./src/assets/logo.svg", replacesTitle: false },
       favicon: "/favicon.svg",
       customCss: ["./src/styles/theme.css"],

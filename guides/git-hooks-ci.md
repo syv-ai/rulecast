@@ -10,7 +10,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 
 `rulecast run --files F...` judges files whole, like `--all-files`. From a hook manager, use the hooks below instead.
 
-rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the install script's directory ([Install](../README.md#install)).
+rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the directory `install.sh` installs to ([Install](../README.md#install)).
 
 ## pre-commit
 
@@ -18,6 +18,7 @@ In `.pre-commit-config.yaml`:
 
 ```yaml
 minimum_pre_commit_version: "3.2.0"
+default_install_hook_types: [pre-commit, pre-push]
 repos:
   - repo: https://github.com/syv-ai/rulecast
     rev: v0.12.0
@@ -66,6 +67,6 @@ jobs:
           sarif_file: rulecast.sarif
 ```
 
-Without Node, replace `setup-node` and `npm ci` with the install command from [Install](../README.md#install), which puts `rulecast` on the job's PATH, and run `rulecast` where the example runs `npx rulecast`.
+The example has rulecast as a devDependency. Without one, put the install command from [Install](../README.md#install) in place of `setup-node` and `npm ci` (or after them, if the job needs Node), which puts `rulecast` on the job's PATH, and run `rulecast` where the example runs `npx rulecast`.
 
 A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`.
