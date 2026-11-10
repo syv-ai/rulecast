@@ -1,6 +1,6 @@
 {
   "name": "rulecast",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Skills for working with rulecast, which delivers a project's conventions to coding agents while they work.",
   "author": {
     "name": "syv.ai"
