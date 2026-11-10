@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { z } from "zod"
 
 import { errorMessage, formatZodError, isNotFound } from "../../src/core/errors"
@@ -96,5 +96,30 @@ describe("formatZodError words a validation failure the same whatever zod says",
 
   test("without the input an enum still names its options", () => {
     expect(message(z.enum(["a", "b"]), "c", {})).toBe("Invalid enum value. Expected 'a' | 'b'")
+  })
+
+  test("a missing key keeps the message its schema wrote", () => {
+    expect(message(z.object({ m: z.enum(["a"], { error: "pick a mode" }) }), {})).toBe("m: pick a mode")
+    expect(message(z.object({ m: z.literal("a", { error: "pick a" }) }), {})).toBe("m: pick a")
+    expect(message(z.object({ m: z.enum(["a", "b"], { error: "pick a mode" }) }), { m: "c" })).toBe("m: pick a mode")
+  })
+
+  test("a missing key with its own message still counts towards a did-you-mean", () => {
+    const schema = z.object({ mode: z.enum(["a", "b"], { error: "pick a mode" }) }).strict()
+    expect(message(schema, { mod: "a" })).toBe('unknown key "mod" (did you mean "mode"?); mode: pick a mode')
+  })
+
+  test("zod rewording its English text does not change rulecast's", async () => {
+    // What a later zod would say: rulecast's wording comes from the issue, never from this text.
+    z.config({ localeError: () => "Reworded by a later zod" })
+    vi.resetModules()
+    const fresh = await import("../../src/core/errors")
+    const result = z
+      .object({ a: z.string(), b: z.number().int(), c: z.enum(["x", "y"]) })
+      .safeParse({ b: 1.5, c: "z" }, { reportInput: true })
+    if (result.success) throw new Error("expected a failure")
+    expect(fresh.formatZodError(result.error)).toBe(
+      "a: required; b: Expected integer, received float; c: Invalid enum value. Expected 'x' | 'y', received 'z'",
+    )
   })
 })

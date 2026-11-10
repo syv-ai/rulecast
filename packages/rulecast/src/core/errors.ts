@@ -71,52 +71,94 @@ export function formatZodError(error: ZodError, options: { prefix?: string; sche
 }
 
 type Issue = z.core.$ZodIssue
+type RawIssue = z.core.$ZodRawIssue
 
-/** How zod's stock message reports a value of the wrong type, the one place that says what it got. */
-const WRONG_TYPE = /^Invalid input: expected (\w+), received (-?\w+)$/
+/** zod's English, for every issue rulecast has no wording of its own for. */
+const english = z.locales.en().localeError!
 
 /**
- * What an issue says, in rulecast's own words. A message a schema wrote itself is left alone, which
- * is why this matches zod's stock text instead of the issue's code: the two cannot otherwise be
- * told apart. Wording zod has none for here, and any locale but English, passes through.
+ * Rulecast's wording, installed as zod's locale. zod asks a locale only when the schema wrote no
+ * message of its own, so a schema's own message always wins. The wording is built from the issue's
+ * code and fields, which are zod's API, so a later zod changing its English text changes nothing a
+ * rule author reads. The locale lives in zod's global config, shared by every copy of zod that keeps
+ * it on globalThis; a schema from a copy that does not gets zod's English, printed as it is.
+ */
+function rulecastLocale(issue: RawIssue): ReturnType<typeof english> {
+  if (issue.code === "invalid_type") return typeWording(issue) ?? english(issue)
+  if (issue.code === "invalid_value") return valueWording(issue.values)
+  if (issue.code === "too_small" || issue.code === "too_big") return sizeWording(issue) ?? english(issue)
+  return english(issue)
+}
+
+z.config({ localeError: rulecastLocale })
+
+/** A value of the wrong type, or a key that is not there. Null: zod's own words. */
+function typeWording(issue: z.core.$ZodRawIssue<z.core.$ZodIssueInvalidType>): string | null {
+  const { input } = issue
+  if (input === undefined) return "required"
+  // zod's own spellings, as its English names the two types.
+  const expected = issue.expected === "nan" ? "NaN" : issue.expected
+  const received = z.core.util.parsedType(input)
+  if (!/^\w+$/.test(expected) || !/^\w+$/.test(received)) return null
+  if (expected === "int") return "Expected integer, received float"
+  // YAML's .inf and -.inf: a number, though not one any integer setting can take. NaN is "nan".
+  if (received === "number" && !Number.isFinite(input)) {
+    if (expected === "number") return "Expected integer, received float"
+    return `Expected ${expected === "record" ? "object" : expected}, received number`
+  }
+  return `Expected ${expected === "record" ? "object" : expected}, received ${received.toLowerCase()}`
+}
+
+/**
+ * A literal or enum value that is not one of those allowed, as the locale words it. What was given
+ * instead is added by formatZodError, which knows whether the caller asked for the input.
+ */
+function valueWording(values: readonly unknown[]): string {
+  if (values.length === 1) {
+    const [value] = values
+    // JSON.stringify throws on a bigint, and a locale that throws breaks the parse itself.
+    return `Invalid literal value, expected ${typeof value === "bigint" ? `${value}n` : JSON.stringify(value)}`
+  }
+  return `Invalid enum value. Expected ${values.map((value) => `'${String(value)}'`).join(" | ")}`
+}
+
+/** A string, list or number out of its bounds. Null: zod's own words, as for an exact size. */
+function sizeWording(
+  issue: z.core.$ZodRawIssue<z.core.$ZodIssueTooSmall> | z.core.$ZodRawIssue<z.core.$ZodIssueTooBig>,
+): string | null {
+  if (issue.exact) return null
+  const small = issue.code === "too_small"
+  const bound = String(small ? issue.minimum : issue.maximum)
+  if (small && issue.origin === "string") return `String must contain at least ${bound} character(s)`
+  if (small && issue.origin === "array") return `Array must contain at least ${bound} element(s)`
+  if (issue.origin === "number" || issue.origin === "int") {
+    const comparison = small ? "greater than" : "less than"
+    return `Number must be ${comparison} ${issue.inclusive ? "or equal to " : ""}${bound}`
+  }
+  return null
+}
+
+/**
+ * What an issue says, given what the caller parsed with. The locale has worded it already, or the
+ * schema has; only rulecast's own enum and literal text is touched here, to say what was given
+ * instead when the caller asked zod to report the input (reportInput).
  */
 function wording(issue: Issue): string {
   const { message } = issue
-  if (isMissing(issue)) return "required"
-  const wrongType = WRONG_TYPE.exec(message)
-  if (wrongType !== null) {
-    const [, expected, received] = wrongType
-    if (expected === "int") return "Expected integer, received float"
-    if (/^-?Infinity$/.test(received!)) {
-      if (expected === "number") return "Expected integer, received float"
-      return `Expected ${expected === "record" ? "object" : expected}, received number`
-    }
-    return `Expected ${expected === "record" ? "object" : expected}, received ${received!.toLowerCase()}`
-  }
-  if (issue.code === "invalid_value" && /^Invalid (input|option): expected /.test(message)) {
-    if (issue.values.length === 1) return `Invalid literal value, expected ${JSON.stringify(issue.values[0])}`
-    const expected = issue.values.map((value) => `'${String(value)}'`).join(" | ")
-    if (!("input" in issue)) return `Invalid enum value. Expected ${expected}`
-    return typeof issue.input === "string"
-      ? `Invalid enum value. Expected ${expected}, received '${issue.input}'`
-      : `Expected ${expected}, received ${z.core.util.getParsedType(issue.input)}`
-  }
-  const size = /^Too (small|big): expected (\w+) to (?:have|be) (>=|>|<=|<)(\S+)(?: \w+)?$/.exec(message)
-  if (size !== null) {
-    const [, side, origin, relation, bound] = size
-    if (side === "small" && origin === "string") return `String must contain at least ${bound} character(s)`
-    if (side === "small" && origin === "array") return `Array must contain at least ${bound} element(s)`
-    if (origin === "number" || origin === "int") {
-      const comparison = side === "small" ? "greater than" : "less than"
-      return `Number must be ${comparison} ${relation!.includes("=") ? "or equal to " : ""}${bound}`
-    }
-  }
-  return message
+  if (issue.code !== "invalid_value" || message !== valueWording(issue.values) || !("input" in issue)) return message
+  if (issue.input === undefined) return "required"
+  if (issue.values.length === 1) return message
+  if (typeof issue.input === "string") return `${message}, received '${issue.input}'`
+  const expected = issue.values.map((value) => `'${String(value)}'`).join(" | ")
+  return `Expected ${expected}, received ${z.core.util.getParsedType(issue.input)}`
 }
 
-/** A required key that is absent. Enum and literal issues only say so when the input was reported. */
+/**
+ * A required key that is absent: the locale's "required", or an enum or literal given no input when
+ * the input was reported, whatever its message says.
+ */
 function isMissing(issue: Issue): boolean {
-  if (issue.code === "invalid_type") return WRONG_TYPE.exec(issue.message)?.[2] === "undefined"
+  if (issue.code === "invalid_type") return issue.message === "required"
   return issue.code === "invalid_value" && "input" in issue && issue.input === undefined
 }
 
