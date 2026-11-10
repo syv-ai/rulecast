@@ -12,7 +12,7 @@
         "file": "app/services/users.py",
         "line": 3,
         "column": 5,
-        "message": "app/services/users.py:3 raises HTTPException(500). Raise a domain exception.",
+        "message": "app/services/users.py:3 raises HTTPException(500) in the service layer. Raise a domain exception; the API layer maps it to a response.",
         "count": 1
       }
     ],

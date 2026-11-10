@@ -4,7 +4,7 @@
 
 # rulecast
 
-Your project conventions, enforced.
+Your project's conventions, checked while your coding agent works.
 
 [![npm](https://img.shields.io/npm/v/@syv-ai/rulecast?color=7fa4d6)](https://www.npmjs.com/package/@syv-ai/rulecast) [![CI](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/syv-ai/rulecast/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-7fa4d6)](LICENSE) [![Docs](https://img.shields.io/badge/docs-syv--ai.github.io%2Frulecast-7fa4d6)](https://syv-ai.github.io/rulecast/)
 
@@ -12,7 +12,7 @@ Your project conventions, enforced.
 
 </div>
 
-Your conventions are fragmented across `AGENTS.md` agent memories, `/docs`, specs, linter rules and old agent transcripts. Your coding agent is sort of aware of some of it. For the stuff it does know, it read it forty tool calls ago and keeps forgetting. Rulecast helps formalize conventions as rules and enforce them through agent hooks: when an edit breaks a rule, the agent is informed along with the relevant doc section, in the same turn.
+Your conventions are spread across `AGENTS.md`, agent memories, `/docs`, specs and linter configs. Your agent read some of it forty tool calls ago, and forgets. rulecast turns conventions into rules and checks them in your agent's hooks: when an edit breaks one, the agent gets the finding and the doc section it cites, in the same turn.
 
 <div align="center">
 
@@ -54,12 +54,11 @@ https://syv-ai.github.io/rulecast/agents/SETUP.md
 and follow it.
 ```
 
-The agent reads your repo, agent memories, docs and grills you a bit on the project's context. It will then serve you some relevant default rules, e.g., via linters, git hooks, for generated code and so on. You add what you agree with.
+The agent reads your repo, docs and agent memories, then shows you one page: the rules that fit (from your linters, your git hooks, generated code) and the few questions only you can answer. Nothing is written until you approve.
 
 The agent hooks run in Claude Code today. Another agent can set up the same rules for git hooks and CI.
 
-Ever tried to sit down and write your Christmas wish list? It's difficult, isn't it? Conventions are the same way. Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
-
+Most rules come later, one at a time: when the agent makes a mistake that shouldn't happen again, run `/rulecast:add-rule`.
 
 ## A rule
 
@@ -119,19 +118,17 @@ If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --
 
 ## Install
 
-The agent hooks run `.claude/hooks/rulecast.sh`, a short script `rulecast install` writes and you commit with `.claude/settings.json`. It runs the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else `rulecast` in the directory `install.sh` installs to (`$RULECAST_INSTALL_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), for an agent started from the Dock or an IDE, whose PATH may lack it. Nothing installs rulecast behind your back. Linux and macOS; Windows is not supported.
-
-Setup installs rulecast for you, after you approve the command. To do it by hand:
+Linux and macOS; Windows is not supported. Setup installs rulecast for you, after you approve the command, and nothing installs it behind your back. [How it works](https://syv-ai.github.io/rulecast/how-it-works/#what-gets-written) lists what setup writes and where the agent hooks look for rulecast. To install it by hand:
 
 ### Standalone binary
 
-No Node needed. Installs the latest release as `~/.local/bin/rulecast` and puts it on your PATH, as uv's installer does:
+No Node needed. Installs the latest release as `~/.local/bin/rulecast` and puts it on your PATH:
 
 ```sh
 curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
 ```
 
-In a terminal it shows what it will do and asks to proceed, customize (directory, startup files) or cancel; with no terminal it uses the defaults. It checks the download against its checksum and prints every shell startup file it changed. For a fixed version, use the script attached to that release: `https://github.com/syv-ai/rulecast/releases/download/vX.Y.Z/install.sh`. Options go after `sh -s --`: `-y` asks nothing, `--install-dir DIR` picks another directory, `--no-modify-path` changes no startup file, `--help` lists them. Run it again to update.
+It checks the download's checksum and lists any shell startup file it changed. Run it again to update. `sh -s -- --help` lists its options. For a fixed version, use the `install.sh` attached to that release.
 
 ### npm
 
@@ -143,7 +140,7 @@ pnpm add -D @syv-ai/rulecast     # or npm / yarn
 
 ## Performance
 
-The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm caches, `llm` rules aside, and the hook before each Bash call at 150 ms over a hook that does nothing. `pnpm perf` checks both. There is no daemon: every hook is a fresh process with caches on disk.
+The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm caches, `llm` rules aside, and the hook before each Bash call at 150 ms over a hook that does nothing. The repo's perf test checks both. There is no daemon: every hook is a fresh process with caches on disk.
 
 ## Learn more
 
@@ -155,7 +152,7 @@ The edit hook is budgeted at p95 under 500 ms on a 30-rule project with warm cac
 
 ## Status
 
-0.12. Everything above works and is tested. Before 1.0 the config format and the output of `rulecast run` may still change; `minimum_rulecast_version` exists so a rule can say what it needs.
+0.12. Before 1.0 the config format and `rulecast run`'s output may change.
 
 Next: adapters for Codex, Cursor and OpenCode; Biome; an Azure OpenAI provider.
 

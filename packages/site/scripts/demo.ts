@@ -35,7 +35,7 @@ export function session(): Line[] {
     agent("Edit app/services/users.py"),
     ...output(openingOutput()),
     agent("Edit app/services/users.py"),
-    note("(nothing new: rulecast stays quiet)"),
+    note("(fixed: nothing to report)"),
     agent("Bash python scripts/scaffold_service.py users"),
     ...output(golden("shell-edit")),
   ]

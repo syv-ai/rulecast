@@ -70,8 +70,8 @@ describe("sync-version", () => {
     expect(pinned).toContain("  - repo: https://github.com/syv-ai/rulecast\n    rev: v1.2.3\n")
     expect(pinned).toContain("  - repo: https://github.com/other/tool\n    rev: v0.4.0\n")
     expect(() => withPreCommitRev("# no snippet\n", "1.2.3")).toThrow(/rev/)
-    const status = withReadmeVersion("## Status\n\n0.4. Everything above works and is tested.\n", "1.2.3")
-    expect(status).toContain("\n1.2. Everything above works and is tested.\n")
+    const status = withReadmeVersion("## Status\n\n0.4. Before 1.0 the config format may change.\n", "1.2.3")
+    expect(status).toContain("\n1.2. Before 1.0 the config format may change.\n")
     expect(() => withReadmeVersion("# no status\n", "1.2.3")).toThrow(/Status/)
   })
 

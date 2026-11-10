@@ -62,7 +62,7 @@ export async function generateSkillFiles(): Promise<{ target: string; source: st
 }
 
 const PRE_COMMIT_REV = /(- repo: https:\/\/github\.com\/syv-ai\/rulecast\n\s+rev: )v\d+\.\d+\.\d+/g
-const README_STATUS = /^\d+\.\d+\.( Everything above works)/gm
+const README_STATUS = /^\d+\.\d+\.( Before 1\.0 )/gm
 
 /** Throws unless `pattern` matches `source` exactly once, rather than go stale quietly. */
 function once(source: string, pattern: RegExp, file: string, name: string): void {

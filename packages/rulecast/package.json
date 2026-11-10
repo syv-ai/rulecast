@@ -1,7 +1,7 @@
 {
   "name": "@syv-ai/rulecast",
   "version": "0.12.0",
-  "description": "Deliver project conventions to coding agents at the moment they matter.",
+  "description": "Your project's conventions, checked while your coding agent works.",
   "keywords": [
     "claude-code",
     "coding-agent",
