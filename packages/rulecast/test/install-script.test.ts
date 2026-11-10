@@ -277,6 +277,17 @@ describe("install.sh", () => {
     expect(run.stdout).toContain(`Add this line to your shell's startup file: ${SOURCE_LINE}`)
   })
 
+  test("a directory with a space is printed so a pasted command keeps it whole", async () => {
+    const dir = path.join(scratch("spaced"), "my bin")
+    const run = await install({ env: { RULECAST_INSTALL_DIR: dir, SHELL: "/usr/bin/fish" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toContain(`for fish, run: fish_add_path "${dir}"\n`)
+    expect(run.stdout).toContain(`to use rulecast in this shell now, run: . "${dir}/env"\n`)
+    // Under HOME, through $HOME, as the startup files name it.
+    const home = await install({ env: { SHELL: "/usr/bin/fish" } })
+    expect(home.stdout).toContain('for fish, run: fish_add_path "$HOME/.local/bin"\n')
+  })
+
   test("GITHUB_PATH set: appends the dir there once", async () => {
     const githubPath = path.join(scratch("gh"), "path")
     const home = scratch("home")

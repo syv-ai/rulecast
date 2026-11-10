@@ -285,8 +285,9 @@ EOF
 $files
 EOF
   fi
+  # Quoted as the startup files have it, so a directory with a space stays one argument when pasted.
   case "${SHELL:-}" in
-    */fish) say "for fish, run: fish_add_path $dir" ;;
+    */fish) say "for fish, run: fish_add_path \"$shown\"" ;;
   esac
   say "to use rulecast in this shell now, run: $env_line"
   return 0
