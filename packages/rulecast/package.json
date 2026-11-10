@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "@ast-grep/lang-python": "^0.0.6",
-    "@ast-grep/napi": "^0.45.3",
+    "@ast-grep/napi": "^0.51.1",
     "diff": "^9.0.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"

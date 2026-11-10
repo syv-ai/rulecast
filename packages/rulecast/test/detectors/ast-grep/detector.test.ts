@@ -93,6 +93,21 @@ describe("ast-grep detector", () => {
     expect(result.findings.map((finding) => finding.match.captures)).toEqual([{ A: "1" }, { A: "" }])
   })
 
+  // Python is a dynamic language: before @ast-grep/napi 0.51.1 every `$` in its patterns was
+  // rewritten as a metavariable sigil, so these two patterns matched nothing.
+  test("a `$` in a Python pattern that starts no metavariable is matched as written", async () => {
+    const cwd = await createProject({ "a.py": 't = Template("$name")\nDIGITS = re.compile(r"^\\d+$")\n' })
+    const result = await run(cwd, [
+      await ruleFor("template", { language: "python", rule: { pattern: 'Template("$name")' } }, ["a.py"]),
+      await ruleFor("anchored", { language: "python", rule: { pattern: 're.compile(r"^\\d+$")' } }, ["a.py"]),
+    ])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((finding) => [finding.rule, finding.match.line])).toEqual([
+      ["template", 1],
+      ["anchored", 2],
+    ])
+  })
+
   test("runs every rule of a language against one parse, and keeps languages apart", async () => {
     const cwd = await createProject({ "a.py": PY, "b.tsx": TSX })
     const result = await run(cwd, [
