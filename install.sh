@@ -278,13 +278,29 @@ main() {
   part=""
   say "installed rulecast $installed at $dir/rulecast"
 
+  # The env file compares PATH entries without their trailing slashes, as on_path does: an entry
+  # spelt $shown// is the same directory, and adding it again would put it on the PATH twice.
   cat >"$dir/env" <<EOF || fail "could not write $dir/env"
 #!/bin/sh
 # Written by the rulecast installer: puts $shown on the PATH, once.
-case ":\${PATH}:" in
-  *:"$shown":* | *:"$shown"/:*) ;;
-  *) export PATH="$shown:\$PATH" ;;
-esac
+_rulecast_rest="\${PATH:-}"
+_rulecast_found=
+while :; do
+  _rulecast_entry="\${_rulecast_rest%%:*}"
+  while :; do
+    case "\$_rulecast_entry" in
+      ?*/) _rulecast_entry="\${_rulecast_entry%/}" ;;
+      *) break ;;
+    esac
+  done
+  [ "\$_rulecast_entry" = "$shown" ] && _rulecast_found=1
+  case "\$_rulecast_rest" in
+    *:*) _rulecast_rest="\${_rulecast_rest#*:}" ;;
+    *) break ;;
+  esac
+done
+[ -n "\$_rulecast_found" ] || export PATH="$shown:\$PATH"
+unset _rulecast_rest _rulecast_entry _rulecast_found
 EOF
 
   if [ -n "${GITHUB_PATH:-}" ] && ! grep -qxF "$dir" "$GITHUB_PATH" 2>/dev/null; then

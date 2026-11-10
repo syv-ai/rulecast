@@ -319,6 +319,31 @@ describe("install.sh", () => {
     expect(sourced.stdout).toBe(`${dir}/:/usr/bin:/bin`)
   })
 
+  test("its env file finds the directory on the PATH however many trailing slashes it has, in any sh", async () => {
+    const home = path.join(scratch("odd"), "my home")
+    mkdirSync(home)
+    const run = await install({ home })
+    expect(run.status, run.stderr).toBe(0)
+    const dir = bin(home)
+    const env = path.join(dir, "env")
+    const shells = ["/bin/sh", "/bin/bash", "/bin/zsh", "dash"]
+      .map((shell) => spawnSync("/bin/sh", ["-c", `command -v ${shell}`], { encoding: "utf8" }).stdout.trim())
+      .filter((shell) => shell !== "")
+    for (const shell of shells) {
+      for (const [before, after] of [
+        [`${dir}//:/usr/bin:/bin`, `${dir}//:/usr/bin:/bin`],
+        [`/usr/bin:${dir}/:/bin`, `/usr/bin:${dir}/:/bin`],
+        ["/usr/bin:/bin", `${dir}:/usr/bin:/bin`],
+      ]) {
+        const sourced = spawnSync(shell, ["-c", `. "$1"; . "$1"; printf %s "$PATH"`, "sh", env], {
+          env: { HOME: home, PATH: before },
+          encoding: "utf8",
+        })
+        expect(sourced.stdout, `${shell}: ${before}`).toBe(after)
+      }
+    }
+  })
+
   test("installDir drops trailing slashes as the script does", async () => {
     for (const env of <Record<string, string>[]>[
       { RULECAST_INSTALL_DIR: `${path.join(scratch("own"), "bin")}//` },
