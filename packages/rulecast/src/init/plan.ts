@@ -101,7 +101,7 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
  * The agent's hooks, planned exactly as `rulecast install` plans them (core/hook-plan.ts): hooks
  * already anywhere count, and are upgraded where they are, a partial install included. The settings
  * change, then one per other settings file upgraded, each committed by its own scope; then one per
- * file the hooks need, for committing when the settings are.
+ * file the hooks need, for committing when a shared settings file will run them.
  */
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange[]> {
   const install = choice.adapter.install
@@ -120,7 +120,6 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
   if (write === null) return []
   const label = choice.adapter.label
   const commitOf = (file: string) => install.scopes.find((entry) => entry.file === file)?.scope === "shared"
-  const commit = commitOf(write.file)
   const changes: PlannedChange[] = []
   if (write.settings !== null) {
     const parts = [
@@ -132,7 +131,7 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
       content: `${JSON.stringify(write.settings, null, 2)}\n`,
       created: write.created,
       summary: `${parts.join(", ")} (${label})`,
-      commit,
+      commit: commitOf(write.file),
     })
   }
   for (const { file, settings, updated } of write.others) {
@@ -145,9 +144,37 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
     })
   }
   for (const { file, content, created } of write.files) {
-    changes.push({ file, content, created, summary: `hook script (${label})`, commit })
+    changes.push({ file, content, created, summary: `hook script (${label})`, commit: plan.sharedRuns })
   }
   return changes
+}
+
+/**
+ * The files the agents' hooks need that are there already, unchanged, and not committed, while a
+ * shared settings file runs them: a teammate who pulls the settings gets hooks that fail.
+ */
+export async function uncommittedHookFiles(
+  agents: readonly AgentChoice[],
+  context: PlanContext,
+  isTracked: (file: string) => Promise<boolean>,
+): Promise<string[]> {
+  const found: string[] = []
+  for (const choice of agents) {
+    const install = choice.adapter.install
+    if (install === null) continue
+    const read = async (file: string) => {
+      const text = await context.readText(file)
+      return text === null ? null : { text }
+    }
+    const plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs).catch(() => null)
+    if (plan === null || !plan.sharedRuns) continue
+    const written = new Set((plan.write?.files ?? []).map((each) => each.file))
+    for (const { file } of install.files) {
+      if (written.has(file) || found.includes(file)) continue
+      if ((await context.readText(file)) !== null && !(await isTracked(file))) found.push(file)
+    }
+  }
+  return found
 }
 
 /** Every file init would create or change, with its full new content. Nothing is written here. */

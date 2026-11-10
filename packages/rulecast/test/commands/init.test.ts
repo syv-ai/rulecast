@@ -80,6 +80,41 @@ describe("rulecast init", () => {
     expect(JSON.parse(await read(root, ".claude/settings.local.json")).hooks.PostToolUseFailure).toHaveLength(1)
   })
 
+  test("a shared file that will run the hook script has the script committed, whichever file won", async () => {
+    // Personal settings with every hook on the old inline command, shared ones with only Stop: the
+    // personal file wins, but after init the shared one runs the script too, for every teammate.
+    const INLINE = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await runCli(root, ["install", "--scope", "personal"])).code).toBe(0)
+    await rm(path.join(root, HOOK_SCRIPT_FILE))
+    const personal = JSON.parse(await read(root, ".claude/settings.local.json"))
+    for (const groups of Object.values(personal.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = INLINE
+    }
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
+    const shared = { hooks: { Stop: [{ hooks: [{ type: "command", command: INLINE, timeout: 70 }] }] } }
+    await writeFile(path.join(root, ".claude/settings.json"), JSON.stringify(shared))
+    await git(root, "add", ".claude/settings.json")
+    await git(root, "commit", "-q", "-m", "shared hook")
+
+    const result = await init(root, "--agent", "claude-code")
+    expect(result.code).toBe(0)
+    expect(JSON.parse(await read(root, ".claude/settings.json")).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
+    expect(result.stdout).toContain("Commit .claude/settings.json and .claude/hooks/rulecast.sh.")
+  })
+
+  test("a hook script on disk but never committed is named for committing", async () => {
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await runCli(root, ["install"])).code).toBe(0)
+    await git(root, "add", ".claude/settings.json")
+    await git(root, "commit", "-q", "-m", "settings only")
+    const result = await init(root, "--agent", "claude-code")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("Commit .claude/hooks/rulecast.sh.")
+    const json = await report(root, "--agent", "claude-code", "--dry-run")
+    expect(json.report.alsoCommit).toEqual([HOOK_SCRIPT_FILE])
+  })
+
   test("a config that fails validation is not called ready to commit", async () => {
     // init wrote a config validate refused, exited 2, and still said "Commit …" (plan 21, #3).
     const root = await createRepo({

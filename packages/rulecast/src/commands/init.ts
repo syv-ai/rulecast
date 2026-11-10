@@ -10,7 +10,7 @@ import { type Config, defaultConfig } from "../core/config/schema"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
-import { allFiles, repositoryTop } from "../core/git"
+import { allFiles, isTracked, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
 import { type Catalog, catalogEntry, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } from "../core/types"
@@ -27,7 +27,14 @@ import {
 } from "../init/generated"
 import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
 import { linterLines, linterRule, markSameAs, type OfferedLinter, offerLinters } from "../init/linters"
-import { type AgentChoice, type InitSelections, type PlannedChange, planInit, reviewText } from "../init/plan"
+import {
+  type AgentChoice,
+  type InitSelections,
+  type PlannedChange,
+  planInit,
+  reviewText,
+  uncommittedHookFiles,
+} from "../init/plan"
 import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
@@ -312,6 +319,8 @@ export interface InitReport {
     stats: { weeklySummary: boolean }
   }
   changes: { file: string; created: boolean; commit: boolean; summary: string; content: string }[]
+  /** Files init leaves as they are that still need committing: a hook script that was never added. */
+  alsoCommit: string[]
   notes: string[]
   written: boolean
   validate: { errors: number; lines: string[] } | null
@@ -419,14 +428,9 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   const reached = await hookConfigs(root, "init", own, (problem) =>
     notes.push(`${problem}\nLeft out of the hooks' timeout and repo fetch.`),
   )
-  const changes = await planInit(
-    { agents, hooks, linters, catalog: adopted, settings: flags.settings },
-    {
-      configText,
-      verifyMs: reached.verifyMs,
-      readText: (file) => readSourceFile(root, file),
-    },
-  )
+  const planContext = { configText, verifyMs: reached.verifyMs, readText: (file: string) => readSourceFile(root, file) }
+  const changes = await planInit({ agents, hooks, linters, catalog: adopted, settings: flags.settings }, planContext)
+  const alsoCommit = await uncommittedHookFiles(agents, planContext, (file) => isTracked(root, file))
   if (agents.length === 0) notes.push(NO_HOOKS)
   if (catalog?.offline !== undefined) notes.push(`Catalog: ${catalog.offline}.`)
   // Hook rules from a config above the project cite nothing: their findings come without a doc section.
@@ -502,6 +506,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
       summary,
       content,
     })),
+    alsoCommit,
     notes,
     written: false,
     validate: null,
@@ -581,7 +586,10 @@ function terminalText(report: InitReport, detection: Detection, scan: HookScan, 
   )
   out.push(...report.notes, "")
   if (report.validate !== null) out.push(...report.validate.lines, "")
-  const toCommit = report.changes.filter((change) => change.commit).map((change) => change.file)
+  const toCommit = [
+    ...report.changes.filter((change) => change.commit).map((change) => change.file),
+    ...report.alsoCommit,
+  ]
   if (!report.written) out.push("Nothing written (--dry-run).")
   else if ((report.validate?.errors ?? 0) > 0) out.push("Not ready to commit: fix what validate reports above.")
   else out.push(toCommit.length === 0 ? "Done." : `Commit ${listed(toCommit)}.`)

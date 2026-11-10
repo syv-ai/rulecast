@@ -42,6 +42,11 @@ export interface HookPlan {
   /** Where rulecast's hooks are now, and what is out of date there; null: in no settings file. */
   state: HookState | null
   /**
+   * Once written, a shared settings file runs the current command, so the files it needs
+   * (AdapterInstall.files) must be committed with it: a teammate's hooks fail without them.
+   */
+  sharedRuns: boolean
+  /**
    * What to write; null when the hooks and their files are current. `settings`: the settings file's
    * new content, null when only files need writing. `files`: those missing or differing, in full.
    * `others`: the other settings files to upgrade, each written in full.
@@ -81,6 +86,7 @@ export async function planHooks(
   verifyMs: number,
 ): Promise<HookPlan> {
   const install = installOf(adapter)
+  const scopeOf = (file: string) => install.scopes.find((each) => each.file === file)?.scope
   const readSettings = async (file: string): Promise<{ value: unknown } | null> => {
     const current = await read(file)
     return current === null ? null : { value: inFile(file, () => JSON.parse(current.text) as unknown) }
@@ -124,9 +130,20 @@ export async function planHooks(
       others: others.map(({ file, updated }) => ({ file, stale: updated })),
     }
     const current = state.stale.length === 0 && state.missing.length === 0
-    if (current && files.length === 0 && others.length === 0) return { state, write: null }
+    // Each file as it will be: what the write puts there, else what is there now.
+    const after = (file: string, value: unknown): unknown =>
+      file === found.file
+        ? current
+          ? value
+          : found.settings
+        : (others.find((other) => other.file === file)?.settings ?? value)
+    const sharedRuns = holding.some(
+      ({ file, value }) => scopeOf(file) === "shared" && runsCommand(after(file, value), install.command),
+    )
+    if (current && files.length === 0 && others.length === 0) return { state, sharedRuns, write: null }
     return {
       state,
+      sharedRuns,
       write: {
         file: state.file,
         settings: current ? null : found.settings,
@@ -144,6 +161,7 @@ export async function planHooks(
   const merged = inFile(target.file, () => install.merge(current?.value ?? {}, install.command, verifyMs))
   return {
     state: null,
+    sharedRuns: target.scope === "shared",
     write: {
       file: target.file,
       settings: merged.settings,
