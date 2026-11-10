@@ -72,6 +72,9 @@ importers:
       astro:
         specifier: ^7.3.8
         version: 7.3.8(@types/node@20.19.43)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1)
+      mdast-util-from-markdown:
+        specifier: ^2.1.0
+        version: 2.1.0
       yaml:
         specifier: ^2.9.1
         version: 2.9.1

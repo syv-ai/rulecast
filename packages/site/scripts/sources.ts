@@ -43,6 +43,24 @@ export interface Page {
 
 export const LEAD = "(lead)"
 
+/**
+ * Where scripts/content-from.ts records the ref the site's content was checked out from. With no
+ * record the content is the working tree's own: main's, in development and in tests.
+ */
+export const CONTENT_REF_FILE = "packages/site/.content-ref"
+
+/** The ref the site's content is from: a release tag, "main", or null for the working tree's own. */
+export function contentRef(): string | null {
+  const file = path.join(REPO_ROOT, CONTENT_REF_FILE)
+  return existsSync(file) ? readFileSync(file, "utf8").trim() || null : null
+}
+
+/** Whether the content is a release's, which may be older than the site's code. */
+export const fromRelease = (ref = contentRef()) => ref !== null && /^v\d/.test(ref)
+
+/** A repository file on GitHub, at the ref the site's content is from. */
+export const BLOB = `https://github.com/syv-ai/rulecast/blob/${contentRef() ?? "main"}/`
+
 /** Where the site is served: https://syv-ai.github.io/rulecast/. */
 export const SITE = "https://syv-ai.github.io"
 export const BASE = "/rulecast"
@@ -99,8 +117,12 @@ export function sidebar() {
   }))
 }
 
-/** Which source becomes which page. The sidebar, the sync and the link rewriting all read this table. */
-export const PAGES: Page[] = [
+/**
+ * Which source becomes which page, as main has them. The site's code is main's and its content may
+ * be an older release's (scripts/content-from.ts), which may not have every source yet: PAGES is
+ * this table less what that release lacks.
+ */
+export const PAGE_TABLE: Page[] = [
   {
     route: "getting-started",
     title: "Getting started",
@@ -229,6 +251,26 @@ export const PAGES: Page[] = [
 ]
 
 /**
+ * The pages whose source is there to build from. On main every source must be there: a page whose
+ * file is missing is a mistake, and throws. A release from before a page's source existed has no
+ * such page: one made only of that file is left off the site, and one that also has README
+ * sections keeps them and drops the file.
+ */
+export function availablePages(table: Page[], exists: (file: string) => boolean, released: boolean): Page[] {
+  const pages: Page[] = []
+  for (const page of table) {
+    const file = "file" in page.source ? page.source.file : undefined
+    if (file === undefined || exists(file)) pages.push(page)
+    else if (!released) throw new Error(`page ${page.route}: its source ${file} does not exist`)
+    else if ("readme" in page.source) pages.push({ ...page, source: { readme: page.source.readme } })
+  }
+  return pages
+}
+
+/** The sidebar, the sync and the link rewriting all read this list. */
+export const PAGES: Page[] = availablePages(PAGE_TABLE, (file) => existsSync(path.join(REPO_ROOT, file)), fromRelease())
+
+/**
  * README sections that are not a page of their own. Performance is imported by how-it-works.mdx.
  * The lead is the landing page's job, and its output block is read by openingOutput(); the license
  * is linked from the footer, "Learn more" is the sidebar's job, the Commands page is built from the
@@ -341,7 +383,7 @@ export interface PagePart {
  * A page's Markdown, in parts, before link rewriting. A README section's heading is dropped when it
  * is the page's title, which Starlight already prints.
  */
-export function pageParts(page: Page, sections: Map<string, string>): PagePart[] {
+export function pageParts(page: Page, sections: Map<string, string>, help = helpRecorded()): PagePart[] {
   const parts: PagePart[] = page.intro ? [{ markdown: page.intro, source: "README.md" }] : []
   if ("readme" in page.source) {
     for (const heading of page.source.readme) {
@@ -350,12 +392,35 @@ export function pageParts(page: Page, sections: Map<string, string>): PagePart[]
       parts.push({ markdown, source: "README.md" })
     }
   }
-  if ("help" in page.source) parts.push({ markdown: commandsMarkdown(readSource), source: "README.md" })
+  if ("help" in page.source) {
+    if (help) {
+      parts.push({ markdown: commandsMarkdown(readSource), source: "README.md" })
+    } else {
+      // A release from before the help was recorded: its README's table, said to be just that.
+      parts.splice(0, parts.length, { markdown: NO_HELP_NOTE, source: "README.md" })
+      parts.push({ markdown: sections.get("Commands") ?? "", source: "README.md" })
+    }
+  }
   if ("file" in page.source && page.source.file) {
     const body = splitTitle(readSource(page.source.file)).body.replace(RELATIVE_LINKS_NOTE, "")
     parts.push({ markdown: body, source: page.source.file })
   }
   return parts
+}
+
+/** Whether the content has the CLI's help recorded, which the Commands page is built from. */
+export const helpRecorded = () => existsSync(path.join(REPO_ROOT, HELP_DIR, "all.txt"))
+
+/** The Commands page's note when the release it documents recorded no help to build it from. */
+export const NO_HELP_NOTE =
+  ":::note\nThis release's help was not recorded for the site, so this page is the command table from its README. `rulecast help --all` and each command's `--help` list every command and flag.\n:::"
+
+/** A page's description: the Commands page's says what it was built from. */
+export function pageDescription(page: Page, help = helpRecorded()): string {
+  if ("help" in page.source && !help) {
+    return "The rulecast commands, as this release's README lists them."
+  }
+  return page.description
 }
 
 /**

@@ -9,8 +9,11 @@ name: pages
 # workflow_dispatch redeploys by hand: "latest" for the newest tag, or "main" for a docs fix that
 # cannot wait for a release.
 #
-# The site's code is main's, so it needs content as new as its own: a tag from before guides/ and
-# install.sh (plan 28) fails content-from. Redeploy those with "main", or wait for the next release.
+# The site's code is main's and its content is exactly the release's (content-from removes main's
+# copy first). Main's code copes with a release older than itself: a page whose source the release
+# lacks is left off, the Commands page falls back to the README's table, and no install.sh is served
+# without one. What it cannot cope with fails the build, not quietly: a README section main's site
+# does not place, or content its own pages need, such as the renderer goldens of the landing demo.
 on:
   workflow_call:
     inputs:

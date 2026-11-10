@@ -6,14 +6,20 @@ import {
   agentDocUrl,
   agentPrompt,
   assertPlaced,
+  availablePages,
   CONTENT_PATHS,
   exampleBinding,
   exampleSection,
+  fromRelease,
   GROUPS,
   INSTALL_SCRIPT,
   LEAD,
+  NO_HELP_NOTE,
+  PAGE_TABLE,
   PAGES,
   pageBody,
+  pageDescription,
+  pageParts,
   REPO_ROOT,
   readme,
   readmeSections,
@@ -144,6 +150,15 @@ describe("the Commands page", () => {
     expect([...body.matchAll(/^## rulecast (\S+)$/gm)].map((match) => match[1])).toEqual(names)
   })
 
+  it("is the README's table, said to be so, for a release that recorded no help", () => {
+    const parts = pageParts(page, readme(), false).map((part) => part.markdown)
+    expect(parts[0]).toBe(NO_HELP_NOTE)
+    expect(parts.join("\n\n")).not.toContain("as this release prints them")
+    expect(parts[1]).toBe(readme().get("Commands"))
+    expect(pageDescription(page, false)).not.toMatch(/help/)
+    expect(pageDescription(page, true)).toBe(page.description)
+  })
+
   it("leaves the summary out of the help block it already prints above", () => {
     const read = (file: string) =>
       file.endsWith("all.txt")
@@ -154,6 +169,33 @@ describe("the Commands page", () => {
     expect(markdown).toContain(
       "## rulecast run\n\nCheck things.\n\n```text\nrulecast x\n\nWarm up\n\n  --a  A flag\n```",
     )
+  })
+})
+
+describe("availablePages", () => {
+  const missing = (gone: string) => (file: string) => file !== gone
+
+  it("are every page on main, and a missing source throws", () => {
+    expect(PAGES).toEqual(PAGE_TABLE)
+    expect(() => availablePages(PAGE_TABLE, missing("agents/reference/stats.md"), false)).toThrow(
+      "page reference/stats: its source agents/reference/stats.md does not exist",
+    )
+  })
+
+  it("leave off a page a release has no source for, and keep a page's README sections", () => {
+    const stats = availablePages(PAGE_TABLE, missing("agents/reference/stats.md"), true)
+    expect(stats.map((page) => page.route)).not.toContain("reference/stats")
+    expect(stats).toHaveLength(PAGE_TABLE.length - 1)
+    const writing = availablePages(PAGE_TABLE, missing("guides/writing-rules.md"), true).find(
+      (page) => page.route === "guides/writing-rules",
+    )
+    expect(writing?.source).toEqual({ readme: ["A rule"] })
+  })
+
+  it("count only a release tag as a release", () => {
+    expect(fromRelease("v0.12.0")).toBe(true)
+    expect(fromRelease("main")).toBe(false)
+    expect(fromRelease(null)).toBe(false)
   })
 })
 

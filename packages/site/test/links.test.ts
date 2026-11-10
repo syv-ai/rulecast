@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { dropSelfPointers, rewriteLinks } from "../scripts/links"
+import { dropSelfPointers, rawAgentDoc, rewriteLinks } from "../scripts/links"
 import { PAGES, readme } from "../scripts/sources"
 import { pageMarkdown } from "../scripts/sync"
 
@@ -74,6 +74,49 @@ describe("rewriteLinks", () => {
     const markdown = "[a](https://example.com/x.md) [b](#errors)"
     expect(rewriteLinks(markdown, "README.md")).toBe(markdown)
   })
+
+  it("rewrites a link whose text wraps onto the next line", () => {
+    expect(rewriteLinks("See [the rule\nformat](agents/reference/rule-format.md#keys).", "README.md")).toBe(
+      "See [the rule\nformat](/rulecast/reference/rule-format/#keys).",
+    )
+  })
+
+  it("rewrites both an image and the link around it", () => {
+    expect(rewriteLinks("[![x](a.svg)](guides/advanced.md)", "README.md")).toBe(
+      "[![x](https://github.com/syv-ai/rulecast/blob/main/a.svg)](/rulecast/guides/advanced/)",
+    )
+  })
+
+  it("rewrites a link whose text holds brackets", () => {
+    expect(rewriteLinks("[`a[0]`](guides/advanced.md)", "README.md")).toBe("[`a[0]`](/rulecast/guides/advanced/)")
+  })
+
+  it("leaves a link in code alone", () => {
+    const markdown = "`[a](guides/advanced.md)`\n\n```md\n[a](guides/advanced.md)\n```"
+    expect(rewriteLinks(markdown, "README.md")).toBe(markdown)
+  })
+})
+
+describe("rawAgentDoc", () => {
+  const served = (repoPath: string) => repoPath.startsWith("agents/")
+
+  it("sends a link out of the served tree to the file on GitHub, and keeps a link within it", () => {
+    expect(
+      rawAgentDoc(
+        "[t](../../guides/agents.md#reading-the-trend) [d](../DRAFT-RULES.md#2-sort) [o](output.md) [w](https://x.dev)",
+        "agents/reference/stats.md",
+        served,
+      ),
+    ).toBe(
+      "[t](https://github.com/syv-ai/rulecast/blob/main/guides/agents.md#reading-the-trend) [d](../DRAFT-RULES.md#2-sort) [o](output.md) [w](https://x.dev)",
+    )
+  })
+
+  it("keeps the link text, a path included", () => {
+    expect(rawAgentDoc("[`guides/advanced.md`](../guides/advanced.md)", "agents/SETUP.md", served)).toBe(
+      "[`guides/advanced.md`](https://github.com/syv-ai/rulecast/blob/main/guides/advanced.md)",
+    )
+  })
 })
 
 describe("pages made of a README section and a file", () => {
@@ -94,6 +137,29 @@ describe("pages made of a README section and a file", () => {
     expect(
       dropSelfPointers("Read [Writing rules](guides/writing-rules.md). Then stop.", "README.md", "guides/git-hooks-ci"),
     ).toBe("Read [Writing rules](guides/writing-rules.md). Then stop.")
+  })
+
+  it("drop a sentence whose link the old pattern missed: text over two lines, brackets in it", () => {
+    expect(
+      dropSelfPointers(
+        "Keep this. More in [the writing\nrules guide](guides/writing-rules.md). And this.",
+        "README.md",
+        "guides/writing-rules",
+      ),
+    ).toBe("Keep this. And this.")
+    expect(
+      dropSelfPointers("See [`a[0]`](guides/writing-rules.md).\n\nNext.", "README.md", "guides/writing-rules"),
+    ).toBe("Next.")
+  })
+
+  it("do not split a sentence inside a link's text", () => {
+    expect(
+      dropSelfPointers(
+        "Read [e.g. this. Or that](guides/writing-rules.md) now. Kept.",
+        "README.md",
+        "guides/writing-rules",
+      ),
+    ).toBe("Kept.")
   })
 
   it("leave lists, code and the part's own anchors alone", () => {
