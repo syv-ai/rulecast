@@ -88,15 +88,15 @@ More in [Writing rules](guides/writing-rules.md): refusing a write, linters with
 
 ## Detectors
 
-| Detector | Catches | Runs on |
+| Detector | Catches | Default stages |
 |---|---|---|
-| `regex` | A pattern in the file's text | every edit |
-| `path` | The file's path alone: "never edit `src/client/`" | every edit |
-| `ast-grep` | Structure, not text: a call shape, a swallowed exception | every edit |
-| `command` | Whatever a tool or script reports (SARIF, JSON, checkstyle, `file:line:` lines…): type checkers, dead-code finders, scanners [by config](agents/reference/tool-recipes.md) | every edit (whole-project tools: verify) |
-| `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | verify |
-| `linter` | Errors from ruff, oxlint, eslint or gitleaks under the project's own config, each with its doc section | edit (eslint: verify) |
-| `llm` | Conventions nothing mechanical expresses, judged by a model. Opt-in | verify |
+| `regex` | A pattern in the file's text | `edit, verify` |
+| `path` | The file's path alone: "never edit `src/client/`" | `edit, verify` |
+| `ast-grep` | Structure, not text: a call shape, a swallowed exception | `edit, verify` |
+| `command` | Whatever a tool or script reports (SARIF, JSON, checkstyle, `file:line:` lines…): type checkers, dead-code finders, scanners [by config](agents/reference/tool-recipes.md) | `edit, verify`; `verify` with `scope: project` |
+| `hook` | A hook your `.pre-commit-config.yaml` or `lefthook.yml` already declares | `verify` |
+| `linter` | Errors from ruff, oxlint, eslint or gitleaks under the project's own config, each with its doc section | `edit, verify`; `verify` for eslint |
+| `llm` | Conventions nothing mechanical expresses, judged by a model. Opt-in | `verify` |
 
 `verify` runs when the agent stops; a rule can opt into the edit hook with `stages: [edit, verify]`. See [`agents/reference/detectors.md`](agents/reference/detectors.md).
 

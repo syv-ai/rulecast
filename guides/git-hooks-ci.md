@@ -1,6 +1,6 @@
 # Git hooks and CI
 
-The same rule reports the same line the same way in an agent hook, a git hook and CI. A finding is new when it matches a line you changed. One that was already there is backlog: shown, never failing.
+The same rule reports the same line the same way in an agent hook, a git hook and CI. A finding is new when it matches a line you changed. One that was already there is [backlog](adopting-rules.md).
 
 | Where | Command | Checks |
 |---|---|---|
@@ -8,9 +8,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 | pre-push and CI | `rulecast run --from-ref A --to-ref B` | Files changed between the merge base with `A` and `B`, read at `B` (the working tree without `--to-ref`). Runs `llm` rules on changed files |
 | a scheduled sweep or agent loop | `rulecast run --all-files` | Everything, against a [committed baseline](advanced.md#a-committed-baseline); exits 0 unless something got worse. Recipes: [`agents/reference/loops.md`](../agents/reference/loops.md) |
 
-`rulecast run --files F...` judges files whole, like `--all-files`. From a hook manager, use the hooks below instead.
-
-rulecast installs no git hooks itself: wire it into the hook manager you use. Git hooks run the same rulecast the agent hooks do: the project's `node_modules/.bin/rulecast`, else `rulecast` on the PATH, else the directory `install.sh` installs to ([Install](../README.md#install)).
+rulecast doesn't install git hooks. Add it to the hook manager you already use:
 
 ## pre-commit
 
@@ -68,5 +66,3 @@ jobs:
 ```
 
 The example has rulecast as a devDependency. Without one, put the install command from [Install](../README.md#install) in place of `setup-node` and `npm ci` (or after them, if the job needs Node), which puts `rulecast` on the job's PATH, and run `rulecast` where the example runs `npx rulecast`.
-
-A shallow clone has no merge base; rulecast says so and names `fetch-depth: 0`.

@@ -8,7 +8,7 @@ Each recipe was run once, on small scratch repositories. What happened, where th
 
 A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [Fresh environments](../../guides/advanced.md#fresh-environments) checklist first: it installs rulecast. The commands below say `rulecast`; with rulecast as a devDependency, run them as `npx rulecast`. For loops, three things on it matter most:
 
-- **Unattended mode.** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`. The stop gate then blocks up to `unattended.max_blocks` (10) stops per prompt instead of one, a finding that has blocked twice is reported instead of retried, and the agent is held once more at the end to report what is left. See [Unattended mode](rule-format.md#unattended-mode). `/goal` sends one prompt for the whole run, so there the 10 blocks are a budget for the run.
+- **[Unattended mode](rule-format.md#unattended-mode).** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`.
 - **`rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
 - **The `loop-safety` pack:** `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
 
@@ -31,7 +31,7 @@ Headless, the same goal runs as `RULECAST_MODE=unattended claude -p --max-turns 
 - **Exits 2 and 3 belong in the condition.** They mean rulecast could not run, or some rules did not, and no code edit fixes that. Written as a separate instruction ("if it exits 3, stop and report"), the agent stopped and reported, but the evaluator still found the goal unmet and kept the run going until `--max-turns` ended it. Written into the condition as above, the goal was met on the first stop.
 - **Rule out the ignore comment.** When a goal contradicts a rule and nothing forbids it, the agent can make `rulecast run` exit 0 with a `rulecast-ignore` comment. In one recorded run it did exactly that. In unattended mode the agent hooks do not honour an ignore on a line changed during the run: its finding still blocks the stop and ends up in the report. But `rulecast run` does honour it, because it is the same check a person's commit gets, so the goal's own command can still be satisfied that way. Say it in the condition.
 - **What `--from-ref main` checks:** everything the branch changed since its merge base with `main`, across sessions and commits. The Stop gate checks only this session's edits; the goal is the wider check.
-- **The two Stop hooks.** While a goal is active, its evaluator and rulecast both run on every stop. A rulecast block holds the agent even on a stop where the evaluator says the goal is met: the goal judges its own condition, and rulecast enforces the conventions. Two runs from #24 show this in detail, in [`docs/evidence/2026-10-16-unattended-goal-runs.md`](../../docs/evidence/2026-10-16-unattended-goal-runs.md).
+- **The two Stop hooks.** While a goal is active, its evaluator and rulecast both run on every stop. A rulecast block holds the agent even on a stop where the evaluator says the goal is met: the goal judges its own condition, and rulecast enforces the conventions. `/goal` sends one prompt for the whole run, so `unattended.max_blocks` is a budget for the run.
 
 Not measured: whether a rulecast block counts as "no progress" for `/goal`. In the runs so far the goal was either met on the first stop, or `--max-turns` ended the run first.
 
@@ -144,13 +144,6 @@ What the counts miss: `suppressed` counts a `rulecast-ignore` added after the fi
 
 ## What a loop can rely on
 
-[output.md](output.md#exit-codes) is the contract. In short:
-
-| Exit | The loop |
-|---|---|
-| `0` | stops: every rule ran, nothing new of error severity |
-| `1` | fixes the new findings and runs again |
-| `2` | stops and tells a person: rulecast could not run |
-| `3` | stops and tells a person: some rules did not run (`complete: false`, and why under `disabled`) |
+Stop on `0`, fix and retry on `1`, hand `2` or `3` to a person: the [exit codes](output.md#exit-codes) are the contract.
 
 In the JSON, `schemaVersion` changes only when a field is removed, renamed or changes meaning ([version policy](output.md#version-policy)). `findings[].id` identifies a finding across runs, and `fixable: true` marks the ones `rulecast fix` can apply.

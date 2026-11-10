@@ -19,12 +19,12 @@ Paths in the output are relative to the directory `run` was started in, with `/`
 
 | Code | Meaning | stdout |
 |---|---|---|
-| `0` | Every rule ran, and no new finding has severity `error`. Warnings and pre-existing findings are allowed. | the report |
-| `1` | Every rule ran, and at least one new finding has severity `error`. | the report |
-| `2` | rulecast could not run: a usage error, a config file that does not load (YAML, schema, `minimum_rulecast_version`), git, or an internal error. | empty; the message is on stderr |
-| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. With `--session`, also a rule whose detector failed earlier in that session, which disabled it. The findings of the rules that did run are still reported. | the report, with `complete: false` |
+| `0` | Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed) | the report |
+| `1` | Every rule ran; at least one new error-severity finding | the report |
+| `2` | rulecast could not run: usage, a config file that does not load, git, or an internal error | empty; the message is on stderr |
+| `3` | Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1 | the report, with `complete: false` |
 
-`3` wins over `1`: a `1` promises that every rule ran. A loop can stop on `0`, fix and retry on `1`, and needs a person on `2` or `3`.
+A config file does not load when its YAML, its schema or its `minimum_rulecast_version` fails. With `--session`, `3` also covers a rule whose detector failed earlier in that session, which disabled it. `3` wins over `1` because a `1` promises that every rule ran. A loop can stop on `0`, fix and retry on `1`, and needs a person on `2` or `3`.
 
 `rulecast run RULE_ID` is incomplete only over that rule: its own compile error, or a rule repo that failed and configures it. Another repo that could not be fetched is still a warning, but not a `3`.
 
@@ -286,7 +286,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `findings` | What the rule found, passing or not: `line`, `endLine`, `column`, `text` (what the detector matched), `message`. One per match, not merged. A baseline example's findings also have `status`: `new` or `preexisting`. |
 | `failures` | Why the example failed, one sentence each, such as `expected lines [2, 4], found [2]` or `line 3: expected new, was pre-existing`. The wording can change; `passed` cannot. |
 | `error` | Present when the detector failed or timed out on the example. The example fails. |
-| `fix` | Only on a `bad` example of a rule with a [`fix`](rule-format.md#fixes), when the rule caught it as expected and the fix was applied: `{ "passed": true }`, or `{ "passed": false, "reason": ... }` with `reason` `stillFires` (the rule fires on the fixed code), `unresolved` (a fix left its own finding and was undone) or `differs` (the result is not the example's `fixed`; `diff` holds the diff from `fixed` to what the fix produced). A failed fix also adds a sentence to `failures`. Added without a `schemaVersion` bump: it is a new field. |
+| `fix` | Only on a `bad` example of a rule with a [`fix`](rule-format.md#fixes), when the rule caught it as expected and the fix was applied: `{ "passed": true }`, or `{ "passed": false, "reason": ... }` with `reason` `stillFires` (the rule fires on the fixed code), `unresolved` (a fix left its own finding and was undone) or `differs` (the result is not the example's `fixed`; `diff` holds the diff from `fixed` to what the fix produced). A failed fix also adds a sentence to `failures`. |
 
 ### `against`
 
@@ -470,11 +470,11 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `notCompiled` | What in the config did not compile, such as a rule repo that has not been fetched (`rulecast install`) or a rule with an error. Present only when there is something. The rules it would have given are unknown, so `neverFired`, `neverRan`, `runs`, `stopBlocks` and `unknownRules` would be wrong and are left out. The same lines go to stderr. |
 | `weekly` | Per rule, its findings by week, to see over weeks whether it fires less. Always present. See [Reading the trend](#reading-the-trend). |
 | `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
-| `weekly.rolledUpTo` | The newest record the weekly summary counts. `null` when there is no summary. The summary counts whole log files, the ones rotations dropped, and the trend adds the log's own files to it, so a record is counted once whatever its time. Each file is counted on its own, so a session that spans a rotation has its counts split across the files and summed: per rotation, about one extra session, and one extra `fired` for each finding still open when the file was dropped and reported again after. |
+| `weekly.rolledUpTo` | The newest record the weekly summary counts, or `null` when there is no summary. |
 | `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds, plus any summary written while it was on. |
 | `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
 
-Per rule, every count is of findings, and a finding is counted once per session however many times it was reported (in `weekly`, once per session and log file: see `weekly.rolledUpTo`):
+Per rule, every count is of findings, and a finding is counted once per session however many times it was reported (in `weekly`, once per session and log file):
 
 | Key | Meaning |
 |---|---|
@@ -489,7 +489,7 @@ Per rule, every count is of findings, and a finding is counted once per session 
 | `open` | Still there, and no stop has seen it yet: the session is still going, or it ended without a stop. Never counted as ignored. |
 | `repeated` | Still there at two or more stops, or refused twice or more: the agent kept hitting it instead of fixing it. |
 | `medianTurnsToFix` | Over the fixed findings, how many of the agent's stops came between the first report and the fix. `0` is fixed in the same turn. `null` when none was fixed. |
-| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. It counts `suppressAttempted` from the first release; nothing earlier was published, so this is not a change of meaning. |
+| `repeatRate`, `suppressionRate` | `repeated / fired` and `(suppressed + suppressAttempted) / fired`, to two decimals; a finding in both counts once. |
 | `noisy` | `"repeats"` when a rule has fired at least 5 times and at least 30% of its findings repeated; `"suppressed"` when it has fired at least 5 times and its `suppressionRate` is at least 20%: suppressed, or, unattended, under an ignore the agent added or changed. A noisy rule's message may not say how to fix it, or its pattern may be too broad. |
 
 `weekly.rules` lists the rules with a finding in the trend's weeks, most fired first. Weeks start on Monday at 00:00 UTC. They run from the first week with data to the week of the newest record, with zeros for weeks without any:
@@ -535,8 +535,8 @@ What the trend cannot tell you:
 
 The counts come from `findings.jsonl` in the project's directory of the rulecast cache (`rulecast doctor` prints where). There is one log per config and checkout: each config runs as its own project, and the directory is keyed by the config's real path. Agent hooks append one record per edit check, refused write and stop. A record holds finding ids, rule ids, file paths and line numbers, and never the message, the matched text or a capture, so no code is written to it. It never leaves the machine.
 
-The file is rotated to `findings.1.jsonl` at 4 MiB, replacing the previous one, so the two together stay near 8 MiB. That is about a week for a loop that writes a record every 20 seconds around the clock, and weeks for a developer working by hand. Hooks that reach the cap together rotate it once. A hook that crashes while writing can leave a partial line; the next record starts on a line of its own, and `stats` skips the partial one and counts it in `skippedLines`. Writing it is best effort: a hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
+The log keeps about the newest 8 MiB and drops older records: about a week for a loop that writes a record every 20 seconds around the clock, and weeks for a developer working by hand. A hook never fails because the log could not be written. `rulecast clean` removes it with the rest of the cache.
 
-With `stats.weekly_summary: true` in the config (off by default), a hook that is about to drop the old `findings.1.jsonl` first adds that file's per-week counts to `findings-weekly.jsonl` beside it, which keeps 26 weeks. It holds rule ids, file paths, weeks and counts only, and marks each log file it counted with a hash of the file's first line, so no file is counted twice. It is written once per rotation, only for the config that turned it on (configs below it do not inherit the key), and on a best-effort basis like the log. `rulecast clean` removes it too.
+With `stats.weekly_summary: true` in the config (off by default), the per-week counts of the records the log drops are kept in `findings-weekly.jsonl` beside it, for 26 weeks. It holds rule ids, file paths, weeks and counts only. Only the config that turns it on keeps one: configs below it do not inherit the key. `rulecast clean` removes it too.
 
 Its format is internal and can change in any release. The `stats` JSON above is the contract.

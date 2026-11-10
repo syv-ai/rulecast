@@ -64,7 +64,7 @@ That matches a `style` attribute on any element — the `<div>` is only there so
 
 ## `command`
 
-Any tool that works as a pre-commit hook works as a `command` rule: rulecast runs it, reads what it prints, and hands each finding to the agent with the rule's message and the doc section it cites. [tool-recipes.md](tool-recipes.md) has a tested rule for ty, mypy, pyright, vulture, tsc, knip, jscpd, staticcheck, golangci-lint, deadcode, semgrep, hadolint, tflint, shellcheck, osv-scanner and checkov.
+Any tool that works as a pre-commit hook works as a `command` rule: rulecast runs it, reads what it prints, and hands each finding to the agent with the rule's message and the doc section it cites. [tool-recipes.md](tool-recipes.md) has a tested rule for each common tool.
 
 ```yaml
 detect:
@@ -95,7 +95,7 @@ detect:
 - `captures`: extra names your message uses, each a string field the tool emits on **every** finding (JSON fields, SARIF `properties`, a pattern's named groups). A missing one disables the rule, so the mistake is visible rather than silently blank. A capture may not shadow `file`, `line`, `column`, `text` or `rule`.
 - Every finding carries `{{message}}`, `{{ruleId}}` and `{{severity}}` (the tool's own word: `error`, `major`, `note`; empty when it gave none). `{{text}}` is the source at the finding's range, unless a JSON result gives its own `text`.
 - Output that cannot be parsed disables the rule.
-- In a staged run (`rulecast run` with no file flags) or with `--to-ref`, a `files` rule is handed a copy of each file under a scratch directory (`.rulecast-staged-XXXX/<path>`), because the content it must judge is the index or a commit, not the file on disk. Findings are mapped back to the real path. A script that decides by path should match the end of the path, not its start. A tool that runs the project's tests (coverage, mutation testing) cannot judge the copy, because the tests never import it: give such a rule `scope: project`, and let the tool pick the changed code itself. A `project` rule needs the real project, so it runs on the working tree when its files there match the index (or the commit), and is skipped with a warning naming the files when they don't. rulecast never stashes to make them match.
+- In a staged run or with `--to-ref`, a `files` rule judges a scratch copy and a `project` rule may be skipped: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
 - Default stages: `edit`, `verify`; **`verify` only with `scope: project`**, since a whole-project run is usually too slow for an edit. Write `stages: [edit, verify]` if your `project` tool is fast enough (tflint takes about 40 ms). A `files` tool runs on edits already; give a slow one, such as semgrep, `stages: [verify]`.
 
 ## `hook`
@@ -118,8 +118,17 @@ Runs a hook the project already declares, so the agent sees the same thing a com
 - A runner that never ran the hook (an unknown id, an environment it could not install) disables the rule with what it said.
 - `rulecast doctor` reports the runner it would use and every hook id or job it cannot find.
 - husky is not supported: its hooks are shell scripts with nothing structured to read. Use `command` with the script's command.
-- Like a `project` command rule, a hook rule runs on the working tree in a staged run when its files match the index, and is skipped with a warning when they don't.
+- In a staged run or with `--to-ref`, a hook rule may be skipped: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
 - Default stages: **`verify` only.** Hooks are written for a commit, not a keystroke. Write `stages: [edit, verify]` if yours is fast.
+
+## In staged and `--to-ref` runs
+
+In a staged run (`rulecast run` with no file flags, the pre-commit check) or with `--to-ref`, the content to judge is the index or a commit, not the file on disk. So the tools are handed that content:
+
+- `ruff` and `eslint` get each file's content on stdin under its real path, one process per file, so path-keyed configuration (`per-file-ignores`, eslint `files:` globs) applies as usual. `gitleaks` gets it on stdin under no file name.
+- `oxlint` and `command` rules with `scope: files` get a copy of each file under a scratch directory (`.rulecast-staged-XXXX/<path>`), and findings are mapped back to the real path. A script that decides by path should match the end of the path, not its start. oxlint's path-keyed configuration does not match the copy.
+- A tool that runs the project's tests (coverage, mutation testing) cannot judge the copy, because the tests never import it: give such a rule `scope: project`, and let the tool pick the changed code itself.
+- `command` rules with `scope: project` and `hook` rules need the real project. They run on the working tree when its matching files equal what is being judged, and are skipped with a warning naming the files otherwise. rulecast never stashes to make them match.
 
 ## `linter`
 
@@ -135,7 +144,7 @@ detect:
 - Every finding carries the tool's page for its lint rule, where the tool's output gives one (ESLint, Ruff and oxlint do; gitleaks does not). It is shown under the finding as `upstream docs: <url>`, unless the rule's `context_by_rule` maps a section for that lint rule (rule-format.md). ESLint is run with `--format=json-with-metadata`, which carries the url in the same process.
 - One process per tool and directory per event, over every file its rules select together, with the findings handed back to the rules that asked for them. Ten `ruff` rules cost one `ruff` run.
 - Captures: `{{ruleId}}` and `{{message}}`. `{{text}}` is the source the linter pointed at.
-- In a staged run or with `--to-ref`, `ruff` and `eslint` are handed each file's staged content on stdin under its real path, one process per file, so path-keyed configuration (`per-file-ignores`, eslint `files:` globs) applies as usual. `gitleaks` reads it on stdin too, under no file name. `oxlint` has no stdin mode and gets a scratch copy, which such configuration does not match.
+- In a staged run or with `--to-ref`, the tool is handed the content to judge, not the file on disk: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
 - Default stages: `edit`, `verify` — **except `eslint`, which is `verify` only**. Its process start and config load take about 175 ms on a trivial config and seconds with type-aware plugins, and on edit a detector past the 350 ms edit deadline is dropped, so an ESLint rule on edit would usually make the edit wait and deliver nothing. Its findings reach the agent when it stops, in the same session. Write `stages: [edit, verify]` if your ESLint is fast.
 
 ## `llm`

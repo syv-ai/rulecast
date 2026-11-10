@@ -17,20 +17,13 @@ A tested `detect` block for each tool below, for a [`command`](detectors.md#comm
 
 Add `rules: [<rule id>, ...]` to any of them to keep only those findings: one rule per convention, each citing its own section, all sharing one run of the tool.
 
-`scope: project` means the tool reads the whole project, so the rule runs at verify only unless you add `stages: [edit, verify]`, and in a staged run only when its files have no unstaged changes. The speed notes say which tools are fast enough for edits.
+`scope: project` means the tool reads the whole project, so the rule runs at verify only unless you add `stages: [edit, verify]`. The speed notes say which tools are fast enough for edits. How each kind of rule runs on staged content is in [detectors.md](detectors.md#in-staged-and---to-ref-runs).
 
 If the project already runs a tool as a pre-commit or lefthook hook, a [`hook`](#a-hook-the-project-already-runs) rule is less to keep in step: the hook's own arguments and environment apply.
 
 ## Python
 
-**ty** (types; 10–20 ms per file, fast enough for edits). Exit 1 is findings; 2 is a bad config and 101 a crash.
-
-```yaml
-command:
-  run: [ty, check, --output-format, gitlab, "{{files}}"]
-  output: gitlab
-  exit_codes: { error: [2, 101] }
-```
+**ty** (types; 10–20 ms per file, fast enough for edits): the rule at the top of this page. Exit 1 is findings; 2 is a bad config and 101 a crash.
 
 **mypy** (types). Don't add `--show-error-end`: it changes the line shape. `note:` lines are findings with severity `note` and no rule id; `rules:` leaves them out.
 

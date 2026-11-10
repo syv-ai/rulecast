@@ -328,10 +328,17 @@ export function pageParts(page: Page, sections: Map<string, string>): PagePart[]
     }
   }
   if ("file" in page.source && page.source.file) {
-    parts.push({ markdown: splitTitle(readSource(page.source.file)).body, source: page.source.file })
+    const body = splitTitle(readSource(page.source.file)).body.replace(RELATIVE_LINKS_NOTE, "")
+    parts.push({ markdown: body, source: page.source.file })
   }
   return parts
 }
+
+/**
+ * An agent doc's note that its relative links resolve against its own URL: true of the raw file an
+ * agent reads, noise on the site, where every link is rewritten to a page.
+ */
+const RELATIVE_LINKS_NOTE = /^Relative links in this file resolve against this file's own URL\.\n+/m
 
 export function pageBody(page: Page, sections: Map<string, string>): string {
   return pageParts(page, sections)

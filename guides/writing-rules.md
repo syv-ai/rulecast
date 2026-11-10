@@ -62,7 +62,7 @@ Agents copy what they find. Halfway through moving off an API, the old form is s
     - "@docs/decisions/0007-api-client.md"
 ```
 
-The uses that are already there are backlog: they are shown and never fail a hook, so the rule can go in on day one ([Adopting a rule](adopting-rules.md)). Once the migration is done, a rule that never fires is the lock working. Keep it.
+The uses that are already there are [backlog](adopting-rules.md), so the rule can go in on day one. Once the migration is done, a rule that never fires is the lock working. Keep it.
 
 ## One home for each convention
 
@@ -70,8 +70,8 @@ The uses that are already there are backlog: they are shown and never fail a hoo
 
 ## Turning a rule off
 
-- **A whole rule:** `enabled: false` on the rule. Under a rule repo's entry, `- id: <rule>` with `enabled: false` switches that rule off.
-- **One finding:** a comment on the matched line or the line above it. The reason is required; an ignore without one suppresses nothing.
+- **A whole rule:** `enabled: false` on the rule, or on its entry under a rule repo.
+- **One finding:** a comment with a reason, on the matched line or the line above it:
 
   ```python
   except Exception:
@@ -79,4 +79,4 @@ The uses that are already there are backlog: they are shown and never fail a hoo
       pass
   ```
 
-`rulecast run --all-files --summary` counts the ignores. An ignore or a config change made during an agent session is reported to you when the agent stops, so the agent can't quietly edit its way past a rule.
+The details, and what you are told when an agent adds an ignore, are in [Turning a rule or a finding off](../agents/reference/rule-format.md#turning-a-rule-or-a-finding-off).

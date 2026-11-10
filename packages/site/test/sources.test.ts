@@ -79,6 +79,12 @@ describe("pageBody", () => {
     expect(body.indexOf("| Detector | Catches |")).toBeLessThan(body.indexOf("## `regex`"))
   })
 
+  it("leaves out an agent doc's note on its relative links, which the site rewrites", () => {
+    const raw = readFileSync(path.join(REPO_ROOT, "agents/reference/output.md"), "utf8")
+    expect(raw).toContain("Relative links in this file resolve")
+    expect(pageBody(page("reference/output"), sections)).not.toContain("Relative links in this file resolve")
+  })
+
   it("splits a title off a Markdown file", () => {
     expect(splitTitle("# Title\n\nBody")).toEqual({ title: "Title", body: "Body" })
   })
@@ -95,7 +101,6 @@ describe("the guides", () => {
       "## Git operations during a turn",
       "## Fresh environments",
       "## A committed baseline",
-      "## Agents with nobody watching",
     ]) {
       expect(advanced).toContain(heading)
     }

@@ -48,7 +48,11 @@ repos:
 | `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
 | `unattended.escalate` | `[]` | Ids of `warning` rules that are `error` in unattended mode |
 | `refuse_gate.max_refusals` | `1` | Writes a `refuse_write` rule may refuse per file per session |
-| `llm.model`, `llm.provider`, `llm.base_url`, `llm.api_key_env`, `llm.max_files_per_verify` | `null`, `claude-code`, `null`, `ANTHROPIC_API_KEY`, `10` | Settings for the `llm` detector. `model` is the model for llm rules that name none, and is set only when the developer has agreed to llm rules. `provider` is one of `claude-code`, `opencode`, `anthropic`, `openai-compatible` |
+| `llm.model` | none | The model for `llm` rules that name none. Set only when the developer has agreed to llm rules |
+| `llm.provider` | `claude-code` | What runs `llm` rules: one of the [providers](detectors.md#llm) |
+| `llm.base_url` | none | The provider's URL, for `anthropic` and `openai-compatible` ([providers](detectors.md#llm)) |
+| `llm.api_key_env` | `ANTHROPIC_API_KEY` | The environment variable that holds the API key, for `anthropic` and `openai-compatible` |
+| `llm.max_files_per_verify` | `10` | Files an `llm` rule judges per verify, most recently edited first; the rest are named in a warning |
 | `stats.weekly_summary` | `false` | Keep 26 weeks of per-week counts for `rulecast stats` beside this config's findings log. Applies to this config's log only |
 
 ## Several configs
@@ -120,8 +124,7 @@ component:
 ```
 
 Without `scope: container` this rule would fire on every edit anywhere inside a long route, because
-the match is the whole function and so overlaps every change in it. Measured over 1,377
-agent-written sites, that is precision 0.62; the container comparison is 0.76.
+the match is the whole function and so overlaps every change in it.
 
 Two things to know before reaching for it:
 
@@ -190,7 +193,7 @@ removed rule: its matches are what a file keeps, not violations.
 
 ### Turning a rule or a finding off
 
-- **A whole rule:** `enabled: false`. Under a URL repo, an entry `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the entry, so re-enabling it is one line.
+- **A whole rule:** `enabled: false`. Under a rule repo, an entry `- id: <rule>` with `enabled: false` switches a catalog rule off and keeps the entry, so re-enabling it is one line.
 - **One finding:** a comment on the matched line or the line above it, in the file's own comment syntax:
 
   ```python
@@ -199,7 +202,7 @@ removed rule: its matches are what a file keeps, not violations.
       pass
   ```
 
-  The id is the one the finding shows. **The reason is required**: an ignore without one suppresses nothing and is reported. Ignores are counted under `rulecast run --all-files --summary` and listed by `--format json`, and one added during an agent session is reported to the developer when the agent stops. An agent adds one only when the developer agrees the finding is wrong.
+  The id is the one the finding shows. **The reason is required**: an ignore without one suppresses nothing and is reported. Ignores are counted under `rulecast run --all-files --summary` and listed by `--format json`. An agent adds one only when the developer agrees the finding is wrong. An ignore added during an agent session, or a change to `.rulecast-config.yaml`, is reported to the developer when the agent stops, so an agent cannot quietly edit its way past a rule.
 
 ### Refusing a write
 
@@ -292,16 +295,8 @@ to its debug log. A missing terminal does not count, because a hook never has on
 it would run in from your shell, and where that came from. The mode applies to agent hooks only.
 `rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
 to answer. The exception is `rulecast run --session <id>`, which shows a session's findings: it runs
-in the mode that session's hooks recorded, so it lists what the stop blocks on. For a session
-recorded before modes were, it resolves the mode from its own environment as a hook would.
-
-**With `/goal`.** `/goal` is a Stop hook too. While a goal is active, its evaluator and rulecast
-both run on every stop. A rulecast block is answered by a fixing turn even when the evaluator says
-the goal is met, and the evaluator judges only its own condition. `/goal` sends no new prompt
-between turns, so `unattended.max_blocks` is in effect a budget for the whole run. rulecast does
-not read `stop_hook_active`: it is `true` after any hook's block, `/goal`'s included, so rulecast
-counts its own blocks in its session store instead. Two recorded runs are in
-`docs/evidence/2026-10-16-unattended-goal-runs.md` in the rulecast repository.
+in the mode that session's hooks recorded, so it lists what the stop blocks on. With `/goal`, see
+[loops.md](loops.md#a-goal-that-rulecast-decides).
 
 ```yaml
 mode: unattended
@@ -313,13 +308,9 @@ unattended:
 ### Examples
 
 `examples` holds `good` code the rule must leave alone, `bad` code it must flag, and `baseline`
-edits whose findings it must sort into new and pre-existing. `rulecast test` runs them;
-`rulecast test <id> --against <paths>` fires the rule over real files and says how many violations
-it would produce and in how many of the files it matches. Without an id,
-`rulecast test --against <paths>` prints that count for every rule, one line each. Add
-`--max-rate 0.5` to exit 1 when a rule flags more than that share of the files it matches; under 25
-matching files it is not applied, because a share of a handful of files says nothing. `--format json`
-prints the results as a document ([output.md](output.md#rulecast-test)).
+edits whose findings it must sort into new and pre-existing. `rulecast test` runs them. How it
+measures a rule on real files and recent commits (`--against`, `--history`, `--max-rate`) is in
+[output.md](output.md#rulecast-test).
 
 ```yaml
 examples:
@@ -461,7 +452,7 @@ back, so under a hook a fixable finding is delivered like any other.
 
 ### Messages
 
-A rule that fires three or more times has its `message` printed once, with the variables shown as `{name}`, and one line per site under it carrying that site's values. So write the message as one sentence that holds for every site — what to do instead, not just what is wrong — and let the capture groups carry what differs. A message that is nearly all variables, such as `"{{file}}:{{line}} {{text}}"`, has nothing to print once and is repeated per finding as before.
+A rule that fires three or more times has its `message` printed once, with the variables shown as `{name}`, and one line per site under it carrying that site's values. So write the message as one sentence that holds for every site — what to do instead, not just what is wrong — and let the capture groups carry what differs. A message that is nearly all variables, such as `"{{file}}:{{line}} {{text}}"`, has nothing to print once and is repeated per finding.
 
 ### File types
 
@@ -473,11 +464,11 @@ A rule that fires three or more times has its `message` printed once, with the v
 - `edit`: the detector runs on each file the agent edits.
 - `verify`: the detector runs when the agent stops, on the files it changed, and in `rulecast run`. A staged `rulecast run` (no file flags, the pre-commit check) skips `llm` rules unless given `--llm`.
 
-Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults. Those are `edit` and `verify`, except `verify` only for `llm`, `eslint`, `hook`, and `command` with `scope: project`: each is too slow to be felt on every edit, and `stages: [edit, verify]` asks for it anyway. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit` or `verify` among its stages.
+Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults, which [detectors.md](detectors.md) gives for each. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit` or `verify` among its stages.
 
 ### Overrides
 
-An entry under a URL repo is merged over the published rule key by key. The merge is shallow: an overridden `detect`, `context` or `context_by_rule` replaces the whole value. `@` paths in an overriding `context` or `context_by_rule` resolve against your project; the published rule's own paths resolve against the rule repo.
+An entry under a rule repo is merged over the published rule key by key. The merge is shallow: an overridden `detect`, `context` or `context_by_rule` replaces the whole value. `@` paths in an overriding `context` or `context_by_rule` resolve against your project; the published rule's own paths resolve against the rule repo.
 
 ## Context references
 

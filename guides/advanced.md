@@ -24,29 +24,15 @@ A CI job, a cloud agent session or a new container starts with nothing installed
 2. Run `rulecast install` (`npx rulecast install` for a devDependency). It fetches the pinned rule repos; hooks never fetch.
 3. Run `rulecast doctor --ci` (`npx rulecast doctor --ci` for a devDependency) before the agent step. It fetches nothing, and exits 2 if a rule repo is missing from the cache, a rule's tool isn't installed, or the hooks can't run. Add `--from-ref origin/main` when the job also runs `rulecast run --from-ref`.
 4. Check out with `fetch-depth: 0` if you use `--from-ref`.
-5. Unattended mode is on under `CI` or `GITHUB_ACTIONS`. Elsewhere set `RULECAST_MODE=unattended`; the hook's not-installed guard reads only the environment, never the config's `mode:`.
+5. Unattended mode is on under `CI` or `GITHUB_ACTIONS`. Elsewhere set `RULECAST_MODE=unattended`.
 6. End the loop with `rulecast run --from-ref …`. It is the gate that counts.
 7. Optionally cache `~/.cache/rulecast/repos` between jobs (keyed on `.rulecast-config.yaml`) to save a clone per job.
 
-A new git worktree on the same machine needs only step 1: rule repos are cached per user, not per checkout. If the cache home's `native/` can't be written, the binary unpacks its native files into a private temp directory instead.
-
-## Performance details
-
-Hooks never fetch, so rules from a rule repo that isn't in the cache don't run until `rulecast install`. On macOS, the first edit in a new worktree is slower: macOS checks each executable the first time it runs from a new path, such as a `command` script or a `node_modules/.bin` shim. Run them once beforehand.
-
-The budget shapes the design: one detector run per kind per event, kinds in parallel, slow tools on `verify`, content-addressed caches on disk, no daemon. When an edit runs long, rulecast delivers what finished, and the rules that missed the deadline run again at the stop. `rulecast warm` builds the caches of detectors that have warm-up work, and SessionStart starts it for you; no built-in detector has any yet.
-
-## Tools in staged and `--to-ref` runs
-
-The content to judge isn't the file on disk, so:
-
-- `command` scripts and `oxlint` get a scratch copy of each file.
-- `ruff` and `eslint` get it on stdin under the real path, so path-keyed configuration still applies. `gitleaks` gets it on stdin with no file name.
-- Whole-project tools (`scope: project`, `hook` rules) run on the working tree when its matching files equal what is being committed, and are skipped with a warning otherwise. rulecast never stashes.
+A new git worktree on the same machine needs only step 1: rule repos are cached per user, not per checkout. On macOS, the first edit in a new worktree is slower: macOS checks each executable the first time it runs from a new path, such as a `command` script or a `node_modules/.bin` shim. Run them once beforehand.
 
 ## A committed baseline
 
-A scheduled full-repository run, such as a nightly sweep or an agent loop told to keep `main` clean, has no ref to diff against, so every legacy violation is new. Record what is there today:
+A scheduled full-repository run, such as a nightly sweep or an agent loop told to keep `main` clean, has no ref to diff against, so every [backlog](adopting-rules.md) violation is new. Record what is there today:
 
 ```sh
 rulecast baseline            # writes .rulecast/baseline.json
@@ -62,7 +48,3 @@ rulecast run --all-files     # exits 0 unless something got worse
 - `rulecast doctor` reports the baseline's size, when it was added and when it last changed.
 
 Where a ref exists, `--from-ref` is the better baseline: it never needs maintaining.
-
-## Agents with nobody watching
-
-If your agent runs unattended (`/goal`, `claude -p`, a scheduled task), add the `loop-safety` catalog pack: `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make tests pass: skipped or focused tests, deleted assertions, new lint and type suppressions, changed coverage thresholds, and edits to CI or rulecast's own config. See [`packages/rules-loop-safety/loop-safety.md`](../packages/rules-loop-safety/loop-safety.md), and [`agents/reference/loops.md`](../agents/reference/loops.md) for recipes.

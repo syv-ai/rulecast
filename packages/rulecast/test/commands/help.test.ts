@@ -164,10 +164,12 @@ test("run --help and try-repo --help print the exit codes", async () => {
   }
 })
 
-/** The commands guide's exit-code table says exactly what EXIT_CODES says, so the two cannot drift apart. */
-test("the commands guide's exit-code table matches the codes rulecast exits with", () => {
-  const guide = repoFile("guides/commands.md")
-  const section = guide.slice(guide.indexOf("## Exit codes"))
+/** The output contract's exit-code table says exactly what EXIT_CODES says, so the two cannot drift apart. */
+test("the output contract's exit-code table matches the codes rulecast exits with", () => {
+  const contract = repoFile("agents/reference/output.md")
+  const start = contract.indexOf("\n## Exit codes\n")
+  expect(start).toBeGreaterThan(-1)
+  const section = contract.slice(start, contract.indexOf("\n## ", start + 1))
   const rows = section
     .split("\n")
     .filter((line) => /^\| `\d+` \|/.test(line))
