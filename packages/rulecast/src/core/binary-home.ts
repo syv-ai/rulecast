@@ -56,12 +56,17 @@ export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.loc
 
 /**
  * The git hooks' command: the project's own rulecast, else the PATH's, else install.sh's in its
- * directory, the order the agent hooks use. Git hooks run from the repository's root.
+ * directory, the order the agent hooks use. Git hooks run from the repository's root. The PATH's is
+ * run rather than exec'd so that one the shell cannot run (126 or 127: a binary for another
+ * machine, a shim with nothing behind it) counts as none and the lookup goes on, as in the hook
+ * script; it has read no input when it could not run.
  */
 export function gitHookCommand(args: string): string {
   return (
     `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
-    `command -v rulecast >/dev/null 2>&1 && exec rulecast ${args}; exec ${INSTALLED_SH} ${args}' --`
+    `if command -v rulecast >/dev/null 2>&1; then rulecast ${args}; status=$?; ` +
+    `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
+    `exec ${INSTALLED_SH} ${args}' --`
   )
 }
 

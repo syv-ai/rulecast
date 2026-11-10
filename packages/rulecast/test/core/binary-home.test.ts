@@ -54,9 +54,10 @@ describe("gitHookCommand", () => {
 
   test.each(LOOKUP_FIXTURES)(
     "the git-hook resolver prefers the project's, then the PATH, then install.sh's: $name",
-    async ({ places, runs, installedOnPath }) => {
+    async ({ places, runs, installedOnPath, brokenPath }) => {
       const root = await createProject({})
       const setup = lookupSetup(places, root)
+      if (brokenPath) breakPathRulecast(setup)
       // pre-commit's entry is split like a shell would; the command is `sh -c <script> --`.
       const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
       const result = spawnSync("/bin/sh", ["-c", script, "--"], {

@@ -170,9 +170,11 @@ describe("the committed hook script", () => {
     expect(hook(root, { hook_event_name: "Stop" }, { HOME: home }).stdout).toBe('{"installed":true}\n')
   })
 
-  test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs, installedOnPath }) => {
+  test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs, installedOnPath, brokenPath }) => {
     const root = await createProject({})
-    const env = lookupEnv(lookupSetup(places, root), installedOnPath)
+    const setup = lookupSetup(places, root)
+    if (brokenPath) breakPathRulecast(setup)
+    const env = lookupEnv(setup, installedOnPath)
     const result = hook(root, { hook_event_name: "Stop" }, env)
     expect(result.stdout).toBe(`{"${runs}":true}\n`)
   })

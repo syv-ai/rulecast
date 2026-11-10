@@ -12,11 +12,18 @@ export type Place = "project" | "path" | "installed"
  * The fixtures every lookup of rulecast is held to: the agent hooks' script, the git hooks'
  * command and doctor's hookRulecast. Each names the places that have a rulecast and the one that
  * must run. `installedOnPath`: install.sh's directory is on the PATH too, after or before the PATH
- * directory, as it is once install.sh has set up the startup files.
+ * directory, as it is once install.sh has set up the startup files. `brokenPath`: the PATH's
+ * rulecast cannot run on this machine (breakPathRulecast), which counts as none.
  */
 export type InstalledOnPath = "after" | "before"
 
-export const LOOKUP_FIXTURES: { name: string; places: Place[]; runs: Place; installedOnPath?: InstalledOnPath }[] = [
+export const LOOKUP_FIXTURES: {
+  name: string
+  places: Place[]
+  runs: Place
+  installedOnPath?: InstalledOnPath
+  brokenPath?: boolean
+}[] = [
   { name: "only the project's own rulecast", places: ["project"], runs: "project" },
   { name: "only one on the PATH", places: ["path"], runs: "path" },
   { name: "the project's own rulecast wins over one on the PATH", places: ["project", "path"], runs: "project" },
@@ -36,6 +43,12 @@ export const LOOKUP_FIXTURES: { name: string; places: Place[]; runs: Place; inst
     installedOnPath: "before",
   },
   { name: "the project's own rulecast wins over install.sh's", places: ["project", "installed"], runs: "project" },
+  {
+    name: "a PATH rulecast that cannot run falls through to install.sh's",
+    places: ["path", "installed"],
+    runs: "installed",
+    brokenPath: true,
+  },
 ]
 
 /** The environment a fixture's lookup runs in: its PATH before `rest`, and install.sh's directory. */

@@ -289,8 +289,10 @@ describe("rulecast doctor", () => {
 
   test.each(LOOKUP_FIXTURES)(
     "doctor names the rulecast the hooks run: $name",
-    async ({ places, runs, installedOnPath }) => {
-      const { stdout, setup } = await doctorWith(places, {}, {}, installedOnPath)
+    async ({ places, runs, installedOnPath, brokenPath }) => {
+      const { stdout, setup } = await doctorWith(places, {}, {}, installedOnPath, (setup) => {
+        if (brokenPath) breakPathRulecast(setup)
+      })
       const label = {
         project: "node_modules/.bin/rulecast",
         path: `rulecast on the PATH (${setup.file.path})`,
