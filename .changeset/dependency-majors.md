@@ -6,7 +6,7 @@ Updates the libraries rulecast runs on to their current major versions: `zod` 4,
 
 Things you may notice:
 
-- `rulecast fix --dry-run` now puts a file name containing a tab, newline or carriage return in quotes, the way git writes it, so `git apply` can read the diff. Every other name is written as it was, so `å.ts` still applies with macOS's `patch`, which reads no quoted names.
+- `rulecast fix --dry-run` now puts a file name containing a tab, newline or carriage return in quotes, the way git writes it, so `git apply` can read the diff. Other names are not quoted, so `å.ts` still applies with macOS's `patch`, which reads no quoted names.
 - A whole number above 2^53 in a config, such as `max_file_bytes: 1e21`, is now refused instead of accepted.
 - Breaking, for anyone writing a custom detector: its `schema` must now be built with zod 4, because rulecast's types and validation use it.
 - Two exported types loosened from a non-empty tuple to an array: `RuleExamples`' `expect.lines` and `RuleEntry.stages` in `/internal`.

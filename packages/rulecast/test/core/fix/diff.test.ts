@@ -63,6 +63,20 @@ describe("unifiedDiff's file names", () => {
     expect(readFileSync(path.join(dir, name), "utf8")).toBe("two\n")
   })
 
+  test.each(["my file.ts", "t ", "a\vb.ts"])("%j ends its name with a tab, as git writes it", async (name) => {
+    const { dir, diff } = await project(name)
+    expect(diff.split("\n").slice(0, 2)).toEqual([`--- a/${name}\t`, `+++ b/${name}\t`])
+    const git = await run("git", ["apply", "--check", "-"], dir, diff)
+    expect(git.status, git.out).toBe(0)
+  })
+
+  test.runIf(hasApplePatch).each(["my file.ts", "t "])("%j applies with macOS's patch", async (name) => {
+    const { dir, diff } = await project(name)
+    const patched = await run(APPLE_PATCH, ["-p1"], dir, diff)
+    expect(patched.status, patched.out).toBe(0)
+    expect(readFileSync(path.join(dir, name), "utf8")).toBe("two\n")
+  })
+
   test.each(["a\tb.ts", "a\nb.ts", "a\rb.ts"])(
     "%j, which ends a name unquoted, is quoted as git quotes it",
     async (name) => {
