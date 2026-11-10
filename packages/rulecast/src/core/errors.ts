@@ -73,7 +73,7 @@ export function formatZodError(error: ZodError, options: { prefix?: string; sche
 type Issue = z.core.$ZodIssue
 
 /** How zod's stock message reports a value of the wrong type, the one place that says what it got. */
-const WRONG_TYPE = /^Invalid input: expected (\w+), received (\w+)$/
+const WRONG_TYPE = /^Invalid input: expected (\w+), received (-?\w+)$/
 
 /**
  * What an issue says, in rulecast's own words. A message a schema wrote itself is left alone, which
