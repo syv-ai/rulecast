@@ -1,0 +1,11 @@
+---
+"@syv-ai/rulecast": patch
+---
+
+Fixes to how rulecast's agent hooks are installed and checked, and to the standalone installer.
+
+- `rulecast install` (and `rulecast init`) can put rulecast's Claude Code hooks in the shared `.claude/settings.json` or the personal `.claude/settings.local.json`. When both files held hooks from an older rulecast, only the shared one was updated, so the personal one kept the old commands and rulecast ran twice on every event. Install now updates rulecast's hooks in every settings file that has them, says which files it changed, and leaves everything else in those files alone. `rulecast doctor` reports a settings file left on an older command as out of date.
+- When the hooks are installed but no rulecast can be found to run them, `rulecast doctor` now says that first, with how to install rulecast, even when the hooks are also out of date. Before, it only said to run `rulecast install`, which does not fix it.
+- `rulecast doctor` names the rulecast the hooks run more accurately. The binary from install.sh is called that whether or not it was found through the PATH, and it is never offered a global npm update. When a global npm rulecast comes before install.sh's directory on the PATH, doctor now says to update the npm install, since a newer install.sh binary would never run.
+- install.sh prints the `fish_add_path` command with the directory in quotes, so a directory with a space in it stays one argument when you paste the command.
+- install.sh treats `/x/y`, `/x/y/` and `/x/y//` as the same install directory, and a PATH entry with a trailing slash as the same directory too. It no longer adds a second line to your shell's startup files, or the directory to your PATH twice, when the spelling differs.
