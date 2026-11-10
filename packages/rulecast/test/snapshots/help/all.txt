@@ -1,0 +1,24 @@
+usage: rulecast <command> [flags]
+
+  init        Set rulecast up: config, settings, your existing git hooks as rules, agent hooks
+  install     Add the agent hooks, or upgrade them, and fetch missing rule repos
+  uninstall   Remove the agent hooks rulecast added
+  run         Check staged files (the default), changed files, or everything
+  fix         Apply regex and ast-grep rules' fixes; --dry-run prints the diff
+  list        Show every configured rule: where it comes from, what it matches, what it cites
+  add         Add catalog rules or packs, such as loop-safety, to the nearest config
+  test        Run each rule's good/bad examples; --against and --history say how much it would flag
+  stats       Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy
+  validate    Check the config (and a rules manifest) and print diagnostics
+  doctor      Compile, check the environment and hooks, dry-run every rule
+
+Advanced:
+  baseline    Record today's findings, so full-repo runs fail only on new ones
+  replay      What your rules would have told the agent in its recent sessions, from their transcripts
+  autoupdate  Move pinned rule repos to their latest tag
+  try-repo    Run a rule repo against your project without configuring it
+  clean       Delete the cache
+  warm        Build detector caches ahead of time (no built-in detector needs it yet)
+  hook        Answer an agent hook on stdin (the agent runs this, not you)
+
+rulecast <command> --help shows a command's flags.

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { cp, mkdir, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { dropSelfPointers, rewriteLinks } from "./links"
@@ -53,6 +53,11 @@ export async function sync(): Promise<string[]> {
   const written: string[] = []
   await rm(generatedDir, { recursive: true, force: true })
   await mkdir(generatedDir, { recursive: true })
+  // A page whose source was removed or renamed would otherwise stay on the site, from an earlier sync.
+  for (const entry of await readdir(docsDir, { recursive: true })) {
+    const file = path.join(docsDir, entry)
+    if (entry.endsWith(".md") && (await readFile(file, "utf8")).includes(HEADER)) await rm(file)
+  }
   for (const page of PAGES) {
     if ("hand" in page.source) {
       const file = path.join(docsDir, `${page.route}.mdx`)

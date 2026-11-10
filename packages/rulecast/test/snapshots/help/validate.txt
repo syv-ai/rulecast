@@ -1,0 +1,5 @@
+rulecast validate [file...]
+
+Check the config (and a rules manifest) and print diagnostics
+
+  file...  A config (repos:) or a manifest (a list of rules), whatever its name

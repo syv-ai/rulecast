@@ -1,0 +1,3 @@
+rulecast hook <adapter>
+
+Answer an agent hook on stdin (the agent runs this, not you)

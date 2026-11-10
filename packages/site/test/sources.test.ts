@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
+import { commandsMarkdown, HELP_DIR, listedCommands } from "../scripts/commands"
 import {
   agentDocUrl,
   agentPrompt,
@@ -108,10 +109,6 @@ describe("the guides", () => {
       expect(agents).toContain(heading)
     }
     expect(agents).not.toContain("isolation: worktree")
-    const commands = pageBody(page("reference/commands"), sections)
-    expect(commands).toContain("## Advanced commands")
-    expect(commands).toContain("`rulecast replay claude-code`")
-    expect(commands).toContain("## Exit codes")
     const rules = pageBody(page("guides/writing-rules"), sections)
     expect(rules).toContain("## A rule")
     expect(rules).toContain("## Refusing a write")
@@ -121,6 +118,42 @@ describe("the guides", () => {
     const lead = sections.get(LEAD) ?? ""
     expect(lead).not.toMatch(/<div|<img|<details|<summary|shields\.io/)
     expect(lead).toContain("rulecast: 1 rule violated")
+  })
+})
+
+describe("the Commands page", () => {
+  const page = PAGES.find((candidate) => candidate.route === "reference/commands")!
+
+  it("is the CLI's help: a table of every command, Advanced ones below a divider, then each one's help", () => {
+    const body = pageBody(page, readme())
+    const table = body.slice(0, body.indexOf("\n## "))
+    expect(table).toContain("| [`init`](#rulecast-init) | Set rulecast up")
+    expect(table.indexOf("| [`doctor`]")).toBeLessThan(table.indexOf("| **Advanced** |"))
+    expect(table.indexOf("| **Advanced** |")).toBeLessThan(table.indexOf("| [`baseline`]"))
+    expect(body).toMatch(/^## rulecast run$/m)
+    expect(body).toContain("--from-ref A    Files changed since the merge base with A")
+    expect(body).toContain("  3  Incomplete:")
+    expect(body).toContain("[output contract](agents/reference/output.md#exit-codes)")
+  })
+
+  it("lists the commands help --all lists, each once", () => {
+    const all = readFileSync(path.join(REPO_ROOT, HELP_DIR, "all.txt"), "utf8")
+    const names = listedCommands(all).map((command) => command.name)
+    expect(names).toContain("hook")
+    const body = pageBody(page, readme())
+    expect([...body.matchAll(/^## rulecast (\S+)$/gm)].map((match) => match[1])).toEqual(names)
+  })
+
+  it("leaves the summary out of the help block it already prints above", () => {
+    const read = (file: string) =>
+      file.endsWith("all.txt")
+        ? "usage\n\n  run   Check things\n\nAdvanced:\n  warm  Warm up\n"
+        : "rulecast x\n\nCheck things\n\nWarm up\n\n  --a  A flag"
+    const markdown = commandsMarkdown(read)
+    expect(markdown).toContain("| **Advanced** |")
+    expect(markdown).toContain(
+      "## rulecast run\n\nCheck things.\n\n```text\nrulecast x\n\nWarm up\n\n  --a  A flag\n```",
+    )
   })
 })
 

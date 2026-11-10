@@ -1,0 +1,7 @@
+rulecast add <id|pack>...
+
+Add catalog rules or packs, such as loop-safety, to the nearest config
+
+  id|pack  A catalog rule id, or a pack's name for all of its rules
+
+Rules already configured are skipped. The config is validated after writing.

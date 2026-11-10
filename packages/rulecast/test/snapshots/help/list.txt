@@ -1,0 +1,7 @@
+rulecast list [RULE_ID] [--catalog] [--format terminal|json]
+
+Show every configured rule: where it comes from, what it matches, what it cites
+
+  RULE_ID    Only this rule, with its message and the text of the sections it cites
+  --catalog  The catalog's rules and packs instead, marking the ones already configured
+  --format   terminal or json

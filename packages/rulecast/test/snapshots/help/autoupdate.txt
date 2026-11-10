@@ -1,0 +1,6 @@
+rulecast autoupdate [--freeze] [--repo URL]...
+
+Move pinned rule repos to their latest tag
+
+  --freeze    Pin the commit SHA, with the tag in a comment
+  --repo URL  Only this repo; repeatable

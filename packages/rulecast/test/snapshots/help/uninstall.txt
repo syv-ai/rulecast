@@ -1,0 +1,5 @@
+rulecast uninstall [--agent <name>]...
+
+Remove the agent hooks rulecast added
+
+  --agent <name>  Only this agent; repeatable

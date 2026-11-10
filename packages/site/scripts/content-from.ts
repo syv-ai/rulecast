@@ -12,7 +12,18 @@ import { CONTENT_PATHS, REPO_ROOT } from "./sources"
  *
  * It runs in CI only, on a fresh checkout. Locally it would overwrite README.md and agents/.
  */
-const git = (...args: string[]) => execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim()
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+
+/** Whether `ref` has `file`, a file or a directory. */
+function has(ref: string, file: string): boolean {
+  try {
+    git("cat-file", "-e", `${ref}:${file}`)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function latestTag(): string {
   const tag = git("tag", "--list", "v*.*.*", "--sort=-v:refname").split("\n")[0]
@@ -23,6 +34,10 @@ export function latestTag(): string {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const requested = process.argv[2] ?? "latest"
   const ref = requested === "latest" ? latestTag() : requested
-  git("checkout", ref, "--", ...CONTENT_PATHS)
-  process.stdout.write(`site content from ${ref}: ${CONTENT_PATHS.join(", ")}\n`)
+  // A path the release does not have yet (it came after it) keeps main's copy.
+  const present = CONTENT_PATHS.filter((file) => has(ref, file))
+  git("checkout", ref, "--", ...present)
+  const missing = CONTENT_PATHS.filter((file) => !present.includes(file))
+  process.stdout.write(`site content from ${ref}: ${present.join(", ")}\n`)
+  if (missing.length > 0) process.stdout.write(`not in ${ref}, kept from main: ${missing.join(", ")}\n`)
 }

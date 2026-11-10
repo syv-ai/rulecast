@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { parse } from "yaml"
+import { commandsMarkdown, HELP_DIR } from "./commands"
 
 /**
  * Every read of the repository's own Markdown goes through here. The site has no copy of the docs:
@@ -27,6 +28,8 @@ export type PageSource =
   | { file: string }
   /** A hand-written page in src/content/docs/<route>.mdx. */
   | { hand: true }
+  /** The CLI's help, recorded in HELP_DIR (scripts/commands.ts). */
+  | { help: true }
 
 export interface Page {
   route: string
@@ -65,6 +68,7 @@ export const CONTENT_PATHS = [
   INSTALL_SCRIPT,
   "packages/rulecast/package.json",
   "packages/rulecast/test/goldens/delivery",
+  HELP_DIR,
 ]
 
 /**
@@ -156,9 +160,11 @@ export const PAGES: Page[] = [
   {
     route: "reference/commands",
     title: "Commands",
-    description: "Every rulecast command.",
+    description: "Every rulecast command and its flags, as the CLI's help prints them.",
     group: "Reference",
-    source: { readme: ["Commands"], file: "guides/commands.md" },
+    source: { help: true },
+    intro:
+      "`rulecast help --all` and each command's `--help`, as this release prints them. The exit codes, and the JSON and SARIF a script can rely on, are in the [output contract](agents/reference/output.md#exit-codes).",
   },
   {
     route: "reference/rule-format",
@@ -224,12 +230,13 @@ export const PAGES: Page[] = [
 
 /**
  * README sections that are not a page of their own. The lead and Performance are imported by
- * how-it-works.mdx; the license is linked from the footer, and "Learn more" is the sidebar's job.
+ * how-it-works.mdx; the license is linked from the footer, "Learn more" is the sidebar's job, and
+ * the Commands page is built from the CLI's help rather than from the README's short table.
  */
 export const FRAGMENTS: Record<string, string> = { lead: LEAD, performance: "Performance" }
 /** The page that imports FRAGMENTS, so the page a link to one of their headings goes to. */
 export const FRAGMENT_PAGE = "how-it-works"
-export const DROPPED = ["Learn more", "License"]
+export const DROPPED = ["Commands", "Learn more", "License"]
 
 const FENCE = /^(```|~~~)/
 
@@ -342,6 +349,7 @@ export function pageParts(page: Page, sections: Map<string, string>): PagePart[]
       parts.push({ markdown, source: "README.md" })
     }
   }
+  if ("help" in page.source) parts.push({ markdown: commandsMarkdown(readSource), source: "README.md" })
   if ("file" in page.source && page.source.file) {
     const body = splitTitle(readSource(page.source.file)).body.replace(RELATIVE_LINKS_NOTE, "")
     parts.push({ markdown: body, source: page.source.file })

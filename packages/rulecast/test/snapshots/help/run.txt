@@ -1,0 +1,23 @@
+rulecast run [RULE_ID] [--all-files | --files F...] [--from-ref A [--to-ref B]] [--summary] [--format terminal|agent|json|sarif] [--session <id>] [--llm | --no-llm]
+
+Check staged files (the default), changed files, or everything
+
+  RULE_ID         Run only this rule
+  --all-files     Every file git knows about, with the adoption backlog
+  --files F...    These files
+  --from-ref A    Files changed since the merge base with A, judged against it
+  --to-ref B      With --from-ref: up to B, read at B (pre-push, CI)
+  --summary       Print the backlog instead of every finding
+  --format        terminal, agent, json or sarif
+  --session <id>  The files an agent session edited, as at its Stop
+  --llm           Include metered (llm) rules in a staged run, which skips them by default
+  --no-llm        Skip metered (llm) rules in any run
+
+With --all-files or --files, findings listed in a committed .rulecast/baseline.json are
+pre-existing (see rulecast baseline).
+Exit codes:
+  0  Every rule ran; no new error-severity findings (warnings and pre-existing findings allowed)
+  1  Every rule ran; at least one new error-severity finding
+  2  rulecast could not run: usage, a config file that does not load, git, or an internal error
+  3  Incomplete: a rule failed to compile, a rule repo could not be fetched, a detector failed or timed out. Findings that were produced are still reported. Wins over 1
+The JSON and SARIF output is documented in agents/reference/output.md.

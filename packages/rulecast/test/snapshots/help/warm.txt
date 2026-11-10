@@ -1,0 +1,5 @@
+rulecast warm [--detector <kind>]...
+
+Build detector caches ahead of time (no built-in detector needs it yet)
+
+  --detector <kind>  Only this detector kind; repeatable

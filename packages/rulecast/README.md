@@ -117,7 +117,7 @@ More in [Writing rules](https://github.com/syv-ai/rulecast/blob/main/guides/writ
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
 | `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; exits 2 on errors, and with `--ci` also on a setup that would run degraded |
 
-If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists every command. The [advanced commands](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md) and the exit codes are [there](https://github.com/syv-ai/rulecast/blob/main/guides/commands.md#exit-codes).
+If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists every command, and `rulecast <command> --help` its flags; the site's [Commands](https://syv-ai.github.io/rulecast/reference/commands/) page shows them all. The exit codes are in the [output contract](https://github.com/syv-ai/rulecast/blob/main/agents/reference/output.md#exit-codes).
 
 ## Install
 

@@ -1,0 +1,6 @@
+rulecast install [--agent <name>]... [--scope shared|personal]
+
+Add the agent hooks, or upgrade them, and fetch missing rule repos
+
+  --agent <name>           Only this agent; repeatable. Default: every supported agent
+  --scope shared|personal  Write to the shared or the personal settings file

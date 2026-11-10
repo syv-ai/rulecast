@@ -1,0 +1,8 @@
+rulecast clean [--project]
+
+Delete the cache
+
+  --project  Only this project's directory
+
+Without --project, everything in the cache home goes except the native files this version of the
+standalone binary loads.

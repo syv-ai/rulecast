@@ -133,11 +133,8 @@ function tableCommands(text: string): string[] {
   ].sort()
 }
 
-/**
- * The README's command table names the basic tier and the commands guide's the advanced one, as
- * COMMANDS does, in both directions.
- */
-test("the README and the commands guide list each tier's commands", () => {
+/** The README's command table names the basic tier, as COMMANDS does, in both directions. */
+test("the README lists the basic commands", () => {
   const readme = repoFile("README.md")
   const start = readme.indexOf("\n## Commands\n")
   const end = readme.indexOf("\n## ", start + 1)
@@ -145,11 +142,21 @@ test("the README and the commands guide list each tier's commands", () => {
   const names = (commands: typeof COMMANDS) => commands.map((command) => command.name).sort()
   expect(tableCommands(readme.slice(start, end))).toEqual(names(basic))
   expect(tableCommands(readme.slice(0, start) + readme.slice(end))).toEqual([])
-  const guide = repoFile("guides/commands.md")
-  const advancedStart = guide.indexOf("## Advanced commands")
-  expect(advancedStart).toBeGreaterThan(-1)
-  expect(tableCommands(guide.slice(advancedStart))).toEqual(names(advanced))
-  expect(tableCommands(guide.slice(0, advancedStart))).toEqual([])
+})
+
+/**
+ * The docs site's Commands page is built from these files (packages/site/scripts/commands.ts), read
+ * from the release it documents, so it shows that release's flags. They are the CLI's own output: a
+ * help change fails here until `pnpm vitest run -u test/commands/help.test.ts` records it.
+ */
+test("the help snapshots the docs site reads are the CLI's help", async () => {
+  // Without the version line, so a release's version bump does not change them.
+  const all = usage({ all: true })
+  expect(all.startsWith(`rulecast ${VERSION}\n\n`)).toBe(true)
+  await expect(all.slice(`rulecast ${VERSION}\n\n`.length)).toMatchFileSnapshot("../snapshots/help/all.txt")
+  for (const command of COMMANDS) {
+    await expect(commandHelp(command.name)).toMatchFileSnapshot(`../snapshots/help/${command.name}.txt`)
+  }
 })
 
 test("run --help and try-repo --help print the exit codes", async () => {
