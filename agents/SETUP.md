@@ -2,7 +2,7 @@
 
 Use this when the developer asks you to set up rulecast. rulecast delivers a project's conventions to coding agents while they work: rules in `.rulecast-config.yaml` pair a check with a message and a pointer to the doc section it enforces.
 
-Setup is short. You read what the repository can tell you, show the developer one page of defaults with the few questions only they can answer, and write it once they approve. More rules come later, one at a time: with `/rulecast:add-rule` from the rulecast plugin in Claude Code, or with [DRAFT-RULES.md](DRAFT-RULES.md) for one convention elsewhere.
+Setup is short. You read what the repository can tell you, show the developer one page of defaults with the few questions only they can answer, and write it once they approve.
 
 Relative links in this file resolve against this file's own URL. Commands below say `rulecast`. If `rulecast` is not on the PATH, use `npx @syv-ai/rulecast`.
 
@@ -18,35 +18,27 @@ Run init's dry run first where sessions start, then in each directory it lists u
 rulecast init --dry-run --format json
 ```
 
-It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports the following; `committers`, `packages`, `sessions`, `gitHooks` and `ci` sit under `detected`:
+It writes nothing in the project. It fetches the catalog's rule data into rulecast's cache; if that fails, `catalog` is `{ error }`. What the table in step 3 reads from it is named there (`committers`, `packages`, `sessions`, `gitHooks` and `ci` sit under `detected`). Beyond that:
 
-- the stack, the docs and their headings, and the agents it detects;
-- `committers`: how many people committed in the last six months, bots left out (null when there are none, or in a shallow clone);
-- `packages`: declared workspaces and top-level directories with a manifest, each with its stack and whether it has its own agent doc or config;
-- `sessions`: directories below this one where an agent's settings already sit (`.claude/`);
-- `gitHooks`: pre-commit, lefthook or husky, and whether rulecast is already in each;
-- `ci`: workflow files that run a coding agent;
-- `linters`: the linters the project already runs (ESLint, Ruff, oxlint, gitleaks), each with the rules its own config makes errors (`errorRules`), how many warnings a rule would not deliver (`warningRules`), and `candidates`: doc sections that name one of those rules;
-- the project's own hooks it can run as rules (and the ones it can't, with why). A hook that runs one of those linters has `sameAs: "linter/<tool>"`;
-- `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence: a directory, a `.gitattributes` pattern, or a file (past 20 files, `notListed` counts the rest). They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`);
-- `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether the config already has it (`installed`);
-- the config's current settings, and every file it would write.
+- `committers` is null when nobody committed in the last six months (bots left out), or in a shallow clone.
+- `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
+- A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
 
 Then read what needs judgement:
 
 - The docs: `README`, `AGENTS.md` or `CLAUDE.md`, `CONTRIBUTING`, anything under `docs/`. Note the conventions they state that code could show, such as "never edit `src/client/` by hand".
 - Your own memory of this project, if you keep one (in Claude Code, `~/.claude/projects/<project>/memory/`). Corrections the developer made before are the best candidates for rules.
 - The script of any hook with `modifies: null`, named in `runs`, to see whether it changes files.
-- Whether rulecast is installed: `node_modules/.bin/rulecast` is a devDependency, and `command -v rulecast` finds one on the PATH (the standalone binary, or a global install). Note whether there is a `package.json`, and whether the project pins its tools there.
+- Whether rulecast is installed: a devDependency puts it at `node_modules/.bin/rulecast`, and `command -v rulecast` finds one on the PATH (the standalone binary, or a global install). Note whether there is a `package.json`, and whether it lists its dev tools (linters, test runners) in devDependencies.
 
 ## 3. Defaults and questions
 
-Each item on the page gets a default from what you found. Only the items below marked **always** are questions; the rest are defaults the developer can strike or change. Put your recommendation first, except for llm rules.
+Each item on the page gets a default from what you found. Only the items below marked **always** are questions; the rest are defaults the developer can strike or change. Put your recommendation first.
 
 | Item | Default from | Default | Becomes a question when |
 |---|---|---|---|
 | Who it's for | `committers.count` | 2 or more: a team. 1: solo. Hooks `--scope shared` either way: with one committer the shared file affects only them, and the next person to join gets the hooks. Say they can keep them personal with "*N*: personal" | `committers` is null |
-| Install | `node_modules/.bin/rulecast`, `command -v rulecast`, and whether `package.json` pins the project's tools | the one already installed, if any; else the devDependency when `package.json` pins the tools, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
+| Install | `node_modules/.bin/rulecast`, `command -v rulecast`, and whether `package.json` lists the project's dev tools | the one already installed, if any; else the devDependency when `package.json` lists them, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
 | Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
 | Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
 | Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
@@ -59,11 +51,11 @@ Each item on the page gets a default from what you found. Only the items below m
 | Catalog rules | `catalog.rules` with `matching` above 0, `installed: false`, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
 | Stated conventions and memory corrections | your reading | each on: drafted after setup, one at a time | never |
 | Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
-| Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never: it is an item, and it never blocks approval |
+| Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never |
 | **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended |
 | **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
-The weekly stats summary row says what turning it on keeps: 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside this config's findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock. It applies to this config only.
+The weekly stats summary row's `why` says what turning it on keeps, as the example page's does.
 
 A linter rule delivers only errors: to have a warning delivered, the developer makes it an error in the linter's config. Each finding carries the linter's own page for its lint rule as a link, until a doc section is mapped to that rule after setup (step 7).
 
@@ -93,7 +85,7 @@ In the same turn, ask every question on the page with your question tool, severa
 - Map what the developer says to numbers ("strike 4 and 7", "turn on 6", "2: also `backend/`", or free text) and repeat it back in one line.
 - If the reply only strikes items, turns `off` items on, or answers the questions with options the page listed, that approves the page as amended. Say in one line what you will write ("Writing everything on the page except 5 and 8, llm rules with haiku"), and write it.
 - If it changes a value or adds an item, show the page again with the change, keeping every number, and ask again.
-- Ask again any question left unanswered. "Go ahead" never answers one.
+- Ask again any question left unanswered.
 
 ## 6. Write
 

@@ -37,7 +37,7 @@ A convention says what should hold from now on. If what happened was a one-off b
 1. Find the `.rulecast-config.yaml` files above the files the convention is about. A repository can have one at the top, one per package, or both, and every config above a file applies to it. If there is none, stop: rulecast is not set up yet. Offer `/rulecast:setup`, which follows [SETUP.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.12.0/agents/SETUP.md) with the developer.
 2. Choose the config with the developer. A convention about one package goes in that package's config; one for the whole repository goes in the top config.
 3. In that config's directory, run `rulecast list`. If a rule already enforces the convention and should have caught what happened, the work is to fix that rule rather than add one. Show the developer what it checks and why it missed, and continue from step 4 with that rule. If the `not_checked` entries it prints at the end name the convention's section, the convention was considered before: tell the developer the reason given then, and ask whether it still holds.
-4. Run `rulecast list --catalog`. If a catalog rule enforces the convention, recommend adopting it over drafting a new one: show what it checks and how many of the project's files it matches (`rulecast list --catalog <id>`), and with the developer's agreement run `rulecast add <id>` in that config's directory. It still cites the convention's section (step 3), as a `context` override on its entry; then go to step 5.
+4. Run `rulecast list --catalog`. If a catalog rule enforces the convention, recommend adopting it over drafting a new one: show what it checks and how many of the project's files it matches (`rulecast list --catalog <id>`), and with the developer's agreement run `rulecast add <id>` in that config's directory. Then do step 3 to find its section, add it as a `context` override on the entry, and go to step 5.
 
 ## 3. Find where the convention is written
 
@@ -52,7 +52,6 @@ Follow [DRAFT-RULES.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.12.
 
 - If code cannot show a break, there is no pattern rule. Offer a touch rule that delivers the section, as DRAFT-RULES.md does for guidance. If the developer does not want one, propose a `not_checked` entry in the config instead, with the section and the reason, as DRAFT-RULES.md section 4 describes. Write nothing about it in the docs.
 - When the convention came from this session, the code that broke it is the best `bad` example, and the fix is a good `good` one. Shorten both to the lines that matter.
-- The gates in DRAFT-RULES.md make a rule ready to show, not to keep. The developer keeps, edits or drops it.
 
 ## 5. Finish
 

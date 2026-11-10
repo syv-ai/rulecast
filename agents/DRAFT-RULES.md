@@ -1,6 +1,6 @@
 # Draft rulecast rules from a project's docs
 
-Use this when asked to draft rulecast rules for a project from a document, usually `AGENTS.md` or `CLAUDE.md`. Every convention in the doc that code can visibly break becomes a rule that catches the break and points back at the doc. The developer decides which rules stay.
+Use this when asked to draft rulecast rules for a project from a document, usually `AGENTS.md` or `CLAUDE.md`. Every convention in the doc that code can visibly break gets a drafted rule for the developer to keep, edit or drop: one that catches the break and points back at the doc.
 
 Load these when you need them. Relative links resolve against this file's own URL.
 
@@ -9,13 +9,14 @@ Load these when you need them. Relative links resolve against this file's own UR
 
 Commands below say `rulecast`. If `rulecast` is not on the PATH, use `npx @syv-ai/rulecast`.
 
-The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them. The gates in steps 5 and 6 do not change that. Passing them makes a rule ready to show the developer, not to adopt. The developer decides.
+The steps ask the developer to decide several things, and the developer is there to decide them. Ask, and wait for the answer. If you were told to work without the developer, stop and say why: rulecast enforces conventions the developer chose, and nobody else can choose them.
 
 ## 1. Read
 
 1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer. If the doc has no conventions, only commands and architecture, stop: work them out with the developer first, through [CONVENTIONS.md](CONVENTIONS.md).
 2. Find the `.rulecast-config.yaml` files above the files the doc talks about. A repository can have one at the top, one per package, or both, and each applies to the files below it on its own. If there is none, stop and set rulecast up with the developer first ([SETUP.md](SETUP.md)). Choose with the developer which config each rule goes in: one about a package in that package's config, one for the whole repository in the top one. Read each config you will use, and run `rulecast list` in its directory. Its first lines say where new conventions are written (the config's `conventions`) and whether llm rules are allowed (`llm.model`). It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
+4. When revising a project's existing rules, read `rulecast stats --format json` first (its shape is in [reference/stats.md](reference/stats.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping, unless it locks in a replacement (section 2), where staying quiet means the lock is working; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong. Before changing the pattern of a rule with `recurringFiles` in `weekly`, read those files: they may hold code the agent keeps copying, or be files the rule is wrong for.
 
 ## 2. Sort the conventions
 
@@ -61,7 +62,7 @@ For checkable conventions, use `path` when the file itself is the break. Otherwi
 
 Write the narrowest pattern that catches the break: a noisy rule gets ignored.
 
-**Do not decide up front that a convention needs an `llm` rule.** Which tier a convention belongs in is a property of how it is *worded*, not of the convention: the same rule, written one way, scored P 0.99 / R 0.90 as a pattern, and written more strictly by the same project's owner, P 0.70. So the tier cannot be settled by reading the sentence. Attempt a pattern, measure it against examples, and fall back to `llm` only when the pattern fails — step 3 below is that loop.
+**Do not decide up front that a convention needs an `llm` rule.** Whether a convention needs `llm` depends on how it is worded, so it can't be decided by reading it: attempt a pattern, measure it (step 3), and fall back to `llm` only when the pattern fails.
 
 **An `llm` rule needs the developer's agreement first.** `llm.model` in the config you draft into says they gave it: `rulecast list` in that config's directory says `llm rules: allowed` or `not allowed`. Without it, never draft an `llm` rule. When a convention needs one, say so, and ask whether to allow llm rules (it costs money per file, and the file goes to the model's provider). With a yes, add `llm:` with `model: haiku` (or the model they choose) to that config; otherwise make the convention a touch rule. A drafted `llm` rule leaves out `model`, so it runs on `llm.model`, unless the developer wants another model for it.
 
@@ -99,7 +100,7 @@ When the doc can be read two ways, flag only what both readings call wrong, and 
    - Where it has none, which is usual in a small or clean repository, write your own: the smallest code that shows the break for `bad`, and for `good` a near miss, code that looks like the break and is not. Invented examples are fine. Say which ones are invented in the summary.
    - A `path` rule judges the file name, not its code: give it `bad` examples only, at paths the rule must refuse.
    - Every `bad` example gets `expect: { lines: [...] }`: the line each match starts on, counted from 1 (line 1 for a finding about the whole file). Without it, a pattern that fires on the wrong line still passes.
-   - The `baseline` example is an edit: `before` has one violation inside a function or other block, and `after` adds an unrelated line in that same block, next to the violation but not on it, and a second violation. It expects the old violation, on the line it moved to, as `preexisting`, and the added one as `new`. It catches a rule that reports code the edit did not touch as the edit's: a pattern that spans lines, an `ast-grep` match on a whole function, a `scope: container` rule. The unrelated line goes inside the block because a match that is too wide covers it there and comes out `new`; above the block it would be missed.
+   - The `baseline` example is an edit: `before` has one violation inside a function or other block, and `after` adds an unrelated line in that same block, next to the violation but not on it, and a second violation. It expects the old violation, on the line it moved to, as `preexisting`, and the added one as `new`. It catches a rule that reports code the edit did not touch as the edit's: a pattern that spans lines, an `ast-grep` match on a whole function, a `scope: container` rule.
    - Three kinds of rule have no baseline example to give, so skip it for them. A `path` rule: the file is either the break or it is not. An `llm` rule: it only reports lines the edit changed, so the old violation is never reported at all. A `hook` rule whose findings are about the whole file (line 1, as a formatter's are): any edit to the file makes it new.
 
    ```yaml
@@ -178,15 +179,12 @@ The agent doc (`AGENTS.md` or `CLAUDE.md`) is read at the start of every session
 Then summarise:
 
 - how many conventions ended up in each of the four places, so a session with few rules is not read as one where every convention is checked;
-
 - the rules kept: id, one line each, and the `--against` or `--history` counts, with the precision where findings were marked (touch rules have no count);
 - where the doc could be read two ways, and the reading you chose;
 - the rules dropped;
 - the catalog rules you pointed at the project's doc, propose to cover differently, or propose to switch off, and why;
 - the examples you invented;
 - the conventions you skipped, with the reason, and the `not_checked` entries you proposed.
-
-When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/stats.md](reference/stats.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping, unless it locks in a replacement (step 2), where staying quiet means the lock is working; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong. Before changing the pattern of a rule with `recurringFiles` in `weekly`, read those files: they may hold code the agent keeps copying, or be files the rule is wrong for.
 
 ## Never
 
