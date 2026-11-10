@@ -48,11 +48,17 @@ function isEmptyObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
 }
 
-/** A rulecast the hooks can run: where it was found, its path, and what `--version` printed. */
+/**
+ * A rulecast the hooks can run: where it was found, its path, and what `--version` printed. `via`
+ * "installed" is install.sh's, whether the PATH led to it or its directory did; "path" is any other
+ * on the PATH, a global npm install as a rule. `installedOnPath`: install.sh's directory is on the
+ * PATH, so installing there again changes what runs only when nothing comes before it.
+ */
 export interface HookRulecast {
   via: "project" | "path" | "installed"
   path: string
   version: string | null
+  installedOnPath: boolean
 }
 
 /**
@@ -73,19 +79,29 @@ export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal
       () => true,
       () => false,
     )
-  const project = path.join(root, "node_modules", ".bin", "rulecast")
-  if (await executable(project)) {
-    found.push({ via: "project", path: project, version: (await probeRulecast(project, signal))?.version ?? null })
-  }
   const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
   const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
+  const dir = installDir(env)
+  // path.resolve drops a trailing slash, which the shell's lookup does not care about either.
+  const installedOnPath = PATH.split(path.delimiter).some(
+    (entry) => entry !== "" && path.resolve(entry) === path.resolve(dir),
+  )
+  const installed = path.join(dir, "rulecast")
+  const project = path.join(root, "node_modules", ".bin", "rulecast")
+  if (await executable(project)) {
+    const version = (await probeRulecast(project, signal))?.version ?? null
+    found.push({ via: "project", path: project, version, installedOnPath })
+  }
   const onPath = await commandPath("rulecast", signal, PATH)
   const probe = onPath === null ? null : await probeRulecast(onPath, signal)
-  if (onPath !== null && probe !== null) found.push({ via: "path", path: onPath, version: probe.version })
-  const installed = path.join(installDir(env), "rulecast")
-  if (await executable(installed)) {
+  if (onPath !== null && probe !== null) {
+    // install.sh's, reached through the PATH, is still install.sh's: install.sh updates it in place.
+    const via = path.resolve(onPath) === path.resolve(installed) ? "installed" : "path"
+    found.push({ via, path: onPath, version: probe.version, installedOnPath })
+  }
+  if (!found.some((each) => each.via === "installed") && (await executable(installed))) {
     const probe = await probeRulecast(installed, signal)
-    if (probe !== null) found.push({ via: "installed", path: installed, version: probe.version })
+    if (probe !== null) found.push({ via: "installed", path: installed, version: probe.version, installedOnPath })
   }
   return found
 }

@@ -53,21 +53,25 @@ function runsLabel(runs: HookRulecast): string {
       ? "node_modules/.bin/rulecast"
       : runs.via === "path"
         ? `rulecast on the PATH (${runs.path})`
-        : `install.sh's rulecast at ${runs.path}, which is not on the PATH`
+        : `install.sh's rulecast at ${runs.path}, ${runs.installedOnPath ? "on the PATH" : "which is not on the PATH"}`
   return runs.version === null ? label : `${label} ${runs.version}`
 }
 
 /**
- * How to update the rulecast the hooks run, by where it came from. On the PATH it is install.sh's
- * or a global npm install: the install command, for the release minimum_rulecast_version names
- * when that is newer than this rulecast, else the latest. Printed, never run: installing is the
- * developer's step.
+ * How to update the rulecast the hooks run, by where it came from: the install command for
+ * install.sh's, for the release minimum_rulecast_version names when that is newer than this
+ * rulecast, else the latest. Another on the PATH is a global npm install as a rule. When install.sh's
+ * directory is on the PATH after it, install.sh would put a newer one where the hooks never reach,
+ * so only npm's update is offered. Printed, never run: installing is the developer's step.
  */
-function updateRemedy(runs: HookRulecast, minimum: string): string {
+function updateRemedy(runs: HookRulecast, minimum: string, dir: string): string {
   if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
-  const install = isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
+  const pinned = isOlder(VERSION, minimum)
+  const install = pinned ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
   if (runs.via === "installed") return `install a newer one: ${install}`
-  return `install a newer one: ${install}, or update the global npm install`
+  if (!runs.installedOnPath) return `install a newer one: ${install}, or update the global npm install`
+  const npm = `npm install -g @syv-ai/rulecast${pinned ? `@${minimum}` : ""}`
+  return `update the global npm install: ${npm}. It comes before ${dir} on the PATH, so install.sh's would not run`
 }
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
@@ -283,7 +287,7 @@ export async function doctorCommand(
               (outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`)
             : outOfDate !== null
               ? `${file} — but ${outOfDate}; run rulecast install`
-              : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
+              : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}` : ""}`
     io.stdout(line(level, adapter.label, detail))
   }
   io.stdout("\ncache\n")

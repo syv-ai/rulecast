@@ -7,7 +7,7 @@ import { parse } from "yaml"
 
 import { gitHookCommand, probeRulecast } from "../../src/core/binary-home"
 import { childEnv, markOwnEnv, unmarkOwnEnv } from "../../src/core/child-env"
-import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup } from "../helpers/lookup"
+import { breakPathRulecast, LOOKUP_FIXTURES, lookupEnv, lookupSetup } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url))
@@ -54,14 +54,14 @@ describe("gitHookCommand", () => {
 
   test.each(LOOKUP_FIXTURES)(
     "the git-hook resolver prefers the project's, then the PATH, then install.sh's: $name",
-    async ({ places, runs }) => {
+    async ({ places, runs, installedOnPath }) => {
       const root = await createProject({})
-      const { pathDir, installDir } = lookupSetup(places, root)
+      const setup = lookupSetup(places, root)
       // pre-commit's entry is split like a shell would; the command is `sh -c <script> --`.
       const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
       const result = spawnSync("/bin/sh", ["-c", script, "--"], {
         cwd: root,
-        env: { PATH: `${pathDir}:${BASE_PATH}`, RULECAST_INSTALL_DIR: installDir },
+        env: lookupEnv(setup, installedOnPath, BASE_PATH),
         encoding: "utf8",
       })
       expect(result.stdout).toBe(`{"${runs}":true}\n`)
