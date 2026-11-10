@@ -3,7 +3,7 @@ import type { AstroIntegration } from "astro"
 import { defineConfig } from "astro/config"
 import { codeThemes } from "./scripts/code-themes"
 import { proseColumnPlugin } from "./scripts/prose-column"
-import { BASE, GROUPS, PAGES, SITE } from "./scripts/sources"
+import { BASE, SITE, sidebar } from "./scripts/sources"
 
 /** Marks each table's prose column (scripts/prose-column.ts), the way Starlight adds its own plugins. */
 const proseColumns: AstroIntegration = {
@@ -46,13 +46,7 @@ export default defineConfig({
         defaultProps: { frame: "none", wrap: true, preserveIndent: true },
         styleOverrides: { borderWidth: "0px", borderRadius: "0.75rem", frames: { frameBoxShadowCssValue: "none" } },
       },
-      sidebar: GROUPS.map((label) => ({
-        label,
-        items: PAGES.filter((page) => page.group === label).map((page) => ({
-          label: page.title,
-          link: `/${page.route}/`,
-        })),
-      })),
+      sidebar: sidebar(),
     }),
   ],
 })

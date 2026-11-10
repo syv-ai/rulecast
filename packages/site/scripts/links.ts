@@ -45,20 +45,36 @@ function publishedRoute(repoPath: string, anchor?: string): { route: string; anc
 }
 
 /**
+ * Link text that only names the target file: `agents/reference/rule-format.md`, `output.md`, as
+ * written in the link, from the repository root or by basename, with or without backticks.
+ */
+function namesFile(text: string, written: string, repoPath: string): boolean {
+  const bare = text.replace(/^`(.*)`$/, "$1")
+  return bare === written || bare === repoPath || bare === path.posix.basename(repoPath)
+}
+
+/**
  * Rewrites the relative links of Markdown read from `sourcePath` (relative to the repository root).
  * A link to a file the site publishes becomes its page; any other relative link becomes the file on
  * GitHub, and a link to a README heading goes to the page that section is on. Absolute URLs and
- * same-page anchors are left alone.
+ * same-page anchors are left alone. On the site a file path means nothing to the reader, so a link
+ * whose text is the path of the page it leads to reads as that page's title; the files keep the
+ * path, for the agents that read them raw.
  */
 export function rewriteLinks(markdown: string, sourcePath: string): string {
-  return markdown.replace(/\]\((?!https?:|#|mailto:)([^)\s]+)\)/g, (_, target: string) => {
-    const [file = "", anchor] = target.split("#")
-    const repoPath = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), file))
-    const published = publishedRoute(repoPath, anchor)
-    if (published === null) return `](${BLOB}${repoPath}${anchor ? `#${anchor}` : ""})`
-    const hash = published.anchor ? `#${published.anchor}` : ""
-    return `](${published.route === "" ? `${BASE}/` : routeUrl(published.route)}${hash})`
-  })
+  return markdown.replace(
+    /(!?)\[([^\]\n]*)\]\((?!https?:|#|mailto:)([^)\s]+)\)/g,
+    (_, bang: string, text: string, target: string) => {
+      const [file = "", anchor] = target.split("#")
+      const repoPath = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), file))
+      const published = publishedRoute(repoPath, anchor)
+      if (published === null) return `${bang}[${text}](${BLOB}${repoPath}${anchor ? `#${anchor}` : ""})`
+      const hash = published.anchor ? `#${published.anchor}` : ""
+      const title = PAGES.find((page) => page.route === published.route)?.title
+      const label = !bang && title && namesFile(text, file, repoPath) ? title : text
+      return `${bang}[${label}](${published.route === "" ? `${BASE}/` : routeUrl(published.route)}${hash})`
+    },
+  )
 }
 
 /**

@@ -43,6 +43,33 @@ describe("rewriteLinks", () => {
     )
   })
 
+  it("gives a link whose text is the target's path the page's title instead", () => {
+    expect(
+      rewriteLinks(
+        "See [`agents/reference/rule-format.md`](../agents/reference/rule-format.md).",
+        "guides/writing-rules.md",
+      ),
+    ).toBe("See [Rule format](/rulecast/reference/rule-format/).")
+    expect(rewriteLinks("[output.md](output.md#rulecast-test)", "agents/reference/rule-format.md")).toBe(
+      "[Output contract](/rulecast/reference/output/#rulecast-test)",
+    )
+    expect(rewriteLinks("[reference/detectors.md](reference/detectors.md)", "agents/DRAFT-RULES.md")).toBe(
+      "[Detectors](/rulecast/reference/detectors/)",
+    )
+  })
+
+  it("keeps link text that is not the target's path, and the path of an unpublished file", () => {
+    expect(rewriteLinks("[the output contract](output.md)", "agents/reference/stats.md")).toBe(
+      "[the output contract](/rulecast/reference/output/)",
+    )
+    expect(rewriteLinks("[`detectors.md`](output.md)", "agents/reference/stats.md")).toBe(
+      "[`detectors.md`](/rulecast/reference/output/)",
+    )
+    expect(rewriteLinks("[`LICENSE`](LICENSE)", "README.md")).toBe(
+      "[`LICENSE`](https://github.com/syv-ai/rulecast/blob/main/LICENSE)",
+    )
+  })
+
   it("leaves absolute URLs and same-page anchors alone", () => {
     const markdown = "[a](https://example.com/x.md) [b](#errors)"
     expect(rewriteLinks(markdown, "README.md")).toBe(markdown)
