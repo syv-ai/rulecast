@@ -13,7 +13,7 @@ Most projects never run these by hand.
 | `rulecast autoupdate` | Move pinned rule repos to their latest tag |
 | `rulecast try-repo` | Run a rule repo against your project without configuring it |
 | `rulecast clean` | Delete the cache |
-| `rulecast warm` | Build detector caches ahead of time |
+| `rulecast warm` | Build detector caches ahead of time (no built-in detector needs it yet) |
 | `rulecast hook <adapter>` | Answer an agent hook on stdin (the agent runs this, not you) |
 
 ## Exit codes

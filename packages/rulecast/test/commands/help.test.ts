@@ -101,6 +101,9 @@ test("<command> --help and help <command> print that command's synopsis and flag
   expect(commandHelp("test")).toContain("--against PATH...")
   expect(commandHelp("doctor")).toContain("--ci")
   expect(commandHelp("doctor")).toContain("--from-ref REF")
+  // Parsed by init and used by agents/SETUP.md, and once missing from its help.
+  expect(commandHelp("init")).toContain("[--linters id,id]")
+  expect(commandHelp("init")).toContain("--linters id,id  ")
 })
 
 test("a usage error prints that command's help, not every command's", async () => {

@@ -33,12 +33,13 @@ export const COMMANDS: CommandHelp[] = [
     name: "init",
     tier: "basic",
     synopsis:
-      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
+      "rulecast init [--agent <name>... | --no-agents] [--scope shared|personal] [--linters id,id] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model <name>] [--llm-provider <name>] [--conventions <path>] [--weekly-summary] [--dry-run] [--format terminal|json]",
     summary: "Set rulecast up: config, settings, your existing git hooks as rules, agent hooks",
     flags: [
       ["--agent <name>", "Install hooks for this agent (claude-code); repeatable. Default: the agents detected"],
       ["--no-agents", "Install no agent hooks"],
       ["--scope shared|personal", "Write hooks to the shared (default) or the personal settings file"],
+      ["--linters id,id", "Run these of the project's linters as rules, e.g. linter/ruff (--dry-run lists them)"],
       ["--hooks id,id", "Run these of the project's pre-commit or lefthook hooks as rules (--dry-run lists them)"],
       ["--catalog id,id", "Adopt these catalog rules (--dry-run lists the ones that fit)"],
       ["--generated path,path", "Cover these generated paths with generated-code (--dry-run lists them)"],
@@ -273,7 +274,7 @@ export const COMMANDS: CommandHelp[] = [
     name: "warm",
     tier: "advanced",
     synopsis: "rulecast warm [--detector <kind>]...",
-    summary: "Build detector caches ahead of time",
+    summary: "Build detector caches ahead of time (no built-in detector needs it yet)",
     flags: [["--detector <kind>", "Only this detector kind; repeatable"]],
   },
 

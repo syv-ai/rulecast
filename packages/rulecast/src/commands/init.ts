@@ -35,12 +35,33 @@ import {
   reviewText,
   uncommittedHookFiles,
 } from "../init/plan"
-import { fetchHookRepos, hookConfigs, settingsDir } from "./install"
+import { configLabel, fetchHookRepos, hookConfigs, hooksInstalled, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
 import { validationReport } from "./validate"
 
 const NO_HOOKS = "No agent hooks: rulecast will not run in your agent until you run rulecast install --agent <name>."
+const hooksAboveNote = (labels: string[]) =>
+  `No agent hooks here: the hooks in ${labels.join(", ")} reach this config for sessions started there.`
+
+/**
+ * The directories above `root`, up to its repository's top, whose agent hooks a session started
+ * there would run for this config too (reachableConfigs looks below, in the same work tree).
+ */
+async function hooksAbove(root: string, verifyMs: number): Promise<string[]> {
+  const top = await repositoryTop(root)
+  const found: string[] = []
+  for (let dir = root; dir !== top && path.dirname(dir) !== dir; ) {
+    dir = path.dirname(dir)
+    for (const adapter of installable()) {
+      if ((await hooksInstalled(dir, adapter, verifyMs).catch(() => null)) !== null) {
+        found.push(configLabel(root, dir))
+        break
+      }
+    }
+  }
+  return found
+}
 
 const SCOPES: readonly InstallScope[] = ["shared", "personal"]
 
@@ -431,7 +452,10 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   const planContext = { configText, verifyMs: reached.verifyMs, readText: (file: string) => readSourceFile(root, file) }
   const changes = await planInit({ agents, hooks, linters, catalog: adopted, settings: flags.settings }, planContext)
   const alsoCommit = await uncommittedHookFiles(agents, planContext, (file) => isTracked(root, file))
-  if (agents.length === 0) notes.push(NO_HOOKS)
+  if (agents.length === 0) {
+    const above = await hooksAbove(root, reached.verifyMs)
+    notes.push(above.length > 0 ? hooksAboveNote(above) : NO_HOOKS)
+  }
   if (catalog?.offline !== undefined) notes.push(`Catalog: ${catalog.offline}.`)
   // Hook rules from a config above the project cite nothing: their findings come without a doc section.
   const uncited = hooks.filter((hook) => hook.context.length === 0).length

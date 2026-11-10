@@ -412,6 +412,17 @@ describe("rulecast init", () => {
     )
   })
 
+  test("--no-agents in a package says when the hooks at the top already reach its config", async () => {
+    const top = await createRepo({ "backend/app.py": "x = 1\n" })
+    expect((await init(top, "--agent", "claude-code")).code).toBe(0)
+    const result = await init(path.join(top, "backend"), "--no-agents")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      "No agent hooks here: the hooks in .. reach this config for sessions started there.",
+    )
+    expect(result.stdout).not.toContain("rulecast will not run in your agent")
+  })
+
   test("re-running changes nothing that is there, and upgrades rulecast's own hooks from an older command", async () => {
     const OLD = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     const root = await createRepo({ "app/services/users.py": "x = 1\n", "node_modules/.bin/rulecast": "" })

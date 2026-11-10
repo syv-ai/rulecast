@@ -78,8 +78,21 @@ export function withReadmeVersion(source: string, version: string): string {
 
 /** The Git hooks guide's pre-commit snippet pins this repository by tag: it said v0.4.0 at 0.7.0. */
 export function withPreCommitRev(source: string, version: string): string {
-  once(source, PRE_COMMIT_REV, GIT_HOOKS_GUIDE, "the pre-commit snippet's rev")
+  return withRepoRev(source, version, GIT_HOOKS_GUIDE, "the pre-commit snippet's rev")
+}
+
+/** A `repo:` entry for this repository and the `rev:` under it, pinned to this version's tag. */
+export function withRepoRev(source: string, version: string, file: string, name = "the rulecast repo's rev"): string {
+  once(source, PRE_COMMIT_REV, file, name)
   return source.replace(PRE_COMMIT_REV, `$1v${version}`)
+}
+
+/** The rule format's example config pins the catalog by tag: it said v0.2.0 at 0.12.0. */
+export const RULE_FORMAT = "agents/reference/rule-format.md"
+
+export async function generateRuleFormat(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, RULE_FORMAT)
+  return { target, source: withRepoRev(await readFile(target, "utf8"), await packageVersion(), RULE_FORMAT) }
 }
 
 /** The git-hook commands' arguments, by where they appear. */
@@ -154,6 +167,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ...(await generateSkillFiles()),
     await generateReadme(),
     await generateGitHooksGuide(),
+    await generateRuleFormat(),
     await generateInstallScript(),
     await generatePreCommitHooks(),
   ]

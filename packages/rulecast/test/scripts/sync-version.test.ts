@@ -9,10 +9,13 @@ import {
   generateInstallScript,
   generatePreCommitHooks,
   generateReadme,
+  generateRuleFormat,
   generateVersionFile,
+  RULE_FORMAT,
   withInstallScriptVersion,
   withPreCommitRev,
   withReadmeVersion,
+  withRepoRev,
   withVersion,
 } from "../../scripts/sync-version"
 import { run } from "../helpers/script"
@@ -84,6 +87,12 @@ describe("sync-version", () => {
   test("the committed Git hooks guide already matches package.json", async () => {
     const { target, source } = await generateGitHooksGuide()
     expect(await readFile(target, "utf8"), `${GIT_HOOKS_GUIDE} is stale: run pnpm sync-version`).toBe(source)
+  })
+
+  test("the rule format's example pins the catalog at this version", async () => {
+    const { target, source } = await generateRuleFormat()
+    expect(await readFile(target, "utf8"), `${RULE_FORMAT} is stale: run pnpm sync-version`).toBe(source)
+    expect(() => withRepoRev("# no example\n", "1.2.3", RULE_FORMAT)).toThrow(RULE_FORMAT)
   })
 
   test("the committed README already matches package.json", async () => {
