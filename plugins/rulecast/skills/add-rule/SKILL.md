@@ -50,7 +50,7 @@ Every rule cites the doc section that states its convention, so the agent that b
 
 Follow [DRAFT-RULES.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.12.0/agents/DRAFT-RULES.md) for this one convention: section 2 to tell whether code can show a break and to pick the detector, then section 3, steps 1 to 7. Draft in the config chosen in step 2, and run its commands in that config's directory.
 
-- If code cannot show a break, there is no rule. Propose a `Not checked by rulecast: <reason>` line next to the convention instead, as DRAFT-RULES.md describes.
+- If code cannot show a break, there is no pattern rule. Offer a touch rule that delivers the section, as DRAFT-RULES.md does for guidance. If the developer does not want one, propose a `Not checked by rulecast: <reason>` line next to the convention instead, as DRAFT-RULES.md describes.
 - When the convention came from this session, the code that broke it is the best `bad` example, and the fix is a good `good` one. Shorten both to the lines that matter.
 - The gates in DRAFT-RULES.md make a rule ready to show, not to keep. The developer keeps, edits or drops it.
 

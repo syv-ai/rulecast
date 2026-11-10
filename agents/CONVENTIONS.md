@@ -1,6 +1,6 @@
 # Work out a project's conventions with the developer
 
-Use this when the developer chose to review their conventions up front during setup ([SETUP.md](SETUP.md), step 6), or asks for it later. You and the developer work them out together. At the end they are in the project's docs, in the developer's words, and [DRAFT-RULES.md](DRAFT-RULES.md) can turn them into rules.
+Use this when the developer chose to review their conventions up front during setup ([SETUP.md](SETUP.md), step 7), or asks for it later. You and the developer work them out together. At the end they are in the project's docs, in the developer's words, and [DRAFT-RULES.md](DRAFT-RULES.md) can turn them into rules.
 
 You bring the knowledge: named principles, practices and the standards for this kind of project. The developer brings what the code can't tell you: what the project is for, what matters, which way it should go. **The code shows what the project does, not what it wants.** Never present what the code does as what the project wants, and never write down a convention the developer didn't choose.
 
@@ -20,7 +20,7 @@ Read these yourself:
 - The tree, the languages and their share, the build and package files.
 - Recent git activity: `git log --since="6 months ago" --format='%an %ad %s' --date=short | head -200`, and how many people commit.
 - `rulecast list`: its first line says where new conventions go (the config's `conventions`).
-- `docs/conventions/declined.md`, or a `declined.md` next to the conventions, if an earlier session left one. What it lists was already declined, with a reason. Don't propose it again unless the developer brings it up.
+- The `declined.md` next to the conventions, if an earlier session left one. What it lists was already declined, with a reason. Don't propose it again unless the developer brings it up.
 - Lines that begin `Not checked by rulecast:` in the project's docs. Each sits under a convention that was kept but has no rule, with the reason ([DRAFT-RULES.md](DRAFT-RULES.md#4-finish)). Don't propose a rule for one unless the reason no longer holds.
 
 Then write down what the project **already enforces**: linter and formatter config and the rules it turns on or off, type-checker strictness, CI checks, pre-commit hooks, `.rulecast-config.yaml`, and the suppressions in the code (`# noqa`, `eslint-disable`, `@ts-expect-error`, `#[allow]`) with a count of each. These are conventions already. The interview confirms them; it doesn't rediscover them.
@@ -64,7 +64,7 @@ From the answers, draft the principles and conventions in plain language: short 
 Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its head comment describes (every `<` inside a JSON string written as `\u003c`), with:
 
 - `decisionsTitle`: `"Conventions"`, and `columns`: `["Convention", "Found", "You said", "Goes in"]`;
-- one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `value` what the developer said, `state`: `"said"`, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`). Leave out `n`: the rows are numbered in order;
+- one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `value` what the developer said, `state`: `"said"`, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`). Number the rows in order with `n`, and keep each row's number when you show the page again: a row the developer drops stays, with `state: "struck"`, and a new row takes the next unused number;
 - no `tree`, `rules`, `questions` or `candidates`.
 
 If you have a tool that publishes private artifacts, publish it there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is. Ask in the chat what to change, apply it, and show the page again until the developer is satisfied.

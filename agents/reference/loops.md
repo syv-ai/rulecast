@@ -6,10 +6,10 @@ Each recipe was run once, on small scratch repositories. What happened, where th
 
 ## Before any loop
 
-A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [Fresh environments](../../guides/advanced.md#fresh-environments) checklist first. For loops, three things on it matter most:
+A loop usually starts somewhere fresh: a CI job, a cloud session, a new container. Work through the [Fresh environments](../../guides/advanced.md#fresh-environments) checklist first: it installs rulecast. The commands below say `rulecast`; with rulecast as a devDependency, run them as `npx rulecast`. For loops, three things on it matter most:
 
 - **Unattended mode.** It is on by itself under `CI` or `GITHUB_ACTIONS`. For `claude -p` or `/goal` on your own machine, set `RULECAST_MODE=unattended`. The stop gate then blocks up to `unattended.max_blocks` (10) stops per prompt instead of one, a finding that has blocked twice is reported instead of retried, and the agent is held once more at the end to report what is left. See [Unattended mode](rule-format.md#unattended-mode). `/goal` sends one prompt for the whole run, so there the 10 blocks are a budget for the run.
-- **`npx rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
+- **`rulecast doctor --ci --from-ref origin/main`** before the agent starts. It exits 2 if rulecast would run degraded: a rule repo missing from the cache, a rule's tool not installed, hooks that cannot run, or no merge base (a shallow clone). Fix that before the loop, not during it.
 - **The `loop-safety` pack:** `npx @syv-ai/rulecast add loop-safety`. It catches the shortcuts a loop takes to make a check pass, such as a skipped test, a new `noqa` or an edit to CI. See [loop-safety.md](../../packages/rules-loop-safety/loop-safety.md). How much it catches in real loops is not measured yet.
 
 Agents running in parallel in one working tree each need their own worktree when they change files through the shell ([Several agents at once](../../guides/advanced.md#several-agents-at-once)).
@@ -20,7 +20,7 @@ Claude Code's `/goal` keeps the agent working until a condition holds. Make rule
 
 ```text
 /goal Add CSV export to the reports page. Done when `npm test` passes and either
-`npx rulecast run --from-ref main` exits 0 without any new rulecast-ignore comment, or it
+`rulecast run --from-ref main` exits 0 without any new rulecast-ignore comment, or it
 exits 2 or 3 and your final report quotes its output. Exit 2 or 3 means rulecast could not
 check everything: do not try to fix that.
 ```
@@ -44,7 +44,7 @@ A scheduled job (GitHub Actions `on: schedule`, cron, or Claude Code's `/schedul
 # rulecast-sweep.sh: one rule per run, one draft PR per rule.
 set -u
 out=$(mktemp -d)
-npx rulecast run --all-files --format json > "$out/all.json"
+rulecast run --all-files --format json > "$out/all.json"
 case $? in
   0) echo "nothing new since the baseline"; exit 0 ;;
   1) ;;                                        # new findings: sweep one rule
@@ -57,11 +57,11 @@ git switch -c "rulecast/sweep-$(echo "$rule" | tr / -)-$(date +%Y%m%d)" || exit 
 
 # Deterministic fixes first, where the rule has one.
 if jq -e --arg r "$rule" 'any(.findings[]; .rule == $r and .fixable == true)' "$out/all.json" >/dev/null; then
-  npx rulecast fix "$rule" --all-files
+  rulecast fix "$rule" --all-files
 fi
 
 # An agent takes what is left of this rule.
-npx rulecast run "$rule" --all-files --format json > "$out/batch.json"
+rulecast run "$rule" --all-files --format json > "$out/batch.json"
 case $? in
   0) ;;                                        # rulecast fix fixed them all
   1)
@@ -75,15 +75,15 @@ They break this convention:
 $docs
 
 Change only the files listed. Do not add rulecast-ignore comments, and do not edit
-.rulecast-config.yaml or .rulecast/baseline.json. Finish when \`npx rulecast run $rule --all-files\`
+.rulecast-config.yaml or .rulecast/baseline.json. Finish when \`rulecast run $rule --all-files\`
 exits 0, or list the findings you could not fix and why."
     RULECAST_MODE=unattended claude -p "$task" --max-turns 30 \
-      --permission-mode acceptEdits --allowedTools "Bash(npx rulecast run:*)" ;;
+      --permission-mode acceptEdits --allowedTools "Bash(rulecast run:*)" ;;
   *) echo "rulecast did not check everything: see $out/batch.json"; exit 1 ;;
 esac
 
-npx rulecast run "$rule" --all-files || { echo "findings left: the branch is for a person"; exit 1; }
-npx rulecast baseline --prune
+rulecast run "$rule" --all-files || { echo "findings left: the branch is for a person"; exit 1; }
+rulecast baseline --prune
 git add -u && git commit -m "fix: $rule findings (rulecast sweep)" || exit 1
 git push -u origin HEAD || exit 1
 jq -r --arg r "$rule" '[.findings[] | select(.rule == $r and .severity == "error")]
@@ -106,7 +106,7 @@ Not measured: the agent step with `--permission-mode acceptEdits` and `--allowed
 
 ```text
 /loop 15m Check the branch feat/csv-export of PR #123. git fetch origin, then run
-`npx rulecast run --from-ref origin/main --format json`. On exit 1, fix the new findings, run it
+`rulecast run --from-ref origin/main --format json`. On exit 1, fix the new findings, run it
 again until it exits 0, then commit and push. On exit 0, say so in one line. On 2 or 3, post its
 output as a PR comment once and stop the loop. When the PR is merged or closed, stop the loop.
 ```
@@ -127,7 +127,7 @@ This takes two steps, and only the first runs unattended:
 1. **The loop writes a summary.** The findings log is local: agent hooks write it on the machine where they ran, so a cloud routine or a CI job has none. Run this on the developer's machine, from a local cron job:
 
    ```sh
-   npx rulecast stats --since 30d --format json > stats.json
+   rulecast stats --since 30d --format json > stats.json
    jq -r '(.rules[] | select((.noisy | length) > 0 or .repeated > 0 or .suppressed > 0)
        | "- \(.rule): fired \(.fired), repeated \(.repeated), suppressed \(.suppressed), fixed \(.fixed)"
          + (if (.noisy | length) > 0 then ", noisy (\(.noisy | join(", ")))" else "" end)),

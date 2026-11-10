@@ -14,7 +14,7 @@ The steps ask the developer to decide several things, and the developer is there
 ## 1. Read
 
 1. Read the doc you were pointed at in full. If it says its conventions live elsewhere (`AGENTS.md` saying "see `docs/conventions.md`"), read that doc too and draft from it: the rules cite the sections that hold the conventions, not the pointer. If the doc has no conventions, only commands and architecture, stop: work them out with the developer first, through [CONVENTIONS.md](CONVENTIONS.md).
-2. Read `.rulecast-config.yaml`. If it is missing, stop and set rulecast up with the developer first ([SETUP.md](SETUP.md)). Then run `rulecast list`. Its first lines say where new conventions are written (the config's `conventions`) and whether llm rules are allowed (`llm.model`). It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
+2. Find the `.rulecast-config.yaml` files above the files the doc talks about. A repository can have one at the top, one per package, or both, and each applies to the files below it on its own. If there is none, stop and set rulecast up with the developer first ([SETUP.md](SETUP.md)). Choose with the developer which config each rule goes in: one about a package in that package's config, one for the whole repository in the top one. Read each config you will use, and run `rulecast list` in its directory. Its first lines say where new conventions are written (the config's `conventions`) and whether llm rules are allowed (`llm.model`). It prints every configured rule, catalog rules included: its `files` and how many project files they match, what its detector looks for (`detects …`), and the doc sections it cites. `rulecast list <rule-id>` prints one rule with the files it matches, its message and the text of those sections. You need both for the catalog rules in step 2.
 3. For each convention, read a few of the files it talks about, so your file and code patterns match the code as it is.
 
 ## 2. Sort the conventions
@@ -54,7 +54,7 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
 
 For checkable conventions, use `path` when the file itself is the break. Otherwise use the first of these that can see the break:
 
-1. **`linter`**: a rule of a linter the project runs, or could run (ruff, oxlint, eslint). The linter already knows the language. When a lint rule the project's config already makes an error enforces the convention, and the config has a `linter` rule for that tool with no `rules` list, the convention is one `context_by_rule` entry on that rule (`eqeqeq: "@docs/conventions.md#comparisons"`), not a new rule.
+1. **`linter`**: a rule of a linter the project runs, or could run (ruff, oxlint, eslint). The linter already knows the language. A linter the project does not run yet has to be installed first: propose that to the developer as a change of its own, and install it only with their approval. When a lint rule the project's config already makes an error enforces the convention, and the config has a `linter` rule for that tool with no `rules` list, the convention is one `context_by_rule` entry on that rule (`eqeqeq: "@docs/conventions.md#comparisons"`), not a new rule.
 2. **`command`** or **`hook`**: a tool the project already runs that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml` or `lefthook.yml`. The tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
 3. **`ast-grep`**: a pattern over the code's syntax, which never matches inside a comment or a string.
 4. **`regex`**: only for a pattern that is text rather than code, such as a comment marker, the content of a string or a file header.
@@ -71,8 +71,8 @@ For each checkable convention, one at a time.
 
 When the doc can be read two ways, flag only what both readings call wrong, and name the rest in the summary so the developer can tighten it. "Every module gets its logger with `log = logging.getLogger(__name__)`; no other logger names": `logging.getLogger("users")` is wrong whichever way you read it, so the rule flags it; `logger = logging.getLogger(__name__)` is wrong only if "logger names" means the variable, so the rule leaves it and the summary asks.
 
-1. Show the developer the rule as YAML and the doc section it enforces.
-2. Add it to the `rules` of the `repo: local` entry in `.rulecast-config.yaml`. Add that entry at the end of `repos` if there is none:
+1. Show the developer the rule as YAML and the doc section it enforces, and ask to add it to the config so it can be measured (steps 4 to 6 need it there). A dropped rule comes out again (step 7).
+2. Add it to the `rules` of the `repo: local` entry in the config chosen for it (section 1), and run the commands below in that config's directory. Add that entry at the end of `repos` if there is none:
 
    ```yaml
    - repo: local
@@ -169,7 +169,7 @@ Every convention you read ends in one of four places: a rule that checks it, a t
 Not checked by rulecast: <the reason, in a few words>.
 ```
 
-For example, `Not checked by rulecast: about how to work, not about the code.`, `Not checked by rulecast: needs the whole repository, not one file.` or `Not checked by rulecast: the type checker already rejects it.` It stays next to the convention, so a later session sees it was considered and why it has no rule, and does not ask again. Show the lines with the rest of the diff; the developer keeps or removes them. A convention the developer turned down belongs in `docs/conventions/declined.md` instead ([CONVENTIONS.md](CONVENTIONS.md)), not here.
+For example, `Not checked by rulecast: about how to work, not about the code.`, `Not checked by rulecast: needs the whole repository, not one file.` or `Not checked by rulecast: the type checker already rejects it.` It stays next to the convention, so a later session sees it was considered and why it has no rule, and does not ask again. Show the lines with the rest of the diff; the developer keeps or removes them. A convention the developer turned down belongs in the `declined.md` next to the conventions instead ([CONVENTIONS.md](CONVENTIONS.md)), not here.
 
 The agent doc (`AGENTS.md` or `CLAUDE.md`) is read at the start of every session, and every line in it competes for the agent's attention. A rule's `context` reaches the agent only when the rule fires, or, for a touch rule, when a matching file is first touched. So when a rule now checks or delivers a section that sits in the agent doc, propose moving that section to where the config's `conventions` points, and repointing the rule's `context` there. If `conventions` is not set, or is the agent doc itself, ask the developer where the section should go; with no other doc, leave it where it is. Leave at most one line in the agent doc if the developer wants one. Move the section; never copy it, because two copies drift apart. Show the move with the rest of the diff, and say what it costs: a section a rule only checks reaches the agent after the convention has been broken, and an agent without rulecast's hooks never sees it. The developer decides.
 

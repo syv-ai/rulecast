@@ -100,9 +100,9 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `preexisting` | Findings that were already there before the change, in the same shape with `status: "preexisting"`. With `--all-files` or `--files` the baseline is `.rulecast/baseline.json` when it exists (below), else there is none and every finding is new. |
 | `backlog` | Counts per rule and per file, new and pre-existing together. |
 | `preexistingSummary` | Pre-existing findings counted per rule and file. |
-| `references` | The doc sections the new findings' rules cite, with their text when it was read. |
-| `warnings` | rulecast's own problems other than the rules in `disabled`: a timeout, an ignore without a reason, a file budget. Not findings. |
-| `skipped` | `llm` rules a staged run or `--no-llm` left out, when they matched a checked file. |
+| `references` | The doc sections the new findings' rules cite, with their text when it was read ([A reference](#a-reference)). |
+| `warnings` | rulecast's own problems other than the rules in `disabled`, one string each: a timeout, an ignore without a reason (`"app/a.py:2: rulecast-ignore needs a reason after the rule id; the finding was kept"`), a file budget. Not findings. |
+| `skipped` | The ids of the `llm` rules a staged run or `--no-llm` left out, when they matched a checked file: `["app/judge"]`. |
 | `disabled` | Rules that did not run, grouped by why: `[{ "reason": "…: not in the cache (run rulecast install)", "rules": ["python/no-bare-except"] }]`. A rule repo that could not be fetched, a detector whose tool is missing, a rule that failed to compile, and with `--session` a rule the session disabled that would have run here. Each rule is named once, here and not again in `warnings`. With `RULE_ID`, only what concerns that rule. Empty when every rule ran. When it is not empty, `complete` is `false` and the exit code is 3. |
 | `checked` | How many files were checked and how they were chosen: `staged`, `range`, `all`, `files` or `session`. |
 | `ignored` | Findings a `rulecast-ignore` comment dropped: `id`, `rule`, `file`, `line`, `reason`. |
@@ -124,6 +124,16 @@ Other commands keep their own codes: `validate` and `doctor` exit 2 on the probl
 | `captures` | The values the message template names, when it names any. |
 | `fixable` | `true` when `rulecast fix` can apply this rule's fix; absent otherwise. Route these to `rulecast fix`, the rest to an agent. |
 | `docs` | What the finding's lint rule points to: `{ "ref": "docs/x.md#y" }`, the project's section for it from the rule's `context_by_rule`, else `{ "url": "…" }`, the tool's own page for it. Absent when there is neither. |
+
+### A reference
+
+| Field | Meaning |
+|---|---|
+| `ref` | The section, as `file#anchor`. |
+| `state` | `full`: its text is in `content`. `pointer`: it was delivered earlier in this agent session. `read`: not included; read it before going on. `missing`: it could not be found. |
+| `content` | The section's text. Only with `full`. |
+| `reason` | Why a `read` section was left out: `mode` (its reference has `mode: read`), `budget` (the message had no room left) or `tooLarge` (it is over `context.max_bytes`). Only with `read`. |
+| `location` | The absolute path of the file to read, for a `read` section from a rule repo. |
 
 ### `rulecast fix`
 

@@ -124,7 +124,7 @@ command:
 
 ## Everything else
 
-**semgrep** (patterns from your own rule file; about 2 s to start, so verify only). It exits 0 with findings unless given `--error`; leave it out.
+**semgrep** (patterns from your own rule file; about 2 s to start, so verify only: give the rule `stages: [verify]`). It exits 0 with findings unless given `--error`; leave it out.
 
 ```yaml
 command:
@@ -158,16 +158,17 @@ command:
   output: checkstyle
 ```
 
-**osv-scanner** (known-vulnerable dependencies; needs the network and takes seconds, so verify or CI). Findings are on line 1 of the lockfile; the rule id is the advisory id.
+**osv-scanner** (known-vulnerable dependencies; needs the network and takes seconds, so verify or CI). Findings are on line 1 of the lockfile; the rule id is the advisory id. Exit 1 is findings; 127 to 129 are its own errors.
 
 ```yaml
 command:
   run: [osv-scanner, scan, source, -f, sarif, -L, requirements.txt]
   output: sarif
   scope: project
+  exit_codes: { error: [127, 128, 129] }
 ```
 
-**checkov** (infrastructure as code; about 4 s). checkov writes SARIF only to a file and prints its own report to stdout, so a shell runs it and prints the file instead.
+**checkov** (infrastructure as code; about 4 s, so verify only: give the rule `stages: [verify]`). checkov writes SARIF only to a file and prints its own report to stdout, so a shell runs it and prints the file instead.
 
 ```yaml
 command:

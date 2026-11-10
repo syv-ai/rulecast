@@ -12,13 +12,13 @@ Every decision here is the developer's. Ask, and wait for the answer. If you wer
 
 ## 2. Find first
 
-Run init's dry run first, in each directory a config might go:
+Run init's dry run first where sessions start, then in each directory it lists under `packages` that may get a config:
 
 ```sh
 rulecast init --dry-run --format json
 ```
 
-It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports:
+It writes nothing in the project. To show which catalog rules fit, it fetches the catalog's rule data at its latest tag (or the rev the config pins) into rulecast's cache; offline, it uses the newest one already cached, or reports the error. It reports the following; `committers`, `packages`, `sessions`, `gitHooks` and `ci` sit under `detected`:
 
 - the stack, the docs and their headings, and the agents it detects;
 - `committers`: how many people committed in the last six months, bots left out (null when there are none, or in a shallow clone);
@@ -29,7 +29,7 @@ It writes nothing in the project. To show which catalog rules fit, it fetches th
 - `linters`: the linters the project already runs (ESLint, Ruff, oxlint, gitleaks), each with the rules its own config makes errors (`errorRules`), how many warnings a rule would not deliver (`warningRules`), and `candidates`: doc sections that name one of those rules;
 - the project's own hooks it can run as rules (and the ones it can't, with why). A hook that runs one of those linters has `sameAs: "linter/<tool>"`;
 - `generated` and `vendored`: paths that are generated (by a header such as `@generated` or `.gitattributes`) or vendored, beyond what the catalog rules already cover, with the evidence: a directory, a `.gitattributes` pattern, or a file (past 20 files, `notListed` counts the rest). They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`);
-- `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether it is configured;
+- `catalog`: each catalog rule, how many of the project's files it matches, whether it is metered (asks a model) or in a pack, and whether the config already has it (`installed`);
 - the config's current settings, and every file it would write.
 
 Then read what needs judgement:
@@ -56,7 +56,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script; one with `sameAs` off, because the linter rule it names runs the same linter, after each edit | you cannot read the script |
 | Generated paths | `generated` | each on, with `--generated` | never |
 | Vendored paths | `vendored` | each on, with `--vendored` | never |
-| Catalog rules | `catalog.rules` with `matching` above 0, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
+| Catalog rules | `catalog.rules` with `matching` above 0, `installed: false`, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |
 | Stated conventions and memory corrections | your reading | each on: drafted after setup, one at a time | never |
 | Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
 | Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never: it is an item, and it never blocks approval |
@@ -105,7 +105,7 @@ Only after the developer approves. First, install rulecast as approved, by runni
   curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
   ```
 
-  Everyone whose sessions run here installs it the same way. Tell the developer.
+  Your shell has not read the startup files it changed, so for the rest of setup run rulecast by the path it printed (`~/.local/bin/rulecast`, or the directory it used). Everyone whose sessions run here installs it the same way. Tell the developer.
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
 - **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is no devDependency. Everyone whose sessions run here installs it the same way.
 
@@ -117,15 +117,17 @@ rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--lin
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
 
-`init` writes the config and the agent hooks, validates them, and says what to commit. With `--format json`, that is each `changes[]` entry with `commit: true`, then `alsoCommit`: files init left as they are that were never committed, such as a hook script the shared settings run. `--generated` and `--vendored` add `generated-code` and `vendored-code` with `files` widened by those paths. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
+`init` writes the config and the agent hooks, validates them, and says what to commit. With `--format json`, that is each `changes[]` entry with `commit: true`, then `alsoCommit`: the hook script the shared settings run, when init left it as it was and it was never committed. `--generated` and `--vendored` add `generated-code` and `vendored-code` with `files` widened by those paths. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
 
 Then, as the page says:
 
-- **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there.
-- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows. Show the change first.
+- **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there, with `--scope personal` if the developer chose personal hooks.
+- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows: the `rulecast` hook, and `rulecast-push` (lefthook: the `pre-push` job) if the project runs pre-push hooks. Show the change first.
 - **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
-- **CI:** tell the developer to add `npx rulecast install` and then `npx rulecast doctor --ci` before the agent step. In a project without Node, the step before them is the install command above (in GitHub Actions it adds its directory to `$GITHUB_PATH`), and they run `rulecast` in place of `npx rulecast`. Don't edit CI yourself.
+- **CI:** tell the developer to add `rulecast install` and then `rulecast doctor --ci` before the agent step, after a step that installs rulecast as the install row did. For the devDependency that is the project's install (`npm ci`), and the two run as `npx rulecast …`; otherwise it is the install command above (for the standalone binary, in GitHub Actions it adds its directory to `$GITHUB_PATH`). Don't edit CI yourself.
+
+Then tell the developer what to commit: the files init named, and the files you changed or created after it.
 
 ## 7. Then
 
