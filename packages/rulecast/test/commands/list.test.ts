@@ -72,6 +72,14 @@ describe("rulecast list", () => {
     // One rule's view is about that rule; the JSON stays one entry per rule.
     expect((await runCli(root, ["list", "a"])).stdout).not.toContain("Not checked")
     expect(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)).toHaveLength(1)
+    // A malformed entry is said where the entries are, and the rules are still listed.
+    await writeFile(
+      path.join(root, ".rulecast-config.yaml"),
+      localConfig([rule], { not_checked: [{ context: "@docs/conventions.md#reviews" }] }),
+    )
+    const malformed = (await runCli(root, ["list"])).stdout
+    expect(malformed).toContain("Not checked (not_checked), with the reason:\n  warning: not_checked[0].reason: ")
+    expect(malformed).toContain("1 rule")
     // Without entries, the section is left out.
     const bare = await createRepo({ ".rulecast-config.yaml": localConfig([rule]) })
     expect((await runCli(bare, ["list"])).stdout).not.toContain("Not checked")

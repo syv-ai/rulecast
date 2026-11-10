@@ -10,6 +10,7 @@ const DEFAULTS = {
   defaultStages: null,
   conventions: null,
   notChecked: [],
+  notCheckedProblems: [],
   context: { mode: "inject", maxBytes: 32768 },
   maxMatchesPerRule: 10,
   maxFileBytes: 1048576,
@@ -72,6 +73,7 @@ describe("configSchema", () => {
       defaultStages: ["edit", "verify"],
       conventions: null,
       notChecked: [{ context: "@docs/a.md#reviews", reason: "process" }],
+      notCheckedProblems: [],
       context: { mode: "read", maxBytes: 1000 },
       maxMatchesPerRule: 3,
       maxFileBytes: 2048,
@@ -139,13 +141,26 @@ describe("configSchema", () => {
     expect(configSchema.parse({ repos: [] }).notChecked).toEqual([])
     const entry = { context: "@docs/a.md#reviews", reason: "about how to work, not about the code" }
     expect(configSchema.parse({ repos: [], not_checked: [entry] }).notChecked).toEqual([entry])
-    // Both keys are required, the reason says something, and nothing else is accepted.
-    expect(configSchema.safeParse({ repos: [], not_checked: [{ context: "@docs/a.md" }] }).success).toBe(false)
-    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, reason: " " }] }).success).toBe(false)
-    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, mode: "read" }] }).success).toBe(false)
-    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, context: ["@docs/a.md"] }] }).success).toBe(
-      false,
-    )
+  })
+
+  test("a malformed not_checked entry is set aside with what is wrong, and the rest of the config loads", () => {
+    // No rule depends on an entry, so a typo in one must not stop every rule: compile warns instead.
+    const entry = { context: "@docs/a.md#reviews", reason: "process" }
+    const parsed = (notChecked: unknown) => configSchema.parse({ repos: [], files: "^src/", not_checked: notChecked })
+    const config = parsed([entry, { context: "@docs/a.md#tests", why: "process" }, { ...entry, reason: " " }])
+    expect(config.files).toBe("^src/")
+    expect(config.notChecked).toEqual([entry])
+    expect(config.notCheckedProblems).toEqual([
+      'not_checked[1]: unknown key "why" (did you mean "reason"?); not_checked[1].reason: required',
+      expect.stringMatching(/^not_checked\[2\]\.reason: /),
+    ])
+    expect(parsed([{ ...entry, context: ["@docs/a.md"] }]).notCheckedProblems).toEqual([
+      expect.stringMatching(/^not_checked\[0\]\.context: /),
+    ])
+    expect(parsed({ context: "@docs/a.md" })).toMatchObject({
+      notChecked: [],
+      notCheckedProblems: [expect.stringMatching(/^not_checked: /)],
+    })
   })
 
   test("repo entries keep their rules unparsed; rev rules are left to compile", () => {

@@ -152,10 +152,15 @@ export async function listCommand(
   }
   for (const rule of rules) out.push(...ruleLines(rule))
   // Considered and left without a rule (not_checked): listed so a later session does not ask again.
-  if (ruleId === null && project.config.notChecked.length > 0) {
+  // An entry that is malformed, or whose section is gone, is said here too: it is only a warning.
+  const notCheckedProblems = project.diagnostics.filter(
+    (diagnostic) => diagnostic.level === "warning" && diagnostic.message.startsWith("not_checked"),
+  )
+  if (ruleId === null && project.config.notChecked.length + notCheckedProblems.length > 0) {
     out.push(
       "Not checked (not_checked), with the reason:",
       ...project.config.notChecked.map((entry) => `  ${entry.context.replace(/^@/, "")}: ${entry.reason}`),
+      ...notCheckedProblems.map((diagnostic) => `  warning: ${diagnostic.message}`),
       "",
     )
   }

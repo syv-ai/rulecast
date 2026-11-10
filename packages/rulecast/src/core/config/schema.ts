@@ -1,6 +1,7 @@
 import path from "node:path"
 import { z } from "zod"
 
+import { parseReported } from "../errors"
 import { referenceInputSchema } from "../references"
 import { LLM_PROVIDERS } from "../types"
 
@@ -145,6 +146,31 @@ const repoSchema = z
   })
   .strict()
 
+const notCheckedEntrySchema = z.object({ context: z.string(), reason: z.string().trim().min(1) }).strict()
+
+/**
+ * The `not_checked` entries that parse, and what is wrong with each one that does not. No rule
+ * depends on an entry, so a typo in one (`why:` for `reason:`) must not stop the config loading and
+ * with it every rule: compile reports the problems as warnings, and the entry is left out.
+ */
+function notCheckedOf(value: unknown): {
+  notChecked: z.output<typeof notCheckedEntrySchema>[]
+  notCheckedProblems: string[]
+} {
+  if (value === undefined || value === null) return { notChecked: [], notCheckedProblems: [] }
+  if (!Array.isArray(value)) {
+    return { notChecked: [], notCheckedProblems: ["not_checked: must be a list of { context, reason }"] }
+  }
+  const notChecked: z.output<typeof notCheckedEntrySchema>[] = []
+  const notCheckedProblems: string[] = []
+  for (const [index, entry] of value.entries()) {
+    const parsed = parseReported(notCheckedEntrySchema, entry, `not_checked[${index}]`)
+    if (parsed.success) notChecked.push(parsed.data)
+    else notCheckedProblems.push(parsed.message)
+  }
+  return { notChecked, notCheckedProblems }
+}
+
 export const configSchema = z
   .object({
     repos: z.array(repoSchema),
@@ -167,10 +193,10 @@ export const configSchema = z
     /**
      * Conventions considered and given no rule, each with the section that states it and why. Kept
      * here rather than as a note in the project's docs, which stay free of rulecast's terms; `rulecast
-     * list` shows them so a later session does not propose the rule again. Checked by compile like a
-     * rule's `context`, but a broken one only warns: it keeps no rule from running.
+     * list` shows them so a later session does not propose the rule again. Parsed on its own in the
+     * transform (notCheckedOf), so a malformed entry is set aside rather than failing the config.
      */
-    not_checked: z.array(z.object({ context: z.string(), reason: z.string().trim().min(1) }).strict()).default([]),
+    not_checked: z.unknown().optional(),
     context: z
       .object({
         mode: z.enum(["inject", "read"]).default("inject"),
@@ -250,7 +276,7 @@ export const configSchema = z
     exclude: input.exclude,
     defaultStages: input.default_stages ?? null,
     conventions: input.conventions,
-    notChecked: input.not_checked,
+    ...notCheckedOf(input.not_checked),
     context: { mode: input.context.mode, maxBytes: input.context.max_bytes },
     maxMatchesPerRule: input.max_matches_per_rule,
     maxFileBytes: input.max_file_bytes,
