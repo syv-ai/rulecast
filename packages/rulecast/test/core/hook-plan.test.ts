@@ -51,6 +51,7 @@ describe("planHooks: the hook script", () => {
       stale: [],
       missing: [],
       files: [{ file: HOOK_SCRIPT_FILE, problem: "missing" }],
+      others: [],
     })
     expect(write).toEqual({
       file: SHARED,
@@ -59,6 +60,7 @@ describe("planHooks: the hook script", () => {
       added: [],
       updated: [],
       files: [{ file: HOOK_SCRIPT_FILE, content: HOOK_SCRIPT, created: true }],
+      others: [],
     })
   })
 
@@ -88,7 +90,7 @@ describe("planHooks: the hook script", () => {
 
   test("everything current: nothing to write", async () => {
     const { state, write } = await plan({ [SHARED]: settingsText(HOOK_COMMAND), [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
-    expect(state).toEqual({ file: SHARED, stale: [], missing: [], files: [] })
+    expect(state).toEqual({ file: SHARED, stale: [], missing: [], files: [], others: [] })
     expect(write).toBeNull()
   })
 
@@ -99,6 +101,7 @@ describe("planHooks: the hook script", () => {
       stale: [],
       missing: [],
       files: [{ file: HOOK_SCRIPT_FILE, problem: "missing" }],
+      others: [],
     })
     expect(write?.file).toBe(PERSONAL)
     expect(write?.files.map((each) => each.file)).toEqual([HOOK_SCRIPT_FILE])
@@ -106,5 +109,89 @@ describe("planHooks: the hook script", () => {
 
   test("settings that are not JSON are named in the error", async () => {
     await expect(plan({ [SHARED]: "{" })).rejects.toThrow(/^\.claude\/settings\.json: /)
+  })
+})
+
+describe("planHooks: rulecast's hooks in more than one settings file", () => {
+  const current = settingsText(HOOK_COMMAND)
+  const older = settingsText(OLDER)
+
+  test("both on an older command: the file install reports upgrades, and so does the other", async () => {
+    const { state, write } = await plan({ [SHARED]: older, [PERSONAL]: older })
+    expect(state?.file).toBe(SHARED)
+    expect(state?.stale).toHaveLength(11)
+    expect(state?.others).toEqual([{ file: PERSONAL, stale: expect.arrayContaining(["Stop"]) }])
+    expect(write?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
+    expect(write?.others).toHaveLength(1)
+    expect(write?.others[0]?.file).toBe(PERSONAL)
+    expect(write?.others[0]?.updated).toHaveLength(11)
+    expect(write?.others[0]?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
+  })
+
+  test("the shared file current and the personal one older: only the personal one is written", async () => {
+    const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: older, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
+    expect(state?.stale).toEqual([])
+    expect(state?.others.map((other) => other.file)).toEqual([PERSONAL])
+    expect(write?.file).toBe(SHARED)
+    expect(write?.settings).toBeNull()
+    expect(write?.others.map((other) => other.file)).toEqual([PERSONAL])
+  })
+
+  test("a timeout too short in the other file is stale too", async () => {
+    const short = settingsText(HOOK_COMMAND).replace(/"timeout": 70/g, '"timeout": 5')
+    const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: short, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
+    expect(state?.others).toEqual([{ file: PERSONAL, stale: ["Stop", "SubagentStop"] }])
+    expect(write?.others[0]?.updated).toEqual(["Stop", "SubagentStop"])
+  })
+
+  test("both current is fine: Claude Code runs identical handlers once", async () => {
+    const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: current, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
+    expect(state?.others).toEqual([])
+    expect(write).toBeNull()
+  })
+
+  test("a partial install in the other file is upgraded, not filled in, and other tools' hooks stay", async () => {
+    const partial = {
+      theme: "dark",
+      hooks: {
+        Stop: [
+          { hooks: [{ type: "command", command: OLDER, timeout: 70 }] },
+          { hooks: [{ type: "command", command: "dash-hook stop" }] },
+        ],
+      },
+    }
+    const { write } = await plan({
+      [SHARED]: current,
+      [PERSONAL]: JSON.stringify(partial),
+      [HOOK_SCRIPT_FILE]: HOOK_SCRIPT,
+    })
+    expect(write?.others).toEqual([
+      {
+        file: PERSONAL,
+        updated: ["Stop"],
+        settings: {
+          theme: "dark",
+          hooks: {
+            Stop: [
+              { hooks: [{ type: "command", command: HOOK_COMMAND, timeout: 70 }] },
+              { hooks: [{ type: "command", command: "dash-hook stop" }] },
+            ],
+          },
+        },
+      },
+    ])
+  })
+
+  test("a settings file with no rulecast hooks is left out", async () => {
+    const theirs = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "dash-hook stop" }] }] } })
+    const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: theirs, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
+    expect(state?.others).toEqual([])
+    expect(write).toBeNull()
+  })
+
+  test("the script is the problem of any file whose hooks run it", async () => {
+    // The shared file on an older command does not run the script; the personal one does.
+    const { state } = await plan({ [SHARED]: older, [PERSONAL]: current })
+    expect(state?.files).toEqual([{ file: HOOK_SCRIPT_FILE, problem: "missing" }])
   })
 })

@@ -244,7 +244,11 @@ export async function doctorCommand(
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
     // on the PATH nor in node_modules/.bin, and doctor said ok.
-    const stale = (state?.stale ?? []).length > 0
+    const stale = (state?.stale ?? []).length > 0 || (state?.others ?? []).length > 0
+    // Which settings files are behind: the one named at the start of the line, others, or both.
+    const otherFiles = (state?.others ?? []).map((each) => each.file).join(" and ")
+    const staleWhere =
+      otherFiles === "" ? "" : (state?.stale ?? []).length > 0 ? ` there and in ${otherFiles}` : ` in ${otherFiles}`
     const missing = state?.missing ?? []
     // A file the hooks run that is not there fails every hook (sh exits 127): settings committed
     // without the script. One that differs still runs, as an older rulecast's would.
@@ -267,7 +271,7 @@ export async function doctorCommand(
           : missing.length > 0
             ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
             : stale
-              ? `${file} — but the hooks are out of date; run rulecast install`
+              ? `${file} — but the hooks${staleWhere} are out of date; run rulecast install`
               : differs !== null
                 ? `${file} — but ${differs.file} is out of date; run rulecast install`
                 : runs

@@ -100,7 +100,8 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
 /**
  * The agent's hooks, planned exactly as `rulecast install` plans them (core/hook-plan.ts): hooks
  * already anywhere count, and are upgraded where they are, a partial install included. The settings
- * change, then one change per file the hooks need; those are for committing when the settings are.
+ * change, then one per other settings file upgraded, each committed by its own scope; then one per
+ * file the hooks need, for committing when the settings are.
  */
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange[]> {
   const install = choice.adapter.install
@@ -118,7 +119,8 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
   const write = plan.write
   if (write === null) return []
   const label = choice.adapter.label
-  const commit = install.scopes.find((entry) => entry.file === write.file)?.scope === "shared"
+  const commitOf = (file: string) => install.scopes.find((entry) => entry.file === file)?.scope === "shared"
+  const commit = commitOf(write.file)
   const changes: PlannedChange[] = []
   if (write.settings !== null) {
     const parts = [
@@ -131,6 +133,15 @@ async function planAgent(choice: AgentChoice, context: PlanContext): Promise<Pla
       created: write.created,
       summary: `${parts.join(", ")} (${label})`,
       commit,
+    })
+  }
+  for (const { file, settings, updated } of write.others) {
+    changes.push({
+      file,
+      content: `${JSON.stringify(settings, null, 2)}\n`,
+      created: false,
+      summary: `~${plural(updated.length, "hook")} updated (${label})`,
+      commit: commitOf(file),
     })
   }
   for (const { file, content, created } of write.files) {

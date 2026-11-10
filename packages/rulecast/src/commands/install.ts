@@ -118,6 +118,8 @@ export interface InstallResult {
   added: string[]
   updated?: string[]
   wrote: string[]
+  /** The other settings files upgraded alongside it. */
+  others?: { file: string; updated: string[] }[]
 }
 
 /**
@@ -137,12 +139,19 @@ export async function installHooks(
   if (plan.write === null) return { file: plan.state!.file, added: [], wrote: [] }
   const { write } = plan
   if (write.settings !== null) await writeSettings(root, write.file, write.settings)
+  for (const { file, settings } of write.others) await writeSettings(root, file, settings)
   // Not executable: the hooks run each file through its interpreter, as `sh <file>`.
   for (const { file, content } of write.files) await writeText(root, file, content, 0o644)
   const wrote = write.files.map(({ file }) => file)
   return plan.state === null
     ? { file: write.file, added: write.added, wrote }
-    : { file: write.file, added: write.added, updated: write.updated, wrote }
+    : {
+        file: write.file,
+        added: write.added,
+        updated: write.updated,
+        wrote,
+        others: write.others.map(({ file, updated }) => ({ file, updated })),
+      }
 }
 
 /**
@@ -202,14 +211,18 @@ export async function loadProjectConfig(root: string, command: string): Promise<
 
 export function printInstall(io: CliIo, adapter: Adapter, result: InstallResult): void {
   const updated = result.updated ?? []
+  const others = result.others ?? []
   if (updated.length > 0) {
     io.stdout(`updated ${adapter.label} hooks in ${result.file}: ${updated.join(", ")}\n`)
+  }
+  for (const other of others) {
+    io.stdout(`updated ${adapter.label} hooks in ${other.file}: ${other.updated.join(", ")}\n`)
   }
   if (result.added.length > 0) {
     io.stdout(`installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`)
   }
   for (const file of result.wrote) io.stdout(`wrote ${file}\n`)
-  if (updated.length === 0 && result.added.length === 0 && result.wrote.length === 0) {
+  if (updated.length === 0 && others.length === 0 && result.added.length === 0 && result.wrote.length === 0) {
     io.stdout(`${adapter.label} hooks already installed in ${result.file}\n`)
   }
 }
