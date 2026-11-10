@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { cp, mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { rewriteLinks } from "./links"
+import { dropSelfPointers, rewriteLinks } from "./links"
 import {
   AGENT_DOCS_DIR,
   assertPlaced,
@@ -34,10 +34,10 @@ function frontmatter(page: Page): string {
   return `---\ntitle: ${JSON.stringify(page.title)}\ndescription: ${JSON.stringify(page.description)}\n---\n`
 }
 
-/** A generated page's Markdown body, links rewritten: what sync writes after the frontmatter. */
+/** A generated page's Markdown body, without pointers to itself, links rewritten: what sync writes after the frontmatter. */
 export function pageMarkdown(page: Page, sections: Map<string, string>): string {
   return pageParts(page, sections)
-    .map((part) => rewriteLinks(part.markdown, part.source))
+    .map((part) => rewriteLinks(dropSelfPointers(part.markdown, part.source, page.route), part.source))
     .join("\n\n")
 }
 

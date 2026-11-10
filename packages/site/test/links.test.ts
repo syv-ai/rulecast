@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { rewriteLinks } from "../scripts/links"
+import { dropSelfPointers, rewriteLinks } from "../scripts/links"
+import { PAGES, readme } from "../scripts/sources"
+import { pageMarkdown } from "../scripts/sync"
 
 describe("rewriteLinks", () => {
   it("sends a link to a published file to its page, anchor included", () => {
@@ -44,5 +46,35 @@ describe("rewriteLinks", () => {
   it("leaves absolute URLs and same-page anchors alone", () => {
     const markdown = "[a](https://example.com/x.md) [b](#errors)"
     expect(rewriteLinks(markdown, "README.md")).toBe(markdown)
+  })
+})
+
+describe("pages made of a README section and a file", () => {
+  const sections = readme()
+  const body = (route: string) => pageMarkdown(PAGES.find((page) => page.route === route)!, sections)
+
+  it("drop the sentences that point from one part to the other, which is the page itself", () => {
+    const writing = body("guides/writing-rules")
+    expect(writing).not.toContain("More in [Writing rules]")
+    expect(writing).not.toContain("The README's [A rule]")
+    expect(writing).toContain("This guide covers the rest")
+    const commands = body("reference/commands")
+    expect(commands).not.toContain("The commands most projects use are in")
+    expect(commands).toContain("`rulecast <command> --help` prints a command's flags.")
+    const detectors = body("reference/detectors")
+    expect(detectors).not.toMatch(/See \[`agents\/reference\/detectors\.md`\]/)
+    expect(detectors).toContain("a rule can opt into the edit hook with `stages: [edit, verify]`.")
+  })
+
+  it("keep a sentence that links to another page", () => {
+    expect(
+      dropSelfPointers("Read [Writing rules](guides/writing-rules.md). Then stop.", "README.md", "guides/git-hooks-ci"),
+    ).toBe("Read [Writing rules](guides/writing-rules.md). Then stop.")
+  })
+
+  it("leave lists, code and the part's own anchors alone", () => {
+    const markdown =
+      "- More in [Writing rules](guides/writing-rules.md).\n\n```md\nMore in [Writing rules](guides/writing-rules.md).\n```\n\nSee [below](#turning-a-rule-off)."
+    expect(dropSelfPointers(markdown, "README.md", "guides/writing-rules")).toBe(markdown)
   })
 })

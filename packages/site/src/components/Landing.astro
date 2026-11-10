@@ -1,9 +1,9 @@
 ---
 /**
  * The landing page. The name and the two Claude Code commands that set rulecast up; what it is, in
- * plain words; a convention becoming a rule becoming what the agent hears; what setup is like and
- * the two ways to start it; where it runs. The prompt for other agents is the README's own (read at
- * build time).
+ * plain words; a convention becoming a rule becoming what the agent hears; what setup is like, and
+ * how to start it from another agent (the hero already has the Claude Code commands); where it
+ * runs. The prompt for other agents is the README's own (read at build time).
  */
 import { routeUrl } from "../../scripts/links"
 import { agentPrompt } from "../../scripts/sources"
@@ -12,7 +12,6 @@ import HookFlow from "./HookFlow.astro"
 
 const install = "/plugin install rulecast --marketplace syv-ai/rulecast"
 const setup = "/rulecast:setup"
-const commands = `${install}\n${setup}`
 const prompt = agentPrompt()
 const steps = [
   {
@@ -86,14 +85,6 @@ const next = [
     </ol>
     <div class="rc-setup-cols">
       <div class="rc-start">
-        <p class="rc-col-label">Start it in Claude Code</p>
-        <pre>{commands}</pre>
-        <button class="rc-prompt-copy" type="button" data-copy={commands} aria-label="Copy the two commands">
-          <span class="rc-copy-state" aria-live="polite">Copy</span>
-        </button>
-        <p class="rc-col-note">Run them one after the other.</p>
-      </div>
-      <div class="rc-start">
         <p class="rc-col-label">Start it in another agent</p>
         <pre>{prompt}</pre>
         <button class="rc-prompt-copy" type="button" data-copy={prompt} aria-label="Copy the prompt">
@@ -106,7 +97,7 @@ const next = [
       </div>
     </div>
     <p class="rc-after">
-      Most rules come later, one at a time. When the agent makes a mistake that should not happen again, run
+      Most rules come later, one at a time. When the agent makes a mistake that should not happen again, run{" "}
       <code>/rulecast:add-rule</code>.
     </p>
   </section>

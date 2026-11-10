@@ -60,3 +60,37 @@ export function rewriteLinks(markdown: string, sourcePath: string): string {
     return `](${published.route === "" ? `${BASE}/` : routeUrl(published.route)}${hash})`
   })
 }
+
+/**
+ * A page made of README sections and a file reads as one page, so a sentence in one part that sends
+ * the reader to another part of the same page ("More in [Writing rules]" on Writing rules, "the
+ * README's [Commands]" on Commands) points at the page itself. Those sentences are left out of the
+ * page; the repository's files keep them, where they are true. Only plain paragraphs are touched:
+ * lists, tables, quotes, headings and code stay as they are, and so does a link within the part.
+ */
+export function dropSelfPointers(markdown: string, sourcePath: string, route: string): string {
+  const pointsHere = (sentence: string) =>
+    [...sentence.matchAll(/\]\((?!https?:|#|mailto:)([^)\s]+)\)/g)].some((match) => {
+      const [file = "", anchor] = match[1]!.split("#")
+      const repoPath = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), file))
+      return repoPath !== sourcePath && publishedRoute(repoPath, anchor)?.route === route
+    })
+  const blocks = markdown.split(/(\n{2,})/)
+  let fenced = false
+  const kept: string[] = []
+  for (let index = 0; index < blocks.length; index += 2) {
+    const block = blocks[index]!
+    const separator = blocks[index + 1] ?? ""
+    const plain = !fenced && !/^(\s*([-*+]|\d+\.)\s|[|>#<:]|```)/.test(block)
+    if ((block.match(/^```/gm) ?? []).length % 2 === 1) fenced = !fenced
+    if (!plain) {
+      kept.push(block, separator)
+      continue
+    }
+    const sentences = block.split(/(?<=[.!?])\s+(?=\S)/)
+    const left = sentences.filter((sentence) => !pointsHere(sentence))
+    if (left.length === sentences.length) kept.push(block, separator)
+    else if (left.length > 0) kept.push(left.join(" "), separator)
+  }
+  return kept.join("").replace(/\n{2,}$/, markdown.match(/\n*$/)![0])
+}

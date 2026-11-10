@@ -74,13 +74,24 @@ hr {
   --rc-syn-var: #d3a9df;
 }
 
-/* Type: tighter tracking as headings grow, body left alone. */
-.sl-markdown-content :is(h1, h2),
+/*
+ * Type, as on the landing page: headings heavy and white, tracking tighter as they grow, body left
+ * alone.
+ */
+.sl-markdown-content :is(h1, h2, h3, h4),
 h1#_top {
-  letter-spacing: -0.022em;
+  color: var(--sl-color-white);
+  font-weight: 650;
+  text-wrap: balance;
+}
+h1#_top {
+  letter-spacing: -0.035em;
+}
+.sl-markdown-content :is(h1, h2) {
+  letter-spacing: -0.025em;
 }
 .sl-markdown-content h3 {
-  letter-spacing: -0.012em;
+  letter-spacing: -0.015em;
 }
 
 /* The bar is a material, not a strip: content scrolls under it. */
@@ -96,17 +107,17 @@ h1#_top {
   }
 }
 
-/* The sidebar sits on the page, one step lighter than it. */
+/* The sidebar is the page itself, as the landing page is one surface: no panel of its own. */
 :root {
-  --sl-color-bg-sidebar: var(--sl-color-gray-6);
+  --sl-color-bg-sidebar: var(--sl-color-black);
 }
 
-/* The current page is marked by weight and a quiet tint, not a block of colour. */
+/* The current page is marked by weight and the landing's card surface, not a block of colour. */
 .sidebar-content a[aria-current="page"],
 .sidebar-content a[aria-current="page"]:hover,
 .sidebar-content a[aria-current="page"]:focus {
   color: var(--sl-color-white);
-  background-color: var(--sl-color-gray-5);
+  background-color: var(--sl-color-gray-6);
 }
 
 /* The name in the bar is the product, not a link colour. */
