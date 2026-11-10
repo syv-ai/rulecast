@@ -3,7 +3,7 @@
  * column take the width the others leave, and keeps the chips in the others (names, commands,
  * defaults) on one line. CSS can't tell the columns apart, so the build marks the prose column's
  * cells with `data-prose`, and each other cell of one word with `data-word`: a word such as
- * "pre-commit" would otherwise break at its hyphen.
+ * "pre-commit" would otherwise break at its hyphen. It also puts each table in a box that scrolls.
  */
 
 /** Below this many characters a row, on average, no column is prose: a table of figures, say. */
@@ -23,8 +23,23 @@ export function proseColumn(rows: string[][]): number {
 }
 
 /** As much of Sätteri's HAST as the plugin reads: Astro's Markdown processor is Sätteri. */
-type Node = { type: string; tagName?: string; children?: readonly Node[] }
-type Context = { textContent(node: Node): string; setProperty(node: Node, key: string, value: unknown): void }
+type Node = { type: string; tagName?: string; properties?: Record<string, unknown>; children?: readonly Node[] }
+type Context = {
+  textContent(node: Node): string
+  setProperty(node: Node, key: string, value: unknown): void
+  wrapNode(node: Node, parent: Node): void
+}
+
+/**
+ * The box each table sits in. A table sized to its column can't scroll by itself, so the box does:
+ * a table wider than the column scrolls inside it, never the page.
+ */
+export const TABLE_BOX: Node = {
+  type: "element",
+  tagName: "div",
+  properties: { className: ["rc-table"] },
+  children: [],
+}
 
 const cellsOf = (row: Node) => (row.children ?? []).filter((c) => c.tagName === "td" || c.tagName === "th")
 function rowsOf(node: Node): Node[] {
@@ -35,7 +50,7 @@ function rowsOf(node: Node): Node[] {
 /** One word, as a table cell holds it: no spaces, short enough to never need breaking. */
 export const isWord = (text: string) => /^\S{1,32}$/.test(text.trim())
 
-/** The Sätteri HAST plugin that marks each table's prose cells and its one-word cells. */
+/** The Sätteri HAST plugin that marks each table's prose cells and its one-word cells, and boxes it. */
 export const proseColumnPlugin = {
   name: "rulecast-prose-column",
   element: {
@@ -50,6 +65,7 @@ export const proseColumnPlugin = {
           else if (isWord(texts[r]?.[c] ?? "")) ctx.setProperty(cell, "dataWord", true)
         })
       })
+      ctx.wrapNode(table, TABLE_BOX)
     },
   },
 }

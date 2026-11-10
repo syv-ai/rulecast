@@ -82,8 +82,18 @@ hr {
 
 /*
  * Type, as on the landing page: headings heavy and white, tracking tighter as they grow, body left
- * alone.
+ * alone. The section headings are a step or two above the body, not a poster: a two-line section
+ * under a 35px title reads as shouting. Space above an h2 does the work that size did.
  */
+:root {
+  --sl-text-h2: 1.75rem;
+  --sl-text-h3: 1.3rem;
+  --sl-text-h4: 1.1rem;
+}
+/* Starlight wraps each heading with its anchor link; the wrapper is what takes the space. */
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper.level-h2 {
+  margin-top: 2.25em;
+}
 .sl-markdown-content :is(h1, h2, h3, h4),
 h1#_top {
   color: var(--sl-color-white);
@@ -108,10 +118,28 @@ h1#_top {
   font-size: 0.9em;
   letter-spacing: normal;
 }
-/* A chip that wraps keeps its padding on each line, instead of opening at one end. */
+/* A chip that wraps keeps its padding on each line, instead of opening at one end. A paragraph can
+   hold twenty of them, so each is a faint tint of whatever it sits on, not a block: see-through, it
+   reads on the page, a table, an aside or a card alike. */
 .sl-markdown-content :not(pre) > code {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+  border-radius: 0.25rem;
+  background-color: color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
+  color: var(--sl-color-gray-1);
+}
+
+/* Links are the accent, the one colour of the page: the accent-high Starlight picks is nearly the
+   body's white. A code word in a link is the link's colour too, or it would read as plain code. */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--sl-color-accent);
+  text-underline-offset: 0.2em;
+}
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  color: var(--sl-color-accent-high);
+}
+.sl-markdown-content a code {
+  color: inherit;
 }
 
 /* The bar is a material, not a strip: content scrolls under it. */
@@ -147,28 +175,29 @@ h1#_top {
   letter-spacing: -0.015em;
 }
 
-/* Tables and pagination: rows and links are surfaces, not ruled lines. */
-.sl-markdown-content table {
-  border-radius: 0.6rem;
-  overflow: hidden;
-}
+/* Tables: rows are told apart by the space around them, not stripes or rules. Only the header has a
+   surface, the faintest one, so it names the columns without becoming a bar. */
 .sl-markdown-content th {
-  background-color: var(--sl-color-gray-5);
+  background-color: var(--sl-color-gray-6);
 }
-/* Starlight takes the outer cells' padding away for an unshaded table; on a shaded one the text
-   would touch the edge of the shading. */
+.sl-markdown-content th:first-child {
+  border-start-start-radius: 0.5rem;
+  border-end-start-radius: 0.5rem;
+}
+.sl-markdown-content th:last-child {
+  border-start-end-radius: 0.5rem;
+  border-end-end-radius: 0.5rem;
+}
+.sl-markdown-content :is(th, td) {
+  padding-block: 0.6rem;
+}
+/* Starlight takes the outer cells' padding away for an unshaded table; with a shaded header the
+   text would touch the edge of the shading, and the rows would not line up under it. */
 .sl-markdown-content :is(th, td):first-child {
   padding-inline-start: 1rem;
 }
 .sl-markdown-content :is(th, td):last-child {
   padding-inline-end: 1rem;
-}
-.sl-markdown-content tr:nth-child(even) td {
-  background-color: var(--sl-color-gray-6);
-}
-/* A chip in a table sits on either row colour, so it takes the step above both. */
-.sl-markdown-content td code {
-  background-color: var(--sl-color-gray-5);
 }
 /* Cells break between words, never inside one: Starlight's break-anywhere is what split
    `ast-grep` in two. Outside the prose column (marked at build, scripts/prose-column.ts) a chip is
@@ -181,15 +210,22 @@ h1#_top {
 .sl-markdown-content [data-word] {
   white-space: nowrap;
 }
-/* In the full-width column a table spans it, and the prose takes all the short columns leave. In a
-   narrower one (a phone, a tablet, a window that also shows "On this page") it keeps Starlight's
-   own scrolling box, so a wide table scrolls by itself, not the page. */
+/* Each table sits in a box (scripts/prose-column.ts) that scrolls, so a table wider than the column
+   scrolls by itself, never the page, in every layout. The table is a real table again inside it:
+   Starlight's own scrolling, a table turned block, can't span the column. In the full-width column
+   it spans it, and the prose takes all the short columns leave; in a narrower one (a phone, a
+   tablet, a window that also shows "On this page") it is as wide as its content needs. */
+.sl-markdown-content .rc-table {
+  overflow-x: auto;
+}
+.sl-markdown-content .rc-table > table {
+  display: table;
+}
 .sl-markdown-content {
   container-type: inline-size;
 }
 @container (min-width: 45rem) {
-  .sl-markdown-content table {
-    display: table;
+  .sl-markdown-content .rc-table > table {
     width: 100%;
   }
   .sl-markdown-content [data-prose] {
@@ -217,6 +253,7 @@ h1#_top {
   background-color: var(--sl-color-gray-6);
 }
 
+/* Pagination: each link is a surface, not a ruled box. */
 .pagination-links a {
   background-color: var(--sl-color-gray-6);
 }
