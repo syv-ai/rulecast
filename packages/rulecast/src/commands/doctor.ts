@@ -267,24 +267,28 @@ export async function doctorCommand(
           ? "warning"
           : "ok"
     count(level)
-    const outOfDate =
-      missing.length > 0
-        ? `hooks for ${missingNames(missing)} missing`
-        : stale
-          ? `the hooks${staleWhere} are out of date`
-          : differs !== null
-            ? `${differs.file} is out of date`
-            : null
+    // Everything install would change besides a missing file, so no settings file it rewrites goes
+    // unnamed: hooks missing in the file named first, stale ones there or elsewhere, a script that differs.
+    const behind = [
+      ...(missing.length > 0 ? [`hooks for ${missingNames(missing)} missing`] : []),
+      ...(stale ? [`the hooks${staleWhere} are out of date`] : []),
+      ...(differs !== null ? [`${differs.file} is out of date`] : []),
+    ]
+    const outOfDate = behind.length === 0 ? null : behind.join(", and ")
+    const cannotRun =
+      `rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
+      `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
     const detail =
       file === null
         ? "not installed (run rulecast install)"
         : gone !== null
-          ? `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install`
+          ? // Every hook fails first; with no rulecast either, both need doing.
+            `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install` +
+            (outOfDate === null ? "" : `. Also: ${outOfDate}`) +
+            (runs ? "" : `. And ${cannotRun}`)
           : !runs
             ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
-              `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
-              `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).` +
-              (outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`)
+              `${file} — but ${cannotRun}` + (outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`)
             : outOfDate !== null
               ? `${file} — but ${outOfDate}; run rulecast install`
               : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}` : ""}`

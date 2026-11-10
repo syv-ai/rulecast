@@ -364,10 +364,12 @@ describe("rulecast doctor", () => {
       )
     })
 
-    test("a missing script stays first, since every hook fails", async () => {
-      const { stdout } = await ciDoctor((root) => rm(path.join(root, ".claude/hooks/rulecast.sh")))
+    test("a missing script stays first, since every hook fails, and the missing rulecast is said too", async () => {
+      const { stdout, setup } = await ciDoctor((root) => rm(path.join(root, ".claude/hooks/rulecast.sh")))
       expect(stdout).toContain(
-        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install\n",
+        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install. " +
+          `And rulecast is not in node_modules/.bin, on the PATH or in ${setup.installDir}, so no rules run. ` +
+          `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
       )
     })
 
@@ -448,6 +450,30 @@ describe("rulecast doctor", () => {
       "warning  Claude Code — .claude/settings.json — but hooks for Bash missing; run rulecast install",
     )
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
+  })
+
+  test("hooks missing in one settings file and stale in another: both files are named", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    const file = path.join(root, ".claude/settings.json")
+    const settings = JSON.parse(await readFile(file, "utf8"))
+    delete settings.hooks.PostToolUseFailure
+    await writeFile(file, JSON.stringify(settings))
+    const stop = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const personal = { hooks: { Stop: [{ hooks: [{ type: "command", command: stop, timeout: 70 }] }] } }
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
+    expect((await doctor(root)).stdout).toContain(
+      "warning  Claude Code — .claude/settings.json — but hooks for Bash missing, " +
+        "and the hooks in .claude/settings.local.json are out of date; run rulecast install\n",
+    )
+    const install = await runCli(root, ["install"])
+    expect(install.stdout).toContain("updated Claude Code hooks in .claude/settings.local.json: Stop\n")
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
   })
 
