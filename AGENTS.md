@@ -7,7 +7,7 @@ rulecast delivers a project's conventions to coding agents while they work. It r
 ```sh
 All standard pnpm commands, like install, build etc.
 pnpm perf               # edit-hook latency budget (p95 < 500 ms)
-pnpm plugin-eval        # the plugin's eval suite (evals/rulecast-plugin/), by hand: pnpm plugin-eval --scaffold --allow-tools Edit Write
+pnpm plugin-eval        # the plugin's eval suite (evals/rulecast-plugin/), by hand: pnpm plugin-eval --scaffold --allow-tools Edit Write Bash
 pnpm binary             # standalone binary with bun
 ```
 
@@ -26,7 +26,7 @@ CI checks each of these with `--check`:
 - `pnpm manifest` → `.rulecast-rules.yaml`, the catalog manifest built from `packages/rules-*/rules.yaml`.
 - `pnpm lenses` → `agents/lenses/`, the pages agents read from the lens catalog in `packages/lenses/` (it validates the catalog first).
 - `pnpm readme` → `packages/rulecast/README.md` and `LICENSE`, mirrored from the root ones. Edit the root `README.md`, then run this.
-- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`, and the version in the README, `guides/git-hooks-ci.md`, `agents/reference/rule-format.md`, `install.sh` and the plugin.
+- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`, and the version in the README, `guides/git-hooks-ci.md`, `agents/reference/rule-format.md`, `agents/DRAFT-RULES.md`, `install.sh` and the plugin (its manifest and skills). It also writes the git-hook command into `.pre-commit-hooks.yaml` and the guide's lefthook snippet.
 - `pnpm demo` → `.github/assets/demo.svg`, the README's terminal demo, from the README's opening output and a renderer golden.
 
 ### Git hooks

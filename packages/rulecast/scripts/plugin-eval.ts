@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 
 /**
  * Runs the Claude Code plugin's eval suite: `pnpm plugin-eval [claude plugin eval flags]`, such as
- * `pnpm plugin-eval --scaffold --allow-tools Edit Write`.
+ * `pnpm plugin-eval --scaffold --allow-tools Edit Write Bash`.
  *
  * The cases live in evals/rulecast-plugin/, not in the plugin: Claude Code installs a plugin by
  * copying its directory, and the suite is for maintainers, not for everyone who installs it. But
