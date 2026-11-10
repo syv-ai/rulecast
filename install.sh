@@ -80,11 +80,29 @@ naming() {
   env_line=". \"$shown/env\""
 }
 
+# $1 without its trailing slashes, as `trimmed`; / stays /. /x/y, /x/y/ and /x/y// are one
+# directory, and one spelling of it is what the startup files are searched for.
+trim_slashes() {
+  trimmed="$1"
+  while :; do
+    case "$trimmed" in
+      ?*/) trimmed="${trimmed%/}" ;;
+      *) return 0 ;;
+    esac
+  done
+}
+
+# Whether `dir` is on the PATH, however an entry spells it.
 on_path() {
-  case ":${PATH:-}:" in
-    *:"$dir":*) return 0 ;;
-  esac
-  return 1
+  rest="${PATH:-}"
+  while :; do
+    trim_slashes "${rest%%:*}"
+    [ "$trimmed" = "$dir" ] && return 0
+    case "$rest" in
+      *:*) rest="${rest#*:}" ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 # The startup files the install will add the source line to, one per line: none when the
@@ -133,7 +151,8 @@ customize() {
     esac
     problem="$(dir_problem "$answer")"
     if [ -z "$problem" ]; then
-      dir="${answer%/}"
+      trim_slashes "$answer"
+      dir="$trimmed"
       break
     fi
     say "$problem"
@@ -201,7 +220,8 @@ main() {
   fi
   problem="$(dir_problem "$dir")"
   [ -z "$problem" ] || fail "$problem"
-  dir="${dir%/}"
+  trim_slashes "$dir"
+  dir="$trimmed"
   naming
 
   if [ -z "$yes" ] && (: <"$tty") 2>/dev/null; then
@@ -262,7 +282,7 @@ main() {
 #!/bin/sh
 # Written by the rulecast installer: puts $shown on the PATH, once.
 case ":\${PATH}:" in
-  *:"$shown":*) ;;
+  *:"$shown":* | *:"$shown"/:*) ;;
   *) export PATH="$shown:\$PATH" ;;
 esac
 EOF

@@ -177,6 +177,13 @@ describe("the committed hook script", () => {
     expect(result.stdout).toBe(`{"${runs}":true}\n`)
   })
 
+  test("install.sh's directory with trailing slashes still finds its rulecast", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["installed"], root)
+    const env = { ...lookupEnv(setup), RULECAST_INSTALL_DIR: `${setup.installDir}//` }
+    expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe('{"installed":true}\n')
+  })
+
   test("a PATH rulecast that cannot run on this machine counts as none: not installed", async () => {
     // A binary for another machine, or one the OS refuses.
     const root = await createProject({})

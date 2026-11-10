@@ -36,15 +36,17 @@ export function pinnedInstallCommand(version: string): string {
 
 /**
  * The directory install.sh installs into, as it decides: $RULECAST_INSTALL_DIR, else $XDG_BIN_HOME,
- * else $HOME/.local/bin, empty values counting as unset. test/install-script.test.ts holds the two
- * to the same answer.
+ * else $HOME/.local/bin, empty values counting as unset, and without trailing slashes, as the script
+ * trims them. test/install-script.test.ts holds the two to the same answer.
  */
 export function installDir(env: Env): string {
-  return env.RULECAST_INSTALL_DIR || env.XDG_BIN_HOME || path.join(env.HOME || homedir(), ".local", "bin")
+  const dir = env.RULECAST_INSTALL_DIR || env.XDG_BIN_HOME || path.join(env.HOME || homedir(), ".local", "bin")
+  return dir.replace(/(?<=.)\/+$/, "")
 }
 
 /**
  * install.sh's rulecast as the hook script and the git hooks name it: installDir's rule in shell.
+ * Trailing slashes are left in: `/x/y//rulecast` is the same file.
  * The hooks' last resort, after the PATH: an agent started from the Dock or an IDE may run its
  * hooks with a PATH that never read the shell's startup files, where install.sh put the directory.
  * No single quotes, so it can go inside `sh -c '…'`.

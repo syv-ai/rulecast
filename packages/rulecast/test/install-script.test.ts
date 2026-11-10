@@ -288,6 +288,49 @@ describe("install.sh", () => {
     expect(home.stdout).toContain('for fish, run: fish_add_path "$HOME/.local/bin"\n')
   })
 
+  test("a directory given with trailing slashes is the same directory: one startup line, however it is spelt", async () => {
+    for (const [first, second] of [
+      ["", "/"],
+      ["/", ""],
+      ["", "//"],
+      ["//", ""],
+    ]) {
+      const home = scratch("home")
+      const dir = path.join(scratch("own"), "bin")
+      expect((await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${first}` } })).status).toBe(0)
+      const again = await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${second}` } })
+      expect(again.status, again.stderr).toBe(0)
+      expect(again.stdout, `${first} then ${second}`).not.toContain("to the PATH in")
+      expect(again.stdout).toContain(`installed rulecast 9.9.9 at ${dir}/rulecast\n`)
+      expect(count(read(path.join(home, ".profile")), `. "${dir}/env"`)).toBe(1)
+    }
+  })
+
+  test("a directory on the PATH with a trailing slash is on the PATH", async () => {
+    const dir = path.join(scratch("own"), "bin")
+    const run = await install({ pathFirst: `${dir}/`, env: { RULECAST_INSTALL_DIR: dir, SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(readdirSync(run.home)).toEqual([])
+    // Nor does sourcing its env file add it again.
+    const sourced = spawnSync("/bin/sh", ["-c", `. "${dir}/env"; printf %s "$PATH"`], {
+      env: { PATH: `${dir}/:/usr/bin:/bin` },
+      encoding: "utf8",
+    })
+    expect(sourced.stdout).toBe(`${dir}/:/usr/bin:/bin`)
+  })
+
+  test("installDir drops trailing slashes as the script does", async () => {
+    for (const env of <Record<string, string>[]>[
+      { RULECAST_INSTALL_DIR: `${path.join(scratch("own"), "bin")}//` },
+      { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: `${scratch("xdg")}/` },
+    ]) {
+      const home = scratch("home")
+      const run = await install({ home, env })
+      expect(run.status, run.stderr).toBe(0)
+      expect(run.stdout).toContain(`installed rulecast 9.9.9 at ${installDir({ HOME: home, ...env })}/rulecast\n`)
+    }
+  })
+
   test("GITHUB_PATH set: appends the dir there once", async () => {
     const githubPath = path.join(scratch("gh"), "path")
     const home = scratch("home")
