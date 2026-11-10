@@ -18,11 +18,12 @@ Run init's dry run first where sessions start, then in each directory it lists u
 rulecast init --dry-run --format json
 ```
 
-It writes nothing in the project. It fetches the catalog's rule data into rulecast's cache; if that fails, `catalog` is `{ error }`. What the table in step 3 reads from it is named there (`committers`, `packages`, `sessions`, `gitHooks` and `ci` sit under `detected`). Beyond that:
+It writes nothing in the project. It fetches the catalog's rule data into rulecast's cache. When the catalog cannot be reached, it uses the newest copy already in the cache and says so in `notes`; with no copy cached, `catalog` is `{ error }`. What the table in step 3 reads from it is named there (`committers`, `packages`, `sessions`, `gitHooks` and `ci` sit under `detected`). Beyond that:
 
 - `committers` is null when nobody committed in the last six months (bots left out), or in a shallow clone.
 - `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
+- Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (a count) and `candidates`, the doc sections that name one of its error rules (step 7).
 
 Then read what needs judgement:
 

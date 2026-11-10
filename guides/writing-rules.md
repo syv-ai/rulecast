@@ -6,7 +6,7 @@ The README's [A rule](../README.md#a-rule) shows the shape. This guide covers th
 
 A rule's `examples` hold `bad` code it must flag and `good` code it must leave alone. `rulecast test` runs them. Two more checks say how the rule would behave on your code:
 
-- `rulecast test <id> --against src/` shows how many real files it would flag.
+- `rulecast test <id> --against .` shows how many real files it would flag. The rule's own `files` picks which ones count.
 - `rulecast test <id> --history` shows how often recent commits would have broken it.
 
 ```yaml

@@ -78,7 +78,7 @@ Change only the files listed. Do not add rulecast-ignore comments, and do not ed
 .rulecast-config.yaml or .rulecast/baseline.json. Finish when \`rulecast run $rule --all-files\`
 exits 0, or list the findings you could not fix and why."
     RULECAST_MODE=unattended claude -p "$task" --max-turns 30 \
-      --permission-mode acceptEdits --allowedTools "Bash(rulecast run:*)" ;;
+      --permission-mode acceptEdits --allowedTools "Bash(rulecast run:*)" "Bash(npx rulecast run:*)" ;;
   *) echo "rulecast did not check everything: see $out/batch.json"; exit 1 ;;
 esac
 

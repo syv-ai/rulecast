@@ -8,7 +8,7 @@ The same rule reports the same line the same way in an agent hook, a git hook an
 | pre-push and CI | `rulecast run --from-ref A --to-ref B` | Files changed between the merge base with `A` and `B`, read at `B` (the working tree without `--to-ref`). Runs `llm` rules on changed files |
 | a scheduled sweep or agent loop | `rulecast run --all-files` | Everything, against a [committed baseline](adopting-rules.md#a-committed-baseline); exits 0 unless something got worse. Recipes: [`agents/reference/loops.md`](../agents/reference/loops.md) |
 
-rulecast doesn't install git hooks. Add it to the hook manager you already use:
+rulecast doesn't install git hooks. Add it to the hook manager you already use. Both entries below look for rulecast in the same order as the agent hooks ([What gets written](https://syv-ai.github.io/rulecast/how-it-works/#what-gets-written)).
 
 ## pre-commit
 

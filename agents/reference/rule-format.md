@@ -37,12 +37,12 @@ repos:
 | `exclude` | `^$` | Regex no rule's files may match |
 | `default_stages` | none | Stages for rules without `stages` |
 | `conventions` | none | Where new conventions are written: a file, or a folder of files by area, relative to this config. A config without one uses the nearest config above that names one; `rulecast list` shows which. It may not exist yet (a warning) |
-| `not_checked` | `[]` | Conventions considered and left without a rule: a list of `{ context: "@docs/x.md#section", reason: "…" }`. `rulecast list` shows them, so a later session does not propose the rule again. `context` is checked like a rule's: a missing file or section is a warning |
+| `not_checked` | `[]` | Conventions considered and left without a rule: a list of `{ context: "@docs/x.md#section", reason: "…" }`. `rulecast list` shows them, so a later session does not propose the rule again. `context` is checked like a rule's, but every problem with an entry is a warning: a missing file or section, a misspelt key or a missing `reason`. `validate`, `doctor` and `list` say it, `validate` still exits 0, and the entry is ignored while the rest of the config loads |
 | `context.mode` | `inject` | Default reference mode: `inject` or `read` |
 | `context.max_bytes` | `32768` | A larger reference is delivered as `read` |
 | `max_matches_per_rule` | `10` | Findings shown per rule |
 | `max_file_bytes` | `1048576` | A larger file is skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and guard, where an agent is waiting. `verify` always runs |
-| `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit |
+| `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit. A detector still running then is dropped for that edit: the agent gets what finished, and the dropped rules that have the `verify` stage run again when it stops |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install` where sessions start: the stop hooks' timeout follows the largest `verify_ms` of the configs they serve |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
 | `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
@@ -295,6 +295,7 @@ The mode is decided in this order:
 An unknown `RULECAST_MODE` value is ignored: `rulecast doctor` warns about it, and a hook writes it
 to its debug log. A missing terminal does not count, because a hook never has one. `rulecast doctor` prints the mode
 it would run in from your shell, and where that came from. The mode applies to agent hooks only.
+When the hook script finds no rulecast to run, it says so at the start of a session, and in unattended mode at every stop as well. It tells unattended mode from the environment alone (`RULECAST_MODE`, `CI`, `GITHUB_ACTIONS`), never from the config's `mode:`, which it cannot read.
 `rulecast run` in a git hook or a CI job always runs the rules as written: there is no agent there
 to answer. The exception is `rulecast run --session <id>`, which shows a session's findings: it runs
 in the mode that session's hooks recorded, so it lists what the stop blocks on. With `/goal`, see

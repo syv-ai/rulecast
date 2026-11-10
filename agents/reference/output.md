@@ -1,6 +1,6 @@
 # rulecast output contract
 
-What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) has its own document below, and `rulecast stats` and `rulecast replay` theirs in [stats.md](stats.md). The terminal and `agent` formats are for people and agents to read, and can change in any release.
+What a script, a CI job or an agent loop can rely on from `rulecast run` and `rulecast try-repo`: the exit code, the JSON document and the SARIF log. [`rulecast test`](#rulecast-test) and [`rulecast list`](#rulecast-list) have their own documents below, and `rulecast stats` and `rulecast replay` theirs in [stats.md](stats.md). The terminal and `agent` formats are for people and agents to read, and can change in any release.
 
 Relative links in this file resolve against this file's own URL.
 
@@ -8,6 +8,8 @@ Relative links in this file resolve against this file's own URL.
 rulecast run --from-ref origin/main --format json    # or --all-files, --files F..., staged by default
 rulecast run --from-ref origin/main --format sarif   # for GitHub code scanning
 ```
+
+`rulecast run --files F...` judges the files it is given whole, like `--all-files`: every finding in them is new unless a [committed baseline](#committed-baseline) lists it.
 
 ## Exit codes
 
@@ -343,3 +345,9 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `smallSample` | Under 10 commits. |
 | `findings` | Every new finding, newest commit first, with the commit's subject and the rule's message. `label` is the developer's mark, when the label file has one. |
 | `labels` | From `.rulecast/history/<rule id, / as __>.json`, or `null` when there is no such file. `--label` writes the findings there with `"label": null`, keeping any mark already in it. The developer, or an agent with them, sets each to `"real"` or `"false"`. `precision` is `real / (real + false)` over this run's findings, or `null` when none is marked. |
+
+## rulecast list
+
+`rulecast list --format json` prints an array with one entry per configured rule, catalog rules included: its `id`, `name`, `source` (`local` or the rule repo's label), `enabled`, `stages`, `detector` and `config` (`null` for a touch rule), `severity`, `files`, `exclude`, `matchingFiles` (`null` outside a git repository), `context`, and `contextByRule` when the rule has one. With a rule id it holds that rule alone, with `matching`, `message` and `sections` (each `{ "ref", "content" }`, `content` `null` when the section is not found) added. `--catalog` adds `description`, `pack`, `installed`, `cost` and, with a rule id, `examples`.
+
+The `not_checked` entries are not in it, because they are not rules and the array holds only rules. The terminal output lists them after the rules, with each malformed entry's warning, and a script reads them from `.rulecast-config.yaml` itself.
