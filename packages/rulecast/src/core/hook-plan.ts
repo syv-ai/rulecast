@@ -32,6 +32,11 @@ export interface HookState {
    * settings file's handlers, so a file left behind on an older command runs rulecast twice.
    */
   others: { file: string; stale: string[] }[]
+  /**
+   * Every one of rulecast's hooks, in every settings file, runs the current command: a missing
+   * file fails all of them, not only some.
+   */
+  allRun: boolean
 }
 
 /** Reads one of an adapter's files, relative to the settings' directory: its text, or null when it does not exist. */
@@ -60,6 +65,14 @@ export interface HookPlan {
     files: { file: string; content: string; created: boolean }[]
     others: { file: string; settings: unknown; updated: string[] }[]
   } | null
+}
+
+/** `value` with every string that is `command` replaced: what is left of rulecast's is on another command. */
+function withoutCommand(value: unknown, command: string): unknown {
+  if (value === command) return ""
+  if (Array.isArray(value)) return value.map((child) => withoutCommand(child, command))
+  if (typeof value !== "object" || value === null) return value
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, withoutCommand(child, command)]))
 }
 
 /** Some string anywhere in `value` is `command`: a hook in these settings runs the current command. */
@@ -128,6 +141,12 @@ export async function planHooks(
       missing: found.added,
       files: runs ? problems : [],
       others: others.map(({ file, updated }) => ({ file, stale: updated })),
+      // A hook on the current command no longer looks like rulecast's once the command is hidden,
+      // so remove() finds only those on an older one.
+      allRun: holding.every(
+        ({ file, value }) =>
+          inFile(file, () => install.remove(withoutCommand(value, install.command))).removed.length === 0,
+      ),
     }
     const current = state.stale.length === 0 && state.missing.length === 0
     // Each file as it will be: what the write puts there, else what is there now.

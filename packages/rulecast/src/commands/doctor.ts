@@ -261,10 +261,10 @@ export async function doctorCommand(
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
     // on the PATH nor in node_modules/.bin, and doctor said ok.
     const stale = (state?.stale ?? []).length > 0 || (state?.others ?? []).length > 0
-    // Which settings files are behind: the one named at the start of the line, others, or both.
-    const otherFiles = (state?.others ?? []).map((each) => each.file).join(" and ")
-    const staleWhere =
-      otherFiles === "" ? "" : (state?.stale ?? []).length > 0 ? ` there and in ${otherFiles}` : ` in ${otherFiles}`
+    // Which settings files are behind, each named: the one at the start of the line only when others are too.
+    const otherFiles = (state?.others ?? []).map((each) => each.file)
+    const staleFiles = [...((state?.stale ?? []).length > 0 && file !== null ? [file] : []), ...otherFiles]
+    const staleWhere = otherFiles.length === 0 ? "" : ` in ${staleFiles.join(" and ")}`
     const missing = state?.missing ?? []
     // A file the hooks run that is not there fails every hook (sh exits 127): settings committed
     // without the script. One that differs still runs, as an older rulecast's would.
@@ -290,20 +290,25 @@ export async function doctorCommand(
     const cannotRun =
       `rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
       `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+    // An old rulecast is said whatever else is wrong, after what install fixes.
+    const oldVersion =
+      runs !== null && tooOld
+        ? `${runsLabel(runs)}, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}`
+        : null
     const detail =
       file === null
         ? "not installed (run rulecast install)"
         : gone !== null
-          ? // Every hook fails first; with no rulecast either, both need doing.
-            `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install` +
+          ? // Every hook that runs the file fails first; with no rulecast either, both need doing.
+            `${file} — but ${gone.file} is missing, so every hook ${state?.allRun ? "" : "that runs it "}fails; run rulecast install` +
             (outOfDate === null ? "" : `. Also: ${outOfDate}`) +
-            (runs ? "" : `. And ${cannotRun}`)
+            (runs ? (oldVersion === null ? "" : `. Also: it runs ${oldVersion}`) : `. And ${cannotRun}`)
           : !runs
             ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
               `${file} — but ${cannotRun}${outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`}`
             : outOfDate !== null
-              ? `${file} — but ${outOfDate}; run rulecast install`
-              : `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}` : ""}`
+              ? `${file} — but ${outOfDate}; run rulecast install${oldVersion === null ? "" : `. Also: it runs ${oldVersion}`}`
+              : `${file} — runs ${oldVersion ?? runsLabel(runs)}`
     io.stdout(line(level, adapter.label, detail))
   }
   io.stdout("\ncache\n")

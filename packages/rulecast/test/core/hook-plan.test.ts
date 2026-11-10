@@ -52,6 +52,7 @@ describe("planHooks: the hook script", () => {
       missing: [],
       files: [{ file: HOOK_SCRIPT_FILE, problem: "missing" }],
       others: [],
+      allRun: true,
     })
     expect(write).toEqual({
       file: SHARED,
@@ -90,7 +91,7 @@ describe("planHooks: the hook script", () => {
 
   test("everything current: nothing to write", async () => {
     const { state, write } = await plan({ [SHARED]: settingsText(HOOK_COMMAND), [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
-    expect(state).toEqual({ file: SHARED, stale: [], missing: [], files: [], others: [] })
+    expect(state).toEqual({ file: SHARED, stale: [], missing: [], files: [], others: [], allRun: true })
     expect(write).toBeNull()
   })
 
@@ -102,6 +103,7 @@ describe("planHooks: the hook script", () => {
       missing: [],
       files: [{ file: HOOK_SCRIPT_FILE, problem: "missing" }],
       others: [],
+      allRun: true,
     })
     expect(write?.file).toBe(PERSONAL)
     expect(write?.files.map((each) => each.file)).toEqual([HOOK_SCRIPT_FILE])
@@ -187,6 +189,11 @@ describe("planHooks: rulecast's hooks in more than one settings file", () => {
     const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: theirs, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
     expect(state?.others).toEqual([])
     expect(write).toBeNull()
+  })
+
+  test("allRun: whether every rulecast hook in every file runs the current command", async () => {
+    expect((await plan({ [SHARED]: current, [PERSONAL]: current })).state?.allRun).toBe(true)
+    expect((await plan({ [SHARED]: current, [PERSONAL]: older })).state?.allRun).toBe(false)
   })
 
   test("the script is the problem of any file whose hooks run it", async () => {

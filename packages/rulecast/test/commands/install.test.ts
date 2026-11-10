@@ -155,7 +155,7 @@ describe("rulecast install", () => {
     await writeFile(path.join(local, SHARED), JSON.stringify(older))
     await writeFile(path.join(local, PERSONAL), JSON.stringify(older))
     expect((await runCli(local, ["doctor"])).stdout).toContain(
-      `${SHARED} — but the hooks there and in ${PERSONAL} are out of date; run rulecast install`,
+      `${SHARED} — but the hooks in ${SHARED} and ${PERSONAL} are out of date; run rulecast install`,
     )
     const both = await runCli(local, ["install"])
     expect(both.stdout).toContain(`updated Claude Code hooks in ${SHARED}: `)
