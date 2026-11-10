@@ -163,13 +163,15 @@ Validate it the same way. A touch rule has no detector, so it takes no `examples
 
 Run `rulecast validate` and `rulecast test --format json` a last time; `validate` must be clean and the document must say `passed: true`. Bare `rulecast test` does not run `llm` rules, because each example costs money, and gives them `status: not-run`: run `rulecast test <id> --format json` for each of those.
 
-Every convention you read ends in one of four places: a rule that checks it, a touch rule that delivers it, not about code, or skipped. For each one that no rule checks or delivers, propose a line under it in the doc that states it, in this form:
+Every convention you read ends in one of four places: a rule that checks it, a touch rule that delivers it, not about code, or skipped. For each one that no rule checks or delivers, propose a `not_checked` entry in the config you would have drafted its rule in: the section that states it, and the reason in a few words.
 
-```markdown
-Not checked by rulecast: <the reason, in a few words>.
+```yaml
+not_checked:
+  - context: "@AGENTS.md#reviews"
+    reason: about how to work, not about the code
 ```
 
-For example, `Not checked by rulecast: about how to work, not about the code.`, `Not checked by rulecast: needs the whole repository, not one file.` or `Not checked by rulecast: the type checker already rejects it.` It stays next to the convention, so a later session sees it was considered and why it has no rule, and does not ask again. Show the lines with the rest of the diff; the developer keeps or removes them. A convention the developer turned down belongs in the `declined.md` next to the conventions instead ([CONVENTIONS.md](CONVENTIONS.md)), not here.
+Other reasons: `needs the whole repository, not one file`, `the type checker already rejects it`. `rulecast list` prints these entries, so a later session sees the convention was considered and why it has no rule, and does not ask again. Write nothing about it in the project's docs. Show the entries with the rest of the diff, and run `rulecast validate`, which reports an entry whose section is missing; the developer keeps or removes them. A convention the developer turned down belongs in the `declined.md` next to the conventions instead ([CONVENTIONS.md](CONVENTIONS.md)), not here.
 
 The agent doc (`AGENTS.md` or `CLAUDE.md`) is read at the start of every session, and every line in it competes for the agent's attention. A rule's `context` reaches the agent only when the rule fires, or, for a touch rule, when a matching file is first touched. So when a rule now checks or delivers a section that sits in the agent doc, propose moving that section to where the config's `conventions` points, and repointing the rule's `context` there. If `conventions` is not set, or is the agent doc itself, ask the developer where the section should go; with no other doc, leave it where it is. Leave at most one line in the agent doc if the developer wants one. Move the section; never copy it, because two copies drift apart. Show the move with the rest of the diff, and say what it costs: a section a rule only checks reaches the agent after the convention has been broken, and an agent without rulecast's hooks never sees it. The developer decides.
 
@@ -182,7 +184,7 @@ Then summarise:
 - the rules dropped;
 - the catalog rules you pointed at the project's doc, propose to cover differently, or propose to switch off, and why;
 - the examples you invented;
-- the conventions you skipped, with the reason, and the `Not checked by rulecast` lines you proposed.
+- the conventions you skipped, with the reason, and the `not_checked` entries you proposed.
 
 When revising rules a project already has, read `rulecast stats --format json` first (its shape is in [reference/stats.md](reference/stats.md#rulecast-stats)): a rule listed as `noisy` needs a clearer message or a tighter pattern; one in `neverRan` may have a `files` pattern that matches nothing; one in `neverFired` with many `runs` may not be worth keeping, unless it locks in a replacement (step 2), where staying quiet means the lock is working; and one in `stopBlocks` whose block rate climbs with the number of files is sometimes wrong. Before changing the pattern of a rule with `recurringFiles` in `weekly`, read those files: they may hold code the agent keeps copying, or be files the rule is wrong for.
 

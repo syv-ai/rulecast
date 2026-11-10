@@ -164,6 +164,13 @@ export const configSchema = z
       .refine((value) => !path.isAbsolute(value), "must be relative to the config's directory")
       .nullable()
       .default(null),
+    /**
+     * Conventions considered and given no rule, each with the section that states it and why. Kept
+     * here rather than as a note in the project's docs, which stay free of rulecast's terms; `rulecast
+     * list` shows them so a later session does not propose the rule again. Checked by compile like a
+     * rule's `context`, but a broken one only warns: it keeps no rule from running.
+     */
+    not_checked: z.array(z.object({ context: z.string(), reason: z.string().trim().min(1) }).strict()).default([]),
     context: z
       .object({
         mode: z.enum(["inject", "read"]).default("inject"),
@@ -243,6 +250,7 @@ export const configSchema = z
     exclude: input.exclude,
     defaultStages: input.default_stages ?? null,
     conventions: input.conventions,
+    notChecked: input.not_checked,
     context: { mode: input.context.mode, maxBytes: input.context.max_bytes },
     maxMatchesPerRule: input.max_matches_per_rule,
     maxFileBytes: input.max_file_bytes,

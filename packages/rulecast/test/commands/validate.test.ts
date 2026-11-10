@@ -64,6 +64,31 @@ describe("rulecast validate", () => {
     expect(result.stdout).toContain("warning: .rulecast-config.yaml: conventions: docs/conventions/ does not exist yet")
   })
 
+  test("a not_checked entry is checked like a rule's context: a missing file or section is reported", async () => {
+    const doc = "# Conventions\n\n## Reviews\nEvery change gets a review.\n"
+    const entry = (context: string) => ({ not_checked: [{ context, reason: "about how to work" }] })
+    const root = await createProject({
+      "docs/conventions.md": doc,
+      ".rulecast-config.yaml": localConfig([], entry("@docs/conventions.md#reviews")),
+    })
+    expect(await validate(root)).toMatchObject({ code: 0, stdout: ".rulecast-config.yaml: 0 rules valid\n" })
+    // A broken entry keeps no rule from running, so it is a warning: hooks carry on, validate says it.
+    await writeFile(path.join(root, ".rulecast-config.yaml"), localConfig([], entry("@docs/conventions.md#review")))
+    const renamed = await validate(root)
+    expect(renamed.code).toBe(0)
+    expect(renamed.stdout).toContain(
+      'warning: .rulecast-config.yaml: not_checked[0]: anchor "#review" not found in docs/conventions.md',
+    )
+    await writeFile(path.join(root, ".rulecast-config.yaml"), localConfig([], entry("@docs/gone.md#reviews")))
+    expect((await validate(root)).stdout).toContain(
+      "warning: .rulecast-config.yaml: not_checked[0]: referenced file not found: docs/gone.md",
+    )
+    await writeFile(path.join(root, ".rulecast-config.yaml"), localConfig([], entry("docs/conventions.md")))
+    expect((await validate(root)).stdout).toContain(
+      'not_checked[0]: reference "docs/conventions.md" must start with "@"',
+    )
+  })
+
   test("validates a rule repo's manifest, resolving references against its directory", async () => {
     const root = await createProject({ ".rulecast-rules.yaml": MANIFEST, "docs/http.md": HTTP_DOC })
     expect(await validate(root)).toMatchObject({ code: 0, stdout: ".rulecast-rules.yaml: 1 rule valid\n" })

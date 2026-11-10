@@ -9,6 +9,7 @@ const DEFAULTS = {
   exclude: "^$",
   defaultStages: null,
   conventions: null,
+  notChecked: [],
   context: { mode: "inject", maxBytes: 32768 },
   maxMatchesPerRule: 10,
   maxFileBytes: 1048576,
@@ -54,6 +55,7 @@ describe("configSchema", () => {
         max_files_per_verify: 4,
       },
       stats: { weekly_summary: true },
+      not_checked: [{ context: "@docs/a.md#reviews", reason: "process" }],
       repos: [
         { repo: "https://github.com/syv-ai/rulecast", rev: "v0.2.0", rules: [{ id: "generated-code" }] },
         { repo: "local", rules: [] },
@@ -69,6 +71,7 @@ describe("configSchema", () => {
       exclude: "^vendor/",
       defaultStages: ["edit", "verify"],
       conventions: null,
+      notChecked: [{ context: "@docs/a.md#reviews", reason: "process" }],
       context: { mode: "read", maxBytes: 1000 },
       maxMatchesPerRule: 3,
       maxFileBytes: 2048,
@@ -130,6 +133,19 @@ describe("configSchema", () => {
     expect(configSchema.parse({ repos: [], conventions: "../docs/a.md" }).conventions).toBe("../docs/a.md")
     expect(configSchema.safeParse({ repos: [], conventions: "/abs/docs" }).success).toBe(false)
     expect(configSchema.safeParse({ repos: [], conventions: "" }).success).toBe(false)
+  })
+
+  test("not_checked lists conventions considered and left without a rule, each with its section and reason", () => {
+    expect(configSchema.parse({ repos: [] }).notChecked).toEqual([])
+    const entry = { context: "@docs/a.md#reviews", reason: "about how to work, not about the code" }
+    expect(configSchema.parse({ repos: [], not_checked: [entry] }).notChecked).toEqual([entry])
+    // Both keys are required, the reason says something, and nothing else is accepted.
+    expect(configSchema.safeParse({ repos: [], not_checked: [{ context: "@docs/a.md" }] }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, reason: " " }] }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, mode: "read" }] }).success).toBe(false)
+    expect(configSchema.safeParse({ repos: [], not_checked: [{ ...entry, context: ["@docs/a.md"] }] }).success).toBe(
+      false,
+    )
   })
 
   test("repo entries keep their rules unparsed; rev rules are left to compile", () => {

@@ -13,7 +13,14 @@ import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
 import type { RepoProvider } from "../repos/provider"
 import { isOlder, requiresNewerMessage, VERSION } from "../version"
-import { type CompiledRule, compileRule, type RuleContext, type RuleInput, requiresNewer } from "./rule"
+import {
+  type CompiledRule,
+  compileReferences,
+  compileRule,
+  type RuleContext,
+  type RuleInput,
+  requiresNewer,
+} from "./rule"
 
 export interface Diagnostic {
   /** ".rulecast-config.yaml", ".rulecast-rules.yaml", or "<repo url>@<rev>" for a rule repo. */
@@ -182,6 +189,13 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     }
     compiled.push({ rule: result.rule, source })
     for (const message of result.warnings) diagnostics.push({ source, rule: result.rule.id, message, level: "warning" })
+  }
+
+  // A section renamed under a not_checked entry is said, not refused: no rule depends on it.
+  for (const [index, entry] of config.notChecked.entries()) {
+    const problem = await compileReferences([entry.context], context, project, `not_checked[${index}]: `)
+    if (typeof problem === "string")
+      diagnostics.push({ source: CONFIG_FILE, rule: null, message: problem, level: "warning" })
   }
 
   for (const [index, entry] of config.repos.entries()) {

@@ -302,7 +302,7 @@ export async function compileRule(
  * References parsed and checked against their root: each file exists and each anchor is a section
  * in it. The first problem, prefixed with `prefix`, when there is one.
  */
-async function compileReferences(
+export async function compileReferences(
   inputs: readonly ReferenceInput[],
   context: RuleContext,
   root: ReferenceRoot,

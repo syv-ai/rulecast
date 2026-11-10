@@ -37,6 +37,7 @@ repos:
 | `exclude` | `^$` | Regex no rule's files may match |
 | `default_stages` | none | Stages for rules without `stages` |
 | `conventions` | none | Where new conventions are written: a file, or a folder of files by area, relative to this config. A config without one uses the nearest config above that names one; `rulecast list` shows which. It may not exist yet (a warning) |
+| `not_checked` | `[]` | Conventions considered and left without a rule: a list of `{ context: "@docs/x.md#section", reason: "…" }`. `rulecast list` shows them, so a later session does not propose the rule again. `context` is checked like a rule's: a missing file or section is a warning |
 | `context.mode` | `inject` | Default reference mode: `inject` or `read` |
 | `context.max_bytes` | `32768` | A larger reference is delivered as `read` |
 | `max_matches_per_rule` | `10` | Findings shown per rule |

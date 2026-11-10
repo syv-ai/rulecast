@@ -151,6 +151,14 @@ export async function listCommand(
     )
   }
   for (const rule of rules) out.push(...ruleLines(rule))
+  // Considered and left without a rule (not_checked): listed so a later session does not ask again.
+  if (ruleId === null && project.config.notChecked.length > 0) {
+    out.push(
+      "Not checked (not_checked), with the reason:",
+      ...project.config.notChecked.map((entry) => `  ${entry.context.replace(/^@/, "")}: ${entry.reason}`),
+      "",
+    )
+  }
   if (ruleId === null) {
     const errors = project.diagnostics.filter((diagnostic) => diagnostic.level === "error")
     for (const diagnostic of errors) out.push(`not compiled: ${diagnosticText(diagnostic)}`)

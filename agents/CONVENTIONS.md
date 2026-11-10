@@ -21,7 +21,7 @@ Read these yourself:
 - Recent git activity: `git log --since="6 months ago" --format='%an %ad %s' --date=short | head -200`, and how many people commit.
 - `rulecast list`: its first line says where new conventions go (the config's `conventions`).
 - The `declined.md` next to the conventions, if an earlier session left one. What it lists was already declined, with a reason. Don't propose it again unless the developer brings it up.
-- Lines that begin `Not checked by rulecast:` in the project's docs. Each sits under a convention that was kept but has no rule, with the reason ([DRAFT-RULES.md](DRAFT-RULES.md#4-finish)). Don't propose a rule for one unless the reason no longer holds.
+- The `not_checked` entries at the end of `rulecast list`: conventions that were kept but have no rule, each with its section and the reason ([DRAFT-RULES.md](DRAFT-RULES.md#4-finish)). Don't propose a rule for one unless the reason no longer holds.
 
 Then write down what the project **already enforces**: linter and formatter config and the rules it turns on or off, type-checker strictness, CI checks, pre-commit hooks, `.rulecast-config.yaml`, and the suppressions in the code (`# noqa`, `eslint-disable`, `@ts-expect-error`, `#[allow]`) with a count of each. These are conventions already. The interview confirms them; it doesn't rediscover them.
 

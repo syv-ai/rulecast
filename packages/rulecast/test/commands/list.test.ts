@@ -57,6 +57,26 @@ describe("rulecast list", () => {
     expect(Array.isArray(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout))).toBe(true)
   })
 
+  test("lists the conventions considered and left without a rule, with the reason, so a later session does not ask again", async () => {
+    const rule = { id: "a", name: "A", detect: { regex: { pattern: "x" } }, message: "m" }
+    const root = await createRepo({
+      "docs/conventions.md": "# Conventions\n\n## Reviews\nEvery change gets a review.\n",
+      ".rulecast-config.yaml": localConfig([rule], {
+        not_checked: [{ context: "@docs/conventions.md#reviews", reason: "about how to work, not about the code" }],
+      }),
+    })
+    const text = (await runCli(root, ["list"])).stdout
+    expect(text).toContain(
+      "Not checked (not_checked), with the reason:\n  docs/conventions.md#reviews: about how to work, not about the code\n\n1 rule",
+    )
+    // One rule's view is about that rule; the JSON stays one entry per rule.
+    expect((await runCli(root, ["list", "a"])).stdout).not.toContain("Not checked")
+    expect(JSON.parse((await runCli(root, ["list", "--format", "json"])).stdout)).toHaveLength(1)
+    // Without entries, the section is left out.
+    const bare = await createRepo({ ".rulecast-config.yaml": localConfig([rule]) })
+    expect((await runCli(bare, ["list"])).stdout).not.toContain("Not checked")
+  })
+
   test("a disabled rule is listed and says so", async () => {
     const rules = fixtureRules.map((rule) =>
       rule.id === "frontend/no-generated-edits" ? { ...rule, enabled: false } : rule,
