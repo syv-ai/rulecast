@@ -1,6 +1,3 @@
-import { existsSync, readdirSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, test } from "vitest"
 import { z } from "zod"
 
@@ -42,21 +39,16 @@ describe("rulecast's wording and a host program's zod", () => {
     }
   })
 
-  // A zod that keeps its settings to itself: zod 3's `zod/v4`, which the workspace has through a
-  // dependency. A third-party detector could be built with one like it.
-  const store = fileURLToPath(new URL("../../../../node_modules/.pnpm", import.meta.url))
-  const zod3 = existsSync(store) ? readdirSync(store).find((name) => name.startsWith("zod@3.")) : undefined
-  test.runIf(zod3 !== undefined)(
-    "a detector schema from a zod copy of its own still gets rulecast's wording",
-    async () => {
-      const other = (await import(path.join(store, zod3!, "node_modules/zod/v4/index.js"))) as { z: typeof z }
-      const schema = other.z.object({ mode: other.z.enum(["a", "b"]), n: other.z.number().int() }).strict()
-      const parsed = await errors.parseReportedAsync(schema as unknown as z.ZodType, { mod: "a", n: 1.5 }, "detect.x")
-      expect(parsed).toEqual({
-        success: false,
-        message:
-          'detect.x: unknown key "mod" (did you mean "mode"?); detect.x.mode: required; detect.x.n: Expected integer, received float',
-      })
-    },
-  )
+  // A zod that keeps its settings to itself: zod 3's `zod/v4`, a dev dependency under the name zod-v3
+  // for this test alone. A third-party detector could be built with one like it.
+  test("a detector schema from a zod copy of its own still gets rulecast's wording", async () => {
+    const other = (await import("zod-v3/v4")) as unknown as { z: typeof z }
+    const schema = other.z.object({ mode: other.z.enum(["a", "b"]), n: other.z.number().int() }).strict()
+    const parsed = await errors.parseReportedAsync(schema as unknown as z.ZodType, { mod: "a", n: 1.5 }, "detect.x")
+    expect(parsed).toEqual({
+      success: false,
+      message:
+        'detect.x: unknown key "mod" (did you mean "mode"?); detect.x.mode: required; detect.x.n: Expected integer, received float',
+    })
+  })
 })
