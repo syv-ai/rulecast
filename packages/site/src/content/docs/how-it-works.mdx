@@ -5,10 +5,9 @@ description: Where rulecast sits between your agent and its tools, and what it c
 
 import HookFlow from "../../components/HookFlow.astro"
 import RuleAnatomy from "../../components/RuleAnatomy.astro"
-import { Content as Lead } from "../../generated/lead.md"
 import { Content as Performance } from "../../generated/performance.md"
 
-<Lead />
+rulecast checks your agent's edits as it makes them, and tells it about a broken rule in the same turn.
 
 ## Where it sits
 
@@ -16,9 +15,19 @@ rulecast runs as your agent's hooks. Each tool call the agent makes passes throu
 
 <HookFlow />
 
+A run with nobody watching, such as a CI job or `/goal`, can hold the agent more often: [Agent loops](/rulecast/guides/agent-loops/) says how.
+
 ## From rule to message
 
 <RuleAnatomy />
+
+## What gets written
+
+Setup writes three files, which you commit:
+
+- `.rulecast-config.yaml`: your rules.
+- `.claude/settings.json`: Claude Code's hook entries. Each one runs the script below. With `--scope personal` they go in `.claude/settings.local.json` instead, which is not committed.
+- `.claude/hooks/rulecast.sh`: finds a rulecast to run. It tries the project's `node_modules/.bin/rulecast`, then `rulecast` on the PATH, then the directory `install.sh` installs to (`$RULECAST_INSTALL_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), for an agent started from the Dock or an IDE whose PATH may lack it. With none, it does nothing and says so when a session starts. It never downloads or installs anything.
 
 ## Performance
 

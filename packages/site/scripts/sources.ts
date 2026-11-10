@@ -106,7 +106,7 @@ export const PAGES: Page[] = [
     title: "Getting started",
     description: "Install rulecast and set it up with one command.",
     group: "Start here",
-    source: { readme: ["Getting started", "Install", "Status"] },
+    source: { readme: ["Getting started", "Install"] },
   },
   {
     route: "how-it-works",
@@ -229,14 +229,15 @@ export const PAGES: Page[] = [
 ]
 
 /**
- * README sections that are not a page of their own. The lead and Performance are imported by
- * how-it-works.mdx; the license is linked from the footer, "Learn more" is the sidebar's job, and
- * the Commands page is built from the CLI's help rather than from the README's short table.
+ * README sections that are not a page of their own. Performance is imported by how-it-works.mdx.
+ * The lead is the landing page's job, and its output block is read by openingOutput(); the license
+ * is linked from the footer, "Learn more" is the sidebar's job, the Commands page is built from the
+ * CLI's help rather than from the README's short table, and Status is for GitHub and npm readers.
  */
-export const FRAGMENTS: Record<string, string> = { lead: LEAD, performance: "Performance" }
+export const FRAGMENTS: Record<string, string> = { performance: "Performance" }
 /** The page that imports FRAGMENTS, so the page a link to one of their headings goes to. */
 export const FRAGMENT_PAGE = "how-it-works"
-export const DROPPED = ["Commands", "Learn more", "License"]
+export const DROPPED = [LEAD, "Commands", "Learn more", "License", "Status"]
 
 const FENCE = /^(```|~~~)/
 
