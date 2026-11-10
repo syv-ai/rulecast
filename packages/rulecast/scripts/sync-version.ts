@@ -95,6 +95,14 @@ export async function generateRuleFormat(): Promise<{ target: string; source: st
   return { target, source: withRepoRev(await readFile(target, "utf8"), await packageVersion(), RULE_FORMAT) }
 }
 
+/** DRAFT-RULES.md's catalog-override example keeps init's entry, rev and all: it said v0.3.0 at 0.12.0. */
+export const DRAFT_RULES = "agents/DRAFT-RULES.md"
+
+export async function generateDraftRules(): Promise<{ target: string; source: string }> {
+  const target = path.join(repoRoot, DRAFT_RULES)
+  return { target, source: withRepoRev(await readFile(target, "utf8"), await packageVersion(), DRAFT_RULES) }
+}
+
 /** The git-hook commands' arguments, by where they appear. */
 export const GIT_HOOK_ARGS = {
   preCommit: "run",
@@ -168,6 +176,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generateReadme(),
     await generateGitHooksGuide(),
     await generateRuleFormat(),
+    await generateDraftRules(),
     await generateInstallScript(),
     await generatePreCommitHooks(),
   ]

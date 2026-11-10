@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
 import {
+  DRAFT_RULES,
   GIT_HOOKS_GUIDE,
+  generateDraftRules,
   generateGitHooksGuide,
   generateInstallScript,
   generatePreCommitHooks,
@@ -93,6 +95,11 @@ describe("sync-version", () => {
     const { target, source } = await generateRuleFormat()
     expect(await readFile(target, "utf8"), `${RULE_FORMAT} is stale: run pnpm sync-version`).toBe(source)
     expect(() => withRepoRev("# no example\n", "1.2.3", RULE_FORMAT)).toThrow(RULE_FORMAT)
+  })
+
+  test("DRAFT-RULES.md's catalog-override example pins the catalog at this version", async () => {
+    const { target, source } = await generateDraftRules()
+    expect(await readFile(target, "utf8"), `${DRAFT_RULES} is stale: run pnpm sync-version`).toBe(source)
   })
 
   test("the committed README already matches package.json", async () => {
