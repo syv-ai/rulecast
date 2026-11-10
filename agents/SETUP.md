@@ -117,7 +117,7 @@ rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--lin
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
 
-`init` writes the config and the agent hooks, validates them, and says what to commit. `--generated` and `--vendored` add `generated-code` and `vendored-code` with `files` widened by those paths. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
+`init` writes the config and the agent hooks, validates them, and says what to commit. With `--format json`, that is each `changes[]` entry with `commit: true`, then `alsoCommit`: files init left as they are that were never committed, such as a hook script the shared settings run. `--generated` and `--vendored` add `generated-code` and `vendored-code` with `files` widened by those paths. If it fails with `unknown agent`, rulecast has no adapter for you yet: run it with `--no-agents`, and tell the developer rulecast cannot deliver rules to you yet. For any other failure, show the developer its output and stop.
 
 Then, as the page says:
 
