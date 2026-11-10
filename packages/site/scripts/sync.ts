@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs"
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { dropSelfPointers, rawAgentDoc, relativeLinks, rewriteLinks } from "./links"
+import { candidateTargets, dropSelfPointers, rawAgentDoc, relativeLinks, rewriteLinks } from "./links"
 import {
   AGENT_DOCS_DIR,
   assertPlaced,
@@ -90,7 +90,21 @@ export async function sync(): Promise<string[]> {
   return written
 }
 
-const isFile = (file: string) => existsSync(file) && statSync(file).isFile()
+/**
+ * Whether a path is a file, asked once per path: the agent docs link to the same few files
+ * thousands of times. One per pass, so a later pass sees the files as they are then.
+ */
+function fileCheck(): (file: string) => boolean {
+  const files = new Map<string, boolean>()
+  return (file) => {
+    let known = files.get(file)
+    if (known === undefined) {
+      known = existsSync(file) && statSync(file).isFile()
+      files.set(file, known)
+    }
+    return known
+  }
+}
 
 /**
  * Writes the agent docs, raw and at their repository paths, under `publicDir`: what the site
@@ -98,6 +112,7 @@ const isFile = (file: string) => existsSync(file) && statSync(file).isFile()
  * GitHub (scripts/links.ts, rawAgentDoc).
  */
 export async function writeRawAgentDocs(publicDir: string): Promise<string[]> {
+  const isFile = fileCheck()
   const served = (repoPath: string) =>
     (repoPath.startsWith(`${AGENT_DOCS_DIR}/`) || repoPath === INSTALL_SCRIPT) && isFile(path.join(REPO_ROOT, repoPath))
   const dest = path.join(publicDir, AGENT_DOCS_DIR)
@@ -106,7 +121,9 @@ export async function writeRawAgentDocs(publicDir: string): Promise<string[]> {
   for (const entry of await readdir(dest, { recursive: true })) {
     if (!entry.endsWith(".md")) continue
     const file = path.join(dest, entry)
-    await writeFile(file, rawAgentDoc(await readFile(file, "utf8"), path.posix.join(AGENT_DOCS_DIR, entry), served))
+    const markdown = await readFile(file, "utf8")
+    const raw = rawAgentDoc(markdown, path.posix.join(AGENT_DOCS_DIR, entry), served)
+    if (raw !== markdown) await writeFile(file, raw)
   }
   return [dest]
 }
@@ -115,12 +132,16 @@ export async function writeRawAgentDocs(publicDir: string): Promise<string[]> {
 export async function unservedLinks(publicDir: string): Promise<string[]> {
   const dest = path.join(publicDir, AGENT_DOCS_DIR)
   const unserved: string[] = []
+  const isFile = fileCheck()
   for (const entry of await readdir(dest, { recursive: true })) {
     if (!entry.endsWith(".md")) continue
     const file = path.join(dest, entry)
-    for (const link of relativeLinks(await readFile(file, "utf8"))) {
-      const target = path.resolve(path.dirname(file), decodeURI(link.target.split("#")[0]!))
-      if (!isFile(target)) unserved.push(`${AGENT_DOCS_DIR}/${entry}: ${link.target}`)
+    const resolves = (target: string) => isFile(path.resolve(path.dirname(file), decodeURI(target.split("#")[0]!)))
+    const markdown = await readFile(file, "utf8")
+    // Parsed only when a destination might not resolve, to tell a real link from `](` in code.
+    if (candidateTargets(markdown).every((target) => !target.includes("(") && resolves(target))) continue
+    for (const link of relativeLinks(markdown)) {
+      if (!resolves(link.target)) unserved.push(`${AGENT_DOCS_DIR}/${entry}: ${link.target}`)
     }
   }
   return unserved

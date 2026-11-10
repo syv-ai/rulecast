@@ -75,6 +75,7 @@ const ABSOLUTE = /^([a-z][a-z0-9+.-]*:|#|\/)/i
  * same-page anchors and reference-style links are left out.
  */
 export function relativeLinks(markdown: string): RelativeLink[] {
+  if (candidateTargets(markdown).length === 0) return []
   const found: RelativeLink[] = []
   const visit = (node: MdNode) => {
     const start = node.position?.start.offset
@@ -85,8 +86,32 @@ export function relativeLinks(markdown: string): RelativeLink[] {
     }
     for (const child of node.children ?? []) visit(child)
   }
-  visit(fromMarkdown(markdown) as MdNode)
+  visit(parse(markdown))
   return found.sort((a, b) => a.start - b.start)
+}
+
+/**
+ * The syntax tree of `markdown`, from the last parse when it is the same text: a page part is read
+ * by dropSelfPointers for its links and its blocks, then by rewriteLinks, mostly unchanged.
+ */
+let lastParse: { markdown: string; tree: MdNode } | null = null
+function parse(markdown: string): MdNode {
+  if (lastParse?.markdown !== markdown) lastParse = { markdown, tree: fromMarkdown(markdown) as MdNode }
+  return lastParse.tree
+}
+
+/**
+ * Every relative destination an inline link or image of `markdown` may have, found without parsing
+ * it: a destination always follows `](`, after optional spaces and an optional `<`. It may find
+ * more than there are (`](` in code, a destination cut at a parenthesis it holds) but never
+ * misses one, so text with none, or with only ones a caller can accept, needs no parse. Parsing
+ * is what the site's sync spends its time on, over some 250 agent docs: callers that run over
+ * every file check this first, and nothing per link may start a subprocess.
+ */
+export function candidateTargets(markdown: string): string[] {
+  return [...markdown.matchAll(/\]\(\s*<?([^\s<>)]*)/g)]
+    .map((match) => match[1]!)
+    .filter((target) => !ABSOLUTE.test(target))
 }
 
 function inlineLink(markdown: string, node: MdNode, start: number, end: number): RelativeLink | null {
@@ -183,6 +208,9 @@ export function rewriteLinks(markdown: string, sourcePath: string): string {
  * same Markdown, and the anchors GitHub makes.
  */
 export function rawAgentDoc(markdown: string, sourcePath: string, served: (repoPath: string) => boolean): string {
+  // Most agent docs only link to each other: those need no parse.
+  const stays = (target: string) => !target.includes("(") && served(resolve(target, sourcePath).repoPath)
+  if (candidateTargets(markdown).every(stays)) return markdown
   const edits: Edit[] = []
   for (const link of relativeLinks(markdown)) {
     const { repoPath, anchor } = resolve(link.target, sourcePath)
@@ -211,11 +239,12 @@ function sentenceBreaks(paragraph: string, links: RelativeLink[], offset: number
  */
 export function dropSelfPointers(markdown: string, sourcePath: string, route: string): string {
   const links = relativeLinks(markdown)
+  if (links.length === 0) return markdown
   const pointsHere = (link: RelativeLink) => {
     const { repoPath, anchor } = resolve(link.target, sourcePath)
     return repoPath !== sourcePath && publishedRoute(repoPath, anchor)?.route === route
   }
-  const blocks = (fromMarkdown(markdown) as MdNode).children ?? []
+  const blocks = parse(markdown).children ?? []
   const edits: Edit[] = []
   const dropped = new Set<number>()
   blocks.forEach((block, index) => {

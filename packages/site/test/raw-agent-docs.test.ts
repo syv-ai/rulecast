@@ -1,9 +1,16 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { fromMarkdown } from "mdast-util-from-markdown"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { INSTALL_SCRIPT, REPO_ROOT } from "../scripts/sources"
 import { unservedLinks, writeRawAgentDocs } from "../scripts/sync"
+
+// Parsing Markdown is what sync spends its time on: the guard below counts the parses.
+vi.mock("mdast-util-from-markdown", async (original) => {
+  const actual = await original<typeof import("mdast-util-from-markdown")>()
+  return { ...actual, fromMarkdown: vi.fn(actual.fromMarkdown) }
+})
 
 describe("the raw agent docs the site serves", () => {
   let publicDir = ""
@@ -13,6 +20,13 @@ describe("the raw agent docs the site serves", () => {
     await writeRawAgentDocs(publicDir)
   })
   afterAll(() => rm(publicDir, { recursive: true, force: true }))
+
+  it("are parsed only where a link may leave the served tree, not all 250 of them", async () => {
+    vi.mocked(fromMarkdown).mockClear()
+    await writeRawAgentDocs(publicDir)
+    await unservedLinks(publicDir)
+    expect(vi.mocked(fromMarkdown).mock.calls.length).toBeLessThan(20)
+  })
 
   it("have no relative link to a file the site does not serve", async () => {
     expect(await unservedLinks(publicDir)).toEqual([])
