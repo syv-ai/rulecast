@@ -133,6 +133,19 @@ function nulSeparated(stdout: string): string[] {
   return [...new Set(stdout.split("\0").filter(Boolean))].sort()
 }
 
+/**
+ * Whether git tracks `file` (repo-relative to `cwd`). True outside a repository, or without git:
+ * there is nothing to commit there, so nothing to say about it.
+ */
+export async function isTracked(cwd: string, file: string): Promise<boolean> {
+  try {
+    const result = await git(cwd, ["ls-files", "--", file])
+    return !result.ok || result.stdout.trim() !== ""
+  } catch {
+    return true
+  }
+}
+
 /** Tracked and untracked files, not ignored ones: the files `run --all-files` checks. Sorted. */
 export async function allFiles(cwd: string): Promise<string[]> {
   const result = await git(cwd, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"])

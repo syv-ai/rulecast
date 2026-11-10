@@ -277,6 +277,85 @@ describe("install.sh", () => {
     expect(run.stdout).toContain(`Add this line to your shell's startup file: ${SOURCE_LINE}`)
   })
 
+  test("a directory with a space is printed so a pasted command keeps it whole", async () => {
+    const dir = path.join(scratch("spaced"), "my bin")
+    const run = await install({ env: { RULECAST_INSTALL_DIR: dir, SHELL: "/usr/bin/fish" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toContain(`for fish, run: fish_add_path "${dir}"\n`)
+    expect(run.stdout).toContain(`to use rulecast in this shell now, run: . "${dir}/env"\n`)
+    // Under HOME, through $HOME, as the startup files name it.
+    const home = await install({ env: { SHELL: "/usr/bin/fish" } })
+    expect(home.stdout).toContain('for fish, run: fish_add_path "$HOME/.local/bin"\n')
+  })
+
+  test("a directory given with trailing slashes is the same directory: one startup line, however it is spelt", async () => {
+    for (const [first, second] of [
+      ["", "/"],
+      ["/", ""],
+      ["", "//"],
+      ["//", ""],
+    ]) {
+      const home = scratch("home")
+      const dir = path.join(scratch("own"), "bin")
+      expect((await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${first}` } })).status).toBe(0)
+      const again = await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${second}` } })
+      expect(again.status, again.stderr).toBe(0)
+      expect(again.stdout, `${first} then ${second}`).not.toContain("to the PATH in")
+      expect(again.stdout).toContain(`installed rulecast 9.9.9 at ${dir}/rulecast\n`)
+      expect(count(read(path.join(home, ".profile")), `. "${dir}/env"`)).toBe(1)
+    }
+  })
+
+  test("a directory on the PATH with a trailing slash is on the PATH", async () => {
+    const dir = path.join(scratch("own"), "bin")
+    const run = await install({ pathFirst: `${dir}/`, env: { RULECAST_INSTALL_DIR: dir, SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(readdirSync(run.home)).toEqual([])
+    // Nor does sourcing its env file add it again.
+    const sourced = spawnSync("/bin/sh", ["-c", `. "${dir}/env"; printf %s "$PATH"`], {
+      env: { PATH: `${dir}/:/usr/bin:/bin` },
+      encoding: "utf8",
+    })
+    expect(sourced.stdout).toBe(`${dir}/:/usr/bin:/bin`)
+  })
+
+  test("its env file finds the directory on the PATH however many trailing slashes it has, in any sh", async () => {
+    const home = path.join(scratch("odd"), "my home")
+    mkdirSync(home)
+    const run = await install({ home })
+    expect(run.status, run.stderr).toBe(0)
+    const dir = bin(home)
+    const env = path.join(dir, "env")
+    const shells = ["/bin/sh", "/bin/bash", "/bin/zsh", "dash"]
+      .map((shell) => spawnSync("/bin/sh", ["-c", `command -v ${shell}`], { encoding: "utf8" }).stdout.trim())
+      .filter((shell) => shell !== "")
+    for (const shell of shells) {
+      for (const [before, after] of [
+        [`${dir}//:/usr/bin:/bin`, `${dir}//:/usr/bin:/bin`],
+        [`/usr/bin:${dir}/:/bin`, `/usr/bin:${dir}/:/bin`],
+        ["/usr/bin:/bin", `${dir}:/usr/bin:/bin`],
+      ]) {
+        const sourced = spawnSync(shell, ["-c", `. "$1"; . "$1"; printf %s "$PATH"`, "sh", env], {
+          env: { HOME: home, PATH: before },
+          encoding: "utf8",
+        })
+        expect(sourced.stdout, `${shell}: ${before}`).toBe(after)
+      }
+    }
+  })
+
+  test("installDir drops trailing slashes as the script does", async () => {
+    for (const env of <Record<string, string>[]>[
+      { RULECAST_INSTALL_DIR: `${path.join(scratch("own"), "bin")}//` },
+      { RULECAST_INSTALL_DIR: "", XDG_BIN_HOME: `${scratch("xdg")}/` },
+    ]) {
+      const home = scratch("home")
+      const run = await install({ home, env })
+      expect(run.status, run.stderr).toBe(0)
+      expect(run.stdout).toContain(`installed rulecast 9.9.9 at ${installDir({ HOME: home, ...env })}/rulecast\n`)
+    }
+  })
+
   test("GITHUB_PATH set: appends the dir there once", async () => {
     const githubPath = path.join(scratch("gh"), "path")
     const home = scratch("home")

@@ -13,7 +13,14 @@ import { createRepo, git } from "../helpers/git"
 import { stateDirFor, TEST_HOME, testEnv } from "../helpers/home"
 import { linkTool } from "../helpers/linters"
 import { stubAgentCli } from "../helpers/llm"
-import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup, type Place } from "../helpers/lookup"
+import {
+  breakPathRulecast,
+  type InstalledOnPath,
+  LOOKUP_FIXTURES,
+  lookupEnv,
+  lookupSetup,
+  type Place,
+} from "../helpers/lookup"
 import { createProject } from "../helpers/project"
 import { createRuleRepo } from "../helpers/rule-repo"
 
@@ -265,26 +272,43 @@ describe("rulecast doctor", () => {
   })
 
   /** doctor with a stub rulecast in each of `places`, in a cache home and an install directory of its own. */
-  async function doctorWith(places: Place[], settings: Record<string, unknown> = {}, versions = {}) {
+  async function doctorWith(
+    places: Place[],
+    settings: Record<string, unknown> = {},
+    versions = {},
+    installedOnPath?: InstalledOnPath,
+    edit: (setup: ReturnType<typeof lookupSetup>) => void = () => {},
+  ) {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")], settings), "src/x.ts": "" })
     const setup = lookupSetup(places, root, versions)
-    const env = {
-      RULECAST_HOME: setup.home,
-      RULECAST_INSTALL_DIR: setup.installDir,
-      PATH: `${setup.pathDir}:/usr/bin:/bin`,
-    }
+    edit(setup)
+    const env = { RULECAST_HOME: setup.home, ...lookupEnv(setup, installedOnPath) }
     expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
     return { ...(await runCli(root, ["doctor"], "", env)), setup }
   }
 
-  test.each(LOOKUP_FIXTURES)("doctor names the rulecast the hooks run: $name", async ({ places, runs }) => {
-    const { stdout, setup } = await doctorWith(places)
-    const label = {
-      project: "node_modules/.bin/rulecast",
-      path: `rulecast on the PATH (${setup.file.path})`,
-      installed: `install.sh's rulecast at ${setup.file.installed}, which is not on the PATH`,
-    }[runs]
-    expect(stdout).toContain(`ok       Claude Code — .claude/settings.json — runs ${label} 0.8.2\n`)
+  test.each(LOOKUP_FIXTURES)(
+    "doctor names the rulecast the hooks run: $name",
+    async ({ places, runs, installedOnPath, brokenPath }) => {
+      const { stdout, setup } = await doctorWith(places, {}, {}, installedOnPath, (setup) => {
+        if (brokenPath) breakPathRulecast(setup)
+      })
+      const label = {
+        project: "node_modules/.bin/rulecast",
+        path: `rulecast on the PATH (${setup.file.path})`,
+        installed: installedOnPath
+          ? `install.sh's rulecast at ${setup.file.installed}, on the PATH`
+          : `install.sh's rulecast at ${setup.file.installed}, which is not on the PATH`,
+      }[runs]
+      expect(stdout).toContain(`ok       Claude Code — .claude/settings.json — runs ${label} 0.8.2\n`)
+    },
+  )
+
+  test("a PATH rulecast that cannot run, ahead of install.sh's directory: install.sh's runs, and is on the PATH", async () => {
+    const { stdout, setup } = await doctorWith(["path", "installed"], {}, {}, "after", breakPathRulecast)
+    expect(stdout).toContain(
+      `ok       Claude Code — .claude/settings.json — runs install.sh's rulecast at ${setup.file.installed}, on the PATH 0.8.2\n`,
+    )
   })
 
   test("a PATH rulecast that cannot run on this machine is none: no rules run", async () => {
@@ -294,6 +318,67 @@ describe("rulecast doctor", () => {
     const env = { RULECAST_HOME: setup.home, PATH: `${setup.pathDir}:/usr/bin:/bin` }
     expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
     expect((await runCli(root, ["doctor"], "", env)).stdout).toContain("so no rules run")
+  })
+
+  describe("no rulecast can run and something else is wrong too", () => {
+    /** Installed hooks, then `edit` to what they are on disk, with no rulecast anywhere it could run. */
+    async function ciDoctor(edit: (root: string) => Promise<void>) {
+      const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("a")]), "src/x.ts": "" })
+      const setup = lookupSetup([], root)
+      const env = {
+        RULECAST_HOME: setup.home,
+        RULECAST_INSTALL_DIR: setup.installDir,
+        PATH: `${setup.pathDir}:/usr/bin:/bin`,
+      }
+      expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
+      await edit(root)
+      const { stdout } = await runCli(root, ["doctor", "--ci"], "", env)
+      return { stdout, setup }
+    }
+
+    const CAN_NOT_RUN = (dir: string) =>
+      `error    Claude Code — .claude/settings.json — but rulecast is not in node_modules/.bin, on the PATH or in ${dir}, so no rules run. ` +
+      `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+
+    const setCommands = async (root: string, command: string) => {
+      const settings = JSON.parse(await readFile(path.join(root, ".claude/settings.json"), "utf8"))
+      for (const groups of Object.values(settings.hooks) as { hooks: { command: string }[] }[][]) {
+        for (const group of groups) for (const hook of group.hooks) hook.command = command
+      }
+      await writeFile(path.join(root, ".claude/settings.json"), JSON.stringify(settings))
+    }
+
+    test("stale hooks: says nothing can run, then that the hooks are out of date", async () => {
+      const { stdout, setup } = await ciDoctor((root) =>
+        setCommands(root, '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'),
+      )
+      expect(stdout).toContain(
+        `${CAN_NOT_RUN(setup.installDir)} Also: the hooks are out of date; run rulecast install.\n`,
+      )
+    })
+
+    test("a script that differs: says nothing can run, then names the script", async () => {
+      const { stdout, setup } = await ciDoctor((root) =>
+        writeFile(path.join(root, ".claude/hooks/rulecast.sh"), "echo edited\n"),
+      )
+      expect(stdout).toContain(
+        `${CAN_NOT_RUN(setup.installDir)} Also: .claude/hooks/rulecast.sh is out of date; run rulecast install.\n`,
+      )
+    })
+
+    test("a missing script stays first, since every hook fails, and the missing rulecast is said too", async () => {
+      const { stdout, setup } = await ciDoctor((root) => rm(path.join(root, ".claude/hooks/rulecast.sh")))
+      expect(stdout).toContain(
+        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install. " +
+          `And rulecast is not in node_modules/.bin, on the PATH or in ${setup.installDir}, so no rules run. ` +
+          `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
+      )
+    })
+
+    test("nothing else wrong: only the message that nothing can run", async () => {
+      const { stdout, setup } = await ciDoctor(async () => {})
+      expect(stdout).toContain(`${CAN_NOT_RUN(setup.installDir)}\n`)
+    })
   })
 
   test("a hook rulecast older than minimum_rulecast_version is a warning with the command that would update it", async () => {
@@ -314,6 +399,34 @@ describe("rulecast doctor", () => {
     const installed = await doctorWith(["installed"], { minimum_rulecast_version: "0.8.0" }, { installed: "0.1.0" })
     expect(installed.stdout).toContain(
       `older than minimum_rulecast_version 0.8.0; install a newer one: ${INSTALL_COMMAND}\n`,
+    )
+    // install.sh's, found on the PATH: still install.sh's, so the install command alone.
+    const onPath = await doctorWith(
+      ["installed"],
+      { minimum_rulecast_version: "0.8.0" },
+      { installed: "0.1.0" },
+      "after",
+    )
+    expect(onPath.stdout).toContain(
+      `runs install.sh's rulecast at ${onPath.setup.file.installed}, on the PATH 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
+        `install a newer one: ${INSTALL_COMMAND}\n`,
+    )
+    // A global npm install ahead of install.sh's directory on the PATH: install.sh would put a newer
+    // one behind it, and the hooks would still run this one.
+    const ahead = await doctorWith(
+      ["path", "installed"],
+      { minimum_rulecast_version: "0.8.0" },
+      { path: "0.1.0", installed: "0.1.0" },
+      "after",
+    )
+    expect(ahead.stdout).toContain(
+      `runs rulecast on the PATH (${ahead.setup.file.path}) 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
+        `update the global npm install: npm install -g @syv-ai/rulecast. It comes before ${ahead.setup.installDir} on the PATH, so install.sh's would not run\n`,
+    )
+    // install.sh's directory first on the PATH, and empty: what install.sh puts there runs first.
+    const behind = await doctorWith(["path"], { minimum_rulecast_version: "0.8.0" }, { path: "0.1.0" }, "before")
+    expect(behind.stdout).toContain(
+      `older than minimum_rulecast_version 0.8.0; install a newer one: ${INSTALL_COMMAND}, or update the global npm install\n`,
     )
     // A devDependency is updated where it came from.
     const local = await doctorWith(["project"], { minimum_rulecast_version: "0.8.0" }, { project: "0.1.0" })
@@ -339,6 +452,89 @@ describe("rulecast doctor", () => {
       "warning  Claude Code — .claude/settings.json — but hooks for Bash missing; run rulecast install",
     )
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
+  })
+
+  test("an old rulecast is named with the other problems, not only when there are none", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")], { minimum_rulecast_version: "0.8.0" }),
+      "src/x.ts": "",
+    })
+    const setup = lookupSetup(["path"], root, { path: "0.1.0" })
+    const env = { RULECAST_HOME: setup.home, ...lookupEnv(setup) }
+    expect(await runCli(root, ["install"], "", env)).toMatchObject({ code: 0 })
+    const file = path.join(root, ".claude/settings.json")
+    const settings = JSON.parse(await readFile(file, "utf8"))
+    settings.hooks.Stop[0].hooks[0].timeout = 1
+    await writeFile(file, JSON.stringify(settings))
+    expect((await runCli(root, ["doctor"], "", env)).stdout).toContain(
+      "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install. " +
+        `Also: it runs rulecast on the PATH (${setup.file.path}) 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
+        `install a newer one: ${INSTALL_COMMAND}, or update the global npm install\n`,
+    )
+  })
+
+  test("a missing script fails only the hooks that run it, and other files are named outright", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    await rm(path.join(root, ".claude/hooks/rulecast.sh"))
+    // The personal file still runs 0.10's inline command, which needs no script.
+    const personal = JSON.parse(await readFile(path.join(root, ".claude/settings.json"), "utf8"))
+    for (const groups of Object.values(personal.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups)
+        for (const hook of group.hooks)
+          hook.command = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    }
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
+    expect((await doctor(root)).stdout).toContain(
+      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook that runs it fails; " +
+        "run rulecast install. Also: the hooks in .claude/settings.local.json are out of date\n",
+    )
+  })
+
+  test("a settings file that is not JSON is reported on the hooks line, and the report goes on", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    await writeFile(path.join(root, ".claude/settings.local.json"), "{ not json")
+    const result = await doctor(root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toMatch(
+      /warning {2}Claude Code — cannot read the hooks: \.claude\/settings\.local\.json: .+; fix it, then run rulecast install\n/,
+    )
+    expect(result.stdout).toContain("\ndry run\n")
+  })
+
+  test("hooks missing in one settings file and stale in another: both files are named", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([RULE("a")]),
+      "src/x.ts": "const x = 1\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\nexit 0\n",
+    })
+    await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
+    expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
+    const file = path.join(root, ".claude/settings.json")
+    const settings = JSON.parse(await readFile(file, "utf8"))
+    delete settings.hooks.PostToolUseFailure
+    await writeFile(file, JSON.stringify(settings))
+    const stop = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const personal = { hooks: { Stop: [{ hooks: [{ type: "command", command: stop, timeout: 70 }] }] } }
+    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
+    expect((await doctor(root)).stdout).toContain(
+      "warning  Claude Code — .claude/settings.json — but hooks for Bash missing, " +
+        "and the hooks in .claude/settings.local.json are out of date; run rulecast install\n",
+    )
+    const install = await runCli(root, ["install"])
+    expect(install.stdout).toContain("updated Claude Code hooks in .claude/settings.local.json: Stop\n")
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
   })
 

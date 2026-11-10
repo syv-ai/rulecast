@@ -10,7 +10,7 @@ import {
   NOT_INSTALLED,
   NOT_INSTALLED_UNATTENDED,
 } from "../../../src/adapters/claude-code/hook-script"
-import { breakPathRulecast, LOOKUP_FIXTURES, lookupSetup } from "../../helpers/lookup"
+import { breakPathRulecast, LOOKUP_FIXTURES, lookupEnv, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
 /**
@@ -170,12 +170,20 @@ describe("the committed hook script", () => {
     expect(hook(root, { hook_event_name: "Stop" }, { HOME: home }).stdout).toBe('{"installed":true}\n')
   })
 
-  test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs }) => {
+  test.each(LOOKUP_FIXTURES)("$name", async ({ places, runs, installedOnPath, brokenPath }) => {
     const root = await createProject({})
-    const { pathDir, installDir } = lookupSetup(places, root)
-    const env = { PATH: `${pathDir}:/usr/bin:/bin`, RULECAST_INSTALL_DIR: installDir }
+    const setup = lookupSetup(places, root)
+    if (brokenPath) breakPathRulecast(setup)
+    const env = lookupEnv(setup, installedOnPath)
     const result = hook(root, { hook_event_name: "Stop" }, env)
     expect(result.stdout).toBe(`{"${runs}":true}\n`)
+  })
+
+  test("install.sh's directory with trailing slashes still finds its rulecast", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["installed"], root)
+    const env = { ...lookupEnv(setup), RULECAST_INSTALL_DIR: `${setup.installDir}//` }
+    expect(hook(root, { hook_event_name: "Stop" }, env).stdout).toBe('{"installed":true}\n')
   })
 
   test("a PATH rulecast that cannot run on this machine counts as none: not installed", async () => {

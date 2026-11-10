@@ -3,7 +3,7 @@ import path from "node:path"
 import { sectionRange } from "../anchors"
 import type { Config, Mode, RuleEntry, RuleExamples, RuleScope, Stage } from "../config/schema"
 import type { DetectorRegistry } from "../detection/registry"
-import { formatZodError } from "../errors"
+import { parseReportedAsync } from "../errors"
 import { compileFilter, type FileFilter } from "../files"
 import {
   parseReference,
@@ -155,9 +155,8 @@ export async function compileRule(
     }
     // Detector schemas may refine asynchronously: ast-grep compiles the rule object against the
     // real parser, which it loads on demand (plan 5a). A synchronous schema is unaffected.
-    const parsed = await implementation.schema.safeParseAsync(rawConfig ?? {}, { reportInput: true })
-    if (!parsed.success)
-      return formatZodError(parsed.error, { prefix: `detect.${kind}`, schema: implementation.schema })
+    const parsed = await parseReportedAsync(implementation.schema, rawConfig ?? {}, `detect.${kind}`)
+    if (!parsed.success) return parsed.message
     detector = { kind, config: parsed.data, captures: implementation.captures(parsed.data) }
     defaultStages = implementation.events(parsed.data)
     hasFix = implementation.fixable?.(parsed.data) === true

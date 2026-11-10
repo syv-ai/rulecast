@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
@@ -120,6 +120,46 @@ describe("rulecast install", () => {
     expect(after.hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
     expect(after.hooks.Stop[1].hooks[0].command).toBe("dash-hook stop")
     expect((await runCli(local, ["install"])).stdout).toContain("already installed")
+  })
+
+  test("hooks on an older command in both settings files: doctor says so, install upgrades and reports both", async () => {
+    const OLD = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const local = await createProject({
+      ".rulecast-config.yaml": "repos: []\n",
+      "node_modules/.bin/rulecast": "#!/bin/sh\necho 0.8.2\n",
+    })
+    await chmod(path.join(local, "node_modules/.bin/rulecast"), 0o755)
+    await runCli(local, ["install"])
+    const shared = await settingsOf(local)
+    const personal = structuredClone(shared)
+    for (const groups of Object.values(personal.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = OLD
+    }
+    await writeFile(path.join(local, PERSONAL), JSON.stringify(personal))
+
+    // The shared file is current, so only the personal one needs naming.
+    expect((await runCli(local, ["doctor"])).stdout).toContain(
+      `${SHARED} — but the hooks in ${PERSONAL} are out of date; run rulecast install`,
+    )
+    const result = await runCli(local, ["install"])
+    expect(result.stdout).toContain(`updated Claude Code hooks in ${PERSONAL}: `)
+    expect((await settingsOf(local, PERSONAL)).hooks.Stop[0].hooks[0].command).toBe(HOOK_COMMAND)
+    expect((await runCli(local, ["doctor"])).stdout).not.toContain("out of date")
+    expect((await runCli(local, ["install"])).stdout).toContain("already installed")
+
+    // Both older: both named, in the order install will report them.
+    const older = await settingsOf(local, PERSONAL)
+    for (const groups of Object.values(older.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = OLD
+    }
+    await writeFile(path.join(local, SHARED), JSON.stringify(older))
+    await writeFile(path.join(local, PERSONAL), JSON.stringify(older))
+    expect((await runCli(local, ["doctor"])).stdout).toContain(
+      `${SHARED} — but the hooks in ${SHARED} and ${PERSONAL} are out of date; run rulecast install`,
+    )
+    const both = await runCli(local, ["install"])
+    expect(both.stdout).toContain(`updated Claude Code hooks in ${SHARED}: `)
+    expect(both.stdout).toContain(`updated Claude Code hooks in ${PERSONAL}: `)
   })
 
   test("re-running install adds the Bash hooks to an install from before them, in the same file", async () => {

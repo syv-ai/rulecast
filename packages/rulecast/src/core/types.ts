@@ -489,11 +489,13 @@ export interface AdapterInstall {
   /**
    * Adds the hooks. `updated` (optional, for adapters that can tell): the adapter's own hooks whose
    * command differed from `command` and were rewritten — an older install upgraded in place.
+   * `upgradeOnly`: rewrite the hooks that are there and add none, for a second settings file.
    */
   merge(
     settings: unknown,
     command: string,
     verifyMs: number,
+    options?: { upgradeOnly?: boolean },
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
 }

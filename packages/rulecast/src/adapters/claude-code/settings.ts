@@ -62,11 +62,13 @@ function hooksOf(settings: unknown): JsonObject {
  * or removed. rulecast's own, when their command is not the current one, are rewritten in place and
  * reported as `updated`: an entry rulecast wrote is not "an existing entry" in §12's sense. One
  * whose timeout is below what `verifyMs` needs gets that timeout, and is reported as `updated` too.
+ * `upgradeOnly` adds nothing: for a settings file beside the one holding the full set.
  */
 export function mergeHooks(
   settings: unknown,
   command: string,
   verifyMs: number,
+  options: { upgradeOnly?: boolean } = {},
 ): { settings: JsonObject; added: string[]; updated: string[] } {
   const merged: JsonObject = { ...hooksOf(settings) }
   const added: string[] = []
@@ -99,6 +101,7 @@ export function mergeHooks(
       }
       continue
     }
+    if (options.upgradeOnly) continue
     const hook = { type: "command", command, timeout }
     merged[event] = [...groups, matcher === undefined ? { hooks: [hook] } : { matcher, hooks: [hook] }]
     added.push(matcher === undefined ? event : `${event} (${matcher})`)

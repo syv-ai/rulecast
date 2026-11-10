@@ -53,21 +53,25 @@ function runsLabel(runs: HookRulecast): string {
       ? "node_modules/.bin/rulecast"
       : runs.via === "path"
         ? `rulecast on the PATH (${runs.path})`
-        : `install.sh's rulecast at ${runs.path}, which is not on the PATH`
+        : `install.sh's rulecast at ${runs.path}, ${runs.installedOnPath ? "on the PATH" : "which is not on the PATH"}`
   return runs.version === null ? label : `${label} ${runs.version}`
 }
 
 /**
- * How to update the rulecast the hooks run, by where it came from. On the PATH it is install.sh's
- * or a global npm install: the install command, for the release minimum_rulecast_version names
- * when that is newer than this rulecast, else the latest. Printed, never run: installing is the
- * developer's step.
+ * How to update the rulecast the hooks run, by where it came from: the install command for
+ * install.sh's, for the release minimum_rulecast_version names when that is newer than this
+ * rulecast, else the latest. Another on the PATH is a global npm install as a rule. When install.sh's
+ * directory comes after it on the PATH, install.sh would put a newer one where the hooks never reach,
+ * so only npm's update is offered. Printed, never run: installing is the developer's step.
  */
-function updateRemedy(runs: HookRulecast, minimum: string): string {
+function updateRemedy(runs: HookRulecast, minimum: string, dir: string): string {
   if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
-  const install = isOlder(VERSION, minimum) ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
+  const pinned = isOlder(VERSION, minimum)
+  const install = pinned ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
   if (runs.via === "installed") return `install a newer one: ${install}`
-  return `install a newer one: ${install}, or update the global npm install`
+  if (!runs.installedBehind) return `install a newer one: ${install}, or update the global npm install`
+  const npm = `npm install -g @syv-ai/rulecast${pinned ? `@${minimum}` : ""}`
+  return `update the global npm install: ${npm}. It comes before ${dir} on the PATH, so install.sh's would not run`
 }
 
 /** Generous: a check may spawn a process or load a native module, and doctor waits for no hook. */
@@ -239,12 +243,28 @@ export async function doctorCommand(
     project.config.timeouts.verifyMs
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
-    const state = await hookState(dir, adapter, verifyMs)
+    // Settings that cannot be read are a problem on this line, not the end of the report: the rest
+    // of what doctor checks does not depend on them.
+    let state: Awaited<ReturnType<typeof hookState>>
+    try {
+      state = await hookState(dir, adapter, verifyMs)
+    } catch (error) {
+      const level: Level = ci ? "error" : "warning"
+      count(level)
+      io.stdout(
+        line(level, adapter.label, `cannot read the hooks: ${errorMessage(error)}; fix it, then run rulecast install`),
+      )
+      continue
+    }
     const file = state?.file ?? null
     // Installed but unrunnable is the worst of the three: the settings say it is wired up and
     // nothing ever happens. Found by installing rulecast on rulecast, where `rulecast` is neither
     // on the PATH nor in node_modules/.bin, and doctor said ok.
-    const stale = (state?.stale ?? []).length > 0
+    const stale = (state?.stale ?? []).length > 0 || (state?.others ?? []).length > 0
+    // Which settings files are behind, each named: the one at the start of the line only when others are too.
+    const otherFiles = (state?.others ?? []).map((each) => each.file)
+    const staleFiles = [...((state?.stale ?? []).length > 0 && file !== null ? [file] : []), ...otherFiles]
+    const staleWhere = otherFiles.length === 0 ? "" : ` in ${staleFiles.join(" and ")}`
     const missing = state?.missing ?? []
     // A file the hooks run that is not there fails every hook (sh exits 127): settings committed
     // without the script. One that differs still runs, as an older rulecast's would.
@@ -259,21 +279,36 @@ export async function doctorCommand(
           ? "warning"
           : "ok"
     count(level)
+    // Everything install would change besides a missing file, so no settings file it rewrites goes
+    // unnamed: hooks missing in the file named first, stale ones there or elsewhere, a script that differs.
+    const behind = [
+      ...(missing.length > 0 ? [`hooks for ${missingNames(missing)} missing`] : []),
+      ...(stale ? [`the hooks${staleWhere} are out of date`] : []),
+      ...(differs !== null ? [`${differs.file} is out of date`] : []),
+    ]
+    const outOfDate = behind.length === 0 ? null : behind.join(", and ")
+    const cannotRun =
+      `rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
+      `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+    // An old rulecast is said whatever else is wrong, after what install fixes.
+    const oldVersion =
+      runs !== null && tooOld
+        ? `${runsLabel(runs)}, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}`
+        : null
     const detail =
       file === null
         ? "not installed (run rulecast install)"
         : gone !== null
-          ? `${file} — but ${gone.file} is missing, so every hook fails; run rulecast install`
-          : missing.length > 0
-            ? `${file} — but hooks for ${missingNames(missing)} missing; run rulecast install`
-            : stale
-              ? `${file} — but the hooks are out of date; run rulecast install`
-              : differs !== null
-                ? `${file} — but ${differs.file} is out of date; run rulecast install`
-                : runs
-                  ? `${file} — runs ${runsLabel(runs)}${tooOld ? `, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!)}` : ""}`
-                  : `${file} — but rulecast is not in node_modules/.bin, on the PATH or in ${installDir(io.env)}, so no rules run. ` +
-                    `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).`
+          ? // Every hook that runs the file fails first; with no rulecast either, both need doing.
+            `${file} — but ${gone.file} is missing, so every hook ${state?.allRun ? "" : "that runs it "}fails; run rulecast install` +
+            (outOfDate === null ? "" : `. Also: ${outOfDate}`) +
+            (runs ? (oldVersion === null ? "" : `. Also: it runs ${oldVersion}`) : `. And ${cannotRun}`)
+          : !runs
+            ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
+              `${file} — but ${cannotRun}${outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`}`
+            : outOfDate !== null
+              ? `${file} — but ${outOfDate}; run rulecast install${oldVersion === null ? "" : `. Also: it runs ${oldVersion}`}`
+              : `${file} — runs ${oldVersion ?? runsLabel(runs)}`
     io.stdout(line(level, adapter.label, detail))
   }
   io.stdout("\ncache\n")

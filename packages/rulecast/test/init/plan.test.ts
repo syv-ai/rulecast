@@ -99,6 +99,24 @@ describe("planInit", () => {
     expect(await planInit(selections, context(files))).toEqual([])
   })
 
+  test("hooks on an older command in both settings files: one change per file, each committed by its scope", async () => {
+    const OLDER = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
+    const older = `${JSON.stringify(install.merge({}, OLDER, 60000).settings, null, 2)}\n`
+    const files = {
+      [CONFIG_FILE]: newConfigText([], settings),
+      ".claude/settings.json": older,
+      ".claude/settings.local.json": older,
+      [HOOK_SCRIPT_FILE]: HOOK_SCRIPT,
+    }
+    const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
+    const changes = await planInit(selections, context(files))
+    expect(changes.map(({ file, commit, summary }) => ({ file, commit, summary }))).toEqual([
+      { file: ".claude/settings.json", commit: true, summary: "~11 hooks updated (Claude Code)" },
+      { file: ".claude/settings.local.json", commit: false, summary: "~11 hooks updated (Claude Code)" },
+    ])
+    expect(JSON.parse(changes[1]!.content)).toEqual(install.merge({}, HOOK_COMMAND, 60000).settings)
+  })
+
   test("settings are added to an existing config", async () => {
     const files = { [CONFIG_FILE]: newConfigText() }
     const [change] = await planInit(

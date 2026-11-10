@@ -11,16 +11,58 @@ export type Place = "project" | "path" | "installed"
 /**
  * The fixtures every lookup of rulecast is held to: the agent hooks' script, the git hooks'
  * command and doctor's hookRulecast. Each names the places that have a rulecast and the one that
- * must run.
+ * must run. `installedOnPath`: install.sh's directory is on the PATH too, after or before the PATH
+ * directory, as it is once install.sh has set up the startup files. `brokenPath`: the PATH's
+ * rulecast cannot run on this machine (breakPathRulecast), which counts as none.
  */
-export const LOOKUP_FIXTURES: { name: string; places: Place[]; runs: Place }[] = [
+export type InstalledOnPath = "after" | "before"
+
+export const LOOKUP_FIXTURES: {
+  name: string
+  places: Place[]
+  runs: Place
+  installedOnPath?: InstalledOnPath
+  brokenPath?: boolean
+}[] = [
   { name: "only the project's own rulecast", places: ["project"], runs: "project" },
   { name: "only one on the PATH", places: ["path"], runs: "path" },
   { name: "the project's own rulecast wins over one on the PATH", places: ["project", "path"], runs: "project" },
   { name: "only install.sh's, off the PATH", places: ["installed"], runs: "installed" },
+  { name: "only install.sh's, on the PATH", places: ["installed"], runs: "installed", installedOnPath: "after" },
   { name: "one on the PATH wins over install.sh's", places: ["path", "installed"], runs: "path" },
+  {
+    name: "one on the PATH wins over install.sh's later on the PATH",
+    places: ["path", "installed"],
+    runs: "path",
+    installedOnPath: "after",
+  },
+  {
+    name: "one on the PATH runs when install.sh's directory comes first and is empty",
+    places: ["path"],
+    runs: "path",
+    installedOnPath: "before",
+  },
   { name: "the project's own rulecast wins over install.sh's", places: ["project", "installed"], runs: "project" },
+  {
+    name: "a PATH rulecast that cannot run falls through to install.sh's",
+    places: ["path", "installed"],
+    runs: "installed",
+    brokenPath: true,
+  },
 ]
+
+/** The environment a fixture's lookup runs in: its PATH before `rest`, and install.sh's directory. */
+export function lookupEnv(
+  setup: LookupSetup,
+  installedOnPath?: InstalledOnPath,
+  rest = "/usr/bin:/bin",
+): { PATH: string; RULECAST_INSTALL_DIR: string } {
+  const dirs =
+    installedOnPath === "before"
+      ? [setup.installDir, setup.pathDir, rest]
+      : [setup.pathDir, ...(installedOnPath === "after" ? [setup.installDir] : []), rest]
+  return { PATH: dirs.join(":"), RULECAST_INSTALL_DIR: setup.installDir }
+}
 
 export interface LookupSetup {
   root: string

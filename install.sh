@@ -80,11 +80,29 @@ naming() {
   env_line=". \"$shown/env\""
 }
 
+# $1 without its trailing slashes, as `trimmed`; / stays /. /x/y, /x/y/ and /x/y// are one
+# directory, and one spelling of it is what the startup files are searched for.
+trim_slashes() {
+  trimmed="$1"
+  while :; do
+    case "$trimmed" in
+      ?*/) trimmed="${trimmed%/}" ;;
+      *) return 0 ;;
+    esac
+  done
+}
+
+# Whether `dir` is on the PATH, however an entry spells it.
 on_path() {
-  case ":${PATH:-}:" in
-    *:"$dir":*) return 0 ;;
-  esac
-  return 1
+  rest="${PATH:-}"
+  while :; do
+    trim_slashes "${rest%%:*}"
+    [ "$trimmed" = "$dir" ] && return 0
+    case "$rest" in
+      *:*) rest="${rest#*:}" ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 # The startup files the install will add the source line to, one per line: none when the
@@ -133,7 +151,8 @@ customize() {
     esac
     problem="$(dir_problem "$answer")"
     if [ -z "$problem" ]; then
-      dir="${answer%/}"
+      trim_slashes "$answer"
+      dir="$trimmed"
       break
     fi
     say "$problem"
@@ -201,7 +220,8 @@ main() {
   fi
   problem="$(dir_problem "$dir")"
   [ -z "$problem" ] || fail "$problem"
-  dir="${dir%/}"
+  trim_slashes "$dir"
+  dir="$trimmed"
   naming
 
   if [ -z "$yes" ] && (: <"$tty") 2>/dev/null; then
@@ -258,13 +278,29 @@ main() {
   part=""
   say "installed rulecast $installed at $dir/rulecast"
 
+  # The env file compares PATH entries without their trailing slashes, as on_path does: an entry
+  # spelt $shown// is the same directory, and adding it again would put it on the PATH twice.
   cat >"$dir/env" <<EOF || fail "could not write $dir/env"
 #!/bin/sh
 # Written by the rulecast installer: puts $shown on the PATH, once.
-case ":\${PATH}:" in
-  *:"$shown":*) ;;
-  *) export PATH="$shown:\$PATH" ;;
-esac
+_rulecast_rest="\${PATH:-}"
+_rulecast_found=
+while :; do
+  _rulecast_entry="\${_rulecast_rest%%:*}"
+  while :; do
+    case "\$_rulecast_entry" in
+      ?*/) _rulecast_entry="\${_rulecast_entry%/}" ;;
+      *) break ;;
+    esac
+  done
+  [ "\$_rulecast_entry" = "$shown" ] && _rulecast_found=1
+  case "\$_rulecast_rest" in
+    *:*) _rulecast_rest="\${_rulecast_rest#*:}" ;;
+    *) break ;;
+  esac
+done
+[ -n "\$_rulecast_found" ] || export PATH="$shown:\$PATH"
+unset _rulecast_rest _rulecast_entry _rulecast_found
 EOF
 
   if [ -n "${GITHUB_PATH:-}" ] && ! grep -qxF "$dir" "$GITHUB_PATH" 2>/dev/null; then
@@ -285,8 +321,9 @@ EOF
 $files
 EOF
   fi
+  # Quoted as the startup files have it, so a directory with a space stays one argument when pasted.
   case "${SHELL:-}" in
-    */fish) say "for fish, run: fish_add_path $dir" ;;
+    */fish) say "for fish, run: fish_add_path \"$shown\"" ;;
   esac
   say "to use rulecast in this shell now, run: $env_line"
   return 0

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { parse } from "yaml"
 
-import { errorMessage, formatZodError, isNotFound } from "../errors"
+import { errorMessage, isNotFound, parseReported } from "../errors"
 import { type Config, configSchema } from "./schema"
 
 export const CONFIG_FILE = ".rulecast-config.yaml"
@@ -33,10 +33,8 @@ export function readConfigData(root: string): Promise<Loaded<unknown>> {
 }
 
 export function parseConfig(data: unknown): Loaded<Config> {
-  const result = configSchema.safeParse(data, { reportInput: true })
-  if (!result.success) {
-    return { ok: false, message: `${CONFIG_FILE}: ${formatZodError(result.error, { schema: configSchema })}` }
-  }
+  const result = parseReported(configSchema, data)
+  if (!result.success) return { ok: false, message: `${CONFIG_FILE}: ${result.message}` }
   return { ok: true, value: result.data }
 }
 

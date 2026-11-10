@@ -48,11 +48,19 @@ function isEmptyObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
 }
 
-/** A rulecast the hooks can run: where it was found, its path, and what `--version` printed. */
+/**
+ * A rulecast the hooks can run: where it was found, its path, and what `--version` printed. `via`
+ * "installed" is install.sh's, whether the PATH led to it or its directory did; "path" is any other
+ * on the PATH, a global npm install as a rule. `installedOnPath`: install.sh's directory is on the
+ * PATH. `installedBehind`: it is, after this "path" one's directory, so what install.sh installs
+ * there would never be the one the hooks run.
+ */
 export interface HookRulecast {
   via: "project" | "path" | "installed"
   path: string
   version: string | null
+  installedOnPath: boolean
+  installedBehind: boolean
 }
 
 /**
@@ -73,19 +81,32 @@ export async function hookRulecasts(root: string, env: Env, signal?: AbortSignal
       () => true,
       () => false,
     )
-  const project = path.join(root, "node_modules", ".bin", "rulecast")
-  if (await executable(project)) {
-    found.push({ via: "project", path: project, version: (await probeRulecast(project, signal))?.version ?? null })
-  }
   const entries = (env.PATH ?? process.env.PATH ?? "").split(path.delimiter)
   const PATH = entries.filter((dir) => !TEMPORARY_BIN.test(dir)).join(path.delimiter)
+  const dir = installDir(env)
+  // path.resolve drops a trailing slash, which the shell's lookup does not care about either.
+  const position = (wanted: string) =>
+    PATH.split(path.delimiter).findIndex((entry) => entry !== "" && path.resolve(entry) === path.resolve(wanted))
+  const installedAt = position(dir)
+  const installedOnPath = installedAt !== -1
+  const common = { installedOnPath, installedBehind: false }
+  const installed = path.join(dir, "rulecast")
+  const project = path.join(root, "node_modules", ".bin", "rulecast")
+  if (await executable(project)) {
+    const version = (await probeRulecast(project, signal))?.version ?? null
+    found.push({ via: "project", path: project, version, ...common })
+  }
   const onPath = await commandPath("rulecast", signal, PATH)
   const probe = onPath === null ? null : await probeRulecast(onPath, signal)
-  if (onPath !== null && probe !== null) found.push({ via: "path", path: onPath, version: probe.version })
-  const installed = path.join(installDir(env), "rulecast")
-  if (await executable(installed)) {
+  if (onPath !== null && probe !== null) {
+    // install.sh's, reached through the PATH, is still install.sh's: install.sh updates it in place.
+    const via = path.resolve(onPath) === path.resolve(installed) ? "installed" : "path"
+    const installedBehind = via === "path" && installedOnPath && installedAt > position(path.dirname(onPath))
+    found.push({ via, path: onPath, version: probe.version, installedOnPath, installedBehind })
+  }
+  if (!found.some((each) => each.via === "installed") && (await executable(installed))) {
     const probe = await probeRulecast(installed, signal)
-    if (probe !== null) found.push({ via: "installed", path: installed, version: probe.version })
+    if (probe !== null) found.push({ via: "installed", path: installed, version: probe.version, ...common })
   }
   return found
 }
@@ -118,6 +139,8 @@ export interface InstallResult {
   added: string[]
   updated?: string[]
   wrote: string[]
+  /** The other settings files upgraded alongside it. */
+  others?: { file: string; updated: string[] }[]
 }
 
 /**
@@ -137,12 +160,19 @@ export async function installHooks(
   if (plan.write === null) return { file: plan.state!.file, added: [], wrote: [] }
   const { write } = plan
   if (write.settings !== null) await writeSettings(root, write.file, write.settings)
+  for (const { file, settings } of write.others) await writeSettings(root, file, settings)
   // Not executable: the hooks run each file through its interpreter, as `sh <file>`.
   for (const { file, content } of write.files) await writeText(root, file, content, 0o644)
   const wrote = write.files.map(({ file }) => file)
   return plan.state === null
     ? { file: write.file, added: write.added, wrote }
-    : { file: write.file, added: write.added, updated: write.updated, wrote }
+    : {
+        file: write.file,
+        added: write.added,
+        updated: write.updated,
+        wrote,
+        others: write.others.map(({ file, updated }) => ({ file, updated })),
+      }
 }
 
 /**
@@ -202,14 +232,18 @@ export async function loadProjectConfig(root: string, command: string): Promise<
 
 export function printInstall(io: CliIo, adapter: Adapter, result: InstallResult): void {
   const updated = result.updated ?? []
+  const others = result.others ?? []
   if (updated.length > 0) {
     io.stdout(`updated ${adapter.label} hooks in ${result.file}: ${updated.join(", ")}\n`)
+  }
+  for (const other of others) {
+    io.stdout(`updated ${adapter.label} hooks in ${other.file}: ${other.updated.join(", ")}\n`)
   }
   if (result.added.length > 0) {
     io.stdout(`installed ${adapter.label} hooks in ${result.file}: ${result.added.join(", ")}\n`)
   }
   for (const file of result.wrote) io.stdout(`wrote ${file}\n`)
-  if (updated.length === 0 && result.added.length === 0 && result.wrote.length === 0) {
+  if (updated.length === 0 && others.length === 0 && result.added.length === 0 && result.wrote.length === 0) {
     io.stdout(`${adapter.label} hooks already installed in ${result.file}\n`)
   }
 }

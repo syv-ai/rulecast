@@ -36,15 +36,17 @@ export function pinnedInstallCommand(version: string): string {
 
 /**
  * The directory install.sh installs into, as it decides: $RULECAST_INSTALL_DIR, else $XDG_BIN_HOME,
- * else $HOME/.local/bin, empty values counting as unset. test/install-script.test.ts holds the two
- * to the same answer.
+ * else $HOME/.local/bin, empty values counting as unset, and without trailing slashes, as the script
+ * trims them. test/install-script.test.ts holds the two to the same answer.
  */
 export function installDir(env: Env): string {
-  return env.RULECAST_INSTALL_DIR || env.XDG_BIN_HOME || path.join(env.HOME || homedir(), ".local", "bin")
+  const dir = env.RULECAST_INSTALL_DIR || env.XDG_BIN_HOME || path.join(env.HOME || homedir(), ".local", "bin")
+  return dir.replace(/(?<=.)\/+$/, "")
 }
 
 /**
  * install.sh's rulecast as the hook script and the git hooks name it: installDir's rule in shell.
+ * Trailing slashes are left in: `/x/y//rulecast` is the same file.
  * The hooks' last resort, after the PATH: an agent started from the Dock or an IDE may run its
  * hooks with a PATH that never read the shell's startup files, where install.sh put the directory.
  * No single quotes, so it can go inside `sh -c '…'`.
@@ -54,12 +56,17 @@ export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.loc
 
 /**
  * The git hooks' command: the project's own rulecast, else the PATH's, else install.sh's in its
- * directory, the order the agent hooks use. Git hooks run from the repository's root.
+ * directory, the order the agent hooks use. Git hooks run from the repository's root. The PATH's is
+ * run rather than exec'd so that one the shell cannot run (126 or 127: a binary for another
+ * machine, a shim with nothing behind it) counts as none and the lookup goes on, as in the hook
+ * script; it has read no input when it could not run.
  */
 export function gitHookCommand(args: string): string {
   return (
     `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
-    `command -v rulecast >/dev/null 2>&1 && exec rulecast ${args}; exec ${INSTALLED_SH} ${args}' --`
+    `if command -v rulecast >/dev/null 2>&1; then rulecast ${args}; status=$?; ` +
+    `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
+    `exec ${INSTALLED_SH} ${args}' --`
   )
 }
 
