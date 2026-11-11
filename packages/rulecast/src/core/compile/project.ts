@@ -195,8 +195,8 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   // depends on it, so it must not switch rules off.
   for (const problem of config.notCheckedProblems)
     diagnostics.push({ source: CONFIG_FILE, rule: null, message: problem, level: "warning" })
-  for (const [index, entry] of config.notChecked.entries()) {
-    const problem = await compileReferences([entry.context], context, project, `not_checked[${index}]: `)
+  for (const entry of config.notChecked) {
+    const problem = await compileReferences([entry.context], context, project, `not_checked[${entry.index}]: `)
     if (typeof problem === "string")
       diagnostics.push({ source: CONFIG_FILE, rule: null, message: problem, level: "warning" })
   }

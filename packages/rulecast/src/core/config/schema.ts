@@ -153,19 +153,22 @@ const notCheckedEntrySchema = z.object({ context: z.string(), reason: z.string()
  * depends on an entry, so a typo in one (`why:` for `reason:`) must not stop the config loading and
  * with it every rule: compile reports the problems as warnings, and the entry is left out.
  */
+/** A `not_checked` entry that parsed, with its place in the file's list, which every warning names. */
+export type NotCheckedEntry = z.output<typeof notCheckedEntrySchema> & { index: number }
+
 function notCheckedOf(value: unknown): {
-  notChecked: z.output<typeof notCheckedEntrySchema>[]
+  notChecked: NotCheckedEntry[]
   notCheckedProblems: string[]
 } {
   if (value === undefined || value === null) return { notChecked: [], notCheckedProblems: [] }
   if (!Array.isArray(value)) {
     return { notChecked: [], notCheckedProblems: ["not_checked: must be a list of { context, reason }"] }
   }
-  const notChecked: z.output<typeof notCheckedEntrySchema>[] = []
+  const notChecked: NotCheckedEntry[] = []
   const notCheckedProblems: string[] = []
   for (const [index, entry] of value.entries()) {
     const parsed = parseReported(notCheckedEntrySchema, entry, `not_checked[${index}]`)
-    if (parsed.success) notChecked.push(parsed.data)
+    if (parsed.success) notChecked.push({ ...parsed.data, index })
     else notCheckedProblems.push(parsed.message)
   }
   return { notChecked, notCheckedProblems }

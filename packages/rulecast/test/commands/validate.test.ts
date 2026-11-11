@@ -107,6 +107,24 @@ describe("rulecast validate", () => {
     expect(result.stdout).toContain(".rulecast-config.yaml: 1 rule valid")
   })
 
+  test("a not_checked warning names the entry by its place in the file, not among the entries that parsed", async () => {
+    // With entry 0 malformed, the broken section in entry 1 used to be reported as not_checked[0].
+    const doc = "# Conventions\n\n## Reviews\nEvery change gets a review.\n"
+    const root = await createProject({
+      "docs/conventions.md": doc,
+      ".rulecast-config.yaml": localConfig([], {
+        not_checked: [
+          { context: "@docs/conventions.md#reviews", why: "about how to work" },
+          { context: "@docs/conventions.md#review", reason: "about how to work" },
+        ],
+      }),
+    })
+    const { stdout } = await validate(root)
+    expect(stdout).toContain('not_checked[0]: unknown key "why"')
+    expect(stdout).toContain('not_checked[1]: anchor "#review" not found in docs/conventions.md')
+    expect(stdout.match(/not_checked\[0\]: /g)).toHaveLength(1)
+  })
+
   test("validates a rule repo's manifest, resolving references against its directory", async () => {
     const root = await createProject({ ".rulecast-rules.yaml": MANIFEST, "docs/http.md": HTTP_DOC })
     expect(await validate(root)).toMatchObject({ code: 0, stdout: ".rulecast-rules.yaml: 1 rule valid\n" })

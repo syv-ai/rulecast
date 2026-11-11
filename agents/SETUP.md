@@ -23,7 +23,7 @@ It writes nothing in the project. It fetches the catalog's rule data into ruleca
 - `committers` is null when nobody committed in the last six months (bots left out), or in a shallow clone.
 - `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
-- Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (a count) and `candidates`, the doc sections that name one of its error rules (step 7).
+- Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (how many rules its config sets to warn; null whenever `errorRules` is) and `candidates`, the doc sections that name one of its error rules (step 7).
 
 Then read what needs judgement:
 

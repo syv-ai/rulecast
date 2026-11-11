@@ -72,7 +72,7 @@ describe("configSchema", () => {
       exclude: "^vendor/",
       defaultStages: ["edit", "verify"],
       conventions: null,
-      notChecked: [{ context: "@docs/a.md#reviews", reason: "process" }],
+      notChecked: [{ context: "@docs/a.md#reviews", reason: "process", index: 0 }],
       notCheckedProblems: [],
       context: { mode: "read", maxBytes: 1000 },
       maxMatchesPerRule: 3,
@@ -140,18 +140,19 @@ describe("configSchema", () => {
   test("not_checked lists conventions considered and left without a rule, each with its section and reason", () => {
     expect(configSchema.parse({ repos: [] }).notChecked).toEqual([])
     const entry = { context: "@docs/a.md#reviews", reason: "about how to work, not about the code" }
-    expect(configSchema.parse({ repos: [], not_checked: [entry] }).notChecked).toEqual([entry])
+    expect(configSchema.parse({ repos: [], not_checked: [entry] }).notChecked).toEqual([{ ...entry, index: 0 }])
   })
 
   test("a malformed not_checked entry is set aside with what is wrong, and the rest of the config loads", () => {
     // No rule depends on an entry, so a typo in one must not stop every rule: compile warns instead.
     const entry = { context: "@docs/a.md#reviews", reason: "process" }
     const parsed = (notChecked: unknown) => configSchema.parse({ repos: [], files: "^src/", not_checked: notChecked })
-    const config = parsed([entry, { context: "@docs/a.md#tests", why: "process" }, { ...entry, reason: " " }])
+    const config = parsed([{ context: "@docs/a.md#tests", why: "process" }, entry, { ...entry, reason: " " }])
     expect(config.files).toBe("^src/")
-    expect(config.notChecked).toEqual([entry])
+    // Each entry keeps its place in the file, so a later warning about it names the right one.
+    expect(config.notChecked).toEqual([{ ...entry, index: 1 }])
     expect(config.notCheckedProblems).toEqual([
-      'not_checked[1]: unknown key "why" (did you mean "reason"?); not_checked[1].reason: required',
+      'not_checked[0]: unknown key "why" (did you mean "reason"?); not_checked[0].reason: required',
       expect.stringMatching(/^not_checked\[2\]\.reason: /),
     ])
     expect(parsed([{ ...entry, context: ["@docs/a.md"] }]).notCheckedProblems).toEqual([
