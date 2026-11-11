@@ -44,15 +44,16 @@ export interface Page {
 export const LEAD = "(lead)"
 
 /**
- * Where scripts/content-from.ts records the ref the site's content was checked out from. With no
- * record the content is the working tree's own: main's, in development and in tests.
+ * The environment variable that tells the build which ref scripts/content-from.ts checked the
+ * site's content out from. Only the release build sets it (.github/workflows/pages.yml). Without it
+ * the content is the working tree's own: main's, in development and in tests. It is not a file, so
+ * nothing left behind by one run can pin another's links to an old tag.
  */
-export const CONTENT_REF_FILE = "packages/site/.content-ref"
+export const CONTENT_REF_ENV = "SITE_CONTENT_REF"
 
 /** The ref the site's content is from: a release tag, "main", or null for the working tree's own. */
 export function contentRef(): string | null {
-  const file = path.join(REPO_ROOT, CONTENT_REF_FILE)
-  return existsSync(file) ? readFileSync(file, "utf8").trim() || null : null
+  return process.env[CONTENT_REF_ENV]?.trim() || null
 }
 
 /** Whether the content is a release's, which may be older than the site's code. */
@@ -97,6 +98,16 @@ export const CONTENT_PATHS = [
 export const AGENT_DOCS_DIR = "agents"
 export function agentDocUrl(file: string): string {
   return `${SITE_URL}${file}`
+}
+
+/**
+ * Pages that moved: an old link lands on the page its content went to. A target names a page and
+ * no anchor: a redeploy of an older tag builds that tag's content, whose headings may not be main's
+ * (v0.12.0's guides/agents.md has no Claude Code section). Claude Code is the first section of
+ * guides/agents.md anyway.
+ */
+export const REDIRECTS: Record<string, string> = {
+  "/guides/claude-code-plugin/": `${BASE}/guides/agents/`,
 }
 
 /** Sidebar groups, in order. */

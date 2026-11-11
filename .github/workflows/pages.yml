@@ -7,7 +7,11 @@ name: pages
 # Not `on: push` or `on: release`: release.yml creates the tag with GITHUB_TOKEN, which starts no
 # workflow run, so it calls this directly once a release is tagged (as it does binaries.yml).
 # workflow_dispatch redeploys by hand: "latest" for the newest tag, or "main" for a docs fix that
-# cannot wait for a release.
+# cannot wait for a release. Any other tag builds main's site around that tag's content, which is
+# not quite the site that tag shipped: main's page table decides the pages, so a page main no longer
+# has (v0.12.0's guides/commands.md and guides/claude-code-plugin.md) is not served, and an old URL
+# that main redirects is redirected. Redirects name a page with no anchor, so they land in any
+# release's content. To restore an old release's site exactly, build that tag's own checkout.
 #
 # The site's code is main's and its content is exactly the release's (content-from removes main's
 # copy first). Main's code copes with a release older than itself: a page whose source the release
@@ -52,6 +56,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Sets SITE_CONTENT_REF for the build below (through $GITHUB_ENV), so its GitHub links name the
+      # tag. Only this job sets it: a local build or test run always uses the working tree's content.
       - run: pnpm --filter @syv-ai/rulecast-site content-from "${{ inputs.ref }}"
       - run: pnpm --filter @syv-ai/rulecast-site build
       - uses: actions/upload-pages-artifact@v5

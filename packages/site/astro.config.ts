@@ -3,7 +3,7 @@ import type { AstroIntegration } from "astro"
 import { defineConfig } from "astro/config"
 import { codeThemes } from "./scripts/code-themes"
 import { proseColumnPlugin } from "./scripts/prose-column"
-import { BASE, SITE, sidebar } from "./scripts/sources"
+import { BASE, REDIRECTS, SITE, sidebar } from "./scripts/sources"
 
 /** Marks each table's prose column (scripts/prose-column.ts), the way Starlight adds its own plugins. */
 const proseColumns: AstroIntegration = {
@@ -21,10 +21,7 @@ export default defineConfig({
   site: SITE,
   base: BASE,
   trailingSlash: "always",
-  // Pages that moved: an old link lands where its content went.
-  redirects: {
-    "/guides/claude-code-plugin/": `${BASE}/guides/agents/#claude-code`,
-  },
+  redirects: REDIRECTS,
   integrations: [
     proseColumns,
     starlight({

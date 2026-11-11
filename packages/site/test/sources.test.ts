@@ -1,13 +1,15 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { commandsMarkdown, HELP_DIR, listedCommands } from "../scripts/commands"
 import {
   agentDocUrl,
   agentPrompt,
   assertPlaced,
   availablePages,
+  BASE,
   CONTENT_PATHS,
+  CONTENT_REF_ENV,
   exampleBinding,
   exampleSection,
   fromRelease,
@@ -20,6 +22,7 @@ import {
   pageBody,
   pageDescription,
   pageParts,
+  REDIRECTS,
   REPO_ROOT,
   readme,
   readmeSections,
@@ -196,6 +199,50 @@ describe("availablePages", () => {
     expect(fromRelease("v0.12.0")).toBe(true)
     expect(fromRelease("main")).toBe(false)
     expect(fromRelease(null)).toBe(false)
+  })
+})
+
+describe("content ref", () => {
+  // content-from used to record its ref in packages/site/.content-ref, a gitignored file nothing
+  // removed: one left at an old tag pinned dev builds' GitHub links to it, dropped pages silently and
+  // failed the tests that expect blob/main. Only the release build passes a ref, in the environment.
+  const stale = path.join(REPO_ROOT, "packages/site/.content-ref")
+  const fresh = async () => {
+    vi.resetModules()
+    return import("../scripts/sources")
+  }
+  afterEach(() => {
+    rmSync(stale, { force: true })
+    vi.unstubAllEnvs()
+  })
+
+  it("is the working tree's own unless the build is given one: a file left behind changes nothing", async () => {
+    writeFileSync(stale, "v0.12.0\n")
+    vi.stubEnv(CONTENT_REF_ENV, "")
+    const sources = await fresh()
+    expect(sources.contentRef()).toBeNull()
+    expect(sources.BLOB).toBe("https://github.com/syv-ai/rulecast/blob/main/")
+    expect(sources.PAGES).toEqual(sources.PAGE_TABLE)
+  })
+
+  it("is the release's when the build is given its tag", async () => {
+    vi.stubEnv(CONTENT_REF_ENV, "v0.12.0")
+    const sources = await fresh()
+    expect(sources.contentRef()).toBe("v0.12.0")
+    expect(sources.BLOB).toBe("https://github.com/syv-ai/rulecast/blob/v0.12.0/")
+  })
+})
+
+describe("redirects", () => {
+  it("lead from a page that moved to a page main has, with no anchor an older release might lack", () => {
+    // A redeploy of an older tag builds that tag's content, whose headings can differ from main's
+    // (v0.12.0's guides/agents.md has no "Claude Code" section), so a target names a page only.
+    const routes = PAGE_TABLE.map((page) => `${BASE}/${page.route}/`)
+    for (const [from, to] of Object.entries(REDIRECTS)) {
+      expect(routes).toContain(to)
+      expect(routes).not.toContain(`${BASE}${from}`)
+    }
+    expect(REDIRECTS["/guides/claude-code-plugin/"]).toBe(`${BASE}/guides/agents/`)
   })
 })
 

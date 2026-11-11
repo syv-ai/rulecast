@@ -53,8 +53,9 @@ const here = Astro.url.pathname
     // The header is a backdrop-filtered layer, which would contain a fixed panel: move it out.
     document.body.append(root)
 
-    // Open, focus starts on the page you are on. Closed, by any means, focus that was in the panel
-    // goes back to the button, not to the top of the page.
+    // Open, focus starts on the page you are on. Closed, by any means, focus goes back to the button,
+    // not to the top of the page: when it was in the panel, or is now nowhere. A press on the scrim
+    // moves focus to the body before its click closes the panel, so "in the panel" alone misses it.
     const setOpen = (open: boolean) => {
       const hadFocus = panel.contains(document.activeElement)
       root.classList.toggle("rc-open", open)
@@ -64,7 +65,9 @@ const here = Astro.url.pathname
       if (open) {
         const current = panel.querySelector<HTMLElement>('a[aria-current="page"]') ?? panel.querySelector("a")
         current?.focus({ preventScroll: true })
-      } else if (hadFocus) button.focus()
+      } else if (hadFocus || document.activeElement === null || document.activeElement === document.body) {
+        button.focus()
+      }
     }
     const isOpen = () => root.classList.contains("rc-open")
 
@@ -82,7 +85,6 @@ const here = Astro.url.pathname
       if (!isOpen()) return
       if (event.key === "Escape") {
         setOpen(false)
-        button.focus()
         return
       }
       if (event.key !== "Tab") return

@@ -1,15 +1,17 @@
 import { execFileSync } from "node:child_process"
-import { rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, rmSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { CONTENT_PATHS, CONTENT_REF_FILE, REPO_ROOT } from "./sources"
+import { CONTENT_PATHS, CONTENT_REF_ENV, REPO_ROOT } from "./sources"
 
 /**
  * Replaces the site's content (CONTENT_PATHS) in the working tree with a release's, so a build
  * documents what that release installs. Each path is removed first and then checked out from the
  * release, so the content is exactly the release's: a file main has and the release does not is
- * gone, not served beside it, and a path the release does not have at all is not there. The ref is
- * recorded in CONTENT_REF_FILE, for the site's links to GitHub.
+ * gone, not served beside it, and a path the release does not have at all is not there. The ref it
+ * resolved goes to the build in CONTENT_REF_ENV, for the site's links to GitHub: in CI through
+ * $GITHUB_ENV, so only the steps after this one in that job see it; anywhere else it is printed, to
+ * be passed by hand. It is never written to a file a later local run would read.
  *
  * What stays main's is the site's own code, packages/site, which a release cannot provide for main's
  * site: its components, its styles, and its two hand-written pages, the landing page and How it
@@ -49,8 +51,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const file of CONTENT_PATHS) rmSync(path.join(REPO_ROOT, file), { recursive: true, force: true })
   const present = CONTENT_PATHS.filter((file) => has(ref, file))
   git("checkout", ref, "--", ...present)
-  writeFileSync(path.join(REPO_ROOT, CONTENT_REF_FILE), `${ref}\n`)
   const missing = CONTENT_PATHS.filter((file) => !present.includes(file))
   process.stdout.write(`site content from ${ref}: ${present.join(", ")}\n`)
+  if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `${CONTENT_REF_ENV}=${ref}\n`)
+  else process.stdout.write(`build with ${CONTENT_REF_ENV}=${ref} for links to GitHub at ${ref}\n`)
   if (missing.length > 0) process.stdout.write(`not in ${ref}, so not on the site: ${missing.join(", ")}\n`)
 }
