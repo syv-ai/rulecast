@@ -121,7 +121,9 @@ h1#_top {
 /* A chip that wraps keeps its padding on each line, instead of opening at one end. A paragraph can
    hold twenty of them, so each is a faint tint of whatever it sits on, not a block: see-through, it
    reads on the page, a table, an aside or a card alike. */
-.sl-markdown-content :not(pre) > code {
+/* Not inside .not-content: the landing's components (its command buttons, the rule demo) style their
+   own code, as Starlight's own prose styles leave them alone. */
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   border-radius: 0.25rem;
