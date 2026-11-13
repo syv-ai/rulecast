@@ -142,6 +142,71 @@ describe("decide: references", () => {
     expect(decision.context.map((record) => record.t === "delivered" && record.path)).toEqual(["conventions/state.md"])
   })
 
+  describe("touch rules whose sections overlap (#69)", () => {
+    const touch = (id: string, refs: string[]) => rule({ id, detector: null, context: refs.map((one) => ref(one)) })
+    const refsOf = (decision: Awaited<ReturnType<typeof decide>>) =>
+      decision.delivery.references.map((one) => [one.ref, one.state])
+
+    test("a section inside a whole file sent in full is not sent again, whichever rule names it first", async () => {
+      const decision = await decide(
+        input({
+          touches: [
+            touch("broad", ["@conventions/state.md", "@conventions/api.md", "@conventions/api.md#errors"]),
+            touch("narrow", ["@conventions/api.md#retries"]),
+          ],
+        }),
+      )
+      expect(refsOf(decision)).toEqual([
+        ["conventions/state.md", "full"],
+        ["conventions/api.md", "full"],
+      ])
+      const text = renderAgentText(decision.delivery, { maxMatchesPerRule: 10 })
+      expect(text.split("Twice.").length - 1).toBe(1)
+    })
+
+    test("narrow rules fill first; the broad rule's whole file is the one cut to a pointer", async () => {
+      const big = "conventions/big.md"
+      const decision = await decide(
+        input({
+          maxBytes: 32768,
+          maxContextChars: 420,
+          touches: [
+            touch("broad", [`@${big}`, "@conventions/state.md"]),
+            touch("narrow", ["@conventions/api.md#retries"]),
+          ],
+        }),
+      )
+      expect(refsOf(decision)).toEqual([
+        ["conventions/api.md#retries", "full"],
+        [big, "read"],
+        ["conventions/state.md", "full"],
+      ])
+    })
+
+    test("with too little room for the whole file, the sections named alongside it still go in full", async () => {
+      const resolverWith = fakeResolver(
+        { ...files, "conventions/api.md": `${files["conventions/api.md"]}\n${"y".repeat(400)}` },
+        { "conventions/api.md#errors": ["retries"] },
+      )
+      const decision = await decide(
+        input({
+          resolver: resolverWith,
+          maxBytes: 32768,
+          maxContextChars: 400,
+          touches: [
+            touch("broad", ["@conventions/api.md", "@conventions/state.md"]),
+            touch("narrow", ["@conventions/api.md#errors"]),
+          ],
+        }),
+      )
+      expect(refsOf(decision)).toEqual([
+        ["conventions/api.md#errors", "full"],
+        ["conventions/api.md", "read"],
+        ["conventions/state.md", "full"],
+      ])
+    })
+  })
+
   test("a section shorter than the line that would replace it is never demoted for the budget", async () => {
     // Demoting it would print "read this before continuing (not included, too long …)" in its
     // place, which is longer than the section. Exact pricing sees that; estimates could not.

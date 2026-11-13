@@ -465,7 +465,7 @@ A rule that fires three or more times has its `message` printed once, with the v
 
 ### Stages
 
-- `touch`: the first time an agent reads or edits a matching file in its context, the rule's `context` is delivered, without a message.
+- `touch`: the first time an agent reads or edits a matching file in its context, the rule's `context` is delivered, without a message. Every touch rule that matches the file is delivered together, and a section inside a whole file sent with it is sent once. When it is more than one message holds, the rules that cite the fewest items go first, and what does not fit is named for the agent to read. `rulecast doctor` reports each file whose touch context does not fit.
 - `edit`: the detector runs on each file the agent edits.
 - `verify`: the detector runs when the agent stops, on the files it changed, and in `rulecast run`. A staged `rulecast run` (no file flags, the pre-commit check) skips `llm` rules unless given `--llm`.
 

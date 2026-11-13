@@ -112,7 +112,7 @@ More in [Writing rules](guides/writing-rules.md): refusing a write, linters with
 | `rulecast test` | Run each rule's good/bad examples; `--against` and `--history` say how much it would flag |
 | `rulecast stats` | Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy |
 | `rulecast validate` | Check the config (and a rules manifest) and print diagnostics |
-| `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule; exits 2 on errors, and with `--ci` also on a setup that would run degraded |
+| `rulecast doctor` | Compile, check the environment and hooks, dry-run every rule, size touch context; exits 2 on errors, and with `--ci` also on a setup that would run degraded |
 
 If a rule is configured but quiet, `rulecast doctor` says why. `rulecast help --all` lists every command, and `rulecast <command> --help` its flags; the site's [Commands](https://syv-ai.github.io/rulecast/reference/commands/) page shows them all. The exit codes are in the [output contract](agents/reference/output.md#exit-codes).
 

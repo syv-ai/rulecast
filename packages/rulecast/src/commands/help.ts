@@ -235,7 +235,7 @@ export const COMMANDS: CommandHelp[] = [
     name: "doctor",
     tier: "basic",
     synopsis: "rulecast doctor [--ci] [--from-ref REF]",
-    summary: "Compile, check the environment and hooks, dry-run every rule",
+    summary: "Compile, check the environment and hooks, dry-run every rule, size touch context",
     flags: [
       ["--ci", "Check what a CI or headless run needs; exit 2 if rulecast would run degraded. On by itself under CI"],
       ["--from-ref REF", "Also check that rulecast run --from-ref REF finds a merge base here (implies --ci)"],

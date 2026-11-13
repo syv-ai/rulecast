@@ -15,7 +15,7 @@ import { compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { type ActiveMode, ciVariable } from "../core/config/mode"
-import { createReferenceResolver } from "../core/delivery/resolve"
+import { createReferenceResolver, type ReferenceResolver } from "../core/delivery/resolve"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
 import { type DetectionContext, detectionFor } from "../core/detection/context"
@@ -29,6 +29,8 @@ import { cacheHome, ensureProjectState } from "../core/home"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
+import { decide } from "../core/session/decide"
+import { emptyContext, emptyWork } from "../core/session/state"
 import { isOlder, VERSION } from "../core/version"
 import {
   configLabel,
@@ -338,6 +340,15 @@ export async function doctorCommand(
   // A rule with violations in four files and none in the one tried reads "no match" above.
   if (dry.some((result) => result.tried)) io.stdout(`  ${DRY_RUN_FOOTER}\n`)
 
+  const payloads = await touchPayloads(project, listed, createReferenceResolver(root))
+  if (payloads.length > 0) {
+    io.stdout("\ntouch context\n")
+    for (const payload of payloads) {
+      count(payload.level)
+      io.stdout(line(payload.level, payload.what, payload.detail))
+    }
+  }
+
   io.stdout(
     `\n${errors + warnings === 0 ? "no problems found" : [plural(errors, "error"), plural(warnings, "warning")].join(", ")}\n`,
   )
@@ -533,4 +544,69 @@ async function dryRun(
     })
   }
   return lines
+}
+
+/** The smallest message budget of the agents rulecast installs into; null when none has one. */
+function agentBudget(): number | null {
+  const budgets = ADAPTERS.filter((adapter) => adapter.install !== null && adapter.maxContextChars !== null).map(
+    (adapter) => adapter.maxContextChars!,
+  )
+  return budgets.length === 0 ? null : Math.min(...budgets)
+}
+
+/**
+ * What the first open of a file sends from its touch rules, for every set of touch rules some file
+ * matches: run through the hook's own assemble and budget (core/session/decide.ts), so a section
+ * reported cut is one the hook would cut (#69). Empty when no touch rule matches a file.
+ */
+async function touchPayloads(
+  project: CompiledProject,
+  listed: { files: string[] } | { error: unknown },
+  resolver: ReferenceResolver,
+): Promise<{ level: Level; what: string; detail: string }[]> {
+  if (!("files" in listed)) return []
+  const touchRules = project.rules.filter((rule) => rule.enabled && rule.stages.includes("touch"))
+  if (touchRules.length === 0) return []
+  const groups = new Map<string, { rules: typeof touchRules; files: string[] }>()
+  for (const file of listed.files) {
+    const rules = touchRules.filter((rule) => rule.matches(file))
+    if (rules.length === 0) continue
+    const key = rules.map((rule) => rule.id).join("\0")
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, { rules, files: [file] })
+    else group.files.push(file)
+  }
+  const budget = agentBudget()
+  const cuts: { level: Level; what: string; detail: string; refs: number }[] = []
+  for (const { rules, files } of groups.values()) {
+    const decision = await decide({
+      agent: "main",
+      findings: [],
+      touches: rules,
+      agentRead: null,
+      warnings: [],
+      work: emptyWork(),
+      context: emptyContext(),
+      resolver,
+      maxBytes: project.config.context.maxBytes,
+      maxBlocks: 1,
+      maxContextChars: budget,
+      maxMatchesPerRule: project.config.maxMatchesPerRule,
+      stopGate: false,
+    })
+    const cut = decision.delivery.references.filter((one) => one.state === "read" && one.reason === "budget")
+    if (cut.length === 0) continue
+    const others = files.length - 1
+    cuts.push({
+      level: "warning",
+      what: `${files[0]}${others === 0 ? "" : ` and ${plural(others, "other file")}`}`,
+      detail:
+        `the first open sends the context of ${plural(rules.length, "touch rule")}, more than one message holds: ` +
+        `${cut.map((one) => one.ref).join(", ")} would be named, not sent. ` +
+        `Narrow these rules to the one or two sections that area gets wrong${naming(rules.map((rule) => rule.id))}`,
+      refs: cut.length,
+    })
+  }
+  if (cuts.length === 0) return [{ level: "ok", what: "every file's touch context fits in one message", detail: "" }]
+  return cuts.sort((a, b) => b.refs - a.refs).map(({ refs: _, ...rest }) => rest)
 }

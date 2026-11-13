@@ -25,7 +25,7 @@ The rest, such as pinning the lines a `bad` example must flag, is in [Examples](
 
 ## Guidance with nothing to catch
 
-A rule with `context` and no `detect` is a touch rule: it delivers its doc section the first time an agent reads or edits a matching file. Use it for a convention no pattern can express.
+A rule with `context` and no `detect` is a touch rule: it delivers its doc section the first time an agent reads or edits a matching file. Use it for a convention no pattern can express. Keep each one to the one or two sections agents get wrong in that area: every touch rule matching a file arrives in the same message, and what does not fit is only named. `rulecast doctor` warns about files whose touch context is too long.
 
 ## Refusing a write
 

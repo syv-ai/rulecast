@@ -850,6 +850,46 @@ describe("rulecast doctor", () => {
       expect(result.code).toBe(0)
     })
 
+    test("touch context that fits in one message is ok", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          { id: "ctx", name: "Context", files: "\\.ts$", stages: ["touch"], context: ["@docs/x.md"] },
+        ]),
+        "docs/x.md": "# X\n",
+        "src/x.ts": "const x = 1\n",
+      })
+      expect((await doctor(root)).stdout).toContain(
+        "touch context\n  ok       every file's touch context fits in one message",
+      )
+    })
+
+    test("touch rules whose context a file's first open cannot hold are a warning naming what is cut (#69)", async () => {
+      const section = (name: string) => `## ${name}\n${"word ".repeat(700)}\n`
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "broad",
+            name: "Broad",
+            files: "\\.ts$",
+            stages: ["touch"],
+            context: ["@docs/a.md#one", "@docs/a.md#two", "@docs/a.md#three"],
+          },
+          { id: "narrow", name: "Narrow", files: "^src/run/", stages: ["touch"], context: ["@docs/a.md#four"] },
+        ]),
+        "docs/a.md": `# A\n${section("One")}${section("Two")}${section("Three")}${section("Four")}`,
+        "src/run/x.ts": "const x = 1\n",
+        "src/y.ts": "const y = 1\n",
+      })
+      const { stdout, code } = await doctor(root)
+      const warning = stdout.split("\n").find((text) => text.includes("src/run/x.ts"))
+      expect(warning).toMatch(/^ {2}warning {2}src\/run\/x\.ts — the first open sends the context of 2 touch rules/)
+      // The narrow rule's section goes first, so what is cut is the broad rule's.
+      expect(warning).toContain("docs/a.md#three would be named, not sent")
+      expect(warning).not.toContain("#four")
+      expect(warning).toContain("(broad, narrow)")
+      expect(code).toBe(0)
+    })
+
     test("environment and dry-run errors are counted together", async () => {
       const root = await createRepo({
         ".rulecast-config.yaml": localConfig([
