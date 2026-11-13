@@ -27,6 +27,8 @@ import { createRuleRepo } from "../helpers/rule-repo"
 /** doctor reads a real environment; nothing the machine happens to have installed may decide a test. */
 beforeEach(() => {
   vi.stubEnv("PATH", "/usr/bin:/bin")
+  // The hooks' last resort is install.sh's rulecast under $HOME/.local/bin (core/binary-home.ts).
+  vi.stubEnv("HOME", "/nonexistent-home")
   return () => vi.unstubAllEnvs()
 })
 
