@@ -13,6 +13,8 @@ export interface CallKeyInput {
   baseUrl: string | null
   model: string
   rules: { id: string; config: LlmConfig; grounding: { ref: string; content: string }[] }[]
+  /** What the prompt showed of the definitions removed elsewhere: part of what was asked. */
+  removedElsewhere?: { file: string; line: string }[]
 }
 
 /**
@@ -35,6 +37,7 @@ export function callKey(input: CallKeyInput): string {
     rules: [...input.rules]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .map((rule) => ({ id: rule.id, config: rule.config, grounding: rule.grounding })),
+    ...(input.removedElsewhere === undefined ? {} : { removedElsewhere: input.removedElsewhere }),
   }
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex")
 }

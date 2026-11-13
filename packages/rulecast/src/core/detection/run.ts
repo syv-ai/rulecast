@@ -1,7 +1,7 @@
 import type { DetectorRule } from "../compile/rule"
 import { DeadlineError, errorMessage } from "../errors"
 import { type IgnoredFinding, type SourceLines, sourceLines, suppress } from "../suppress"
-import type { ChangeSet, DetectorEvent, DetectorResult, Match, TextEdit } from "../types"
+import type { ChangeSet, DetectorEvent, DetectorResult, Match, RemovedDefinition, TextEdit } from "../types"
 import type { DetectionContext } from "./context"
 import type { Selection } from "./select"
 
@@ -11,6 +11,8 @@ export interface DetectionInput {
   event: DetectorEvent
   selections: Selection[]
   changes: ReadonlyMap<string, ChangeSet>
+  /** Handed to detectors as `DetectorRun.removedDefinitions`. */
+  removedDefinitions?: () => Promise<RemovedDefinition[]>
   /** How every in-process detector reads a file: from disk, or from what the agent proposed. */
   read(file: string): Promise<string | null>
   /**
@@ -89,6 +91,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
           read: input.read,
           fromDisk: input.fromDisk ?? true,
           changes: input.changes,
+          ...(input.removedDefinitions === undefined ? {} : { removedDefinitions: input.removedDefinitions }),
           cache: input.detection.cacheFor(kind),
           settings: input.detection.settings,
           cwd: input.detection.root,

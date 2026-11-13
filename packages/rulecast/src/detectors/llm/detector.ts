@@ -22,6 +22,8 @@ interface Call {
   source: string
   changedLines: [number, number][] | null
   model: string
+  /** Its rules asked for the definitions the change removed elsewhere: they get their own call. */
+  removedDefinitions: boolean
   rules: DetectorRuleInput<LlmConfig>[]
 }
 
@@ -53,10 +55,11 @@ async function groupCalls(
       if (changedLines === "skip") continue
       const source = await read(file)
       if (source === null || isBinary(source)) continue
-      const key = `${file}\u0000${model}`
+      const removedDefinitions = rule.config.removed_definitions === true
+      const key = `${file}\u0000${model}\u0000${removedDefinitions}`
       const call = calls.get(key)
       if (call) call.rules.push(rule)
-      else calls.set(key, { file, source, changedLines, model, rules: [rule] })
+      else calls.set(key, { file, source, changedLines, model, removedDefinitions, rules: [rule] })
     }
   }
   return [...calls.values()]
@@ -120,6 +123,10 @@ async function runCall(
   const model = resolveModel(call.model, settings.provider)
   if (model === null) throw new Error(`model "${call.model}" has ${unmappedModel(settings.provider)}`)
   const rules = promptRules(call.rules)
+  const removedElsewhere =
+    call.removedDefinitions && input.removedDefinitions !== undefined
+      ? (await input.removedDefinitions()).filter((removed) => removed.file !== call.file)
+      : undefined
   const key = callKey({
     file: call.file,
     source: call.source,
@@ -132,10 +139,17 @@ async function runCall(
       config: rule.config,
       grounding: rules[index]!.grounding,
     })),
+    ...(removedElsewhere === undefined ? {} : { removedElsewhere }),
   })
   const answered = await askCached(provider, input.cache, key, {
     model,
-    prompt: buildPrompt({ file: call.file, source: call.source, changedLines: call.changedLines, rules }),
+    prompt: buildPrompt({
+      file: call.file,
+      source: call.source,
+      changedLines: call.changedLines,
+      rules,
+      ...(removedElsewhere === undefined ? {} : { removedElsewhere }),
+    }),
     settings,
     env: process.env,
     cwd: input.cwd,

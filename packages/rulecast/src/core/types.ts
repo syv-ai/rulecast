@@ -120,6 +120,12 @@ export interface Match {
   docs?: string
 }
 
+/** A line defining something (a class, a function, a type) that a change removed from a file. */
+export interface RemovedDefinition {
+  file: string
+  line: string
+}
+
 export interface ChangeSet {
   /** 1-based inclusive ranges in the current file. */
   changedLines: [start: number, end: number][]
@@ -185,6 +191,11 @@ export interface DetectorRun<Config> {
   fromDisk?: boolean
   /** File absent = no baseline, the whole file is new. */
   changes: ReadonlyMap<string, ChangeSet>
+  /**
+   * At a verify with a base commit: the definitions the whole change removed from its files, read
+   * once on first call (core/baseline/removed-definitions.ts). Absent: nothing to compare with.
+   */
+  removedDefinitions?: () => Promise<RemovedDefinition[]>
   cache: Cache
   /** Project settings from .rulecast-config.yaml; a detector that needs none ignores them. */
   settings: DetectorSettings

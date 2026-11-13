@@ -160,10 +160,12 @@ detect:
       Does this route do more than parse input, call a service,
       and return the result? Report each offending line.
     grounding: true
+    # removed_definitions: true    # show it the definitions the change removed from its other files
 ```
 
 - `model`: optional. Either a rulecast alias — `haiku`, `sonnet`, `opus`, `fable` — which `claude-code`, `anthropic` and `opencode` map to their own names (`openai-compatible` has no aliases: name its exact model), or the exact model name your provider uses (`claude-haiku-4-5-20251001`, `gpt-5-mini`, `qwen3-coder:30b`), which is passed through untouched. Without it the rule runs on the config's `llm.model`. That key is set when the developer agrees to llm rules, so a config without it has no llm rules: don't propose one there, and a rule with no model of its own fails `rulecast validate`.
 - `question`: what the model is asked about the file. Ask for specific lines — "Report each offending line" — or you get an essay instead of findings.
+- `removed_definitions`: optional, default false. The model sees one file at a time, so a class moved into a new file looks new. With `true`, the prompt also lists the definitions (`class`, `def`, `function`, `interface`, `type` and the like) that the change removed from its other files, deleted files included, so a moved one reads as moved. It needs a commit to compare with: the session's start commit at a stop, or `--from-ref`. Use it for rules that ask whether something in the change is new. Such a rule gets its own model call per file.
 - `grounding`: defaults to `true`. Sends the rule's `context` references with the question, whatever their delivery mode, so the model judges against your conventions rather than its own taste. Set it to `false` when the question stands alone.
 - Which model is the developer's choice. Haiku is reliable only on simple, clear questions ("is this prose in the past tense?"); a rule that takes judgement needs Sonnet or stronger. `rulecast test <id> --runs 5` shows how often a rule passes its examples on its model.
 - One call per file **and model**, covering every llm rule that selected that file. Three llm rules on one file all using `haiku` cost one call; a fourth using `sonnet` costs a second.

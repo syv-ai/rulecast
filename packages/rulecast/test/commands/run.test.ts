@@ -719,3 +719,50 @@ describe("rulecast run: a scope: removed rule", () => {
     ])
   })
 })
+
+describe("rulecast run: an llm rule told what the change removed elsewhere (#72)", () => {
+  beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"))
+  afterEach(() => vi.unstubAllEnvs())
+
+  const rule = (removed: boolean) => ({
+    id: "py/one-model",
+    name: "One model per concept",
+    files: "^app/",
+    detect: {
+      llm: {
+        model: "sonnet",
+        question: "Does this add a second model of a concept?",
+        ...(removed ? { removed_definitions: true } : {}),
+      },
+    },
+    message: "{{file}}:{{line}} {{reason}}",
+  })
+
+  /** A class moved from app/a.py into a new app/b.py, in one commit. */
+  async function moved(removed: boolean) {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([rule(removed)]),
+      "app/a.py": "class Order:\n    pass\n\nx = 1\n",
+    })
+    await stubAgentCli(root, "claude")
+    await writeFile(path.join(root, "app/a.py"), "x = 1\n")
+    await writeFile(path.join(root, "app/b.py"), "class Order:\n    pass\n")
+    await git(root, "add", "-A")
+    await git(root, "commit", "-q", "-m", "move Order")
+    await run(root, "--from-ref", "HEAD~1", "--to-ref", "HEAD", "--llm")
+    return stubStdin(root, "claude")
+  }
+
+  test("with removed_definitions, the prompt for the new file lists the class cut from the other", async () => {
+    const prompts = await moved(true)
+    const forB = prompts.find((prompt) => prompt.includes("## File: app/b.py"))
+    expect(forB).toContain("## Removed elsewhere in this change")
+    expect(forB).toContain("- app/a.py: class Order:")
+    // A file is not told about its own removals.
+    expect(prompts.find((prompt) => prompt.includes("## File: app/a.py"))).not.toContain("Removed elsewhere")
+  })
+
+  test("without it, the prompt is as before", async () => {
+    for (const prompt of await moved(false)) expect(prompt).not.toContain("Removed elsewhere")
+  })
+})

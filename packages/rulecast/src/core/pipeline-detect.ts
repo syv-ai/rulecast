@@ -3,6 +3,7 @@ import { classify } from "./baseline/classify"
 import { baselineHas } from "./baseline/committed"
 import { foreignCommits, type HeadMove, linesFromCommits } from "./baseline/foreign"
 import { removedFindings } from "./baseline/removed"
+import { removedDefinitions } from "./baseline/removed-definitions"
 import { type BaselineInput, changesFor } from "./baseline/stage"
 import { appendBaseline, type BaselineState } from "./baseline/store"
 import type { CompiledRule } from "./compile/rule"
@@ -21,7 +22,7 @@ import { configHash, type Notice, notices } from "./session/oversight"
 import type { SessionView } from "./session/session"
 import { dirtyAtStart, editedBy, MAIN_AGENT, type WorkRecord } from "./session/state"
 import { type IgnoredFinding, sourceLines } from "./suppress"
-import type { Delivery, Event, Match } from "./types"
+import type { Delivery, Event, Match, RemovedDefinition } from "./types"
 
 /** What an edit or a verify checks, and how: decided by the pipeline before detection runs. */
 export interface DetectInput {
@@ -166,12 +167,19 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
     }
   }
   const lines = sourceLines(read)
+  // At a verify with a commit to compare with: what the whole change removed, read once, and only
+  // if an llm rule with `removed_definitions` asks (#72).
+  const commit = event.kind === "verify" ? (event.baseCommit ?? baseline.startCommit) : null
+  let gone: Promise<RemovedDefinition[]> | undefined
+  const definitionsGone =
+    commit === null ? undefined : () => (gone ??= removedDefinitions(root, requested, commit, read))
   const detected = await runDetectionFrom(
     {
       detection,
       event: event.kind,
       selections,
       changes,
+      ...(definitionsGone === undefined ? {} : { removedDefinitions: definitionsGone }),
       read,
       lines,
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : Math.max(1, verifyEnds - Date.now()),

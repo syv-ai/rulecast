@@ -11,6 +11,8 @@ export interface PromptCall {
   /** null: no baseline — judge the whole file, with no marks (spec §6). */
   changedLines: [number, number][] | null
   rules: PromptRule[]
+  /** Definitions the change removed from its other files, for a rule with `removed_definitions`. */
+  removedElsewhere?: { file: string; line: string }[]
 }
 
 /**
@@ -37,6 +39,17 @@ export function buildPrompt(call: PromptCall): string {
     for (const reference of rule.grounding) {
       lines.push(`Reference — ${reference.ref}:`, '"""', reference.content.replace(/\n$/, ""), '"""', "")
     }
+  }
+
+  if (call.removedElsewhere !== undefined && call.removedElsewhere.length > 0) {
+    lines.push(
+      "## Removed elsewhere in this change",
+      "",
+      "The change removed these definitions from its other files. One that reappears in the file below was moved, not added.",
+      "",
+      ...call.removedElsewhere.map((removed) => `- ${removed.file}: ${removed.line}`),
+      "",
+    )
   }
 
   lines.push(`## File: ${call.file}`, "")
