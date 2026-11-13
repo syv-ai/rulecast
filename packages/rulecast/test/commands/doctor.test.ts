@@ -890,6 +890,40 @@ describe("rulecast doctor", () => {
       expect(code).toBe(0)
     })
 
+    test("--time runs each tool-backed rule over all its files against timeouts.verify_ms (#83)", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig(
+          [
+            {
+              id: "quick",
+              name: "Quick",
+              files: "\\.ts$",
+              detect: { command: { run: ["sh", "-c", "exit 0"] } },
+              message: "{{message}}",
+            },
+            {
+              id: "slow",
+              name: "Slow",
+              files: "\\.ts$",
+              detect: { command: { run: ["sh", "-c", "sleep 2"] } },
+              message: "{{message}}",
+            },
+            { id: "pattern", name: "Pattern", files: "\\.ts$", detect: { regex: { pattern: "x" } }, message: "m" },
+          ],
+          { timeouts: { verify_ms: 800 } },
+        ),
+        "src/a.ts": "const a = 1\n",
+        "src/b.ts": "const b = 1\n",
+      })
+      const { stdout } = await runCli(root, ["doctor", "--time"])
+      const timing = stdout.slice(stdout.indexOf("\ntiming\n"))
+      expect(timing).toMatch(/ok {7}quick — \d+\.\d s of 0\.8 s on 2 files/)
+      expect(timing).toContain("warning  slow — over timeouts.verify_ms (0.8 s) on 2 files: a stop would cut it off")
+      // An in-process detector takes milliseconds: not timed.
+      expect(timing).not.toContain("pattern")
+      expect((await doctor(root)).stdout).not.toContain("\ntiming\n")
+    })
+
     test("environment and dry-run errors are counted together", async () => {
       const root = await createRepo({
         ".rulecast-config.yaml": localConfig([

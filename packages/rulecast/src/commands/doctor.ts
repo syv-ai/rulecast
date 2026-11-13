@@ -117,14 +117,18 @@ function modeText(mode: ActiveMode, config: CompiledProject["config"]): string {
   return `${mode.mode} — ${source}; up to ${plural(blocks, "blocked stop")} per prompt`
 }
 
-function parseDoctorArgs(args: string[]): { ci: boolean; fromRef: string | null } {
+function parseDoctorArgs(args: string[]): { ci: boolean; fromRef: string | null; time: boolean } {
   try {
     const { values } = parseArgs({
       args,
-      options: { ci: { type: "boolean", default: false }, "from-ref": { type: "string" } },
+      options: {
+        ci: { type: "boolean", default: false },
+        "from-ref": { type: "string" },
+        time: { type: "boolean", default: false },
+      },
       strict: true,
     })
-    return { ci: values.ci, fromRef: values["from-ref"] ?? null }
+    return { ci: values.ci, fromRef: values["from-ref"] ?? null, time: values.time }
   } catch (error) {
     throw new UsageError(`doctor: ${errorMessage(error)}`)
   }
@@ -339,6 +343,20 @@ export async function doctorCommand(
   }
   // A rule with violations in four files and none in the one tried reads "no match" above.
   if (dry.some((result) => result.tried)) io.stdout(`  ${DRY_RUN_FOOTER}\n`)
+
+  if (flags.time) {
+    io.stdout("\ntiming\n")
+    const timed = await timeRules(
+      project,
+      detectionFor(project, registry, stateDir, createReferenceResolver(root)),
+      listed,
+    )
+    if (timed.length === 0) io.stdout("  no rule runs a tool\n")
+    for (const result of timed) {
+      count(result.level)
+      io.stdout(line(result.level, result.rule, result.detail))
+    }
+  }
 
   const payloads = await touchPayloads(project, listed, createReferenceResolver(root))
   if (payloads.length > 0) {
@@ -618,4 +636,53 @@ async function touchPayloads(
   }
   if (cuts.length === 0) return [{ level: "ok", what: "every file's touch context fits in one message", detail: "" }]
   return cuts.sort((a, b) => b.refs - a.refs).map(({ refs: _, ...rest }) => rest)
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
+
+/**
+ * `--time` (#83): each rule that runs a tool at a stop (a hook, a command, a linter), once, over
+ * every file it matches: the most a stop can hand it. Its wall time against `timeouts.verify_ms`,
+ * the stop check's budget, says whether it fits before it is turned on. Metered rules (llm) are
+ * not run: their time is a model's, and each run costs money. Rules run one after another, so
+ * each time is its own.
+ */
+async function timeRules(
+  project: CompiledProject,
+  detection: DetectionContext,
+  listed: { files: string[] } | { error: unknown },
+): Promise<DryRunLine[]> {
+  if (!("files" in listed)) return []
+  const budget = project.config.timeouts.verifyMs
+  const lines: DryRunLine[] = []
+  for (const rule of project.rules) {
+    if (!rule.enabled || !isDetectorRule(rule) || !rule.stages.includes("verify")) continue
+    const implementation = detection.registry.get(rule.detector.kind)
+    // In-process detectors (regex, ast-grep, path) take milliseconds; llm costs money per run.
+    if (implementation === undefined || implementation.guards === true || implementation.metered === true) continue
+    const files = listed.files.filter((file) => rule.matches(file))
+    if (files.length === 0) continue
+    const started = Date.now()
+    const output = await runDetection({
+      detection: { ...detection, cacheFor: () => memoryCache(), contextFor: async () => [] },
+      event: "verify",
+      selections: [{ rule, files }],
+      changes: new Map(),
+      read: (name) => readSourceFile(project.root, name),
+      timeoutMs: budget,
+    })
+    const took = Date.now() - started
+    const over = output.timedOut.length > 0
+    const failure = output.errors[0]
+    lines.push({
+      rule: rule.id,
+      level: over ? "warning" : failure ? "error" : "ok",
+      detail: over
+        ? `over timeouts.verify_ms (${seconds(budget)}) on ${plural(files.length, "file")}: a stop would cut it off. Leave it off agent stops (stages: [edit] or a git hook), or raise timeouts.verify_ms`
+        : failure
+          ? `${seconds(took)}, then failed: ${failure.message}`
+          : `${seconds(took)} of ${seconds(budget)} on ${plural(files.length, "file")}`,
+    })
+  }
+  return lines
 }

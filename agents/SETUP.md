@@ -65,7 +65,7 @@ The weekly stats summary row's `why` says what turning it on keeps, as the examp
 
 A linter rule delivers only errors: to have a warning delivered, the developer makes it an error in the linter's config. Each finding carries the linter's own page for its lint rule as a link, until a doc section is mapped to that rule after setup (step 7).
 
-A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off.
+A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off. After writing the config, `rulecast doctor --time` runs each such rule once over all its files and says whether it fits; it can take minutes, so say so before running it. Show the developer any rule it reports over the timeout.
 
 Stated conventions become candidates only when a pattern in the code can show them, at most five. One that names a generated path is not a candidate of its own: it joins that path's item, with a note that `AGENTS.md` says so too.
 

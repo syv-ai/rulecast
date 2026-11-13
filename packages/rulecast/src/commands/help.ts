@@ -243,11 +243,15 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "doctor",
     tier: "basic",
-    synopsis: "rulecast doctor [--ci] [--from-ref REF]",
+    synopsis: "rulecast doctor [--ci] [--from-ref REF] [--time]",
     summary: "Compile, check the environment and hooks, dry-run every rule, size touch context",
     flags: [
       ["--ci", "Check what a CI or headless run needs; exit 2 if rulecast would run degraded. On by itself under CI"],
       ["--from-ref REF", "Also check that rulecast run --from-ref REF finds a merge base here (implies --ci)"],
+      [
+        "--time",
+        "Run each rule that runs a tool (hook, command, linter) over all its files and compare with timeouts.verify_ms; may take minutes",
+      ],
     ],
   },
   {
