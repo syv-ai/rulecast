@@ -43,6 +43,8 @@ interface TestArgs {
   yes: boolean
   /** --label: write the history's findings to the label file for the developer to mark. */
   label: boolean
+  /** --runs N: run the examples N times and report how many runs passed (#72). 1 without it. */
+  runs: number
   format: "terminal" | "json"
 }
 
@@ -57,6 +59,7 @@ export function parseTestArgs(args: string[]): TestArgs {
       "max-rate": { type: "string" },
       yes: { type: "boolean", default: false },
       label: { type: "boolean", default: false },
+      runs: { type: "string" },
       format: { type: "string", default: "terminal" },
     },
   })
@@ -80,6 +83,10 @@ export function parseTestArgs(args: string[]): TestArgs {
   }
   const ruleId = positionals[0] ?? null
   if (historyValue !== null && ruleId === null) throw new UsageError("--history judges one rule: name it")
+  const runs = values.runs === undefined ? 1 : runCount(values.runs)
+  if (runs > 1 && (historyValue !== null || against.length > 0)) {
+    throw new UsageError("--runs repeats the examples: it does not go with --against or --history")
+  }
   return {
     ruleId,
     against,
@@ -87,8 +94,20 @@ export function parseTestArgs(args: string[]): TestArgs {
     history: historyValue,
     yes: values.yes,
     label: values.label,
+    runs,
     format: values.format,
   }
+}
+
+/** More than this many runs of an llm rule's examples is a bill, not a measurement. */
+const MAX_RUNS = 20
+
+function runCount(text: string): number {
+  const value = /^\d+$/.test(text.trim()) ? Number(text) : Number.NaN
+  if (!Number.isInteger(value) || value < 1 || value > MAX_RUNS) {
+    throw new UsageError(`--runs takes a number of runs from 1 to ${MAX_RUNS}, not "${text}"`)
+  }
+  return value
 }
 
 function commitCount(text: string): number {
@@ -423,6 +442,11 @@ interface RuleReport {
   history?: HistoryReport | null
   /** Under `--history`, for a rule that costs money per file, run without `--yes`: what it would take. */
   estimate?: HistoryEstimate
+  /**
+   * With `--runs N` above 1, for a rule that ran: how many runs passed every example, and how many
+   * runs each example passed in. `examples` is then the first run that failed, else the last.
+   */
+  runs?: { total: number; passed: number; examples: { kind: string; index: number; passed: number }[] }
 }
 
 interface TestReport {
@@ -457,6 +481,28 @@ function againstReport(rule: DetectorRule, against: AgainstReport | null): RuleR
   return { rule: rule.id, detector: rule.detector.kind, scope: rule.scope, status, examples: null, against }
 }
 
+/** A rule's examples run `runs.length` times: the run to show, and the counts across all of them. */
+interface Repeated {
+  result: ExampleResult
+  runs: NonNullable<RuleReport["runs"]> | null
+}
+
+const runPassed = (result: ExampleResult) => result.outcomes.every((outcome) => outcome.passed)
+
+function repeated(results: readonly ExampleResult[]): Repeated {
+  const shown = results.find((result) => !runPassed(result)) ?? results.at(-1)!
+  if (results.length < 2 || shown.skipped || shown.missing || shown.empty) return { result: shown, runs: null }
+  const examples = shown.outcomes.map((outcome, at) => ({
+    kind: outcome.kind,
+    index: outcome.index,
+    passed: results.filter((result) => result.outcomes[at]?.passed === true).length,
+  }))
+  return {
+    result: shown,
+    runs: { total: results.length, passed: results.filter(runPassed).length, examples },
+  }
+}
+
 function examplesReport(rule: DetectorRule, result: ExampleResult): RuleReport {
   const report = (status: RuleReport["status"], examples: RuleReport["examples"]): RuleReport => ({
     rule: rule.id,
@@ -472,15 +518,31 @@ function examplesReport(rule: DetectorRule, result: ExampleResult): RuleReport {
   return report(outcomes.every((outcome) => outcome.passed) ? "passed" : "failed", { outcomes, precision, recall })
 }
 
-function examplesText(results: readonly { rule: DetectorRule; result: ExampleResult }[]): string {
+/** For `--runs`: the run count, and each example that failed in some of the runs. */
+function runsLines(runs: NonNullable<RuleReport["runs"]>, result: ExampleResult): string[] {
+  const out = [`      passed in ${runs.passed} of ${runs.total} runs`]
+  for (const [at, example] of runs.examples.entries()) {
+    if (example.passed === runs.total) continue
+    out.push(
+      `      ${example.kind}[${example.index}] ${result.outcomes[at]!.path} — passed in ${example.passed} of ${runs.total} runs`,
+    )
+  }
+  if (runs.passed < runs.total) out.push("      the failures below are from the first run that failed")
+  return out
+}
+
+function examplesText(
+  results: readonly { rule: DetectorRule; result: ExampleResult; runs?: Repeated["runs"] }[],
+): string {
   if (results.length === 0) return "no rules with a detector\n"
   const lines: string[] = [""]
   const noExamples: string[] = []
   const notRun: string[] = []
   let failedRules = 0
   let ranRules = 0
-  for (const { rule, result } of results) {
+  for (const { rule, result, runs } of results) {
     lines.push(summaryLine(rule, result))
+    if (runs) lines.push(...runsLines(runs, result))
     if (result.missing || result.empty) {
       noExamples.push(rule.id)
       continue
@@ -529,7 +591,7 @@ export async function testCommand(
   registry: DetectorRegistry,
   io: CliIo,
 ): Promise<number> {
-  const { ruleId, against, maxRate, history, yes, label, format } = parseTestArgs(args)
+  const { ruleId, against, maxRate, history, yes, label, runs, format } = parseTestArgs(args)
   if (!hasProject(root)) throw new Error(`no ${CONFIG_FILE} in ${io.cwd} or its parents`)
   const project = await compile({ root, registry, repos: fetchingRepos(cacheHome(io.env)) })
   // A config that does not load compiled no rule at all: "passed" over nothing would be a lie.
@@ -607,13 +669,23 @@ export async function testCommand(
     return print(reports, () => againstAllText(reports, maxRate))
   }
 
-  const results: { rule: DetectorRule; result: ExampleResult }[] = []
+  const results: { rule: DetectorRule; result: ExampleResult; runs: Repeated["runs"] }[] = []
   for (const rule of rules) {
-    const result = notAsked(rule) ? skippedResult(rule.id) : await runExamples({ detection, rule, timeoutMs })
-    results.push({ rule, result })
+    if (notAsked(rule)) {
+      results.push({ rule, result: skippedResult(rule.id), runs: null })
+      continue
+    }
+    // One after another: an llm rule's runs are what is measured, not the provider's concurrency.
+    const each: ExampleResult[] = []
+    for (let run = 0; run < runs; run++) each.push(await runExamples({ detection, rule, timeoutMs }))
+    results.push({ rule, ...repeated(each) })
   }
   return print(
-    results.map(({ rule, result }) => examplesReport(rule, result)),
+    results.map(({ rule, result, runs: counted }) => ({
+      ...examplesReport(rule, result),
+      ...(counted === null ? {} : { runs: counted }),
+      ...(counted !== null && counted.passed < counted.total ? { status: "failed" as const } : {}),
+    })),
     () => examplesText(results),
   )
 }

@@ -275,6 +275,7 @@ A detector that fails on an example is not a `2`: that example fails, with the d
 | `rules[].examples` | Without `--against`, when examples ran: `outcomes`, and `precision` and `recall` over the `good` and `bad` examples. Otherwise `null`. |
 | `rules[].against` | With `--against`, when the rule ran ([below](#against-the-rule-on-real-files)). Otherwise `null`. |
 | `rules[].history` | Only with `--history`: what the rule found in recent commits ([below](#history-the-rule-on-recent-commits)), or `null` when it was not run (such as a `scope: removed` rule). |
+| `rules[].runs` | Only with `--runs N` above 1, for a rule that ran: `{ "total", "passed", "examples": [{ "kind", "index", "passed" }] }`, how many runs passed every example and how many runs each example passed. `status` is `failed` when any run failed, and `examples` is the first run that failed (else the last). |
 | `rules[].estimate` | Only with `--history`, for a rule that costs money per file (`llm`) run without `--yes`: `{ "commits", "calls" }`, one model call per file per commit. Nothing was run, and `status` is `not-run`. |
 
 ### An outcome

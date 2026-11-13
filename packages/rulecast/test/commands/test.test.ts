@@ -151,6 +151,64 @@ describe("rulecast test", () => {
   })
 })
 
+describe("rulecast test --runs (#72)", () => {
+  /**
+   * A rule whose good example fires on every other run, as an llm rule on a weak model can: the
+   * script flags a file holding BAD always, and one holding GOOD on alternate calls.
+   */
+  const flaky = {
+    id: "flaky",
+    name: "Flaky",
+    files: "\\.txt$",
+    detect: { command: { run: ["sh", "./flaky.sh"], output: { lines: "gcc" } } },
+    message: "{{file}}:{{line}} flagged",
+    examples: { good: [{ path: "a.txt", code: "GOOD\n" }], bad: [{ path: "a.txt", code: "BAD\n" }] },
+  }
+  const FLAKY_SH = `count=$(cat .flaky-count 2>/dev/null || echo 0)
+for f in "$@"; do
+  if grep -q BAD "$f"; then echo "$f:1:1: error: bad"; fi
+  if grep -q GOOD "$f"; then count=$((count + 1)); [ $((count % 2)) -eq 1 ] && echo "$f:1:1: error: flaky"; fi
+done
+echo $count > .flaky-count
+`
+
+  test("a deterministic rule passes every run", async () => {
+    const root = await project([httpException()])
+    const result = await runTest(root, "backend/no-httpexception", "--runs", "3")
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("passed in 3 of 3 runs")
+    expect(
+      json((await runTest(root, "backend/no-httpexception", "--runs", "3", "--format", "json")).stdout).rules[0].runs,
+    ).toEqual({
+      total: 3,
+      passed: 3,
+      examples: [
+        { kind: "good", index: 0, passed: 3 },
+        { kind: "bad", index: 0, passed: 3 },
+      ],
+    })
+  })
+
+  test("a rule that fails some runs fails, and says which example and how often", async () => {
+    const root = await project([flaky], { "flaky.sh": FLAKY_SH })
+    const result = await runTest(root, "flaky", "--runs", "4")
+    expect(result.code).toBe(1)
+    expect(result.stdout).toContain("passed in 2 of 4 runs")
+    expect(result.stdout).toContain("good[0] a.txt — passed in 2 of 4 runs")
+    expect(result.stdout).toContain("the failures below are from the first run that failed")
+    expect(result.stdout).toContain("1 of 1 rules failed")
+  })
+
+  test("--runs takes 1 to 20 and does not go with --against or --history", async () => {
+    const root = await project([httpException()])
+    expect((await runTest(root, "--runs", "0")).code).toBe(2)
+    expect((await runTest(root, "--runs", "21")).stderr).toContain("--runs takes a number of runs from 1 to 20")
+    expect((await runTest(root, "backend/no-httpexception", "--runs", "2", "--against", ".")).stderr).toContain(
+      "--runs repeats the examples",
+    )
+  })
+})
+
 describe("rulecast test --against", () => {
   const files = {
     "app/services/a.py": "raise HTTPException(1)\nraise HTTPException(2)\n",

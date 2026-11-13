@@ -179,6 +179,10 @@ export const COMMANDS: CommandHelp[] = [
       ],
       ["--commits N", "With --history: how many commits (default 20, or 10 for an llm rule)"],
       [
+        "--runs N",
+        "Run the examples N times (up to 20) and say how many runs passed; any failed run fails the rule. For llm rules",
+      ],
+      [
         "--yes",
         "With --history: run an llm rule, which costs one model call per file per commit. Without it, the cost is printed",
       ],

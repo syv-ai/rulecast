@@ -56,7 +56,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Stated conventions and memory corrections | your reading | each on: drafted after setup, one at a time | never |
 | Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
 | Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never |
-| **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended |
+| **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended. The options are "no" and a model each; say what each model can do: Haiku only for simple, clear questions, Sonnet or stronger for anything that takes judgement |
 | **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
 The weekly stats summary row's `why` says what turning it on keeps, as the example page's does.
@@ -87,7 +87,7 @@ In the same turn, ask every question on the page with your question tool, and ad
 ## 5. The reply
 
 - Map what the developer says to numbers ("strike 4 and 7", "turn on 6", "2: also `backend/`", or free text) and repeat it back in one line.
-- If the reply only strikes items, turns `off` items on, or answers the questions with options the page listed, that approves the page as amended. Say in one line what you will write ("Writing everything on the page except 5 and 8, llm rules with haiku"), and write it.
+- If the reply only strikes items, turns `off` items on, or answers the questions with options the page listed, that approves the page as amended. Say in one line what you will write ("Writing everything on the page except 5 and 8, llm rules with sonnet"), and write it.
 - If it changes a value or adds an item, show the page again with the change, keeping every number, and ask again.
 - Ask again any question left unanswered.
 
@@ -108,7 +108,7 @@ Only after the developer approves. First, install rulecast as approved, by runni
 These are the install row's three options. The hooks look for the project's `node_modules/.bin/rulecast` first, then for `rulecast` on the PATH, where the standalone binary and a global install both are, then in the standalone binary's install directory. Then, in each config's directory:
 
 ```sh
-rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--linters linter/eslint,linter/ruff] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model haiku --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
+rulecast init --agent <your adapter, e.g. claude-code> [--scope personal] [--linters linter/eslint,linter/ruff] [--hooks id,id] [--catalog id,id] [--generated path,path] [--vendored path,path] [--llm-model <the model they chose> --llm-provider <your harness, e.g. claude-code>] [--conventions docs/conventions/] [--weekly-summary]
 ```
 
 Pass `--weekly-summary` where the developer turned on the weekly stats summary. Pass `--agent` only where sessions start. In a config's directory where they don't, pass `--no-agents` instead: hooks there would never run, and the install where sessions start already reaches that config.
