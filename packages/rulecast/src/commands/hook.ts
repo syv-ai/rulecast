@@ -16,6 +16,7 @@ import {
   sessionRoots,
 } from "../core/projects"
 import { cachedRepos } from "../core/repos/provider"
+import { MAIN_AGENT } from "../core/session/state"
 import type { Adapter, AdapterInput, Delivery, Event } from "../core/types"
 import type { CliIo } from "./main"
 
@@ -54,15 +55,15 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       home,
       seat: budgetSeats(adapter.maxContextChars, projects.size),
     }
-    const sessionId = event?.session?.id
+    const session = event?.session
     const [, ...runs] = await Promise.all([
-      // A start recorded its roots while finding them (projectsForEvent).
-      sessionId === undefined || event?.kind === "start"
+      // An event without files recorded its roots while finding them (projectsForEvent).
+      session === undefined || event === null || event.files.length === 0
         ? undefined
-        : recordRoots(home, sessionId, [...projects.keys()]).catch((error: unknown) =>
+        : recordRoots(home, session.id, session.agentId ?? MAIN_AGENT, [...projects.keys()]).catch((error: unknown) =>
             io.stderr(`rulecast: ${errorMessage(error)}\n`),
           ),
-      ...[...projects].map(([root, files]) => runProject(root, files, routed)),
+      ...[...projects].map(([root, routing]) => runProject(root, routing, routed)),
     ])
     const parts = runs.filter((run): run is ProjectRun => run !== null)
     if (event === null || parts.length === 0) return 0
@@ -77,30 +78,49 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
 }
 
 /**
- * Every project the event belongs to, each with its root-relative files (core/projects.ts). An event
- * with files goes to every config above each file; one without (a stop, a prompt, a session start, a
- * shell call) to the projects the session has run and those above where the agent is and started.
+ * How an event reaches one project: its root-relative files (null for an event without files), and
+ * whether only the main agent's subagents ran it, so its config's `subagent_projects` decides.
+ */
+interface Routing {
+  files: string[] | null
+  subagents: boolean
+}
+
+/**
+ * Every project the event belongs to (core/projects.ts). An event with files goes to every config
+ * above each file; one without (a stop, a prompt, a session start, a shell call) to the projects
+ * the agent has run and those above where it is and started (`projectsForEvent`).
  */
 async function projectsFor(
   parsed: AdapterInput,
   event: Event | null,
   launchDir: string,
   home: string,
-): Promise<Map<string, string[] | null>> {
-  if (event !== null && event.files.length > 0) return projectsForFiles(parsed.cwd, event.files)
-  const sessionId = event?.session?.id
-  const roots =
-    sessionId === undefined
-      ? configRootsAbove(parsed.cwd)
-      : await projectsForEvent({ cwd: parsed.cwd, launchDir, sessionId, kind: event?.kind ?? "start" }, home)
-  return new Map(roots.map((root) => [root, null]))
+): Promise<Map<string, Routing>> {
+  if (event !== null && event.files.length > 0) {
+    const routed = projectsForFiles(parsed.cwd, event.files)
+    return new Map([...routed].map(([root, files]) => [root, { files, subagents: false }]))
+  }
+  const session = event?.session
+  if (session === undefined) return new Map(configRootsAbove(parsed.cwd).map((root) => [root, NO_FILES]))
+  const agent = session.agentId ?? MAIN_AGENT
+  const { own, subagents } = await projectsForEvent(
+    { cwd: parsed.cwd, launchDir, sessionId: session.id, agent, kind: event?.kind ?? "start" },
+    home,
+  )
+  return new Map([
+    ...own.map((root): [string, Routing] => [root, NO_FILES]),
+    ...subagents.map((root): [string, Routing] => [root, { files: null, subagents: true }]),
+  ])
 }
 
-/** Appends the roots the session has not run before; a repeat costs a read, not a write. */
-async function recordRoots(home: string, sessionId: string, roots: string[]): Promise<void> {
-  const known = new Set(await sessionRoots(home, sessionId))
+const NO_FILES: Routing = { files: null, subagents: false }
+
+/** Appends the roots the agent has not run before; a repeat costs a read, not a write. */
+async function recordRoots(home: string, sessionId: string, agent: string, roots: string[]): Promise<void> {
+  const known = new Set(await sessionRoots(home, sessionId, agent))
   const fresh = roots.filter((root) => !known.has(path.resolve(root)))
-  if (fresh.length > 0) await recordSessionRoots(home, sessionId, fresh)
+  if (fresh.length > 0) await recordSessionRoots(home, sessionId, agent, fresh)
 }
 
 interface Routed {
@@ -170,7 +190,7 @@ interface ProjectRun {
  * its delivery are shown from the agent's cwd. A failure is this project's alone: logged in its debug
  * log, and the other projects still deliver.
  */
-async function runProject(root: string, files: string[] | null, routed: Routed): Promise<ProjectRun | null> {
+async function runProject(root: string, routing: Routing, routed: Routed): Promise<ProjectRun | null> {
   const { parsed, event, adapter, registry, io, home } = routed
   const seat = routed.seat()
   let log: ((line: string) => void) | undefined
@@ -191,7 +211,9 @@ async function runProject(root: string, files: string[] | null, routed: Routed):
       if (kinds.length > 0) io.startWarm(root, kinds)
     }
     if (event === null) return null
-    const projectEvent: Event = { ...event, files: files ?? [], cwd: root }
+    // Only the main agent's subagents ran this project, and its config leaves it to their own hooks.
+    if (routing.subagents && project.config.subagentProjects === "exclude") return null
+    const projectEvent: Event = { ...event, files: routing.files ?? [], cwd: root }
     const result = await runPipeline({
       project,
       stateDir,
@@ -201,6 +223,7 @@ async function runProject(root: string, files: string[] | null, routed: Routed):
       shareBudget: seat.claim,
       restoredFiles: adapter.restoredFiles,
       stopGate: projectEvent.kind === "verify",
+      subagentsProject: routing.subagents,
       recordMode: true,
       displayFrom: parsed.cwd,
       log,

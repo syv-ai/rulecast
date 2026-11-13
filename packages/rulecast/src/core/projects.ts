@@ -5,6 +5,7 @@ import path from "node:path"
 import { CONFIG_FILE } from "./config/load"
 import { git } from "./git"
 import { appendRecords, readRecords } from "./jsonl"
+import { MAIN_AGENT } from "./session/state"
 import type { EventKind } from "./types"
 
 /**
@@ -87,18 +88,42 @@ function sessionRootsFile(cache: string, sessionId: string): string {
   return path.join(cache, "sessions", `${safeSegment(sessionId)}.roots`)
 }
 
-/** Appends `roots` to the session's record of the projects it has run. Safe under concurrent hooks. */
-export async function recordSessionRoots(cache: string, sessionId: string, roots: readonly string[]): Promise<void> {
+/** A root an agent of the session ran: `a` is the agent id, MAIN_AGENT for the main agent. */
+interface RootRecord {
+  r: string
+  a: string
+}
+
+const isRootRecord = (record: unknown): record is RootRecord =>
+  typeof record === "object" &&
+  record !== null &&
+  typeof (record as RootRecord).r === "string" &&
+  typeof (record as RootRecord).a === "string"
+
+/** Appends `roots` to the projects `agent` has run in the session. Safe under concurrent hooks. */
+export async function recordSessionRoots(
+  cache: string,
+  sessionId: string,
+  agent: string,
+  roots: readonly string[],
+): Promise<void> {
   await appendRecords(
     sessionRootsFile(cache, sessionId),
-    roots.map((root) => path.resolve(root)),
+    roots.map((root): RootRecord => ({ r: path.resolve(root), a: agent })),
   )
 }
 
-/** Every project root the session has run, first-recorded first, without repeats. */
-export async function sessionRoots(cache: string, sessionId: string): Promise<string[]> {
-  const records = await readRecords<unknown>(sessionRootsFile(cache, sessionId))
-  return dedupe(records.filter((record): record is string => typeof record === "string"))
+async function rootRecords(cache: string, sessionId: string): Promise<RootRecord[]> {
+  return (await readRecords<unknown>(sessionRootsFile(cache, sessionId))).filter(isRootRecord)
+}
+
+/**
+ * Every project root the session has run, first-recorded first, without repeats: any agent's, or
+ * only `agent`'s when it is given.
+ */
+export async function sessionRoots(cache: string, sessionId: string, agent?: string): Promise<string[]> {
+  const records = await rootRecords(cache, sessionId)
+  return dedupe(records.filter((record) => agent === undefined || record.a === agent).map((record) => record.r))
 }
 
 export interface ProjectEvent {
@@ -106,15 +131,33 @@ export interface ProjectEvent {
   /** Where the session started ($CLAUDE_PROJECT_DIR for Claude Code); it does not follow a `cd`. */
   launchDir: string
   sessionId: string
+  /** The agent the event is from: MAIN_AGENT, or a subagent's id. */
+  agent: string
   kind: EventKind
 }
 
 /**
+ * The projects of an event without files. `own` are the agent's; `subagents` are those only the
+ * main agent's subagents ran (their own worktrees, say), which a config's `subagent_projects` may
+ * leave out of the main agent's shell calls and stop. Empty for a subagent's event and for a
+ * start, prompt or reset.
+ */
+export interface EventProjects {
+  own: string[]
+  subagents: string[]
+}
+
+/** The kinds that check the working tree and so belong to the agent's own projects. */
+const CHECKS: ReadonlySet<EventKind> = new Set(["shell-before", "shell-after", "verify"])
+
+/**
  * The projects an event without files belongs to. A session start: every config above and below the
- * launch directory, recorded for the session. Anything else: the projects the session has run, then
- * those above cwd and above the launch directory. Deduplicated by real path, keeping the first seen:
- * for a start, above the launch dir (nearest first) then below it; otherwise above cwd (nearest
- * first), above the launch dir, then the session's recorded roots.
+ * launch directory. A shell call or a stop: the configs above cwd (and, for the main agent, above the
+ * launch directory), then those the agent ran before; for the main agent, the ones only its
+ * subagents ran come after, in `subagents`. A subagent's never reaches another agent's projects: a
+ * sibling's worktree is not its work. A prompt or reset only resets bookkeeping, so it reaches every
+ * project the session ran. What is above cwd and the launch directory is recorded as the agent's.
+ * Deduplicated by real path, keeping the first seen.
  *
  * `cache` is the rulecast cache home (core/home.ts `cacheHome`); `home` the user's home directory.
  */
@@ -122,17 +165,27 @@ export async function projectsForEvent(
   event: ProjectEvent,
   cache: string,
   home: string = homedir(),
-): Promise<string[]> {
+): Promise<EventProjects> {
+  const main = event.agent === MAIN_AGENT
   if (event.kind === "start") {
     const roots = dedupe([...configRootsAbove(event.launchDir, home), ...(await configRootsBelow(event.launchDir))])
-    await recordSessionRoots(cache, event.sessionId, roots)
-    return roots
+    await recordSessionRoots(cache, event.sessionId, event.agent, roots)
+    return { own: roots, subagents: [] }
   }
-  return dedupe([
-    ...configRootsAbove(event.cwd, home),
-    ...configRootsAbove(event.launchDir, home),
-    ...(await sessionRoots(cache, event.sessionId)).filter((root) => existsSync(path.join(root, CONFIG_FILE))),
-  ])
+  const here = dedupe([...configRootsAbove(event.cwd, home), ...(main ? configRootsAbove(event.launchDir, home) : [])])
+  const records = (await rootRecords(cache, event.sessionId)).filter((record) =>
+    existsSync(path.join(record.r, CONFIG_FILE)),
+  )
+  const known = new Set(records.filter((record) => record.a === event.agent).map((record) => record.r))
+  const fresh = here.filter((root) => !known.has(path.resolve(root)))
+  if (fresh.length > 0) await recordSessionRoots(cache, event.sessionId, event.agent, fresh)
+  const recorded = (mine: boolean) =>
+    records.filter((record) => (record.a === event.agent) === mine).map((record) => record.r)
+  if (!CHECKS.has(event.kind)) return { own: dedupe([...here, ...records.map((record) => record.r)]), subagents: [] }
+  const own = dedupe([...here, ...recorded(true)])
+  if (!main) return { own, subagents: [] }
+  const ownReal = new Set(own.map(realPath))
+  return { own, subagents: dedupe(recorded(false)).filter((root) => !ownReal.has(realPath(root))) }
 }
 
 function realPath(dir: string): string {

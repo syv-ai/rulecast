@@ -44,6 +44,7 @@ repos:
 | `max_file_bytes` | `1048576` | A larger file is skipped by the in-process detectors (`regex`, `path`, `ast-grep`) on edit and guard, where an agent is waiting. `verify` always runs |
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit. A detector still running then is dropped for that edit: the agent gets what finished, and the dropped rules that have the `verify` stage run again when it stops |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install` where sessions start: the stop hooks' timeout follows the largest `verify_ms` of the configs they serve |
+| `subagent_projects` | `include` | Whether the main agent's shell calls and stop also check this project when only its subagents worked in it, as in a subagent's own worktree. `exclude` leaves it to the subagents' own hooks |
 | `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
 | `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
 | `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
@@ -63,6 +64,7 @@ A repository can hold any number of `.rulecast-config.yaml` files: one at the to
 - `files`, `exclude` and every path a rule names are relative to the config's own directory.
 - Every config above a file applies to it, each on its own: its rules, its state and its findings. Nothing is merged, and a config cannot change a rule from a config above it. To keep a rule from the top config out of a package, add `exclude` on that rule in the top config.
 - Agent hooks route each file to the configs above it, wherever the session was started. The agent sees paths relative to its own working directory.
+- A shell call or a stop goes to the configs above where the agent is and the projects it worked in before. A subagent's never goes to another agent's. The main agent's also goes to the projects only its subagents worked in, unless their config sets `subagent_projects: exclude`.
 - In a git repository, `rulecast run` and `rulecast fix` choose the files in the directory they were started in and below it (with `--files`, the files named), and check each file against every config above it. Each project uses its own committed baseline, state and mode. A `RULE_ID` runs in the projects that define it, and is an error only when none does. With `--session`, and outside a git repository, only the nearest config above the directory runs. How the output combines the projects is in [output.md](output.md#several-projects).
 - Commands about one project, such as `list`, `stats`, `doctor`, `baseline` and `test`, act on the nearest config at or above the current directory.
 

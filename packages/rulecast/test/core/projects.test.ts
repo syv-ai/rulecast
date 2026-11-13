@@ -75,23 +75,38 @@ describe("configRootsBelow", () => {
 describe("session roots", () => {
   test("recorded roots read back once each, in order; concurrent appends all land", async () => {
     const cache = await mkdtemp(path.join(tmpdir(), "rulecast-cache-"))
-    await Promise.all(Array.from({ length: 20 }, (_, i) => recordSessionRoots(cache, "s/../1", [`/r${i}`])))
-    await recordSessionRoots(cache, "s/../1", ["/r0"])
+    await Promise.all(Array.from({ length: 20 }, (_, i) => recordSessionRoots(cache, "s/../1", "main", [`/r${i}`])))
+    await recordSessionRoots(cache, "s/../1", "main", ["/r0"])
     const roots = await sessionRoots(cache, "s/../1")
     expect(roots).toHaveLength(20)
     expect(new Set(roots)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => `/r${i}`)))
     expect(await sessionRoots(cache, "other")).toEqual([])
+  })
+
+  test("each root is recorded for the agent that ran it", async () => {
+    const cache = await mkdtemp(path.join(tmpdir(), "rulecast-cache-"))
+    await recordSessionRoots(cache, "s", "main", ["/lead"])
+    await recordSessionRoots(cache, "s", "sub1", ["/w1", "/lead"])
+    expect(await sessionRoots(cache, "s")).toEqual(["/lead", "/w1"])
+    expect(await sessionRoots(cache, "s", "main")).toEqual(["/lead"])
+    expect(await sessionRoots(cache, "s", "sub1")).toEqual(["/w1", "/lead"])
   })
 })
 
 describe("projectsForEvent", () => {
   test("a session start finds configs above and below the launch dir and records them", async () => {
     const root = await createRepo({ [CONFIG]: config, [`frontend/${CONFIG}`]: config, [`backend/${CONFIG}`]: config })
-    const event = { cwd: root, launchDir: path.join(root, "frontend"), sessionId: "start-1", kind: "start" as const }
-    expect(await projectsForEvent(event, TEST_HOME, NO_HOME)).toEqual([path.join(root, "frontend"), root])
+    const event = {
+      cwd: root,
+      launchDir: path.join(root, "frontend"),
+      sessionId: "start-1",
+      agent: "main",
+      kind: "start" as const,
+    }
+    expect((await projectsForEvent(event, TEST_HOME, NO_HOME)).own).toEqual([path.join(root, "frontend"), root])
     expect(await sessionRoots(TEST_HOME, "start-1")).toEqual([path.join(root, "frontend"), root])
     const top = { ...event, launchDir: root, sessionId: "start-2" }
-    expect(await projectsForEvent(top, TEST_HOME, NO_HOME)).toEqual([
+    expect((await projectsForEvent(top, TEST_HOME, NO_HOME)).own).toEqual([
       root,
       path.join(root, "backend"),
       path.join(root, "frontend"),
@@ -102,15 +117,45 @@ describe("projectsForEvent", () => {
     const root = await createRepo({ [CONFIG]: config, [`frontend/${CONFIG}`]: config, [`backend/${CONFIG}`]: config })
     const launchDir = path.join(root, "frontend")
     const edited = projectsForFiles(launchDir, ["../backend/x.py"], NO_HOME)
-    await recordSessionRoots(TEST_HOME, "stop-1", [...edited.keys()])
-    const stop = { cwd: launchDir, launchDir, sessionId: "stop-1", kind: "verify" as const }
-    expect(await projectsForEvent(stop, TEST_HOME, NO_HOME)).toEqual([launchDir, root, path.join(root, "backend")])
+    await recordSessionRoots(TEST_HOME, "stop-1", "main", [...edited.keys()])
+    const stop = { cwd: launchDir, launchDir, sessionId: "stop-1", agent: "main", kind: "verify" as const }
+    expect(await projectsForEvent(stop, TEST_HOME, NO_HOME)).toEqual({
+      own: [launchDir, root, path.join(root, "backend")],
+      subagents: [],
+    })
   })
 
-  test("other events add the configs above cwd after a cd, deduplicated", async () => {
+  test("other events add the configs above cwd after a cd, deduplicated, and record them", async () => {
     const root = await createProject({ [CONFIG]: config, [`pkg/${CONFIG}`]: config })
-    const event = { cwd: path.join(root, "pkg"), launchDir: root, sessionId: "none", kind: "prompt" as const }
-    expect(await projectsForEvent(event, TEST_HOME, NO_HOME)).toEqual([path.join(root, "pkg"), root])
+    const event = {
+      cwd: path.join(root, "pkg"),
+      launchDir: root,
+      sessionId: "cd-1",
+      agent: "main",
+      kind: "prompt" as const,
+    }
+    expect((await projectsForEvent(event, TEST_HOME, NO_HOME)).own).toEqual([path.join(root, "pkg"), root])
+    expect(await sessionRoots(TEST_HOME, "cd-1", "main")).toEqual([path.join(root, "pkg"), root])
+  })
+
+  test("the main agent's shell calls and stop list its subagents' worktrees apart; a subagent's never reach another's", async () => {
+    const lead = await createProject({ [CONFIG]: config })
+    const w1 = await createProject({ [CONFIG]: config })
+    const w2 = await createProject({ [CONFIG]: config })
+    await recordSessionRoots(TEST_HOME, "tree-1", "main", [lead])
+    await recordSessionRoots(TEST_HOME, "tree-1", "sub1", [w1])
+    await recordSessionRoots(TEST_HOME, "tree-1", "sub2", [w2, lead])
+    const of = (agent: string, cwd: string, kind: "verify" | "shell-after" | "prompt") =>
+      projectsForEvent({ cwd, launchDir: lead, sessionId: "tree-1", agent, kind }, TEST_HOME, NO_HOME)
+
+    for (const kind of ["verify", "shell-after"] as const) {
+      expect(await of("main", lead, kind)).toEqual({ own: [lead], subagents: [w1, w2] })
+      expect(await of("sub1", w1, kind)).toEqual({ own: [w1], subagents: [] })
+    }
+    // A subagent working in the lead's tree reaches it from there, and only it.
+    expect(await of("sub2", lead, "verify")).toEqual({ own: [lead, w2], subagents: [] })
+    // A prompt only resets bookkeeping: it reaches every project the session ran.
+    expect(await of("main", lead, "prompt")).toEqual({ own: [lead, w1, w2], subagents: [] })
   })
 })
 

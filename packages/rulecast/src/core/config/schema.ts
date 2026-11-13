@@ -222,6 +222,12 @@ export const configSchema = z
       })
       .strict()
       .prefault({}),
+    /**
+     * Whether the main agent's shell calls and stop also reach projects only its subagents ran, such
+     * as each subagent's own worktree. `exclude` leaves those to the subagents' own hooks. A
+     * subagent's never reach another agent's projects either way (core/projects.ts).
+     */
+    subagent_projects: z.enum(["include", "exclude"]).default("include"),
     stop_gate: z
       .object({ max_blocks: z.number().int().nonnegative().default(1) })
       .strict()
@@ -284,6 +290,7 @@ export const configSchema = z
     maxMatchesPerRule: input.max_matches_per_rule,
     maxFileBytes: input.max_file_bytes,
     timeouts: { editDeadlineMs: input.timeouts.edit_deadline_ms, verifyMs: input.timeouts.verify_ms },
+    subagentProjects: input.subagent_projects,
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
     refuseGate: { maxRefusals: input.refuse_gate.max_refusals },
     mode: input.mode ?? null,

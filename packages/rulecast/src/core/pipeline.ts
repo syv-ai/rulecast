@@ -65,6 +65,12 @@ export interface PipelineOptions {
   /** verify from an agent's stop: decide block / allow / capReached. Needs a session. */
   stopGate?: boolean
   /**
+   * The hook: only the main agent's subagents ran this project (each in its own worktree, say), and
+   * its config's `subagent_projects` let the main agent's event in. Changes the advice of the notice
+   * for a shared working tree, which a separate worktree does not cure.
+   */
+  subagentsProject?: boolean
+  /**
    * `.rulecast/baseline.json`, for a verify with no baseline of its own (no session, no base
    * commit): a match whose id it lists is pre-existing. Any other baseline wins, so it is ignored
    * there. Hooks never pass it.
@@ -131,6 +137,13 @@ const SHARED_TREE =
   "command to every file that changed while it ran, so findings here and at your stop may be another " +
   "agent's. Give each agent that runs in parallel its own worktree (in Claude Code, a subagent with " +
   "`isolation: worktree`)."
+
+/** SHARED_TREE for a project only the main agent's subagents ran, which its config lets the main agent reach. */
+const SUBAGENTS_TREE =
+  "rulecast: a subagent ran a shell command in its own working tree while yours ran. Your shell calls are " +
+  "checked there too, so findings from that tree, here and at your stop, may be the subagent's. To leave a " +
+  "subagent's worktree to its own hooks, set `subagent_projects: exclude` in that worktree's " +
+  "`.rulecast-config.yaml`."
 
 /**
  * What every step of one invocation shares. Set once by `startRun`; the accumulators (`warnings`,
@@ -306,7 +319,8 @@ async function shellAfter(
     ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
   ])
   if (files.length === 0) return null
-  return { files, sharedCall, agentNotices: shared ? [SHARED_TREE] : [] }
+  const notice = run.options.subagentsProject === true ? SUBAGENTS_TREE : SHARED_TREE
+  return { files, sharedCall, agentNotices: shared ? [notice] : [] }
 }
 
 /**
