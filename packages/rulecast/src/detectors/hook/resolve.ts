@@ -8,6 +8,32 @@ import { localBin, onPath } from "../../core/which"
 import type { Runner } from "./framing"
 
 export const PRE_COMMIT_CONFIG = ".pre-commit-config.yaml"
+export const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"]
+/** Every name lefthook reads a main config from, YAML or not: whether lefthook is set up at all. */
+const LEFTHOOK_ANY = ["", ".", ".config/"].flatMap((dir) =>
+  ["yml", "yaml", "toml", "json", "jsonc"].map((ext) => `${dir}lefthook.${ext}`),
+)
+
+/** Whether the repository's top holds `file`. */
+export async function hasConfig(top: string, file: string): Promise<boolean> {
+  try {
+    await readFile(path.join(top, file))
+    return true
+  } catch (error) {
+    if (isNotFound(error)) return false
+    throw error
+  }
+}
+
+/**
+ * What to say when a hook rule's hook manager has no config here: the repository moved to another
+ * manager, or the rule was copied from another repository (#87). Null when the config is there.
+ */
+export async function missingManager(top: string, manager: "pre-commit" | "lefthook"): Promise<string | null> {
+  const files = manager === "pre-commit" ? [PRE_COMMIT_CONFIG] : LEFTHOOK_ANY
+  for (const file of files) if (await hasConfig(top, file)) return null
+  return `no ${files[0]} in the repository, so ${manager} is not set up here and this rule cannot run; point the rule at the hook manager the project uses now, or remove it`
+}
 
 type JsonObject = Record<string, unknown>
 const isObject = (value: unknown): value is JsonObject =>

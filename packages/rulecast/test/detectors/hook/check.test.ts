@@ -54,7 +54,7 @@ describe("hook detector check", () => {
   })
 
   test("lefthook: the binary, and each job it cannot find", async () => {
-    const root = await createProject({})
+    const root = await createProject({ "lefthook.yml": "pre-commit:\n  jobs:\n    - name: lint\n      run: x\n" })
     const dump = JSON.stringify({ "pre-commit": { jobs: [{ name: "lint", run: "x" }] } })
     const lefthook = await bin(root, "lefthook", `echo '${dump}'`)
     expect(
@@ -71,5 +71,21 @@ describe("hook detector check", () => {
         rules: ["b"],
       },
     ])
+  })
+
+  test("a hook manager with no config here is named as the problem (#87)", async () => {
+    const root = await createProject({})
+    const results = await check(root, [
+      { id: "a", config: { "pre-commit": "mypy" } },
+      { id: "b", config: { lefthook: "pre-commit/lint" } },
+    ])
+    expect(results.map((result) => [result.what, result.level, result.rules])).toEqual([
+      ["pre-commit", "error", ["a"]],
+      ["lefthook", "error", ["b"]],
+    ])
+    expect(results[0]!.detail).toMatch(
+      /^no \.pre-commit-config\.yaml in the repository, so pre-commit is not set up here/,
+    )
+    expect(results[1]!.detail).toMatch(/^no lefthook\.yml in the repository, so lefthook is not set up here/)
   })
 })

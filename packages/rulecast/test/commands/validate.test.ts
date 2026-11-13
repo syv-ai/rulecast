@@ -225,6 +225,25 @@ describe("rulecast validate: tool rules", () => {
     })
   })
 
+  test("a hook rule whose hook manager has no config here says so, once per rule (#87)", async () => {
+    // A repository that moved from pre-commit to another hook manager keeps its hook rules.
+    const root = await createProject({
+      "hk.pkl": 'amends "package://github.com/jdx/hk/releases/download/v1.0.0/hk@1.0.0#/Config.pkl"\n',
+      ".rulecast-config.yaml": localConfig([
+        { id: "types", name: "Types", detect: { hook: { "pre-commit": "mypy" } }, message: "{{message}}" },
+        { id: "lint", name: "Lint", detect: { hook: { lefthook: "pre-commit/lint" } }, message: "{{message}}" },
+      ]),
+    })
+    const result = await validate(root)
+    expect(result.code).toBe(2)
+    expect(result.stdout).toContain(
+      ".rulecast-config.yaml (types): no .pre-commit-config.yaml in the repository, so pre-commit is not set up here",
+    )
+    expect(result.stdout).toContain(
+      ".rulecast-config.yaml (lint): no lefthook.yml in the repository, so lefthook is not set up here",
+    )
+  })
+
   test("names a lines pattern that does not compile", async () => {
     const root = await createProject({
       ".rulecast-config.yaml": localConfig([

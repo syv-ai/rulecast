@@ -16,6 +16,7 @@ import {
   findPreCommitHook,
   lefthookCommand,
   lefthookDump,
+  missingManager,
   PRE_COMMIT_CONFIG,
   preCommitRunner,
   substituteFiles,
@@ -195,6 +196,12 @@ export const hookDetector: Detector<HookConfig> = {
     const problems: { rule: string; message: string }[] = []
     const top = await repositoryTop(input.cwd)
     for (const rule of input.rules) {
+      const manager = rule.config["pre-commit"] !== undefined ? "pre-commit" : "lefthook"
+      const missing = await missingManager(top, manager)
+      if (missing !== null) {
+        problems.push({ rule: rule.id, message: missing })
+        continue
+      }
       const id = rule.config["pre-commit"]
       if (id !== undefined && (await findPreCommitHook(top, id)) === null) {
         problems.push({ rule: rule.id, message: `no hook with id "${id}" in ${PRE_COMMIT_CONFIG}` })
@@ -206,7 +213,15 @@ export const hookDetector: Detector<HookConfig> = {
     const results: CheckResult[] = []
     const top = await repositoryTop(input.cwd)
     const preCommit = input.rules.filter((rule) => rule.config["pre-commit"] !== undefined)
-    if (preCommit.length > 0) {
+    const preCommitMissing = preCommit.length > 0 ? await missingManager(top, "pre-commit") : null
+    if (preCommitMissing !== null) {
+      results.push({
+        what: "pre-commit",
+        level: "error",
+        detail: preCommitMissing,
+        rules: preCommit.map((rule) => rule.id),
+      })
+    } else if (preCommit.length > 0) {
       const found = await preCommitRunner(input.cwd, top, input.signal)
       results.push(
         found === null
@@ -227,7 +242,15 @@ export const hookDetector: Detector<HookConfig> = {
       }
     }
     const lefthook = input.rules.filter((rule) => rule.config.lefthook !== undefined)
-    if (lefthook.length > 0) {
+    const lefthookMissing = lefthook.length > 0 ? await missingManager(top, "lefthook") : null
+    if (lefthookMissing !== null) {
+      results.push({
+        what: "lefthook",
+        level: "error",
+        detail: lefthookMissing,
+        rules: lefthook.map((rule) => rule.id),
+      })
+    } else if (lefthook.length > 0) {
       const command = await lefthookCommand(input.cwd, top, input.signal)
       if (command === null) {
         results.push({

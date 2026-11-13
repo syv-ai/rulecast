@@ -1,6 +1,6 @@
 import { parse } from "yaml"
 
-import { PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
+import { LEFTHOOK_CONFIGS, PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
 
 /** A hook the project already declares, as init offers it. */
 export interface DetectedHook {
@@ -61,7 +61,7 @@ export interface HookScan {
   skipped: SkippedHook[]
 }
 
-export const LEFTHOOK_CONFIGS = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml"]
+export { LEFTHOOK_CONFIGS }
 
 /** Names that say "I rewrite files": the hook is a formatter or a fixer. */
 const FIXER_NAME =
