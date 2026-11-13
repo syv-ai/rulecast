@@ -82,6 +82,68 @@ describe("detectHooks", () => {
     ])
   })
 
+  test("a hook that can never fail says why (#77)", async () => {
+    const config = `repos:
+  - repo: local
+    hooks:
+      - id: mypy-gate
+        entry: bash -c 'mypy "\${files[@]}" || true'
+        language: system
+      - id: knip-check
+        entry: bash -c 'cd frontend && npm run knip || true'
+        language: system
+      - id: exit-zero
+        entry: bash -c 'pytest; exit 0'
+        language: system
+      - id: lenient
+        entry: bash -c 'set +e; ty check'
+        language: system
+      - id: via-script
+        entry: npm run typecheck
+        language: system
+      - id: honest
+        entry: bash -c 'tsc --noEmit || exit 1'
+        language: system
+`
+    const scripts = JSON.stringify({ scripts: { typecheck: "tsc --noEmit || :" } })
+    const hooks = await detectHooks(files({ ".pre-commit-config.yaml": config, "package.json": scripts }))
+    expect(hooks.map((hook) => [hook.id, hook.neverFails])).toEqual([
+      ["hook/mypy-gate", "|| true"],
+      ["hook/knip-check", "|| true"],
+      ["hook/exit-zero", "; exit 0"],
+      ["hook/lenient", "set +e"],
+      ["hook/via-script", "|| : (in npm run typecheck)"],
+      ["hook/honest", undefined],
+    ])
+  })
+
+  test("a hook's stages come from its own stages, the config's default_stages, or its lefthook hook (#78)", async () => {
+    const config = `default_stages: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: conventional
+        entry: conventional-pre-commit
+        language: system
+        stages: [commit-msg]
+      - id: backend-tests
+        entry: pytest
+        language: system
+        stages: [manual]
+      - id: lint
+        entry: eslint .
+        language: system
+`
+    const hooks = await detectHooks(files({ ".pre-commit-config.yaml": config }))
+    expect(hooks.map((hook) => [hook.id, hook.stages])).toEqual([
+      ["hook/conventional", ["commit-msg"]],
+      ["hook/backend-tests", ["manual"]],
+      ["hook/lint", ["pre-commit"]],
+    ])
+    const lefthook = await detectHooks(files({ "lefthook.yml": LEFTHOOK }))
+    expect(lefthook.map((hook) => hook.stages)).toEqual([["pre-commit"], ["pre-commit"], ["pre-push"]])
+  })
+
   test("hook names that are not rule ids become valid, distinct ids; detect keeps the real name", async () => {
     // A lefthook job's name is free text, and a local pre-commit hook's id may have underscores or
     // capitals: "lint typescript" was offered as hook/pre-commit-lint typescript, which init then

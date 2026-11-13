@@ -31,6 +31,17 @@ export interface DetectedHook {
   description?: string
   /** It runs a linter init also offers as a rule (`linter/ruff`): that rule is offered instead. */
   sameAs?: string
+  /**
+   * What makes it exit 0 whatever it finds, as written: "|| true", "; exit 0", "set +e". A rule on
+   * it never fires (#77).
+   */
+  neverFails?: string
+  /**
+   * The git stages it runs at: pre-commit's `stages` (else the config's `default_stages`), or the
+   * lefthook hook it is under. Absent: pre-commit's default, every stage that runs on commit.
+   * `commit-msg` checks the message, not the code; `manual` runs only when asked for (#78).
+   */
+  stages?: string[]
 }
 
 /** A hook the config declares that init does not offer in this project, and why. */
@@ -103,6 +114,29 @@ function packageRun(command: string): { manager: string; name: string; explicit:
 
 /** The project's package.json scripts, by name. */
 export type PackageScripts = Readonly<Record<string, string>>
+
+/** Ways a command exits 0 whatever it finds: the first match, as written, is the evidence. */
+const SWALLOWS_EXIT = /\|\|\s*(?:true|:|exit\s+0)(?=\s*(?:$|[;'")&]))|;\s*exit\s+0\b(?=\s*(?:$|['"]))|\bset\s+\+e\b/
+
+/**
+ * Whether a hook's command can never fail, and the part that says so. A package script it runs is
+ * looked at too, one level down, as for `modifies`.
+ */
+function swallowsExit(command: string, scripts: PackageScripts): string | undefined {
+  const own = SWALLOWS_EXIT.exec(command)
+  if (own) return own[0].replace(/\s+/g, " ")
+  const run = packageRun(command)
+  const body = run !== null && Object.hasOwn(scripts, run.name) ? scripts[run.name] : undefined
+  const inScript = body === undefined ? null : SWALLOWS_EXIT.exec(body)
+  return inScript ? `${inScript[0].replace(/\s+/g, " ")} (in ${run!.manager} run ${run!.name})` : undefined
+}
+
+/** A hook's `stages`, when they are a list of names. */
+function stagesOf(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const names = value.filter((stage): stage is string => typeof stage === "string")
+  return names.length === 0 ? undefined : names
+}
 
 const writesByItself = (command: string) => WRITES_BY_DEFAULT.test(command) && !CHECK_ONLY.test(command)
 
@@ -184,6 +218,7 @@ function preCommitHooks(
 ): void {
   if (!isObject(config) || !Array.isArray(config.repos)) return
   const hooks = scan.offered
+  const defaultStages = stagesOf(config.default_stages)
   for (const repo of config.repos) {
     // meta hooks check the config itself, not the code.
     if (!isObject(repo) || repo.repo === "meta" || !Array.isArray(repo.hooks)) continue
@@ -203,6 +238,8 @@ function preCommitHooks(
         continue
       }
       const description = text(hook.description)
+      const neverFails = swallowsExit(`${entry} ${args}`, scripts)
+      const stages = stagesOf(hook.stages) ?? defaultStages
       hooks.push({
         id: `hook/${idSegment(hook.id)}`,
         name,
@@ -211,6 +248,8 @@ function preCommitHooks(
         ...(FIXER_NAME.test(hook.id) ? { modifies: true } : writes(`${entry} ${args}`, scripts)),
         source,
         ...(description === "" ? {} : { description }),
+        ...(neverFails === undefined ? {} : { neverFails }),
+        ...(stages === undefined ? {} : { stages }),
       })
     }
   }
@@ -300,6 +339,7 @@ function lefthookJobs(
       scan.skipped.push({ name, source, reason, elsewhere })
       return
     }
+    const neverFails = swallowsExit(run, scripts)
     scan.offered.push({
       id: `hook/${idSegment(`${hook}-${name}`)}`,
       name,
@@ -307,6 +347,8 @@ function lefthookJobs(
       files,
       ...(job.stage_fixed === true ? { modifies: true } : writes(run, scripts)),
       source,
+      ...(neverFails === undefined ? {} : { neverFails }),
+      stages: [hook],
     })
   }
   if (Array.isArray(jobs)) {

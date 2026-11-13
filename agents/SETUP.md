@@ -23,6 +23,8 @@ It writes nothing in the project. It fetches the catalog's rule data into ruleca
 - `committers` is null when nobody committed in the last six months (bots left out), or in a shallow clone.
 - `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
+- A hook that exits 0 whatever it finds has `neverFails`, the part of its command that makes it so (`"|| true"`, `"; exit 0"`, `"set +e"`). A rule on it would never fire.
+- A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's stage is the hook it sits under.
 - Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (how many rules its config sets to warn; null whenever `errorRules` is) and `candidates`, the doc sections that name one of its error rules (step 7).
 
 Then read what needs judgement:
@@ -46,7 +48,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | CI | `ci` | an aside in the footer: rulecast never edits CI | never |
 | Conventions location | the config's `conventions`, else an existing folder such as `docs/conventions/`, else `primaryDoc` | that path | none of the three exists |
 | Linter rules | `linters.offered` | each on, with `--linters`: the errors the linter's own config reports reach the agent after each edit (ESLint's when it stops), and only the ones its edit caused. The row says how many rules the config makes errors and how many warnings will not be delivered | never |
-| Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script; one with `sameAs` off, because the linter rule it names runs the same linter, after each edit | you cannot read the script |
+| Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script; one with `sameAs` off, because the linter rule it names runs the same linter, after each edit; one with `neverFails` off, because it can't fail, and tell the developer: they may count it as a gate; `stages` with `commit-msg` off, because it checks the commit message, not the code; `stages` with `manual` off, because it runs only when asked for and may be slower than the stop check's timeout | you cannot read the script |
 | Generated paths | `generated` | each on, with `--generated` | never |
 | Vendored paths | `vendored` | each on, with `--vendored` | never |
 | Catalog rules | `catalog.rules` with `matching` above 0, `installed: false`, not in a pack, not metered | each on, with `--catalog` | never. A metered one waits for the llm answer and is `off` until then |

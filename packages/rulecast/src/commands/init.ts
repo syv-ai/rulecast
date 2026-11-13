@@ -327,6 +327,10 @@ export interface InitReport {
       configured: boolean
       /** It runs a linter offered under `linters`: that rule is the one to offer. */
       sameAs?: string
+      /** What makes it exit 0 whatever it finds ("|| true"): a rule on it never fires. */
+      neverFails?: string
+      /** The git stages it runs at, when its config names them: `commit-msg`, `manual`, `pre-push`. */
+      stages?: string[]
     }[]
     skipped: { name: string; source: string; reason: string }[]
   }
@@ -513,6 +517,8 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
         ...(hook.runs === undefined ? {} : { runs: hook.runs }),
         configured: configured.has(hook.id),
         ...(hook.sameAs === undefined ? {} : { sameAs: hook.sameAs }),
+        ...(hook.neverFails === undefined ? {} : { neverFails: hook.neverFails }),
+        ...(hook.stages === undefined ? {} : { stages: hook.stages }),
       })),
       skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
     },
@@ -626,10 +632,30 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 const listed = (items: readonly string[]) =>
   items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 
-/** How init's text says whether an offered hook changes files. */
-function writesNote(hook: { modifies: boolean | null; runs?: string; sameAs?: string }): string {
+/** The stages at which a hook runs over the code a commit or push holds. */
+const CODE_STAGES = new Set(["pre-commit", "pre-merge-commit", "pre-push", "commit", "merge-commit", "push"])
+
+/**
+ * How init's text says what to know about an offered hook before making it a rule: whether it
+ * changes files, can never fail, or runs at a stage that is not about the code.
+ */
+function writesNote(hook: {
+  modifies: boolean | null
+  runs?: string
+  sameAs?: string
+  neverFails?: string
+  stages?: string[]
+}): string {
   if (hook.sameAs !== undefined) return ` (same as ${hook.sameAs}: offer that instead)`
-  if (hook.modifies === true) return " (changes files)"
-  if (hook.modifies === null) return ` (may change files: runs ${hook.runs})`
-  return ""
+  const notes: string[] = []
+  if (hook.modifies === true) notes.push("changes files")
+  if (hook.modifies === null) notes.push(`may change files: runs ${hook.runs}`)
+  if (hook.neverFails !== undefined) notes.push(`never fails: ${hook.neverFails}`)
+  const stages = hook.stages ?? []
+  if (stages.length > 0 && !stages.some((stage) => CODE_STAGES.has(stage))) {
+    if (stages.includes("commit-msg")) notes.push("commit-msg: checks the commit message, not the code")
+    else if (stages.includes("manual")) notes.push("manual stage: runs only when asked for, and may be slow")
+    else notes.push(`runs at ${stages.join(", ")}`)
+  }
+  return notes.length === 0 ? "" : ` (${notes.join("; ")})`
 }
