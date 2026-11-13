@@ -79,7 +79,7 @@ Fill [setup-page.html](setup-page.html). Copy the file and replace only the JSON
 
 If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is.
 
-In the same turn, ask every question on the page with your question tool, several in one call where the tool allows, and add one last question: "Everything else on the page: go ahead as shown / I'll name what to change". When the developer answers every question and picks go ahead, that is approval.
+In the same turn, ask every question on the page with your question tool, and add one last question: "Everything else on the page: go ahead as shown / I'll name what to change". A question tool may cap how many questions one call takes (Claude Code's takes 4), and the go-ahead counts toward that cap. Then split the questions over two calls in the turn, the go-ahead last in the second. If they still do not fit, ask the rest in the next turn and the go-ahead after them. When the developer answers every question and picks go ahead, that is approval.
 
 ## 5. The reply
 
