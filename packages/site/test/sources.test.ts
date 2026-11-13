@@ -140,7 +140,7 @@ describe("the Commands page", () => {
     expect(table.indexOf("| [`doctor`]")).toBeLessThan(table.indexOf("| **Advanced** |"))
     expect(table.indexOf("| **Advanced** |")).toBeLessThan(table.indexOf("| [`baseline`]"))
     expect(body).toMatch(/^## rulecast run$/m)
-    expect(body).toContain("--from-ref A    Files changed since the merge base with A")
+    expect(body).toMatch(/--from-ref A +Files changed since the merge base with A/)
     expect(body).toContain("  3  Incomplete:")
     expect(body).toContain("[output contract](agents/reference/output.md#exit-codes)")
   })
