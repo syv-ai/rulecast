@@ -95,6 +95,7 @@ export const COMMANDS: CommandHelp[] = [
       ["--session <id>", "The files an agent session edited, as at its Stop"],
       ["--llm", "Include metered (llm) rules in a staged run, which skips them by default"],
       ["--no-llm", "Skip metered (llm) rules in any run"],
+      ["--commit-msg FILE", "Judge the commit message in FILE with the stages: [commit-msg] rules, and nothing else"],
     ],
     notes: [
       "With --all-files or --files, findings listed in a committed .rulecast/baseline.json are",

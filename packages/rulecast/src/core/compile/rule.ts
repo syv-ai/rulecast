@@ -163,9 +163,26 @@ export async function compileRule(
   }
   const stages: Stage[] = data.stages ?? context.config.defaultStages ?? defaultStages
 
+  if (stages.includes("commit-msg")) {
+    // A commit message is no file in the project: rulecast run --commit-msg hands it to the
+    // detector as text, so only a detector that judges the content it is given can read it (#79).
+    if (stages.length > 1)
+      return "stages [commit-msg] judge the commit message: it cannot share a rule with other stages"
+    const implementation = detector === null ? undefined : context.registry.get(detector.kind)
+    const readsText = implementation?.guards === true || implementation?.takesContent?.(detector?.config) === true
+    // A whole-file detector (path) judges where a file is, and a message is nowhere.
+    if (!detector || !readsText || implementation?.wholeFile === true) {
+      return "stages [commit-msg] need a detector that judges the text it is given, such as regex or llm"
+    }
+    if (data.files !== undefined || data.exclude !== undefined)
+      return "a commit-msg rule judges the message: leave out files and exclude"
+    if (data.refuse_write) return "refuse_write does not apply to a commit message"
+    if (data.scope !== undefined) return "scope does not apply to a commit message: it is judged whole"
+  }
+
   if (detector) {
     if (data.message === undefined) return "rules with detect need a message"
-    if (!stages.includes("edit") && !stages.includes("verify")) {
+    if (!stages.includes("edit") && !stages.includes("verify") && !stages.includes("commit-msg")) {
       return "stages [touch] never run the detector: add edit or verify, or remove detect"
     }
     if (data.refuse_write) {

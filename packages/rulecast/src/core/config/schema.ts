@@ -5,7 +5,7 @@ import { parseReported } from "../errors"
 import { referenceInputSchema } from "../references"
 import { LLM_PROVIDERS } from "../types"
 
-export const STAGES = ["touch", "edit", "verify"] as const
+export const STAGES = ["touch", "edit", "verify", "commit-msg"] as const
 export type Stage = (typeof STAGES)[number]
 
 export const RULE_ID = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/

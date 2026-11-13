@@ -49,6 +49,7 @@ describe("gitHookCommand", () => {
     expect(Object.fromEntries(hooks.map((hook) => [hook.id, hook.entry]))).toEqual({
       rulecast: gitHookCommand("run"),
       "rulecast-push": gitHookCommand('run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"'),
+      "rulecast-commit-msg": gitHookCommand('run --commit-msg "$1"'),
     })
   })
 

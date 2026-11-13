@@ -468,8 +468,9 @@ A rule that fires three or more times has its `message` printed once, with the v
 - `touch`: the first time an agent reads or edits a matching file in its context, the rule's `context` is delivered, without a message. Every touch rule that matches the file is delivered together, and a section inside a whole file sent with it is sent once. When it is more than one message holds, the rules that cite the fewest items go first, and what does not fit is named for the agent to read. `rulecast doctor` reports each file whose touch context does not fit.
 - `edit`: the detector runs on each file the agent edits.
 - `verify`: the detector runs when the agent stops, on the files it changed, and in `rulecast run`. A staged `rulecast run` (no file flags, the pre-commit check) skips `llm` rules unless given `--llm`.
+- `commit-msg`: the detector judges a commit message, in `rulecast run --commit-msg FILE`, which the commit-msg git hook runs ([Git hooks and CI](../../guides/git-hooks-ci.md#commit-messages)). Git's comment lines and anything below the scissors line are left out. Findings name the message `COMMIT_EDITMSG`, and every one is new. It is the rule's only stage; the detector must judge the text it is given (`regex`, `ast-grep`, `llm`), and the rule has no `files`, `exclude`, `scope` or `refuse_write`.
 
-Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults, which [detectors.md](detectors.md) gives for each. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit` or `verify` among its stages.
+Defaults, in order: the rule's `stages`, then `default_stages`, then `[touch]` for rules without `detect` or the detector's own defaults, which [detectors.md](detectors.md) gives for each. A rule without `detect` needs `stages: [touch]` and `context`. A rule with `detect` needs `edit`, `verify` or `commit-msg` among its stages.
 
 ### Overrides
 

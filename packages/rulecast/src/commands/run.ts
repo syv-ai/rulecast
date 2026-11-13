@@ -48,6 +48,7 @@ import {
 import { fetchingRepos } from "../core/repos/provider"
 import { recordedMode, sessionDir } from "../core/session/session"
 import type { ContentSource, Delivery } from "../core/types"
+import { commitMsgRun } from "./commit-msg"
 import type { CliIo } from "./main"
 import { hasProject, toProjectPath } from "./project"
 import { UsageError } from "./usage"
@@ -69,6 +70,8 @@ export interface RunArgs {
   llm: boolean
   /** --ref: try-repo only. */
   ref: string | null
+  /** --commit-msg FILE: judge the commit message in FILE with the commit-msg rules, and nothing else. */
+  commitMsg: string | null
 }
 
 /** Parses run's flags. Positionals after `--files` are files, like pre-commit's `--files F…`. */
@@ -88,6 +91,7 @@ export function parseRunArgs(args: string[]): RunArgs {
       "no-llm": { type: "boolean", default: false },
       llm: { type: "boolean", default: false },
       ref: { type: "string" },
+      "commit-msg": { type: "string" },
     },
   })
   const format = values.format as CliFormat
@@ -131,6 +135,7 @@ export function parseRunArgs(args: string[]): RunArgs {
     noLlm: values["no-llm"],
     llm: values.llm,
     ref: values.ref ?? null,
+    commitMsg: values["commit-msg"] ?? null,
   }
 }
 
@@ -528,6 +533,13 @@ export async function compileRun(
 export async function runCommand(root: string, args: string[], registry: DetectorRegistry, io: CliIo): Promise<number> {
   const run = parseRunArgs(args)
   if (run.ref !== null) throw new UsageError("--ref only applies to try-repo")
+  if (run.commitMsg !== null) {
+    const other = run.leading.length > 0 || run.files !== null || run.allFiles || run.fromRef !== null || run.summary
+    if (other)
+      throw new UsageError("--commit-msg judges a commit message: it takes no files, refs, rule id or --summary")
+    if (run.format === "sarif") throw new UsageError("--commit-msg has no SARIF output: use terminal, agent or json")
+    return commitMsgRun(root, run.commitMsg, run.format, registry, io)
+  }
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   const ruleId = run.leading[0] ?? null
   const { projects, displayFrom } = await compileRun(

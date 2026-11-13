@@ -497,6 +497,15 @@ async function dryRun(
       lines.push({ rule: rule.id, level: "ok", detail: "context only, nothing to run" })
       continue
     }
+    // A commit-msg rule judges a message, not the project's files (#79).
+    if (rule.stages.includes("commit-msg")) {
+      lines.push({
+        rule: rule.id,
+        level: "ok",
+        detail: "judges commit messages: rulecast run --commit-msg FILE runs it",
+      })
+      continue
+    }
     // Spec §5: metered rules — llm — are not dry-run. Each run costs money, and doctor is a command
     // people type when something is already wrong; their check reports what can be known for free.
     if (detection.registry.get(rule.detector.kind)?.metered === true) {

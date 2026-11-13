@@ -24,3 +24,12 @@
   pass_filenames: false
   always_run: true
   stages: [pre-push]
+- id: rulecast-commit-msg
+  name: rulecast (commit message)
+  description: Check the commit message against the project's commit-msg rules.
+  # pre-commit hands a commit-msg hook the message file, which the script reads as $1.
+  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --commit-msg "$1"; if command -v rulecast >/dev/null 2>&1; then rulecast run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
+  language: system
+  pass_filenames: true
+  always_run: true
+  stages: [commit-msg]

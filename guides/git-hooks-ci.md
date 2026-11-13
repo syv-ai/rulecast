@@ -38,6 +38,10 @@ pre-push:
   jobs:
     - name: rulecast
       run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; if command -v rulecast >/dev/null 2>&1; then rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
+commit-msg:
+  jobs:
+    - name: rulecast
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --commit-msg {1}; if command -v rulecast >/dev/null 2>&1; then rulecast run --commit-msg {1}; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --commit-msg {1}; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
 ```
 
 ## hk
@@ -60,10 +64,34 @@ hooks {
       }
     }
   }
+  ["commit-msg"] {
+    steps {
+      ["rulecast"] {
+        check = #"sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --commit-msg {{commit_msg_file}}; if command -v rulecast >/dev/null 2>&1; then rulecast run --commit-msg {{commit_msg_file}}; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --commit-msg {{commit_msg_file}}; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --"#
+      }
+    }
+  }
 }
 ```
 
 The `#"…"#` raw strings take the command as it is.
+
+## Commit messages
+
+A rule with `stages: [commit-msg]` judges the commit message instead of files. The hook entries above include one for the `commit-msg` hook (pre-commit's `rulecast-commit-msg`, needing `default_install_hook_types: [pre-commit, commit-msg]` in its config, or `pre-commit install --hook-type commit-msg`). It runs `rulecast run --commit-msg` on the message, so every committer is checked, person or agent. An agent that commits sees the commit fail with the finding, and fixes the message.
+
+For example, to keep AI co-sign trailers out of commits:
+
+```yaml
+- id: commits/no-ai-trailers
+  name: No AI co-sign trailers
+  stages: [commit-msg]
+  detect:
+    regex:
+      pattern: '^(co-authored-by:.*\b(claude|copilot|anthropic|openai)\b.*|.*generated with \[?claude code.*)$'
+      flags: im
+  message: "{{file}}:{{line}}: an AI co-sign trailer. Commits name their human author only."
+```
 
 ## A team
 
