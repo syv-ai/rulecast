@@ -3,6 +3,7 @@ import path from "node:path"
 import { runInNewContext } from "node:vm"
 import { beforeAll, describe, expect, test } from "vitest"
 
+import { setupPageDocument } from "../../scripts/sync-version"
 import { REPO_ROOT } from "../helpers/catalog"
 
 /** agents/setup-page.html, run without a browser: its render(data) is a pure function of the data. */
@@ -161,5 +162,20 @@ describe("setup page", () => {
   test("it loads nothing but its fonts", () => {
     const urls = [...page.matchAll(/(?:src|href)="(https?:[^"]+)"/g)].map((match) => new URL(match[1]!).host)
     expect(new Set(urls)).toEqual(new Set(["fonts.googleapis.com", "fonts.gstatic.com"]))
+  })
+
+  test("the page is a fragment an artifact publisher can wrap, with a light theme beside the dark (#81)", () => {
+    expect(page).not.toMatch(/<!DOCTYPE|<html[\s>]|<head>|<body>|<meta /i)
+    expect(page.indexOf("<title>")).toBeLessThan(page.indexOf("<style>"))
+    expect(page.indexOf("</style>")).toBeLessThan(page.indexOf('<main class="page" id="app">'))
+    expect(page).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{/)
+  })
+
+  test("the local copy is the fragment as a whole document", async () => {
+    const local = await readFile(path.join(REPO_ROOT, "agents/setup-page.local.html"), "utf8")
+    expect(local).toBe(setupPageDocument(page))
+    expect(local.startsWith("<!DOCTYPE html>")).toBe(true)
+    expect(local.indexOf("<style>")).toBeGreaterThan(local.indexOf("<head>"))
+    expect(local.indexOf("<main")).toBeGreaterThan(local.indexOf("<body>"))
   })
 })

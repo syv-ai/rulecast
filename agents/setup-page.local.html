@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<!-- Generated from agents/setup-page.html by pnpm sync-version: edit that file. -->
+<!--
+  rulecast's setup page (agents/SETUP.md, step 4). An agent copies this file, replaces the JSON in
+  <script id="setup-data"> with the defaults it drew from the repository and the questions only the
+  developer can answer, and shows the page: a private artifact where the agent can publish one,
+  otherwise a local file outside the repository. CONVENTIONS.md uses it too, with conventions as the
+  rows and no repository, questions or candidates. The page is read-only: the developer answers,
+  strikes and changes items in the conversation. Change only the data block.
+
+  Two copies of one page: setup-page.html is a fragment, as an artifact publisher takes it (it wraps
+  the page in its own document); setup-page.local.html is the same page as a whole document, for a
+  local file, generated from the first by pnpm sync-version. The page follows the viewer's light or
+  dark theme.
+
+  Data (every string is text; `backticks` become code, nothing else is markup):
+  {
+    "project":  "tidewater",                     the repository's name, in the title
+    "state":    "Nothing written yet",
+    "lead":     "One or two sentences on what the page shows and what to do next.",
+    "key":      true,                            show the colour key (found / you said / sessions)
+    "questionsTitle": "Needs your answer",       optional heading for the questions
+    "questions": [                               shown first, right after the header
+      { "n": 1, "question": "May rules ask a model?", "why": ["Paragraph."],
+        "options": [ { "text": "Yes, with Haiku", "lands": "`llm.model: haiku`", "recommended": false } ],
+        "answer": null }                         the developer's answer, shown in place of the options
+    ],
+    "tree": [                                    optional: the repository as setup touches it
+      { "depth": 0, "name": "tidewater/", "highlight": true, "dim": false,
+        "marks": [ { "kind": "session" | "config" | "conventions" | "note", "text": "sessions start here" } ] }
+    ],
+    "rules": [ { "n": 3, "state": "default", "name": "gitleaks", "source": "your pre-commit hook", "text": "What it does here." } ],
+    "decisionsTitle": "Setup",                   optional heading for the rows
+    "columns": ["Decision", "Found", "Set to", "Lands in"],   optional
+    "decisions": [
+      { "n": 8, "state": "default",
+        "decision": "Who it's for",
+        "found": "4 committers" | null,          null: nothing in the repository says
+        "value": "Team: hooks in the shared settings.",
+        "lands": "`--scope shared`",
+        "why": ["Paragraph.", "Paragraph."],
+        "detail": { "label": "What changes" | "Draft rules", "code": "# comment line\n+ added line\nplain line" } | null,
+        "open": false }
+    ],
+    "candidatesTitle": "Conventions to draft as rules",       optional
+    "candidates": [ { "n": 14, "state": "default", "text": "The convention, one sentence.", "source": "from memory",
+                      "recommended": true, "note": "Why it is a candidate.",
+                      "sketch": "- id: …\n  detect: …" | null } ],
+    "footer": { "go": "Say **go ahead** …", "aside": "What the developer does themselves, such as CI." }
+  }
+
+  Numbers and states. Every question, rule, row and candidate has a number `n`, which the developer
+  names in the chat ("strike 4", "6: also `backend/`"). Three rules hold:
+  - `n` is unique across the whole page, and an item keeps its number in every later version of the
+    page. A row without `n` is numbered by its place in "decisions" (1, 2, …).
+  - A struck item stays on the page, crossed out, so the numbers stay put.
+  - A question is never settled by "go ahead": only an answer settles it.
+  "state" is one of:
+  - "default": set from what was found in the repository, with a small "default" label. Also what a
+    missing "state" means.
+  - "said":    the developer's own word, in blue.
+  - "off":     offered, not on: faint, labelled "off · say N to turn on".
+  - "struck":  struck by the developer: crossed out.
+
+  In "go", **double asterisks** mark the words to say. Write every "<" inside a string as \u003c, so
+  text such as a closing script tag cannot end the data block early; the page shows it as "<".
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rulecast setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* One deep surface, depth by tone alone, no borders. The repository map leads; decisions read as a
+   quiet ledger under it. Sand = found in the repository, blue = the developer's word, green = where
+   sessions start. */
+:root {
+  --bg: #080b10;
+  --tone-1: #0e131a;
+  --tone-2: #141a23;
+  --tone-3: #1b232e;
+  --ink: #e6eaf0;
+  --muted: #8b95a4;
+  --faint: #566070;
+  --said: #9cc2ee;
+  --found: #d9bd8f;
+  --session: #9fd6b4;
+  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+/* The same tones on paper, for a viewer in a light theme. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f5f1;
+    --tone-1: #eeece6;
+    --tone-2: #e6e3db;
+    --tone-3: #dcd8ce;
+    --ink: #1b2129;
+    --muted: #59636f;
+    --faint: #8b939e;
+    --said: #2a64a8;
+    --found: #94661c;
+    --session: #2c7a4b;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.6 var(--display); padding: 0 20px 80px; -webkit-font-smoothing: antialiased; }
+h1, h2 { margin: 0; text-wrap: balance; font-weight: 400; }
+p { margin: 0; }
+code { font: 400 0.88em var(--mono); }
+:focus-visible { outline: 2px solid var(--said); outline-offset: 2px; }
+
+.page { max-width: 1040px; margin: 0 auto; padding-top: 64px; display: grid; gap: 56px; }
+
+header { display: grid; gap: 14px; max-width: 640px; }
+.state { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+.state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--found); box-shadow: 0 0 0 4px color-mix(in srgb, var(--found) 18%, transparent); }
+h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.025em; font-weight: 300; }
+h1 b { font-weight: 500; }
+.lead { color: var(--muted); font-size: 16px; max-width: 58ch; }
+.key { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--muted); }
+.key span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; }
+.key .k-found::before { background: var(--found); }
+.key .k-said::before { background: var(--said); }
+.key .k-session::before { background: var(--session); }
+
+h2 { font-size: 13px; color: var(--muted); letter-spacing: 0.01em; font-weight: 500; margin-bottom: 16px; }
+
+/* map */
+.map { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 4px; border-radius: 14px; overflow: hidden; }
+.map.solo { grid-template-columns: 1fr; }
+.tree { background: var(--tone-1); padding: 28px 30px; font: 400 14px/2.05 var(--mono); overflow-x: auto; }
+.tree .r { display: flex; align-items: baseline; gap: 14px; white-space: pre; }
+.tree .g { color: var(--faint); }
+.tree .n { color: var(--ink); }
+.tree .dim .n { color: var(--faint); }
+.tree .a { font: 400 12.5px/1 var(--display); white-space: nowrap; }
+.tree .a.config { color: var(--said); }
+.tree .a.session { color: var(--session); }
+.tree .a.conventions { color: var(--found); }
+.tree .a.note { color: var(--muted); }
+.tree .r.hi { background: linear-gradient(90deg, var(--tone-2), transparent 85%); margin: 0 -30px; padding: 0 30px; }
+.side { background: var(--tone-1); padding: 28px 30px; display: grid; gap: 22px; align-content: start; }
+.rule { display: grid; gap: 4px; }
+.rule .t { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.rule .t b { font-weight: 500; }
+.rule .t span { font-size: 12.5px; color: var(--faint); }
+.rule p { color: var(--muted); font-size: 14px; }
+
+/* ledger */
+.ledger { display: grid; gap: 4px; border-radius: 14px; overflow: hidden; }
+.cols { display: grid; grid-template-columns: 28px minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 0.9fr) 16px; gap: 24px; align-items: baseline; }
+.head { padding: 0 26px 6px; color: var(--faint); font-size: 12.5px; }
+details.row { background: var(--tone-1); font-size: 14px; }
+details.row > summary { list-style: none; cursor: pointer; padding: 18px 26px; }
+details.row > summary::-webkit-details-marker { display: none; }
+details.row > summary::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); transform: rotate(45deg) translateY(-3px); transition: transform .18s ease; justify-self: end; }
+details.row[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
+details.row > summary:hover { background: var(--tone-2); }
+details.row[open] { background: var(--tone-2); }
+.i { color: var(--faint); font: 400 13px var(--mono); font-variant-numeric: tabular-nums; }
+.d { font-weight: 500; }
+.f { color: var(--found); }
+.s { color: var(--said); }
+.l { color: var(--muted); font: 400 13px/1.5 var(--mono); }
+.none { color: var(--faint); }
+.more { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; padding: 0 26px 22px 78px; }
+.more > div { display: grid; gap: 8px; align-content: start; }
+.lab { font-size: 12.5px; color: var(--faint); }
+.more p { color: var(--muted); font-size: 14px; max-width: 58ch; }
+pre { margin: 0; background: var(--bg); border-radius: 10px; padding: 14px 16px; font: 400 12.5px/1.65 var(--mono); color: var(--ink); overflow-x: auto; }
+pre .c { color: var(--faint); }
+pre .add { color: var(--session); }
+
+/* candidates */
+.cands { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px; border-radius: 14px; overflow: hidden; }
+.cand { background: var(--tone-1); padding: 24px 26px; display: grid; gap: 12px; align-content: start; }
+.cand.rec { background: var(--tone-3); }
+.cand .src { font-size: 12.5px; color: var(--faint); }
+.cand.rec .src { color: var(--said); }
+.cand p.t { font-size: 16px; line-height: 1.45; font-weight: 450; }
+.cand p.m { color: var(--muted); font-size: 13.5px; }
+details.sk > summary { list-style: none; cursor: pointer; font-size: 13px; color: var(--muted); }
+details.sk > summary::-webkit-details-marker { display: none; }
+details.sk > summary::before { content: "+ "; color: var(--faint); }
+details.sk[open] > summary::before { content: "− "; }
+details.sk pre { margin-top: 10px; font-size: 12px; }
+
+.foot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; border-radius: 14px; overflow: hidden; }
+.foot .cell { background: var(--tone-1); padding: 22px 26px; font-size: 14px; color: var(--muted); }
+.foot .cell.go { background: var(--tone-2); color: var(--ink); font-size: 15px; }
+.foot .go b { font-weight: 500; color: var(--ink); }
+
+/* questions */
+.qs { display: grid; gap: 4px; border-radius: 14px; overflow: hidden; }
+.q { background: var(--tone-2); padding: 22px 26px; display: grid; gap: 10px; }
+.q .qh { display: flex; gap: 14px; align-items: baseline; }
+.q .qh b { font-weight: 500; font-size: 16px; }
+.q > p { color: var(--muted); font-size: 14px; max-width: 64ch; padding-left: 28px; }
+.q > p.ans { color: var(--said); font-size: 15px; }
+.opts { list-style: none; margin: 4px 0 0; padding: 0 0 0 28px; display: grid; gap: 8px; }
+.opts li { display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; font-size: 14.5px; }
+.opts li::before { content: "○"; color: var(--faint); margin-right: -4px; }
+.opts .l { font-size: 12.5px; }
+
+/* numbers and states: default is ink with a small label, said is blue, off is faint, struck is crossed out */
+.tag { margin-left: 8px; font: 400 11.5px/1 var(--display); color: var(--faint); white-space: nowrap; }
+.v { color: var(--ink); }
+.v.state-said, .rule.state-said p, .cand.state-said p.t { color: var(--said); }
+.v.state-off, .rule.state-off b, .rule.state-off p, .cand.state-off p.t { color: var(--faint); }
+del { color: var(--faint); text-decoration-thickness: 1px; }
+details.row.struck .d, details.row.struck .f, details.row.struck .l { color: var(--faint); }
+.cand .src .i { margin-right: 10px; }
+.rule .t b .i { margin-right: 10px; }
+
+@media (prefers-reduced-motion: reduce) { details.row > summary::after { transition: none; } }
+@media (max-width: 860px) {
+  .map, .foot { grid-template-columns: 1fr; }
+  .head { display: none; }
+  .cols { grid-template-columns: 24px 1fr 16px; gap: 6px 14px; }
+  .cols > :nth-child(n+3) { grid-column: 2; }
+  .more { grid-template-columns: 1fr; padding-left: 26px; }
+  h1 { font-size: 32px; }
+  .q > p, .opts { padding-left: 0; }
+}
+</style>
+</head>
+<body>
+<main class="page" id="app"></main>
+
+<script type="application/json" id="setup-data">
+{
+  "project": "tidewater",
+  "state": "Nothing written yet",
+  "lead": "What I'd set up, from what the repository shows. Answer the two questions, strike or change anything by its number, and I'll write it.",
+  "key": true,
+  "questions": [
+    { "n": 1, "question": "May rules ask a model?",
+      "why": ["Some conventions can't be shown with a pattern. An llm rule asks a model about each changed file. That costs money per file, and the file leaves your machine: through Claude Code to Anthropic.", "Saying yes adds no rule. Each llm rule is still proposed to you, with what it costs."],
+      "options": [
+        { "text": "No llm rules", "lands": "nothing" },
+        { "text": "Yes, with Haiku", "lands": "`llm.model: haiku`" },
+        { "text": "Yes, with Sonnet", "lands": "`llm.model: sonnet`" }
+      ],
+      "answer": null },
+    { "n": 2, "question": "Do agents run here with nobody watching?",
+      "why": ["`agent.yml` runs Claude in CI. The repository can't show whether you run `/goal` or `claude -p` on your own machine.", "The loop-safety rules catch the shortcuts a loop takes to make tests pass: skipped tests, deleted assertions, new suppressions. With nobody watching they are errors, and edits to rulecast's own config are refused."],
+      "options": [
+        { "text": "In CI only", "lands": "`rulecast add loop-safety`", "recommended": true },
+        { "text": "In CI and locally", "lands": "`rulecast add loop-safety`, `RULECAST_MODE=unattended` for those runs" },
+        { "text": "No", "lands": "nothing" }
+      ],
+      "answer": null }
+  ],
+  "tree": [
+    { "depth": 0, "name": "tidewater/", "highlight": true, "marks": [{ "kind": "session", "text": "sessions start here" }, { "kind": "config", "text": "config" }] },
+    { "depth": 1, "name": ".claude/settings.json", "marks": [{ "kind": "note", "text": "hooks, shared" }] },
+    { "depth": 1, "name": ".claude/hooks/rulecast.sh", "marks": [{ "kind": "note", "text": "the script they run" }] },
+    { "depth": 1, "name": ".pre-commit-config.yaml", "marks": [{ "kind": "note", "text": "+ rulecast run" }] },
+    { "depth": 1, "name": "AGENTS.md", "dim": true },
+    { "depth": 1, "name": "docs/conventions/", "highlight": true, "marks": [{ "kind": "conventions", "text": "new conventions go here" }] },
+    { "depth": 1, "name": "api/", "highlight": true, "marks": [{ "kind": "config", "text": "config" }, { "kind": "note", "text": "Python, own AGENTS.md" }] },
+    { "depth": 1, "name": "web/", "marks": [{ "kind": "note", "text": "TypeScript" }] },
+    { "depth": 2, "name": "src/client/", "dim": true, "marks": [{ "kind": "note", "text": "generated" }] },
+    { "depth": 1, "name": ".github/workflows/agent.yml", "dim": true, "marks": [{ "kind": "note", "text": "not touched" }] }
+  ],
+  "rules": [
+    { "n": 3, "state": "default", "name": "gitleaks", "source": "your pre-commit hook", "text": "Whole repository. A secret shows up while the agent is still writing it." },
+    { "n": 4, "state": "default", "name": "linter/ruff", "source": "your Ruff config in `api/pyproject.toml`", "text": "Python in `api/`, after each edit: the errors your Ruff config reports, 82 rules, and only the ones the agent's edit caused. Each links Ruff's page for its rule until you map a doc section to it." },
+    { "n": 5, "state": "off", "name": "ruff", "source": "your pre-commit hook", "text": "Runs the same linter as 4, which checks after each edit instead of at the stop." },
+    { "n": 6, "state": "off", "name": "ruff-format", "source": "your pre-commit hook", "text": "It rewrites files, so it stays a commit hook." },
+    { "n": 7, "state": "default", "name": "generated-code", "source": "catalog", "text": "`web/src/client/` too: its files say they are generated by `@hey-api/openapi-ts`. An edit there is refused with the regenerate step." },
+    { "n": 8, "state": "default", "name": "python/no-silent-except", "source": "catalog", "text": "An `except` whose only statement is `pass`. 41 Python files." }
+  ],
+  "decisionsTitle": "Setup",
+  "decisions": [
+    { "n": 9, "state": "default", "decision": "Who it's for", "found": "4 committers in the last six months", "value": "Team: hooks in the shared settings, config committed.", "lands": "`--scope shared`",
+      "why": ["Four people committed in the last six months, so everyone's agent gets the same hooks and rules."],
+      "detail": { "label": "What changes", "code": "# .claude/settings.json\n+ rulecast's hooks, shared\n# .claude/hooks/rulecast.sh\n+ the script they run" } },
+    { "n": 10, "state": "default", "decision": "Install", "found": "`package.json` pins the tools, pnpm; none installed", "value": "A devDependency.", "lands": "`package.json`",
+      "why": ["The project pins its tools in `package.json`, so rulecast goes there too and everyone runs the same version. The agent hooks and git hooks run it first.", "The other options: the standalone binary, which needs no Node (say 10: binary, and the row shows its install command), or a global `npm install -g @syv-ai/rulecast`. Nothing is installed before you approve."],
+      "detail": { "label": "What changes", "code": "# runs\npnpm add -D @syv-ai/rulecast" } },
+    { "n": 11, "state": "default", "decision": "Configs and sessions", "found": "`api/` (Python, own `AGENTS.md`), `web/` (TypeScript)", "value": "One at the top, one in `api/`. Sessions start at the top.", "lands": "two configs",
+      "why": ["Each config applies to the files below it, on its own. `api/` has its own agent doc, so it gets its own config; `web/` uses the top one.", "Sessions start at the top, so one hook install reaches both configs."],
+      "detail": { "label": "Files", "code": "# new\n.rulecast-config.yaml\napi/.rulecast-config.yaml" } },
+    { "n": 12, "state": "default", "decision": "Pre-commit", "found": "`.pre-commit-config.yaml`, no rulecast in it", "value": "Add rulecast's hook.", "lands": "`.pre-commit-config.yaml`",
+      "why": ["pre-commit already runs on every commit, so rulecast joins it there, and a commit is checked against the same rules as an edit."],
+      "detail": { "label": "What changes", "code": "# .pre-commit-config.yaml, appended\n+ - repo: https://github.com/syv-ai/rulecast\n+   rev: v0.8.2\n+   hooks:\n+     - id: rulecast" } },
+    { "n": 13, "state": "default", "decision": "Conventions", "found": "`docs/conventions/`", "value": "New conventions go in `docs/conventions/`.", "lands": "`conventions:`",
+      "why": ["The folder already holds one file per area. When you approve a rule, add-rule proposes the file; you have the final say."],
+      "detail": { "label": "What changes", "code": "# .rulecast-config.yaml\nconventions: docs/conventions/" } },
+    { "n": 14, "state": "default", "decision": "Up front or as you go", "found": "rulecast's default", "value": "As you go.", "lands": "`/rulecast:add-rule`",
+      "why": ["No conventions review now. When an agent gets something wrong that should not happen again, run `/rulecast:add-rule`, or the agent offers it after your correction.", "Strike this to go through your conventions up front instead."],
+      "detail": null },
+    { "n": 15, "state": "off", "decision": "Weekly stats summary", "found": null, "value": "Off.", "lands": "`--weekly-summary`",
+      "why": ["Turned on, this config keeps 26 weeks of per-week counts for `rulecast stats` (rule ids, file paths and counts, never code) on each machine, beside its findings log. The log alone holds about 8 MiB: weeks of work by hand, about a week for a loop that runs around the clock.", "It applies to this config only."],
+      "detail": { "label": "What changes", "code": "# .rulecast-config.yaml, when turned on\nstats:\n  weekly_summary: true" } }
+  ],
+  "candidatesTitle": "Conventions to draft as rules",
+  "candidates": [
+    { "n": 16, "state": "default", "text": "Migrations come from `alembic revision --autogenerate`, never by hand.", "source": "from AGENTS.md", "note": "Written down, not checked. A rule would flag a migration without the autogenerate header.", "sketch": null },
+    { "n": 17, "state": "default", "text": "Services raise domain exceptions, never `HTTPException`.", "source": "from memory", "note": "You corrected this on 28 October, and once since.", "sketch": "- id: no-http-exception-in-services\n  files: '^api/services/.*\\.py$'\n  detect:\n    ast-grep: { rule: { pattern: raise HTTPException($$$) } }" }
+  ],
+  "footer": { "go": "Say **go ahead**, or name numbers to strike or change. Questions 1 and 2 need an answer either way.", "aside": "CI is yours to change: add `npx rulecast install` and `npx rulecast doctor --ci` before the agent step in `agent.yml`." }
+}
+</script>
+
+<script id="render">
+/** Text as HTML: every string from the data goes through here, so a file name cannot be markup. */
+function asText(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+}
+
+/** Escaped text with `backticks` as code, and (where asked) **double asterisks** as bold. */
+function inline(value, bold = false) {
+  let html = asText(value).replace(/`([^`]+)`/g, "<code>$1</code>")
+  if (bold) html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  return html
+}
+
+/** A code block: lines starting with # are comments, lines starting with "+ " are additions. */
+function code(text) {
+  const lines = String(text ?? "").split("\n").map((line) => {
+    if (/^\s*#/.test(line)) return `<span class="c">${asText(line)}</span>`
+    if (line.startsWith("+ ")) return `<span class="add">${asText(line.slice(2))}</span>`
+    return asText(line)
+  })
+  return `<pre>${lines.join("\n")}</pre>`
+}
+
+/** An item's state (the head comment); anything else counts as "default". */
+function stateOf(item) {
+  return ["default", "said", "off", "struck"].includes(item.state) ? item.state : "default"
+}
+
+/** The label after an item's text: "default", or how to turn an "off" item on. */
+function stateTag(state, n) {
+  if (state === "default") return `<span class="tag">default</span>`
+  if (state === "off") return `<span class="tag">off · say ${asText(n)} to turn on</span>`
+  return ""
+}
+
+/** Escaped inline text, crossed out when the item is struck. */
+function stated(value, state) {
+  return state === "struck" ? `<del>${inline(value)}</del>` : inline(value)
+}
+
+/** Tree connectors from depths alone: a row is the last of its siblings when no later sibling follows. */
+function treeRows(rows) {
+  const lastAt = (index) => {
+    const depth = rows[index].depth
+    for (let next = index + 1; next < rows.length; next++) {
+      if (rows[next].depth < depth) return true
+      if (rows[next].depth === depth) return false
+    }
+    return true
+  }
+  const open = []
+  return rows
+    .map((row, index) => {
+      const depth = Math.max(0, Number(row.depth) || 0)
+      const last = lastAt(index)
+      let guide = ""
+      for (let level = 1; level < depth; level++) guide += open[level] ? "│  " : "   "
+      if (depth > 0) guide += last ? "└─ " : "├─ "
+      open[depth] = !last
+      const marks = (row.marks ?? [])
+        .map((mark) => `<span class="a ${["session", "config", "conventions"].includes(mark.kind) ? mark.kind : "note"}">${asText(mark.text)}</span>`)
+        .join("")
+      const classes = ["r", row.highlight ? "hi" : "", row.dim ? "dim" : ""].filter(Boolean).join(" ")
+      return `<div class="${classes}"><span class="g">${asText(guide)}</span><span class="n">${asText(row.name)}</span>${marks}</div>`
+    })
+    .join("")
+}
+
+function render(data) {
+  const out = []
+  out.push(
+    `<header><span class="state">${asText(data.state ?? "Nothing written yet")}</span>`,
+    `<h1>rulecast for <b>${asText(data.project)}</b></h1>`,
+    data.lead ? `<p class="lead">${inline(data.lead)}</p>` : "",
+    data.key === false
+      ? ""
+      : `<div class="key"><span class="k-found">found in the repository</span><span class="k-said">what you said</span>${data.tree?.length ? `<span class="k-session">sessions start here</span>` : ""}</div>`,
+    "</header>",
+  )
+
+  const questions = data.questions ?? []
+  if (questions.length) {
+    const items = questions.map((question, index) => {
+      const n = question.n ?? index + 1
+      const why = (question.why ?? []).map((paragraph) => `<p>${inline(paragraph)}</p>`).join("")
+      const options = (question.options ?? [])
+        .map((option) => `<li><span>${inline(option.text)}</span>${option.recommended ? `<span class="tag">recommended</span>` : ""}<span class="l">${inline(option.lands)}</span></li>`)
+        .join("")
+      const body = question.answer == null ? `<ul class="opts">${options}</ul>` : `<p class="ans">${inline(question.answer)}</p>`
+      return `<div class="q"><div class="qh"><span class="i">${asText(n)}</span><b>${inline(question.question)}</b></div>${why}${body}</div>`
+    })
+    out.push(`<section><h2>${asText(data.questionsTitle ?? "Needs your answer")}</h2><div class="qs">${items.join("")}</div></section>`)
+  }
+
+  const rules = data.rules ?? []
+  if (data.tree?.length || rules.length) {
+    const side = rules.length
+      ? `<div class="side">${rules
+          .map((rule, index) => {
+            const state = stateOf(rule)
+            const n = rule.n ?? index + 1
+            return `<div class="rule state-${state}"><div class="t"><b><span class="i">${asText(n)}</span>${stated(rule.name, state)}</b><span>${asText(rule.source)}</span></div><p>${stated(rule.text, state)}${stateTag(state, n)}</p></div>`
+          })
+          .join("")}</div>`
+      : ""
+    const tree = data.tree?.length ? `<div class="tree" aria-label="Repository map">${treeRows(data.tree)}</div>` : ""
+    out.push(`<section><h2>${data.tree?.length ? "The repository" : "Rules"}</h2><div class="map${tree && side ? "" : " solo"}">${tree}${side}</div></section>`)
+  }
+
+  const decisions = data.decisions ?? []
+  if (decisions.length) {
+    const columns = data.columns ?? ["Decision", "Found", "Set to", "Lands in"]
+    const head = `<div class="cols head"><span></span>${columns.map((column) => `<span>${asText(column)}</span>`).join("")}<span></span></div>`
+    const rows = decisions.map((row, index) => {
+      const state = stateOf(row)
+      const n = row.n ?? index + 1
+      const found = row.found == null ? `<span class="none">nothing to find</span>` : `<span class="f">${inline(row.found)}</span>`
+      const why = (row.why ?? []).map((paragraph) => `<p>${inline(paragraph)}</p>`).join("")
+      const detail = row.detail ? `<div><span class="lab">${asText(row.detail.label)}</span>${code(row.detail.code)}</div>` : "<div></div>"
+      return (
+        `<details class="row${state === "struck" ? " struck" : ""}"${row.open ? " open" : ""}><summary class="cols"><span class="i">${asText(n)}</span>` +
+        `<span class="d">${inline(row.decision)}</span>${found}<span class="v state-${state}">${stated(row.value, state)}${stateTag(state, n)}</span>` +
+        `<span class="l">${inline(row.lands)}</span></summary>` +
+        `<div class="more"><div><span class="lab">Why</span>${why}</div>${detail}</div></details>`
+      )
+    })
+    out.push(`<section><h2>${asText(data.decisionsTitle ?? "Setup")}</h2><div class="ledger">${head}${rows.join("")}</div></section>`)
+  }
+
+  const candidates = data.candidates ?? []
+  if (candidates.length) {
+    const cards = candidates.map((card, index) => {
+      const state = stateOf(card)
+      const n = card.n ?? index + 1
+      const source = [card.recommended ? "Recommended" : "", card.source ?? ""].filter(Boolean).join(" · ")
+      const sketch = card.sketch ? `<details class="sk"><summary>Sketch of the rule</summary>${code(card.sketch)}</details>` : ""
+      return `<div class="cand state-${state}${card.recommended ? " rec" : ""}"><span class="src"><span class="i">${asText(n)}</span>${asText(source)}${stateTag(state, n)}</span><p class="t">${stated(card.text, state)}</p>${card.note ? `<p class="m">${inline(card.note)}</p>` : ""}${sketch}</div>`
+    })
+    out.push(`<section><h2>${asText(data.candidatesTitle ?? "Conventions to draft as rules")}</h2><div class="cands">${cards.join("")}</div></section>`)
+  }
+
+  if (data.footer) {
+    out.push(
+      `<footer class="foot"><div class="cell go">${inline(data.footer.go, true)}</div>${data.footer.aside ? `<div class="cell">${inline(data.footer.aside)}</div>` : ""}</footer>`,
+    )
+  }
+  return out.join("")
+}
+</script>
+<script>
+const data = JSON.parse(document.getElementById("setup-data").textContent)
+document.title = `rulecast setup for ${data.project}`
+document.getElementById("app").innerHTML = render(data)
+</script>
+</body>
+</html>

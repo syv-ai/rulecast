@@ -202,6 +202,40 @@ export async function generateGitHooksGuide(): Promise<{ target: string; source:
   return { target, source: withHkCommands(withLefthookCommands(source)) }
 }
 
+/** The setup page as artifact publishers take it: a fragment they wrap in their own document (#81). */
+export const SETUP_PAGE = "agents/setup-page.html"
+/** The same page as a whole document, for an agent that shows it as a local file. */
+export const SETUP_PAGE_LOCAL = "agents/setup-page.local.html"
+
+/** The fragment as a document: its title, links and style in a head, the rest in a body. */
+export function setupPageDocument(fragment: string): string {
+  const main = fragment.indexOf("<main")
+  const title = fragment.indexOf("<title>")
+  if (main === -1 || title === -1) throw new Error(`${SETUP_PAGE}: expected a <title> and a <main>`)
+  const comment = fragment.slice(0, title).trimEnd()
+  return [
+    "<!DOCTYPE html>",
+    `<!-- Generated from ${SETUP_PAGE} by pnpm sync-version: edit that file. -->`,
+    comment,
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    fragment.slice(title, main).trimEnd(),
+    "</head>",
+    "<body>",
+    fragment.slice(main).trimEnd(),
+    "</body>",
+    "</html>",
+    "",
+  ].join("\n")
+}
+
+export async function generateSetupPageLocal(): Promise<{ target: string; source: string }> {
+  const fragment = await readFile(path.join(repoRoot, SETUP_PAGE), "utf8")
+  return { target: path.join(repoRoot, SETUP_PAGE_LOCAL), source: setupPageDocument(fragment) }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const files = [
     await generateVersionFile(),
@@ -213,6 +247,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generateDraftRules(),
     await generateInstallScript(),
     await generatePreCommitHooks(),
+    await generateSetupPageLocal(),
   ]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {

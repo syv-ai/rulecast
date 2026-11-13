@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <!--
   rulecast's setup page (agents/SETUP.md, step 4). An agent copies this file, replaces the JSON in
   <script id="setup-data"> with the defaults it drew from the repository and the questions only the
@@ -6,6 +5,11 @@
   otherwise a local file outside the repository. CONVENTIONS.md uses it too, with conventions as the
   rows and no repository, questions or candidates. The page is read-only: the developer answers,
   strikes and changes items in the conversation. Change only the data block.
+
+  Two copies of one page: setup-page.html is a fragment, as an artifact publisher takes it (it wraps
+  the page in its own document); setup-page.local.html is the same page as a whole document, for a
+  local file, generated from the first by pnpm sync-version. The page follows the viewer's light or
+  dark theme.
 
   Data (every string is text; `backticks` become code, nothing else is markup):
   {
@@ -59,10 +63,6 @@
   In "go", **double asterisks** mark the words to say. Write every "<" inside a string as \u003c, so
   text such as a closing script tag cannot end the data block early; the page shows it as "<".
 -->
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rulecast setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -85,6 +85,22 @@
   --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
+}
+/* The same tones on paper, for a viewer in a light theme. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f5f1;
+    --tone-1: #eeece6;
+    --tone-2: #e6e3db;
+    --tone-3: #dcd8ce;
+    --ink: #1b2129;
+    --muted: #59636f;
+    --faint: #8b939e;
+    --said: #2a64a8;
+    --found: #94661c;
+    --session: #2c7a4b;
+    color-scheme: light;
+  }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -208,8 +224,6 @@ details.row.struck .d, details.row.struck .f, details.row.struck .l { color: var
   .q > p, .opts { padding-left: 0; }
 }
 </style>
-</head>
-<body>
 <main class="page" id="app"></main>
 
 <script type="application/json" id="setup-data">
@@ -448,5 +462,3 @@ const data = JSON.parse(document.getElementById("setup-data").textContent)
 document.title = `rulecast setup for ${data.project}`
 document.getElementById("app").innerHTML = render(data)
 </script>
-</body>
-</html>

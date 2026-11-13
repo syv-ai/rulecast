@@ -61,7 +61,7 @@ From the answers, draft the principles and conventions in plain language: short 
 
 ## 5. Review
 
-Show the whole list on one page. Fill [setup-page.html](setup-page.html) as its head comment describes (every `<` inside a JSON string written as `\u003c`), with:
+Show the whole list on one page. Fill [setup-page.html](setup-page.html) for an artifact, or [setup-page.local.html](setup-page.local.html) for a local file, as its head comment describes (every `<` inside a JSON string written as `\u003c`), with:
 
 - `decisionsTitle`: `"Conventions"`, and `columns`: `["Convention", "Found", "You said", "Goes in"]`;
 - one row per principle, convention and declined item: `decision` is the text, `found` the evidence from the code or null, `value` what the developer said, `state`: `"said"`, `lands` the file, `why` what it means here, and `detail` the section as it will be written (`label`: `"As written"`). Number the rows in order with `n`, and keep each row's number when you show the page again: a row the developer drops stays, with `state: "struck"`, and a new row takes the next unused number;
