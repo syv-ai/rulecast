@@ -20,8 +20,12 @@ export interface SetupFacts {
   sessions: string[]
   /** The git hook managers at the git top, relative to the project, and whether rulecast is already in each. */
   gitHooks: { manager: "pre-commit" | "lefthook" | "hk" | "husky"; file: string; rulecast: boolean }[]
-  /** Workflow files that run a coding agent. */
-  ci: { file: string; agent: string }[]
+  /**
+   * The repository's CI configs, by system: `github-actions`, `azure-pipelines`, `gitlab-ci`,
+   * `circleci`, `bitbucket-pipelines`, `jenkins`. `agent`: the coding agent a config runs, or null.
+   * Only GitHub Actions gets a recipe in the docs; the rest are found so the page names them (#76).
+   */
+  ci: { file: string; system: string; agent: string | null }[]
 }
 
 export interface FactsInput {
@@ -202,17 +206,42 @@ async function gitHooks(root: string, top: string): Promise<SetupFacts["gitHooks
   return hooks
 }
 
+/** Each CI system's config files, relative to the git top: single files, or a directory's YAML. */
+const CI_SYSTEMS: readonly { system: string; files?: string[]; dirs?: string[] }[] = [
+  { system: "github-actions", dirs: [".github/workflows"] },
+  {
+    system: "azure-pipelines",
+    files: ["azure-pipelines.yml", "azure-pipelines.yaml"],
+    dirs: [".azure-pipelines", "azure-pipelines", ".azuredevops"],
+  },
+  { system: "gitlab-ci", files: [".gitlab-ci.yml", ".gitlab-ci.yaml"] },
+  { system: "circleci", files: [".circleci/config.yml", ".circleci/config.yaml"] },
+  { system: "bitbucket-pipelines", files: ["bitbucket-pipelines.yml"] },
+  { system: "jenkins", files: ["Jenkinsfile"] },
+]
+
 async function ci(root: string, top: string): Promise<SetupFacts["ci"]> {
   const project = path.relative(top, root)
   const up = project === "" ? "" : "../".repeat(project.split(path.sep).length)
-  const dir = path.join(top, ".github", "workflows")
-  const names = (await readdir(dir).catch(() => [] as string[])).filter((name) => /\.ya?ml$/.test(name)).sort()
   const found: SetupFacts["ci"] = []
-  for (const name of names) {
-    const text = await readSourceFile(dir, name).catch(() => null)
-    if (text === null) continue
-    for (const { agent, pattern } of CI_AGENTS) {
-      if (pattern.test(text)) found.push({ file: `${up}.github/workflows/${name}`, agent })
+  const add = async (system: string, file: string) => {
+    const text = await readSourceFile(top, file).catch(() => null)
+    if (text === null) return
+    const agents = CI_AGENTS.filter(({ pattern }) => pattern.test(text)).map(({ agent }) => agent)
+    if (agents.length === 0) found.push({ file: `${up}${file}`, system, agent: null })
+    for (const agent of agents) found.push({ file: `${up}${file}`, system, agent })
+  }
+  for (const { system, files = [], dirs = [] } of CI_SYSTEMS) {
+    for (const file of files) await add(system, file)
+    for (const dir of dirs) {
+      // Azure's templates sit in subdirectories of its folder; GitHub reads only the top level.
+      const names = (
+        await readdir(path.join(top, dir), { recursive: system !== "github-actions" }).catch(() => [] as string[])
+      )
+        .map(String)
+        .filter((name) => /\.ya?ml$/.test(name))
+        .sort()
+      for (const name of names) await add(system, `${dir}/${name.split(path.sep).join("/")}`)
     }
   }
   return found

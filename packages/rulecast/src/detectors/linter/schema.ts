@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const TOOL_NAMES = ["eslint", "gitleaks", "oxlint", "ruff"] as const
+export const TOOL_NAMES = ["biome", "eslint", "gitleaks", "oxlint", "ruff"] as const
 
 export const linterSchema = z
   .object({

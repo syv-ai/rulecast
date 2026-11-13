@@ -1,0 +1,116 @@
+{
+  "source": {
+    "name": "Biome",
+    "url": "https://biomejs.dev"
+  },
+  "diagnostics": [
+    {
+      "code": {
+        "url": "https://biomejs.dev/linter/rules/use-const",
+        "value": "lint/style/useConst"
+      },
+      "location": {
+        "path": "src/a.js",
+        "range": {
+          "end": {
+            "column": 4,
+            "line": 2
+          },
+          "start": {
+            "column": 1,
+            "line": 2
+          }
+        }
+      },
+      "message": "This let declares a variable that is only assigned once.",
+      "severity": "WARNING",
+      "suggestions": [
+        {
+          "range": {
+            "end": {
+              "column": 4,
+              "line": 2
+            },
+            "start": {
+              "column": 1,
+              "line": 2
+            }
+          },
+          "text": "const"
+        }
+      ]
+    },
+    {
+      "code": {
+        "url": "https://biomejs.dev/linter/rules/no-debugger",
+        "value": "lint/suspicious/noDebugger"
+      },
+      "location": {
+        "path": "src/a.js",
+        "range": {
+          "end": {
+            "column": 10,
+            "line": 1
+          },
+          "start": {
+            "column": 1,
+            "line": 1
+          }
+        }
+      },
+      "message": "This is an unexpected use of the debugger statement.",
+      "severity": "ERROR",
+      "suggestions": [
+        {
+          "range": {
+            "end": {
+              "column": 10,
+              "line": 1
+            },
+            "start": {
+              "column": 1,
+              "line": 1
+            }
+          },
+          "text": ""
+        }
+      ]
+    },
+    {
+      "code": {
+        "url": "https://biomejs.dev/linter/rules/no-double-equals",
+        "value": "lint/suspicious/noDoubleEquals"
+      },
+      "location": {
+        "path": "src/a.js",
+        "range": {
+          "end": {
+            "column": 9,
+            "line": 3
+          },
+          "start": {
+            "column": 7,
+            "line": 3
+          }
+        }
+      },
+      "message": "Using == may be unsafe if you are relying on type coercion.",
+      "severity": "ERROR",
+      "suggestions": [
+        {
+          "range": {
+            "end": {
+              "column": 9,
+              "line": 3
+            },
+            "start": {
+              "column": 9,
+              "line": 3
+            }
+          },
+          "text": "="
+        }
+      ]
+    }
+  ]
+}

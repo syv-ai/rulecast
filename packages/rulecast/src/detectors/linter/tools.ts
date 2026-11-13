@@ -78,7 +78,53 @@ const GITLEAKS_FLAGS = ["--no-banner", "--log-level", "error", "--report-format"
 // gitleaks runs every rule of its config by default; --enable-rule narrows the run to the ones asked for.
 const gitleaksRules = (select: string[]): string[] => select.flatMap((rule) => ["--enable-rule", rule])
 
+/** Biome's rule id as people write it in biome.json and `--only`: `suspicious/noDebugger`. */
+const biomeRuleId = (category: string) => category.replace(/^lint\//, "")
+
 export const TOOLS: Record<ToolName, LinterTool> = {
+  biome: {
+    events: ["edit", "verify"],
+    markers: ["biome.json", "biome.jsonc"],
+    // rdjson is reviewdog's format, stable where Biome's own json reporter is experimental. --only
+    // runs a rule even where the config turns it off. Its stdin mode prints the file, not findings,
+    // so content that is not on disk reaches it as a scratch copy.
+    args: (files, select) => [
+      "lint",
+      "--reporter=rdjson",
+      "--no-errors-on-unmatched",
+      "--colors=off",
+      ...select.map((rule) => `--only=${rule}`),
+      "--",
+      ...files,
+    ],
+    parse(stdout, cwd, root = cwd) {
+      const parsed = json("biome", stdout)
+      if (!isObject(parsed) || !Array.isArray(parsed.diagnostics)) {
+        throw new Error("biome output is not rdjson with diagnostics")
+      }
+      const relative = repoRelativeFrom(cwd, root)
+      return parsed.diagnostics.filter(isObject).map((diagnostic) => {
+        const location = isObject(diagnostic.location) ? diagnostic.location : {}
+        const range = isObject(location.range) ? location.range : {}
+        const start = isObject(range.start) ? range.start : {}
+        const end = isObject(range.end) ? range.end : {}
+        const code = isObject(diagnostic.code) ? diagnostic.code : {}
+        const line = number(start.line, 1)
+        return {
+          file: relative(text(location.path)),
+          line,
+          column: number(start.column, 1),
+          endLine: number(end.line, line),
+          // Biome's end column is exclusive, as a finding's is.
+          endColumn: typeof end.column === "number" ? end.column : null,
+          ruleId: biomeRuleId(text(code.value)),
+          message: text(diagnostic.message),
+          level: diagnostic.severity === "ERROR" ? "error" : "warning",
+          docs: url(code.url),
+        }
+      })
+    },
+  },
   gitleaks: {
     events: ["edit", "verify"],
     markers: [".gitleaks.toml"],

@@ -23,6 +23,8 @@ It writes nothing in the project. It fetches the catalog's rule data into ruleca
 - `committers` is null when nobody committed in the last six months (bots left out), or in a shallow clone.
 - `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
+- `ci` lists every CI config found, each with its `system` (`github-actions`, `azure-pipelines`, `gitlab-ci`, `circleci`, `bitbucket-pipelines`, `jenkins`) and the coding `agent` it runs, or `null`.
+- `linters.unoffered` lists linters the project configures that are not offered, each with its `config` and `reason`: one rulecast doesn't support (a `command` rule can run it, [reference/tool-recipes.md](reference/tool-recipes.md)), or a supported one that isn't installed. Name them on the page, so a gap is seen, not silent.
 - A hook that exits 0 whatever it finds has `neverFails`, the part of its command that makes it so (`"|| true"`, `"; exit 0"`, `"set +e"`). A rule on it would never fire.
 - A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's or hk step's stage is the hook it sits under.
 - hk's steps are offered only when hk is installed, since only hk can read `hk.pkl`. Without it, `hooks.skipped` says so: ask the developer to install hk, or leave its steps out.
@@ -46,7 +48,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
 | Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
 | Pre-commit entry | `gitHooks` | on when pre-commit, lefthook or hk is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
-| CI | `ci` | an aside in the footer: rulecast never edits CI | never |
+| CI | `ci` | an aside in the footer naming each `system` found: rulecast never edits CI. For `github-actions`, point to [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/); for any other, the same steps in its own syntax: install rulecast, then `rulecast doctor --ci` and `rulecast run --from-ref <base>` | never |
 | Conventions location | the config's `conventions`, else an existing folder such as `docs/conventions/`, else `primaryDoc` | that path | none of the three exists |
 | Linter rules | `linters.offered` | each on, with `--linters`: the errors the linter's own config reports reach the agent after each edit (ESLint's when it stops), and only the ones its edit caused. The row says how many rules the config makes errors and how many warnings will not be delivered | never |
 | Hook rules | `hooks.offered` | each checker on; `modifies: true` off (it changes files); `modifies: null` on or off once you have read its script; one with `sameAs` off, because the linter rule it names runs the same linter, after each edit; one with `neverFails` off, because it can't fail, and tell the developer: they may count it as a gate; `stages` with `commit-msg` off, because it checks the commit message, not the code; `stages` with `manual` off, because it runs only when asked for and may be slower than the stop check's timeout | you cannot read the script |
@@ -57,7 +59,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Up front or as you go | rulecast's default | as you go; struck, it takes the up-front path ([CONVENTIONS.md](CONVENTIONS.md)) | never |
 | Weekly stats summary | the config's `stats.weeklySummary` | `off`, unless the config already has it on. Turned on, it is written with `--weekly-summary` | never |
 | **llm rules** | | | **always**: they cost money per file, and the files leave the machine. Mark no option as recommended. The options are "no" and a model each; say what each model can do: Haiku only for simple, clear questions, Sonnet or stronger for anything that takes judgement |
-| **Agent loops with nobody watching** | `ci` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
+| **Agent loops with nobody watching** | each `ci` entry with an `agent` is shown as found | | **always**: it makes rulecast stricter, and the repository can't show local `/goal` or `claude -p` runs |
 
 The weekly stats summary row's `why` says what turning it on keeps, as the example page's does.
 

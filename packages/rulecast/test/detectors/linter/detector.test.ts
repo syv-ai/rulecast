@@ -73,6 +73,30 @@ describe("linter detector", () => {
     expect(inA.match.docs).toMatch(/^https:\/\/oxc\.rs\//)
   })
 
+  test("biome: its rdjson, rule ids as biome.json writes them, levels from the project's config (#75)", async () => {
+    // Recorded with style/useConst at warn and the recommended rules' own levels.
+    const root = await createProject({ "src/a.js": "debugger;\nlet a = 1;\nif (a == 2) { console.log(a) }\n" })
+    // Not biome.json: Biome would read a file of that name in this repository as its own config.
+    await stubTool(root, "biome", { recording: "biome-rdjson" })
+    const result = await run(root, [
+      ruleFor("errors", { tool: "biome" }, ["src/a.js"]),
+      ruleFor("const", { tool: "biome", rules: ["style/useConst"] }, ["src/a.js"]),
+    ])
+    expect(result.errors).toEqual([])
+    const of = (rule: string) =>
+      result.findings
+        .filter((finding) => finding.rule === rule)
+        .map((finding) => [finding.match.line, finding.match.captures.ruleId])
+    expect(of("errors")).toEqual([
+      [1, "suspicious/noDebugger"],
+      [3, "suspicious/noDoubleEquals"],
+    ])
+    expect(of("const")).toEqual([[2, "style/useConst"]])
+    expect(result.findings.find((finding) => finding.rule === "errors")!.match.docs).toBe(
+      "https://biomejs.dev/linter/rules/no-debugger",
+    )
+  })
+
   test("a rule without rules takes only the findings the project's config makes errors", async () => {
     // The recording has no-console at error and no-debugger at warn.
     const root = await createProject({ "src/a.js": JS })

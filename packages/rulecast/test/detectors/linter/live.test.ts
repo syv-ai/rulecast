@@ -30,6 +30,12 @@ const LIVE: Live[] = [
   },
   { tool: "oxlint", files: { "src/a.js": "debugger\n" }, file: "src/a.js", ruleId: "no-debugger" },
   {
+    tool: "biome",
+    files: { "src/a.js": "debugger;\n", "biome.json": "{}\n" },
+    file: "src/a.js",
+    ruleId: "suspicious/noDebugger",
+  },
+  {
     tool: "gitleaks",
     files: { "app/conf.py": 'API_KEY = "x8Fq2LmN9pRt6VwXy1Zb3Cd5Ef7Gh"\n' },
     file: "app/conf.py",

@@ -31,13 +31,20 @@ const LISTING_TIMEOUT_MS = 5_000
 
 /** The file types a linter's rule selects; none for gitleaks, which looks at every file. */
 const TYPES: Record<ToolName, string[] | null> = {
+  biome: ["javascript", "jsx", "ts", "tsx"],
   eslint: ["javascript", "jsx", "ts", "tsx"],
   oxlint: ["javascript", "jsx", "ts", "tsx"],
   ruff: ["python"],
   gitleaks: null,
 }
 
-const LABEL: Record<ToolName, string> = { eslint: "ESLint", oxlint: "oxlint", ruff: "Ruff", gitleaks: "gitleaks" }
+const LABEL: Record<ToolName, string> = {
+  biome: "Biome",
+  eslint: "ESLint",
+  oxlint: "oxlint",
+  ruff: "Ruff",
+  gitleaks: "gitleaks",
+}
 
 /** Hook ids that run one of the linters: offered as the linter rule instead. */
 const HOOK_TOOL = new Map<string, ToolName>([
@@ -46,6 +53,11 @@ const HOOK_TOOL = new Map<string, ToolName>([
   ["eslint", "eslint"],
   ["oxlint", "oxlint"],
   ["gitleaks", "gitleaks"],
+  // biomejs/pre-commit's ids, and a local hook's.
+  ["biome-check", "biome"],
+  ["biome-lint", "biome"],
+  ["biome-ci", "biome"],
+  ["biome", "biome"],
 ])
 
 const basename = (file: string) => path.posix.basename(file)
@@ -151,6 +163,8 @@ async function listRules(
       })
     ).stdout
   const local = (file: string) => path.posix.relative(dir, file)
+  // Biome lists the rules it has on (`biome rage --linter`), not which of them are errors.
+  if (tool === "biome") throw new Error("Biome does not say which of its rules are errors")
   if (tool === "oxlint") {
     // oxlint reports a plugin's rule by its bare name (`typescript(no-explicit-any)`): so is it listed.
     return byLevel(parseJson(tool, await run(["--print-config"])).rules, (name) => name.replace(/^[\w-]+\//, ""))
@@ -310,8 +324,9 @@ export async function offerLinters(
   files: readonly string[],
   docs: readonly DetectedDoc[],
   options: { read: (file: string) => Promise<string | null>; top: string; configured: ReadonlySet<string> },
-): Promise<{ detected: DetectedLinter[]; offered: OfferedLinter[]; notes: string[] }> {
+): Promise<{ detected: DetectedLinter[]; offered: OfferedLinter[]; unoffered: UnofferedLinter[]; notes: string[] }> {
   const detected = await detectLinters(root, files, { read: options.read, top: options.top })
+  const unoffered = await unofferedLinters(files, detected, options.read)
   const texts = new Map<string, string>()
   if (detected.some((linter) => (linter.errorRules ?? []).length > 0)) {
     for (const doc of docs) {
@@ -328,15 +343,108 @@ export async function offerLinters(
     configured: options.configured.has(linter.id),
     candidates: sectionsNaming(docs, texts, linter.errorRules ?? [], linter.names),
   }))
-  return { detected, offered, notes: detected.flatMap((linter) => (linter.note === undefined ? [] : [linter.note])) }
+  return {
+    detected,
+    offered,
+    unoffered,
+    notes: detected.flatMap((linter) => (linter.note === undefined ? [] : [linter.note])),
+  }
 }
 
-/** init's "Linters" step: the ones on offer, not yet configured or just written. */
-export function linterLines(offered: readonly OfferedLinter[], written: readonly string[]): string[] {
+/** A linter the project configures that init does not offer as a rule, and why. */
+export interface UnofferedLinter {
+  /** As people name it: "stylelint", "Biome". */
+  tool: string
+  /** Its config file, project-relative. */
+  config: string
+  /** "not supported as a linter rule" or "not installed". */
+  reason: string
+}
+
+/**
+ * Linters rulecast has no `linter` support for, by their config files. A `command` rule can run any
+ * of them (agents/reference/tool-recipes.md); init says it found one so the gap is seen (#75).
+ */
+const UNSUPPORTED: [tool: string, markers: string[]][] = [
+  ["golangci-lint", [".golangci.yml", ".golangci.yaml", ".golangci.toml", ".golangci.json"]],
+  ["RuboCop", [".rubocop.yml"]],
+  [
+    "stylelint",
+    [
+      ".stylelintrc",
+      ".stylelintrc.json",
+      ".stylelintrc.yml",
+      ".stylelintrc.yaml",
+      ".stylelintrc.js",
+      "stylelint.config.js",
+      "stylelint.config.mjs",
+      "stylelint.config.cjs",
+    ],
+  ],
+  ["flake8", [".flake8"]],
+  ["Pylint", [".pylintrc", "pylintrc"]],
+  ["Clippy", ["clippy.toml", ".clippy.toml"]],
+  [
+    "markdownlint",
+    [
+      ".markdownlint.json",
+      ".markdownlint.jsonc",
+      ".markdownlint.yaml",
+      ".markdownlint.yml",
+      ".markdownlint-cli2.jsonc",
+      ".markdownlint-cli2.yaml",
+    ],
+  ],
+  ["hadolint", [".hadolint.yaml", ".hadolint.yml"]],
+  ["ShellCheck", [".shellcheckrc"]],
+]
+
+/**
+ * The linters the project configures that are not offered: one rulecast does not support, or a
+ * supported one whose config is there but the tool is not installed. Shallowest config of each.
+ */
+export async function unofferedLinters(
+  files: readonly string[],
+  detected: readonly DetectedLinter[],
+  read: (file: string) => Promise<string | null>,
+): Promise<UnofferedLinter[]> {
+  const shallowest = (markers: readonly string[]) =>
+    files
+      .filter((file) => markers.includes(basename(file)) && !file.split("/").includes("node_modules"))
+      .sort((a, b) => depth(a) - depth(b) || (a < b ? -1 : 1))[0]
+  const found: UnofferedLinter[] = []
+  for (const tool of TOOL_NAMES) {
+    if (detected.some((linter) => linter.tool === tool)) continue
+    const config = await configFile(tool, files, read)
+    if (config !== null) found.push({ tool: LABEL[tool], config, reason: "not installed" })
+  }
+  for (const [tool, markers] of UNSUPPORTED) {
+    const config = shallowest(markers)
+    if (config !== undefined) found.push({ tool, config, reason: "not supported as a linter rule" })
+  }
+  return found
+}
+
+/** init's "Linters" step: the ones on offer, not yet configured or just written, and those not offered. */
+export function linterLines(
+  offered: readonly OfferedLinter[],
+  written: readonly string[],
+  unoffered: readonly UnofferedLinter[] = [],
+): string[] {
   const open = offered.filter((linter) => !linter.configured && !written.includes(linter.id))
-  if (open.length === 0) return []
-  const listed = open.map((linter) => `${linter.id} (${countsText(linter)})`).join(", ")
-  return ["Linters", `Offered as rules with --linters: ${listed}`, ""]
+  if (open.length === 0 && unoffered.length === 0) return []
+  const lines = ["Linters"]
+  if (open.length > 0) {
+    lines.push(
+      `Offered as rules with --linters: ${open.map((linter) => `${linter.id} (${countsText(linter)})`).join(", ")}`,
+    )
+  }
+  for (const linter of unoffered) lines.push(`Not offered: ${linter.tool} (${linter.config}): ${linter.reason}`)
+  if (unoffered.some((linter) => linter.reason !== "not installed")) {
+    lines.push("A command rule can run any of them: agents/reference/tool-recipes.md")
+  }
+  lines.push("")
+  return lines
 }
 
 /** "12 error rules, 3 warnings not delivered", for init's text. */

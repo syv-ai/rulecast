@@ -491,7 +491,9 @@ describe("rulecast init", () => {
     expect(found.detected.gitHooks).toEqual([
       { manager: "pre-commit", file: ".pre-commit-config.yaml", rulecast: false },
     ])
-    expect(found.detected.ci).toEqual([{ file: ".github/workflows/claude.yml", agent: "claude-code" }])
+    expect(found.detected.ci).toEqual([
+      { file: ".github/workflows/claude.yml", system: "github-actions", agent: "claude-code" },
+    ])
     expect(found.generated).toEqual([
       {
         path: "frontend/src/client/",

@@ -156,7 +156,7 @@ describe("setupFacts", () => {
     })
   })
 
-  test("ci finds claude-code-action and claude -p in workflows, nothing in a plain test workflow", async () => {
+  test("ci finds claude-code-action and claude -p in workflows; a plain workflow is found with no agent", async () => {
     const root = await createRepo({
       ".github/workflows/claude.yml": "jobs:\n  a:\n    steps:\n      - uses: anthropics/claude-code-action@v1\n",
       ".github/workflows/nightly.yaml": "jobs:\n  a:\n    steps:\n      - run: claude -p 'fix the tests'\n",
@@ -164,9 +164,27 @@ describe("setupFacts", () => {
       ".github/workflows/test.yml": "jobs:\n  a:\n    steps:\n      - run: pytest\n",
     })
     expect((await facts(root)).ci).toEqual([
-      { file: ".github/workflows/claude.yml", agent: "claude-code" },
-      { file: ".github/workflows/nightly.yaml", agent: "claude-code" },
-      { file: ".github/workflows/review.yml", agent: "codex" },
+      { file: ".github/workflows/claude.yml", system: "github-actions", agent: "claude-code" },
+      { file: ".github/workflows/nightly.yaml", system: "github-actions", agent: "claude-code" },
+      { file: ".github/workflows/review.yml", system: "github-actions", agent: "codex" },
+      { file: ".github/workflows/test.yml", system: "github-actions", agent: null },
     ])
+  })
+
+  test("ci finds Azure Pipelines, its templates, and other systems' configs (#76)", async () => {
+    const root = await createRepo({
+      "azure-pipelines.yml": "steps:\n  - script: pytest\n",
+      ".azure-pipelines/templates/build.yml": "steps:\n  - script: claude -p 'triage'\n",
+      ".gitlab-ci.yml": "test:\n  script: pytest\n",
+      Jenkinsfile: "pipeline {}\n",
+      "backend/app.py": "x = 1\n",
+    })
+    expect((await facts(root)).ci).toEqual([
+      { file: "azure-pipelines.yml", system: "azure-pipelines", agent: null },
+      { file: ".azure-pipelines/templates/build.yml", system: "azure-pipelines", agent: "claude-code" },
+      { file: ".gitlab-ci.yml", system: "gitlab-ci", agent: null },
+      { file: "Jenkinsfile", system: "jenkins", agent: null },
+    ])
+    expect((await facts(path.join(root, "backend"))).ci[0]!.file).toBe("../azure-pipelines.yml")
   })
 })

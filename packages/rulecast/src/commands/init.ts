@@ -27,7 +27,14 @@ import {
   readHead,
 } from "../init/generated"
 import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
-import { linterLines, linterRule, markSameAs, type OfferedLinter, offerLinters } from "../init/linters"
+import {
+  linterLines,
+  linterRule,
+  markSameAs,
+  type OfferedLinter,
+  offerLinters,
+  type UnofferedLinter,
+} from "../init/linters"
 import {
   type AgentChoice,
   type InitSelections,
@@ -344,7 +351,8 @@ export interface InitReport {
     }[]
     skipped: { name: string; source: string; reason: string }[]
   }
-  linters: { offered: OfferedLinter[] }
+  /** `unoffered`: linters the project configures that are not offered, and why (#75). */
+  linters: { offered: OfferedLinter[]; unoffered: UnofferedLinter[] }
   config: {
     exists: boolean
     /** Where new conventions go, from this config or one above it; null when none names it. */
@@ -532,7 +540,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
       })),
       skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
     },
-    linters: { offered: lintersOn.offered },
+    linters: { offered: lintersOn.offered, unoffered: lintersOn.unoffered },
     config: {
       exists: config !== null,
       conventions: await conventionsFor(root),
@@ -586,7 +594,7 @@ function adoptedNames(flags: Flags): string[] {
 /** `wrapped`: what this run wrote (adoptedNames), left out of what it offers. */
 function terminalText(report: InitReport, detection: Detection, scan: HookScan, wrapped: readonly string[]): string {
   const out = [`rulecast init · ${report.root}`, "", "Detected", detectionSummary(detection), ""]
-  out.push(...linterLines(report.linters.offered, wrapped))
+  out.push(...linterLines(report.linters.offered, wrapped, report.linters.unoffered))
   const offered = report.hooks.offered.filter((hook) => !hook.configured && !wrapped.includes(hook.id))
   if (offered.length > 0 || scan.skipped.length > 0) {
     out.push("Hooks")

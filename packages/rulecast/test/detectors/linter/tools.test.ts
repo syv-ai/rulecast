@@ -13,14 +13,18 @@ const recording = async (tool: string) =>
   (await readFile(path.join(payloads, `${tool}.json`), "utf8")).replaceAll("__ROOT__", ROOT)
 
 describe("linter schema", () => {
-  test("accepts the four tools and an optional rule list", () => {
+  test("accepts the five tools and an optional rule list", () => {
     expect(linterSchema.parse({ tool: "ruff" })).toEqual({ tool: "ruff" })
     expect(linterSchema.parse({ tool: "oxlint", rules: ["no-debugger"] })).toEqual({
       tool: "oxlint",
       rules: ["no-debugger"],
     })
     expect(linterSchema.parse({ tool: "gitleaks" })).toEqual({ tool: "gitleaks" })
-    expect(linterSchema.safeParse({ tool: "biome" }).success).toBe(false)
+    expect(linterSchema.parse({ tool: "biome", rules: ["suspicious/noDebugger"] })).toEqual({
+      tool: "biome",
+      rules: ["suspicious/noDebugger"],
+    })
+    expect(linterSchema.safeParse({ tool: "stylelint" }).success).toBe(false)
     expect(linterSchema.safeParse({ tool: "ruff", extra: 1 }).success).toBe(false)
   })
 })

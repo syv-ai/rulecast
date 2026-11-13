@@ -6,7 +6,14 @@ import { describe, expect, test } from "vitest"
 import { scanHeadings } from "../../src/core/anchors"
 import { readSourceFile } from "../../src/core/detection/per-rule"
 import type { DetectedDoc } from "../../src/init/detect"
-import { detectLinters, linterRule, parseRuffSettings, sectionsNaming } from "../../src/init/linters"
+import {
+  detectLinters,
+  linterLines,
+  linterRule,
+  parseRuffSettings,
+  sectionsNaming,
+  unofferedLinters,
+} from "../../src/init/linters"
 import { brokenTool, stubTool } from "../helpers/linters"
 import { createProject } from "../helpers/project"
 
@@ -138,6 +145,34 @@ describe("detectLinters", () => {
     const [gitleaks] = await detect({ ".gitleaks.toml": "" }, { tool: "gitleaks" })
     expect(gitleaks).toMatchObject({ id: "linter/gitleaks", errorRules: null, warningRules: null })
     expect(gitleaks!.note).toBeUndefined()
+  })
+})
+
+describe("unofferedLinters (#75)", () => {
+  test("a supported linter whose tool is missing, and linters rulecast does not support, each by its shallowest config", async () => {
+    const files = [
+      "frontend/biome.json",
+      "frontend/package.json",
+      ".stylelintrc.json",
+      "web/.stylelintrc.json",
+      "node_modules/x/.rubocop.yml",
+      "backend/.flake8",
+    ]
+    const read = async () => "{}"
+    const found = await unofferedLinters(files, [], read)
+    expect(found).toEqual([
+      { tool: "Biome", config: "frontend/biome.json", reason: "not installed" },
+      { tool: "stylelint", config: ".stylelintrc.json", reason: "not supported as a linter rule" },
+      { tool: "flake8", config: "backend/.flake8", reason: "not supported as a linter rule" },
+    ])
+    expect(linterLines([], [], found)).toEqual([
+      "Linters",
+      "Not offered: Biome (frontend/biome.json): not installed",
+      "Not offered: stylelint (.stylelintrc.json): not supported as a linter rule",
+      "Not offered: flake8 (backend/.flake8): not supported as a linter rule",
+      "A command rule can run any of them: agents/reference/tool-recipes.md",
+      "",
+    ])
   })
 })
 
