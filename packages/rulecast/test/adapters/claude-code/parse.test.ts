@@ -69,12 +69,20 @@ describe("Claude Code adapter: parse", () => {
     ["post-tool-use.bash", "shell-after"],
     // Fires at launch; the job's writes are swept later.
     ["post-tool-use.bash.background", "shell-after"],
-  ])("%s → %s, carrying the tool use id and no files", (name, kind) => {
+  ])("%s → %s, carrying the tool use id and command, and no files", (name, kind) => {
     const { payload, parsed } = parse(name)
+    const command = (payload.tool_input as unknown as { command: string }).command
     expect(parsed).toEqual({
       cwd: "/project",
       warmup: false,
-      event: { kind, files: [], cwd: "/project", session: { id: payload.session_id }, toolUseId: payload.tool_use_id },
+      event: {
+        kind,
+        files: [],
+        cwd: "/project",
+        session: { id: payload.session_id },
+        toolUseId: payload.tool_use_id,
+        command,
+      },
     })
   })
 
@@ -88,6 +96,7 @@ describe("Claude Code adapter: parse", () => {
       session: { id: payload.session_id },
       toolUseId: payload.tool_use_id,
       failed: true,
+      command: (payload.tool_input as unknown as { command: string }).command,
     })
   })
 

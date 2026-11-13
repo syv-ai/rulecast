@@ -14,6 +14,9 @@ const common = z.object({
   tool_use_id: z.string().min(1).optional(),
 })
 
+/** A Bash call's command, when the payload carries one. */
+const bashInput = z.object({ tool_input: z.object({ command: z.string() }) })
+
 const fileTool = z.object({
   tool_name: z.string(),
   tool_input: z.object({ file_path: z.string().min(1) }),
@@ -69,18 +72,22 @@ export function parseClaudeCode(input: unknown): AdapterInput | null {
   // Before the file tools: a Bash payload has no file_path, which their schema requires. A command
   // that exits non-zero fires PostToolUseFailure instead of PostToolUse, and may have written files
   // before it failed, so both end the call (test/payloads/claude-code/README.md).
-  const shell = (kind: "shell-before" | "shell-after", failed = false): AdapterInput => ({
-    cwd,
-    event: {
-      kind,
-      files: [],
+  const shell = (kind: "shell-before" | "shell-after", failed = false): AdapterInput => {
+    const bash = bashInput.safeParse(input)
+    return {
       cwd,
-      session,
-      ...(toolUseId === undefined ? {} : { toolUseId }),
-      ...(failed ? { failed } : {}),
-    },
-    warmup: false,
-  })
+      event: {
+        kind,
+        files: [],
+        cwd,
+        session,
+        ...(toolUseId === undefined ? {} : { toolUseId }),
+        ...(failed ? { failed } : {}),
+        ...(bash.success ? { command: bash.data.tool_input.command } : {}),
+      },
+      warmup: false,
+    }
+  }
   if (toolName === "Bash") {
     if (hook === "PreToolUse") return shell("shell-before")
     if (hook === "PostToolUse") return shell("shell-after")

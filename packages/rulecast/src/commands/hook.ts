@@ -16,6 +16,7 @@ import {
   sessionRoots,
 } from "../core/projects"
 import { cachedRepos } from "../core/repos/provider"
+import { elsewhereNotice, uncheckedCheckouts, untold } from "../core/session/elsewhere"
 import { MAIN_AGENT } from "../core/session/state"
 import type { Adapter, AdapterInput, Delivery, Event } from "../core/types"
 import type { CliIo } from "./main"
@@ -68,6 +69,13 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     const parts = runs.filter((run): run is ProjectRun => run !== null)
     if (event === null || parts.length === 0) return 0
     const delivery = combineDeliveries(parts, parsed.cwd)
+    // A command that works in another checkout this call does not check: told once per checkout (#71).
+    if (event.kind === "shell-after" && event.command !== undefined && session !== undefined) {
+      const trees = await uncheckedCheckouts(event.command, parsed.cwd, [...projects.keys()])
+      const fresh = await untold(home, session.id, session.agentId ?? MAIN_AGENT, trees)
+      if (fresh.length > 0)
+        delivery.agentNotices = [...(delivery.agentNotices ?? []), elsewhereNotice(fresh, parsed.cwd)]
+    }
     // The nearest project's setting: the first part is the config nearest the agent or the file.
     const output = adapter.format(delivery, event, { maxMatchesPerRule: parts[0]!.maxMatchesPerRule })
     if (output.stdout !== "") io.stdout(output.stdout)

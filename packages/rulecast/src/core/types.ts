@@ -57,6 +57,8 @@ interface ShellCall {
   toolUseId?: string
   /** After: the command exited non-zero. It may still have written files; an adapter may answer it differently. */
   failed?: boolean
+  /** The command as the agent wrote it, when the payload carries it: where it works, not what it changed. */
+  command?: string
 }
 
 /** One variant per kind, so each carries only what its kind has (plan 21, #11). */

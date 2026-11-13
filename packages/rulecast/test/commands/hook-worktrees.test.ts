@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -113,5 +114,35 @@ describe("rulecast hook claude-code: subagents in their own worktrees", () => {
       writeFile(path.join(lead, "a.py"), "print(3)\n"),
     )
     expect(told).toBe("")
+  })
+})
+
+describe("rulecast hook claude-code: a command that works in another checkout (#71)", () => {
+  test("the agent is told once per checkout that shell edits there are not checked", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig(RULES), "a.py": "a = 1\n" })
+    const builder = path.join(root, ".claude", "worktrees", "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", builder], { cwd: root })
+    const sessionId = randomUUID()
+    const env = { ...testEnv, CLAUDE_PROJECT_DIR: root }
+    let calls = 0
+    const shell = async (command: string) => {
+      const id = `toolu_${++calls}`
+      const send = (name: string) => {
+        const payload = claudeCodePayload(name, { root, sessionId })
+        payload.tool_use_id = id
+        ;(payload as { tool_input?: { command?: string } }).tool_input = { command }
+        return runCli(root, ["hook", "claude-code"], JSON.stringify(payload), env)
+      }
+      await send("pre-tool-use.bash")
+      const { stdout } = await send("post-tool-use.bash")
+      return stdout === "" ? "" : (JSON.parse(stdout).hookSpecificOutput?.additionalContext ?? "")
+    }
+    const there = await shell(`cd ${builder} && echo 'print(1)' > b.py`)
+    expect(there).toContain("this command works in .claude/worktrees/w1, another checkout of this repository")
+    expect(there).toContain("EnterWorktree")
+    // Once: the next command there says nothing more.
+    expect(await shell(`cd ${builder} && echo 'print(2)' >> b.py`)).not.toContain("another checkout")
+    // A command in the session's own checkout is no news.
+    expect(await shell("echo 'x = 2' >> a.py")).not.toContain("another checkout")
   })
 })

@@ -16,6 +16,8 @@ A subagent in its own worktree is checked there by its own stop. By default the 
 subagent_projects: exclude
 ```
 
+rulecast sees an agent's shell commands in its working directory. A subagent that makes its own worktree, say with `git worktree add` from a chosen commit on a named branch, and then runs `cd <worktree> && …` from the lead's directory, works where rulecast doesn't look: its shell edits there are neither checked nor logged. Its Edit and Write calls are still checked, since they name the file. Have such a subagent switch into its worktree first. In Claude Code that is the EnterWorktree tool with the worktree's path, which keeps the commit, the branch and the worktree. rulecast tells an agent once per checkout when a command of its works in another checkout of the repository.
+
 ## Git operations during a turn
 
 A commit, pull, merge or checkout is not an edit. Lines a pull or merge brings into a file the agent edited are not counted as the agent's, as long as their commits predate the operation. The agent's own commits stay its own.
