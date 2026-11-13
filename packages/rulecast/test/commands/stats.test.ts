@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, realpath, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
@@ -412,5 +413,63 @@ describe("rulecast stats", () => {
         `  ${RULE}: ${USERS} (3 sessions)`,
       ].join("\n"),
     )
+  })
+})
+
+describe("rulecast stats --worktrees (#71)", () => {
+  const writeLog = async (stateDir: string, records: FindingsRecord[], root: string) => {
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(path.join(stateDir, "root"), `${root}\n`)
+    await writeFile(path.join(stateDir, FINDINGS_LOG), records.map((item) => `${JSON.stringify(item)}\n`).join(""))
+  }
+
+  test("merges the checkouts a glob picks, removed ones included, keeping one session's checkouts apart", async () => {
+    const root = await realpath(await projectWithLog(RECORDS.slice(0, 4)))
+    const trees = path.join(root, ".claude", "worktrees")
+    const w1 = path.join(trees, "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", w1], { cwd: root })
+    // The same session, the same finding id and file, in another checkout: left open there.
+    await writeLog(stateDirFor(w1), [record("2026-10-01T11:00:00.000Z", "stop", [["a1", RULE, "delivered"]])], w1)
+    // A checkout removed since: its log is still in the cache, beside w1.
+    const gone = path.join(trees, "w2")
+    const goneState = path.join(path.dirname(stateDirFor(root)), "0000000000gone00")
+    await writeLog(goneState, [record("2026-10-02T09:00:00.000Z", "edit", [], "s3")], gone)
+    const hashed = path.join(
+      path.dirname(stateDirFor(root)),
+      createHash("sha256").update(gone).digest("hex").slice(0, 16),
+    )
+    await mkdir(path.dirname(hashed), { recursive: true })
+    execFileSync("cp", ["-R", goneState, hashed])
+
+    const all = await runCli(w1, ["stats", "--worktrees", "w*", "--format", "json"])
+    const document = JSON.parse(all.stdout)
+    expect(
+      document.checkouts.map((checkout: { name: string; exists: boolean; records: number }) => [
+        checkout.name,
+        checkout.exists,
+        checkout.records,
+      ]),
+    ).toEqual([
+      ["w1", true, 1],
+      ["w2", false, 1],
+    ])
+    expect(document.sessions).toBe(2)
+
+    const both = JSON.parse((await runCli(root, ["stats", "--worktrees", "*", "--format", "json"])).stdout)
+    expect(both.checkouts.map((checkout: { name: string }) => checkout.name)).toContain(path.basename(root))
+    // s1 fixed a1 in the main checkout and left it open in w1: two lives, not one.
+    const rule = both.rules.find((entry: { rule: string }) => entry.rule === RULE)
+    expect([rule.fired, rule.fixed, rule.ignored]).toEqual([2, 1, 1])
+    expect(both.sessions).toBe(2)
+
+    const text = (await runCli(root, ["stats", "--worktrees", "w*"])).stdout
+    expect(text).toContain("2 checkouts: w1, w2 (removed)")
+  })
+
+  test("a glob that matches no checkout is a usage error", async () => {
+    const root = await projectWithLog(RECORDS)
+    const result = await runCli(root, ["stats", "--worktrees", "nope-*"])
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("no checkout of this repository matches nope-*")
   })
 })

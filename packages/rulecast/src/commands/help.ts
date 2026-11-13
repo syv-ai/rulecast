@@ -200,10 +200,14 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "stats",
     tier: "basic",
-    synopsis: "rulecast stats [--since 30d] [--format terminal|json]",
+    synopsis: "rulecast stats [--since 30d] [--worktrees GLOB] [--format terminal|json]",
     summary: "Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy",
     flags: [
       ["--since", "Only findings first reported in this window: 30d, 12h, or a date (UTC)"],
+      [
+        "--worktrees GLOB",
+        "Read this project's log in every checkout of the repository whose directory name matches (* for all), removed ones included; repeatable",
+      ],
       ["--format", "terminal or json"],
     ],
     notes: [

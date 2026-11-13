@@ -10,6 +10,7 @@ Relative links in this file resolve against this file's own URL.
 
 ```sh
 rulecast stats --since 30d --format json    # 30d, 12h or a date; default: everything in the log
+rulecast stats --worktrees '*' --format json   # every checkout of the repository; a glob over their directory names picks some
 ```
 
 A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs its offset, as in `2026-09-01T10:00Z` or `2026-09-01T12:00+02:00`; without one it is refused, as is a date that does not exist. For `weekly`, `--since` rounds down to the Monday of its week, so the trend holds whole weeks.
@@ -96,6 +97,7 @@ A date alone, such as `2026-09-01`, is midnight UTC. A date with a time needs it
 | `weekly.from` | The first instant the trend covers: the oldest record it counts, or the Monday of `since`'s week when that is later. `null` with no data. |
 | `weekly.rolledUpTo` | The newest record the weekly summary counts, or `null` when there is no summary. |
 | `weekly.summary` | `"on"` when this config keeps a weekly summary (`stats.weekly_summary: true`), else `"off"`. With it off, the trend covers only what the log holds, plus any summary written while it was on. |
+| `checkouts` | Only with `--worktrees`: the checkouts whose logs were read, each `{ "name", "root", "exists", "records" }`. `name` is the checkout's directory name, `root` this project's directory in it, `exists` false for a checkout removed since whose log is still cached, and `records` how many lines its log holds (0: nothing logged there). Findings in different checkouts are kept apart, even in one session; `sessions` counts each session once. |
 | `skippedLines` | Lines of the log or the weekly summary that could not be read, or that were not a whole record. Present only when there were any. |
 
 Per rule, every count is of findings, and a finding is counted once per session however many times it was reported (in `weekly`, once per session and log file):

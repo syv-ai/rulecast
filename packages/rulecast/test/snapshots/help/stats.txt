@@ -1,9 +1,10 @@
-rulecast stats [--since 30d] [--format terminal|json]
+rulecast stats [--since 30d] [--worktrees GLOB] [--format terminal|json]
 
 Per-rule outcomes from agent sessions: fired, fixed, ignored, noisy
 
-  --since   Only findings first reported in this window: 30d, 12h, or a date (UTC)
-  --format  terminal or json
+  --since           Only findings first reported in this window: 30d, 12h, or a date (UTC)
+  --worktrees GLOB  Read this project's log in every checkout of the repository whose directory name matches (* for all), removed ones included; repeatable
+  --format          terminal or json
 
 Read from a local log of finding ids, rule ids, files and lines that agent hooks write; never any code.
 The JSON is documented in agents/reference/stats.md.
