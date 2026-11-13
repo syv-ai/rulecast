@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "kind": "run_result",
+  "hook": "pre-commit",
+  "status": "failed",
+  "started_at": "2026-11-13T00:00:00+00:00",
+  "duration_ms": 0,
+  "failure": "unknown step 'nope' for hook 'pre-commit'.\nAvailable steps: noprint",
+  "steps": []
+}

@@ -144,6 +144,29 @@ repos:
     expect(lefthook.map((hook) => hook.stages)).toEqual([["pre-commit"], ["pre-commit"], ["pre-push"]])
   })
 
+  test("hk: steps hk reports for each hook, offered once each, run in check mode (#87)", async () => {
+    const steps: Record<string, string[]> = { "pre-commit": ["eslint", "ruff"], check: ["eslint", "knip"] }
+    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "", async (hook) => steps[hook] ?? null)
+    expect(scan.offered.map((hook) => [hook.id, hook.detect, hook.modifies, hook.stages])).toEqual([
+      ["hook/pre-commit-eslint", { hk: "pre-commit/eslint" }, false, ["pre-commit"]],
+      ["hook/pre-commit-ruff", { hk: "pre-commit/ruff" }, false, ["pre-commit"]],
+      ["hook/check-knip", { hk: "check/knip" }, false, ["check"]],
+    ])
+    expect(hookRule(scan.offered[0]!)).toMatchObject({
+      name: "eslint (hk)",
+      detect: { hook: { hk: "pre-commit/eslint" } },
+      context: ["@hk.pkl"],
+    })
+  })
+
+  test("hk without hk installed: its steps are said to be unread, not silently missing", async () => {
+    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "")
+    expect(scan.offered).toEqual([])
+    expect(notOfferedLines(scan.skipped)).toEqual([
+      "Not offered from hk.pkl: hk steps (hk is not installed, so its steps can't be read)",
+    ])
+  })
+
   test("hook names that are not rule ids become valid, distinct ids; detect keeps the real name", async () => {
     // A lefthook job's name is free text, and a local pre-commit hook's id may have underscores or
     // capitals: "lint typescript" was offered as hook/pre-commit-lint typescript, which init then

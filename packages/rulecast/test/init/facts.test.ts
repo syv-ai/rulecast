@@ -139,11 +139,13 @@ describe("setupFacts", () => {
         "repos:\n  - repo: https://github.com/syv-ai/rulecast\n    rev: v0.8.2\n    hooks:\n      - id: rulecast\n",
       "lefthook.yml": "pre-commit:\n  jobs:\n    - name: lint\n      run: eslint\n",
       ".husky/pre-commit": "npx lint-staged\n",
+      "hk.pkl": 'hooks { ["pre-commit"] { steps { ["rulecast"] { check = "rulecast run" } } } }\n',
       "backend/app.py": "x = 1\n",
     })
     expect((await facts(root)).gitHooks).toEqual([
       { manager: "pre-commit", file: ".pre-commit-config.yaml", rulecast: true },
       { manager: "lefthook", file: "lefthook.yml", rulecast: false },
+      { manager: "hk", file: "hk.pkl", rulecast: true },
       { manager: "husky", file: ".husky/", rulecast: false },
     ])
     // Read at the git top, named from the package.

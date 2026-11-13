@@ -56,7 +56,7 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
 For checkable conventions, use `path` when the file itself is the break. Otherwise use the first of these that can see the break:
 
 1. **`linter`**: a rule of a linter the project runs, or could run (ruff, oxlint, eslint). The linter already knows the language. A linter the project does not run yet has to be installed first: propose that to the developer as a change of its own, and install it only with their approval. When a lint rule the project's config already makes an error enforces the convention, and the config has a `linter` rule for that tool with no `rules` list, the convention is one `context_by_rule` entry on that rule (`eqeqeq: "@docs/conventions.md#comparisons"`), not a new rule.
-2. **`command`** or **`hook`**: a tool the project already runs that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml` or `lefthook.yml`. The tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
+2. **`command`** or **`hook`**: a tool the project already runs that checks the convention — a type checker, a dead-code finder, a hook in `.pre-commit-config.yaml`, `lefthook.yml` or `hk.pkl`. The tool already knows the code. [reference/tool-recipes.md](reference/tool-recipes.md) has a tested block for each common one.
 3. **`ast-grep`**: a pattern over the code's syntax, which never matches inside a comment or a string.
 4. **`regex`**: only for a pattern that is text rather than code, such as a comment marker, the content of a string or a file header.
 

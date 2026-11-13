@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "run_result",
+  "hook": "pre-commit",
+  "status": "passed",
+  "started_at": "2026-11-13T00:00:00+00:00",
+  "duration_ms": 124,
+  "steps": [
+    {
+      "name": "noprint",
+      "status": "skipped",
+      "duration_ms": 0,
+      "effects": [],
+      "diagnostics": [],
+      "skip_reason": "skipped: no files to process"
+    }
+  ]
+}

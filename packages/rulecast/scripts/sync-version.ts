@@ -110,14 +110,30 @@ export const GIT_HOOK_ARGS = {
   lefthookPush: 'run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD',
 } as const
 
-/** Rewrites each `<prefix>sh -c '…' --` line in `source` with the next of `commands`. Throws on a count mismatch. */
-function withCommandLines(source: string, prefix: string, commands: string[], what: string): string {
-  const pattern = new RegExp(`^(${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})sh -c '.*' --$`, "gm")
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Rewrites each `<prefix>sh -c '…' --<suffix>` line in `source` with the next of `commands`.
+ * Throws on a count mismatch.
+ */
+function withCommandLines(source: string, prefix: string, commands: string[], what: string, suffix = ""): string {
+  const pattern = new RegExp(`^(${escaped(prefix)})sh -c '.*' --${escaped(suffix)}$`, "gm")
   const found = (source.match(pattern) ?? []).length
   if (found !== commands.length)
     throw new Error(`${what}: expected ${commands.length} git-hook commands, found ${found}`)
   let next = 0
-  return source.replace(pattern, (_, start: string) => `${start}${commands[next++]}`)
+  return source.replace(pattern, (_, start: string) => `${start}${commands[next++]}${suffix}`)
+}
+
+/** The Git hooks guide's hk snippet: the same commands, in Pkl raw strings, which need no escaping. */
+export function withHkCommands(source: string): string {
+  return withCommandLines(
+    source,
+    '        check = #"',
+    [gitHookCommand(GIT_HOOK_ARGS.preCommit), gitHookCommand(GIT_HOOK_ARGS.lefthookPush)],
+    GIT_HOOKS_GUIDE,
+    '"#',
+  )
 }
 
 /** The Git hooks guide's lefthook snippet runs gitHookCommand, the order the agent hooks use. */
@@ -165,7 +181,7 @@ export const GIT_HOOKS_GUIDE = "guides/git-hooks-ci.md"
 export async function generateGitHooksGuide(): Promise<{ target: string; source: string }> {
   const target = path.join(repoRoot, GIT_HOOKS_GUIDE)
   const source = withPreCommitRev(await readFile(target, "utf8"), await packageVersion())
-  return { target, source: withLefthookCommands(source) }
+  return { target, source: withHkCommands(withLefthookCommands(source)) }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

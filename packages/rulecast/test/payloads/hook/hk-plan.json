@@ -1,0 +1,19 @@
+{
+  "hook": "pre-commit",
+  "runType": "fix",
+  "steps": [
+    {
+      "name": "noprint",
+      "status": "included",
+      "orderIndex": 0,
+      "reasons": [
+        {
+          "kind": "filter_match",
+          "detail": "2 files matched"
+        }
+      ],
+      "fileCount": 2
+    }
+  ],
+  "generatedAt": "2026-11-13T21:12:56.449057+00:00"
+}

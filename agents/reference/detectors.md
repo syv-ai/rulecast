@@ -64,6 +64,7 @@ detect:
   hook:
     pre-commit: mypy                 # a hook id in .pre-commit-config.yaml
     # lefthook: pre-commit/typecheck # or a lefthook job: <hook>/<job>
+    # hk: pre-commit/eslint          # or an hk step: <hook>/<step>
     output: { lines: gcc }           # default
 ```
 
@@ -71,11 +72,13 @@ Runs a hook the project already declares, so the agent sees the same thing a com
 
 - `pre-commit`: a hook id (or alias) in `.pre-commit-config.yaml`. rulecast runs `prek run <id> --files <files>` when prek is installed, else `pre-commit run …`, from the project's `node_modules/.bin` or `PATH`. That mode never stashes. A hook whose `stages` leave out `pre-commit` is run at its first stage. `rulecast validate` names an id the config does not declare.
 - `lefthook`: `<hook>/<job>` in lefthook's merged config (`lefthook dump`), including jobs inside groups and lefthook 1's `commands:`. rulecast runs the job's `run` command itself, from the job's `root`, with the rule's files in place of `{staged_files}`, `{files}`, `{all_files}` and `{push_files}`. It does not call `lefthook run`, which can install git hooks. The job's `glob` is not applied: the rule's `files` decide.
+- `hk`: `<hook>/<step>` in `hk.pkl`. rulecast runs `hk run <hook> --check --step <step> --stash none --no-stage --format json <files>` from the repository's top, so only the step's check command runs, never its fix, and the working tree is left as it is. The step's own output is read; hk filters the files by the step's `glob`. `init` offers hk's steps only when hk is installed, since hk.pkl is Pkl and only hk evaluates it.
+- A rule names exactly one of `pre-commit`, `lefthook` and `hk`. When the repository has no config for that hook manager (`.pre-commit-config.yaml`, a lefthook config, `hk.pkl`), `rulecast validate` and `rulecast doctor` say the manager is not set up here, as after a move to another manager.
 - `output`, `rules`, `exit_codes`, `captures`: as for `command`. The runner's own framing (pre-commit's status line and `- hook id` block, prek's indent) is removed before the output is read.
 - A hook that changes a file — a formatter, a fixer — has the file put back as it was, and each changed file is a finding: `{{message}}` is "<hook> would change this file". rulecast never rewrites an agent's file behind its back. Only the rule's files are compared.
 - A hook that fails and prints nothing the `output` format reads is one finding on the rule's first file, carrying the hook's first lines of output, so the agent still hears that it failed and why.
 - A runner that never ran the hook (an unknown id, an environment it could not install) disables the rule with what it said.
-- `rulecast doctor` reports the runner it would use and every hook id or job it cannot find.
+- `rulecast doctor` reports the runner it would use and every hook id, job or step it cannot find.
 - husky is not supported: its hooks are shell scripts with nothing structured to read. Use `command` with the script's command.
 - In a staged run or with `--to-ref`, a hook rule may be skipped: see [In staged and `--to-ref` runs](#in-staged-and---to-ref-runs).
 - Default stages: **`verify` only.** Hooks are written for a commit, not a keystroke. Write `stages: [edit, verify]` if yours is fast.

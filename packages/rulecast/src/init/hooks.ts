@@ -1,6 +1,6 @@
 import { parse } from "yaml"
 
-import { LEFTHOOK_CONFIGS, PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
+import { HK_CONFIGS, LEFTHOOK_CONFIGS, PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
 
 /** A hook the project already declares, as init offers it. */
 export interface DetectedHook {
@@ -9,7 +9,7 @@ export interface DetectedHook {
   /** The hook's own name. */
   name: string
   /** The `detect.hook` config that runs it. */
-  detect: { "pre-commit": string } | { lefthook: string }
+  detect: { "pre-commit": string } | { lefthook: string } | { hk: string }
   /**
    * The rule's `files`, relative to the project, from a lefthook job's `root:` and glob; null: every
    * file, and the runner filters.
@@ -422,8 +422,60 @@ function packageScripts(text: string | null): PackageScripts {
   }
 }
 
+/**
+ * The hk hooks whose steps init offers, in this order: a step in several is offered from the first.
+ * `check` is hk's own hook for `hk check`; `commit-msg` steps check messages and say so (stages).
+ */
+const HK_HOOKS = ["pre-commit", "pre-push", "check", "commit-msg"]
+
+/**
+ * hk's steps, read by asking hk: hk.pkl is Pkl, which only hk evaluates. `steps` lists one hook's
+ * steps (null: no such hook); undefined when hk is not installed, and the steps are said to be unread.
+ */
+async function hkHooks(
+  read: (file: string) => Promise<string | null>,
+  up: string,
+  scan: HookScan,
+  steps: ((hook: string) => Promise<string[] | null>) | undefined,
+): Promise<void> {
+  let config: string | undefined
+  for (const file of HK_CONFIGS) if ((await read(file)) !== null) config = file
+  if (config === undefined) return
+  const source = `${up}${config}`
+  if (steps === undefined) {
+    scan.skipped.push({
+      name: "hk steps",
+      source,
+      reason: "hk is not installed, so its steps can't be read",
+      elsewhere: false,
+    })
+    return
+  }
+  const seen = new Set<string>()
+  for (const hook of HK_HOOKS) {
+    for (const step of (await steps(hook)) ?? []) {
+      if (seen.has(step)) continue
+      seen.add(step)
+      // Run with --check, the step never fixes: hk runs its check command only.
+      scan.offered.push({
+        id: `hook/${idSegment(`${hook}-${step}`)}`,
+        name: step,
+        detect: { hk: `${hook}/${step}` },
+        files: null,
+        modifies: false,
+        source,
+        stages: [hook],
+      })
+    }
+  }
+}
+
 /** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
-export async function scanHooks(read: (file: string) => Promise<string | null>, project = ""): Promise<HookScan> {
+export async function scanHooks(
+  read: (file: string) => Promise<string | null>,
+  project = "",
+  hkSteps?: (hook: string) => Promise<string[] | null>,
+): Promise<HookScan> {
   const prefix = project === "" || project === "." ? "" : `${project.replace(/\/+$/, "")}/`
   const up = prefix === "" ? "" : "../".repeat(prefix.split("/").length - 1)
   const scan: HookScan = { offered: [], skipped: [] }
@@ -439,6 +491,7 @@ export async function scanHooks(read: (file: string) => Promise<string | null>, 
     }
     break
   }
+  await hkHooks(read, up, scan, hkSteps)
   return { ...scan, offered: distinctIds(scan.offered) }
 }
 
@@ -474,11 +527,12 @@ export interface LocalRule {
 }
 
 export function hookRule(hook: DetectedHook): LocalRule {
-  const runner = "lefthook" in hook.detect ? "lefthook" : "pre-commit"
+  const runner = "lefthook" in hook.detect ? "lefthook" : "hk" in hook.detect ? "hk" : "pre-commit"
+  const what = { lefthook: "lefthook job", hk: "hk step", "pre-commit": "pre-commit hook" }[runner]
   const outside = hook.source.startsWith("../")
   // Said in the rule, since its findings come without a doc section.
   const note = outside
-    ? `Runs the ${runner === "lefthook" ? "lefthook job" : "pre-commit hook"} ${hook.name} from ${hook.source}. No doc section: the config is outside this project.`
+    ? `Runs the ${what} ${hook.name} from ${hook.source}. No doc section: the config is outside this project.`
     : ""
   const description = [hook.description ?? "", note].filter((part) => part !== "").join(" ")
   return {

@@ -5,7 +5,7 @@ import { parse } from "yaml"
 import { readSourceFile } from "../core/detection/per-rule"
 import { git, isShallow, repositoryTop } from "../core/git"
 import type { Adapter } from "../core/types"
-import { PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
+import { HK_CONFIGS, PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
 import { detectStack } from "./detect"
 import { VENDORED_DIR } from "./generated"
 import { globToRegex, LEFTHOOK_CONFIGS } from "./hooks"
@@ -19,7 +19,7 @@ export interface SetupFacts {
   /** Dirs below the project holding an adapter's install marker (e.g. ".claude/"). */
   sessions: string[]
   /** The git hook managers at the git top, relative to the project, and whether rulecast is already in each. */
-  gitHooks: { manager: "pre-commit" | "lefthook" | "husky"; file: string; rulecast: boolean }[]
+  gitHooks: { manager: "pre-commit" | "lefthook" | "hk" | "husky"; file: string; rulecast: boolean }[]
   /** Workflow files that run a coding agent. */
   ci: { file: string; agent: string }[]
 }
@@ -183,6 +183,12 @@ async function gitHooks(root: string, top: string): Promise<SetupFacts["gitHooks
     const text = await read(file)
     if (text === null) continue
     hooks.push({ manager: "lefthook", file: `${up}${file}`, rulecast: MENTIONS_RULECAST.test(text) })
+    break
+  }
+  for (const file of HK_CONFIGS) {
+    const text = await read(file)
+    if (text === null) continue
+    hooks.push({ manager: "hk", file: `${up}${file}`, rulecast: MENTIONS_RULECAST.test(text) })
     break
   }
   const husky = await readdir(path.join(top, ".husky")).catch(() => null)

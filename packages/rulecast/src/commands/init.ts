@@ -14,6 +14,7 @@ import { allFiles, isTracked, repositoryTop } from "../core/git"
 import { cacheHome } from "../core/home"
 import { type Catalog, catalogEntry, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } from "../core/types"
+import { hkCommand, hkSteps } from "../detectors/hook/resolve"
 import type { ConfigSettings, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
 import { type SetupFacts, setupFacts } from "../init/facts"
@@ -172,12 +173,21 @@ const idOf = (entry: unknown): string | null => {
   return typeof id === "string" ? id : null
 }
 
-/** The project's own pre-commit and lefthook hooks, read at the git top as the hook detector does. */
+/**
+ * The project's own pre-commit, lefthook and hk hooks, read at the git top as the hook detector does.
+ * hk's steps are asked of hk itself, when it is installed: its config is Pkl.
+ */
 async function projectHooks(root: string): Promise<HookScan> {
   const top = await repositoryTop(root)
   const project = path.relative(top, root).split(path.sep).join("/")
-  return scanHooks((file) => readSourceFile(top, file), project)
+  const signal = AbortSignal.timeout(HK_TIMEOUT_MS)
+  const hk = await hkCommand(root, top, signal)
+  const steps = hk === null ? undefined : (hook: string) => hkSteps(hk, top, hook, signal).catch(() => null)
+  return scanHooks((file) => readSourceFile(top, file), project, steps)
 }
+
+/** hk evaluates hk.pkl, which may fetch hk's Pkl package the first time. */
+const HK_TIMEOUT_MS = 60_000
 
 /**
  * The agents `init` installs hooks for unless told otherwise: the detected ones, or — when nothing

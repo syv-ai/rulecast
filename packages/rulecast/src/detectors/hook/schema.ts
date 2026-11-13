@@ -12,6 +12,11 @@ export const hookSchema = z
       .string()
       .regex(/^[^/\s]+\/.+$/, "lefthook names a hook and a job: pre-commit/typecheck")
       .optional(),
+    /** `<hook>/<step>` in the project's hk.pkl: `pre-commit/eslint`. Run in check mode, never fix. */
+    hk: z
+      .string()
+      .regex(/^[^/\s]+\/.+$/, "hk names a hook and a step: pre-commit/eslint")
+      .optional(),
     /** Most hooks print gcc-style lines; a hook that prints nothing a format reads still reports its failure. */
     output: outputSchema.default({ lines: "gcc" }),
     rules: ruleIdsSchema.optional(),
@@ -19,11 +24,16 @@ export const hookSchema = z
     captures: capturesSchema,
   })
   .strict()
-  .refine((config) => (config["pre-commit"] === undefined) !== (config.lefthook === undefined), {
-    message: "a hook rule names exactly one of pre-commit and lefthook",
+  .refine((config) => [config["pre-commit"], config.lefthook, config.hk].filter((v) => v !== undefined).length === 1, {
+    message: "a hook rule names exactly one of pre-commit, lefthook and hk",
   })
 
 export type HookConfig = z.infer<typeof hookSchema>
 
-/** The hook as people name it: its pre-commit id, or lefthook's `<hook>/<job>`. */
-export const hookName = (config: HookConfig): string => config["pre-commit"] ?? config.lefthook!
+/** The hook as people name it: its pre-commit id, lefthook's `<hook>/<job>` or hk's `<hook>/<step>`. */
+export const hookName = (config: HookConfig): string => config["pre-commit"] ?? config.lefthook ?? config.hk!
+
+/** The hook manager a rule runs its hook with. */
+export type HookManager = "pre-commit" | "lefthook" | "hk"
+export const managerOf = (config: HookConfig): HookManager =>
+  config["pre-commit"] !== undefined ? "pre-commit" : config.lefthook !== undefined ? "lefthook" : "hk"

@@ -14,6 +14,9 @@ const LEFTHOOK_ANY = ["", ".", ".config/"].flatMap((dir) =>
   ["yml", "yaml", "toml", "json", "jsonc"].map((ext) => `${dir}lefthook.${ext}`),
 )
 
+/** The names hk reads its config from at the repository's top. */
+export const HK_CONFIGS = ["hk.pkl", ".hk.pkl", ".config/hk.pkl"]
+
 /** Whether the repository's top holds `file`. */
 export async function hasConfig(top: string, file: string): Promise<boolean> {
   try {
@@ -29,8 +32,8 @@ export async function hasConfig(top: string, file: string): Promise<boolean> {
  * What to say when a hook rule's hook manager has no config here: the repository moved to another
  * manager, or the rule was copied from another repository (#87). Null when the config is there.
  */
-export async function missingManager(top: string, manager: "pre-commit" | "lefthook"): Promise<string | null> {
-  const files = manager === "pre-commit" ? [PRE_COMMIT_CONFIG] : LEFTHOOK_ANY
+export async function missingManager(top: string, manager: "pre-commit" | "lefthook" | "hk"): Promise<string | null> {
+  const files = manager === "pre-commit" ? [PRE_COMMIT_CONFIG] : manager === "lefthook" ? LEFTHOOK_ANY : HK_CONFIGS
   for (const file of files) if (await hasConfig(top, file)) return null
   return `no ${files[0]} in the repository, so ${manager} is not set up here and this rule cannot run; point the rule at the hook manager the project uses now, or remove it`
 }
@@ -85,6 +88,56 @@ export async function preCommitRunner(
     if (command !== null) return { runner, command }
   }
   return null
+}
+
+export async function hkCommand(root: string, top: string, signal?: AbortSignal): Promise<string | null> {
+  return locate("hk", root, top, signal)
+}
+
+/** One step of an hk run, as `--format json` reports it. */
+export interface HkStep {
+  name: string
+  status: string
+  output?: string
+}
+
+/**
+ * What `hk run --format json` printed: the run's status, why it failed before any step ran
+ * (`failure` with no steps: an unknown hook or step), and each step.
+ */
+export function parseHkRun(stdout: string): { status: string; failure: string | null; steps: HkStep[] } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    return null
+  }
+  if (!isObject(parsed) || typeof parsed.status !== "string" || !Array.isArray(parsed.steps)) return null
+  const steps = parsed.steps.filter(
+    (step): step is HkStep => isObject(step) && typeof step.name === "string" && typeof step.status === "string",
+  )
+  return { status: parsed.status, failure: typeof parsed.failure === "string" ? parsed.failure : null, steps }
+}
+
+/** The steps of one hk hook, from `hk run <hook> --plan --json --all`; null when hk does not know the hook. */
+export async function hkSteps(
+  command: string,
+  top: string,
+  hook: string,
+  signal: AbortSignal,
+): Promise<string[] | null> {
+  const ran = await runTool(command, ["run", hook, "--plan", "--json", "--all"], {
+    cwd: top,
+    signal,
+    notFound: "hk is not installed",
+  })
+  try {
+    const plan: unknown = JSON.parse(ran.stdout)
+    if (!isObject(plan) || !Array.isArray(plan.steps)) return null
+    return plan.steps.flatMap((step) => (isObject(step) && typeof step.name === "string" ? [step.name] : []))
+  } catch {
+    return null
+  }
 }
 
 export async function lefthookCommand(root: string, top: string, signal?: AbortSignal): Promise<string | null> {

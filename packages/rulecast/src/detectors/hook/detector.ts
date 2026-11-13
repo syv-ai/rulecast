@@ -14,14 +14,17 @@ import { restoreChanged, snapshot } from "./modified"
 import {
   findLefthookJob,
   findPreCommitHook,
+  hkCommand,
+  hkSteps,
   lefthookCommand,
   lefthookDump,
   missingManager,
   PRE_COMMIT_CONFIG,
+  parseHkRun,
   preCommitRunner,
   substituteFiles,
 } from "./resolve"
-import { type HookConfig, hookName, hookSchema } from "./schema"
+import { type HookConfig, hookName, hookSchema, managerOf } from "./schema"
 
 const ALWAYS = ["message", "ruleId", "severity"] as const
 /** How many lines of an unreadable failure the finding carries. */
@@ -83,6 +86,34 @@ async function runLefthook(spec: string, files: string[], input: DetectorRun<Hoo
 }
 
 /**
+ * One hk step in check mode on the rule's files: `--check` runs its check command, never its fix,
+ * and `--stash none` leaves the working tree as it is. Run from the repository's top, where hk.pkl is.
+ */
+async function runHk(spec: string, files: string[], input: DetectorRun<HookConfig>): Promise<HookRun> {
+  const top = await repositoryTop(input.cwd)
+  const command = await hkCommand(input.cwd, top, input.signal)
+  if (command === null) throw new Error("hk is not installed")
+  const slash = spec.indexOf("/")
+  const [hook, step] = [spec.slice(0, slash), spec.slice(slash + 1)]
+  const args = ["run", hook, "--check", "--step", step, "--stash", "none", "--no-stage", "--format", "json"]
+  const ran = await runTool(command, [...args, ...filesFrom(top, input.cwd, files)], {
+    cwd: top,
+    signal: input.signal,
+    notFound: "hk is not installed",
+  })
+  const run = parseHkRun(ran.stdout)
+  if (run === null) throw new Error(toolFailure("hk", ran))
+  const result = run.steps.find((one) => one.name === step)
+  // No step ran: hk stopped before it, at an unknown hook or step, and says why in `failure`.
+  if (result === undefined) {
+    if (run.status === "failed") throw new Error(`hk: ${run.failure ?? "the step did not run"}`)
+    return { exitCode: null, failed: false, output: "", dir: top }
+  }
+  const failed = result.status === "failed"
+  return { exitCode: failed ? ran.exitCode : null, failed, output: result.output ?? "", dir: top }
+}
+
+/**
  * A finding the hook itself is the source of, not a line of its output. It spans the whole file,
  * as a `path` match does, so any edit to the file makes it the agent's rather than the backlog.
  */
@@ -136,6 +167,7 @@ export const hookDetector: Detector<HookConfig> = {
       const key = JSON.stringify([
         rule.config["pre-commit"],
         rule.config.lefthook,
+        rule.config.hk,
         rule.config.output,
         rule.config.exit_codes,
       ])
@@ -156,7 +188,9 @@ export const hookDetector: Detector<HookConfig> = {
         try {
           ran = config["pre-commit"]
             ? await runPreCommit(config["pre-commit"], files, input)
-            : await runLefthook(config.lefthook!, files, input)
+            : config.lefthook
+              ? await runLefthook(config.lefthook, files, input)
+              : await runHk(config.hk!, files, input)
         } finally {
           changed = await restoreChanged(before, input.cwd)
           const findings = await Promise.all(
@@ -196,7 +230,7 @@ export const hookDetector: Detector<HookConfig> = {
     const problems: { rule: string; message: string }[] = []
     const top = await repositoryTop(input.cwd)
     for (const rule of input.rules) {
-      const manager = rule.config["pre-commit"] !== undefined ? "pre-commit" : "lefthook"
+      const manager = managerOf(rule.config)
       const missing = await missingManager(top, manager)
       if (missing !== null) {
         problems.push({ rule: rule.id, message: missing })
@@ -259,16 +293,47 @@ export const hookDetector: Detector<HookConfig> = {
           detail: "not installed",
           rules: lefthook.map((rule) => rule.id),
         })
+      } else {
+        results.push({ what: "lefthook", level: "ok", detail: shown(command), rules: [] })
+        const dump = await lefthookDump(command, top, input.signal)
+        const byJob = new Map<string, string[]>()
+        for (const rule of lefthook)
+          byJob.set(rule.config.lefthook!, [...(byJob.get(rule.config.lefthook!) ?? []), rule.id])
+        for (const [job, rules] of byJob) {
+          if (findLefthookJob(dump, job) !== null) continue
+          results.push({
+            what: `lefthook job "${job}"`,
+            level: "error",
+            detail: "no such job with a run command",
+            rules,
+          })
+        }
+      }
+    }
+    const hk = input.rules.filter((rule) => rule.config.hk !== undefined)
+    const hkMissing = hk.length > 0 ? await missingManager(top, "hk") : null
+    if (hkMissing !== null) {
+      results.push({ what: "hk", level: "error", detail: hkMissing, rules: hk.map((rule) => rule.id) })
+    } else if (hk.length > 0) {
+      const command = await hkCommand(input.cwd, top, input.signal)
+      if (command === null) {
+        results.push({ what: "hk", level: "error", detail: "not installed", rules: hk.map((rule) => rule.id) })
         return results
       }
-      results.push({ what: "lefthook", level: "ok", detail: shown(command), rules: [] })
-      const dump = await lefthookDump(command, top, input.signal)
-      const byJob = new Map<string, string[]>()
-      for (const rule of lefthook)
-        byJob.set(rule.config.lefthook!, [...(byJob.get(rule.config.lefthook!) ?? []), rule.id])
-      for (const [job, rules] of byJob) {
-        if (findLefthookJob(dump, job) !== null) continue
-        results.push({ what: `lefthook job "${job}"`, level: "error", detail: "no such job with a run command", rules })
+      results.push({ what: "hk", level: "ok", detail: shown(command), rules: [] })
+      const bySpec = new Map<string, string[]>()
+      for (const rule of hk) bySpec.set(rule.config.hk!, [...(bySpec.get(rule.config.hk!) ?? []), rule.id])
+      const stepsOf = new Map<string, string[] | null>()
+      for (const [spec, rules] of bySpec) {
+        const slash = spec.indexOf("/")
+        const hook = spec.slice(0, slash)
+        if (!stepsOf.has(hook)) stepsOf.set(hook, await hkSteps(command, top, hook, input.signal))
+        const steps = stepsOf.get(hook)
+        if (steps === null || steps === undefined) {
+          results.push({ what: `hk hook "${hook}"`, level: "error", detail: "not in hk.pkl", rules })
+        } else if (!steps.includes(spec.slice(slash + 1))) {
+          results.push({ what: `hk step "${spec}"`, level: "error", detail: "no such step", rules })
+        }
       }
     }
     return results

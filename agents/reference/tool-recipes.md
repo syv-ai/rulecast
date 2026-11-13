@@ -19,7 +19,7 @@ Add `rules: [<rule id>, ...]` to any of them to keep only those findings: one ru
 
 `scope: project` means the tool reads the whole project, so the rule runs at verify only unless you add `stages: [edit, verify]`. The speed notes say which tools are fast enough for edits. How each kind of rule runs on staged content is in [detectors.md](detectors.md#in-staged-and---to-ref-runs).
 
-If the project already runs a tool as a pre-commit or lefthook hook, a [`hook`](#a-hook-the-project-already-runs) rule is less to keep in step: the hook's own arguments and environment apply.
+If the project already runs a tool as a pre-commit, lefthook or hk hook, a [`hook`](#a-hook-the-project-already-runs) rule is less to keep in step: the hook's own arguments and environment apply.
 
 ## Python
 

@@ -24,7 +24,8 @@ It writes nothing in the project. It fetches the catalog's rule data into ruleca
 - `generated` and `vendored` list at most 20 files; `notListed` counts the rest. They are offered only when the catalog has the rule that covers them (`generated-code`, `vendored-code`).
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
 - A hook that exits 0 whatever it finds has `neverFails`, the part of its command that makes it so (`"|| true"`, `"; exit 0"`, `"set +e"`). A rule on it would never fire.
-- A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's stage is the hook it sits under.
+- A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's or hk step's stage is the hook it sits under.
+- hk's steps are offered only when hk is installed, since only hk can read `hk.pkl`. Without it, `hooks.skipped` says so: ask the developer to install hk, or leave its steps out.
 - Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (how many rules its config sets to warn; null whenever `errorRules` is) and `candidates`, the doc sections that name one of its error rules (step 7).
 
 Then read what needs judgement:
@@ -44,7 +45,7 @@ Each item on the page gets a default from what you found. Only the items below m
 | Install | `node_modules/.bin/rulecast`, `command -v rulecast`, and whether `package.json` lists the project's dev tools | the one already installed, if any; else the devDependency when `package.json` lists them, so everyone runs the same version; else the standalone binary, which needs no Node and no change to the project. The row lists the three options (devDependency, standalone binary, global `npm install -g`), and its `detail` is the exact command step 6 will run | never |
 | Sessions start | where init runs, and `sessions` | here; each directory in `sessions` is listed as "sessions may also start in X", with `rulecast install --agent` there | never |
 | Configs | `packages` and existing configs | one at the top, and one in each package that already has its own config, agent doc or `.claude/` | never |
-| Pre-commit entry | `gitHooks` | on when pre-commit or lefthook is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
+| Pre-commit entry | `gitHooks` | on when pre-commit, lefthook or hk is there without rulecast; `off` for husky, which init can't read; left out when rulecast is already in it | never |
 | CI | `ci` | an aside in the footer: rulecast never edits CI | never |
 | Conventions location | the config's `conventions`, else an existing folder such as `docs/conventions/`, else `primaryDoc` | that path | none of the three exists |
 | Linter rules | `linters.offered` | each on, with `--linters`: the errors the linter's own config reports reach the agent after each edit (ESLint's when it stops), and only the ones its edit caused. The row says how many rules the config makes errors and how many warnings will not be delivered | never |
@@ -117,7 +118,7 @@ Pass `--weekly-summary` where the developer turned on the weekly stats summary. 
 Then, as the page says:
 
 - **Sessions starting somewhere without a config:** run `rulecast install --agent <name>` there, with `--scope personal` if the developer chose personal hooks.
-- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml` or `lefthook.yml` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows: the `rulecast` hook, and `rulecast-push` (lefthook: the `pre-push` job) if the project runs pre-push hooks. Show the change first.
+- **Pre-commit:** add rulecast's entry to `.pre-commit-config.yaml`, `lefthook.yml` or `hk.pkl` as [Git hooks and CI](https://syv-ai.github.io/rulecast/guides/git-hooks-ci/) shows: the `rulecast` hook, and `rulecast-push` (lefthook and hk: the `pre-push` step) if the project runs pre-push hooks. Show the change first.
 - **Conventions:** create the file or folder if it is new, with what the developer agreed should go in it. Show it first.
 - **Agent loops with nobody watching:** `rulecast add loop-safety` adds the catalog pack that catches the shortcuts a loop takes to make tests pass. Tell the developer to set `RULECAST_MODE=unattended` for those runs. Set `mode: unattended` in a config only if nothing but those runs uses it: it makes every session there stricter.
 - **CI:** tell the developer to add `rulecast install` and then `rulecast doctor --ci` before the agent step, after a step that installs rulecast as the install row did. For the devDependency that is the project's install (`npm ci`), and the two run as `npx rulecast …`; otherwise it is the install command above (for the standalone binary, in GitHub Actions it adds its directory to `$GITHUB_PATH`). Don't edit CI yourself.
