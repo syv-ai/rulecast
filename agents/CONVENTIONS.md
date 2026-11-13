@@ -51,6 +51,26 @@ The order:
 
 When the developer says no to something, note their reason. It goes in `declined.md` in step 6.
 
+## 3a. Many candidates
+
+One question at a time works for a couple of dozen candidates. When the developer asks for conventions from many sources (their memory, session transcripts, review comments, the agent doc, the docs, a sister project, the standards for this kind of project), there can be hundreds, and a chat interview would take a week. Then mine, merge and review on a page instead. Settle the questions in step 3's items 1 to 3 in the chat first: the candidates depend on them.
+
+1. **Mine.** For each source, collect candidates in one shape, so they can be merged:
+   - `text`: the convention as it would be written down;
+   - `sources`: where it was said, each with the exact words (`where`: a file and line, a session and time, a review comment; `quote`);
+   - `followed`: what the code does today, with counts (`7 relative imports in 412 files`);
+   - `checkable`: what could check it, `regex`, `ast-grep`, `linter`, `command`, `llm`, or `no`;
+   - `enforce`: what should, `git hook` (every committer), `rulecast` (the agent while it works), `both`, or `practice` (no tool);
+   - `lands`: where it would be written.
+
+   Several sources can be mined in parallel, by subagents if you have them, each giving back candidates in this shape.
+2. **Merge.** One candidate per convention, keeping every source's quote. Where two sources disagree, or the developer's words and the code do, the disagreement becomes a **conflict**: a question with an option per side, what each means, the evidence, and your recommendation. Don't merge a disagreement away.
+3. **Group.** Put the candidates in topics, in dependency order: principles first, then each area. For each candidate recommend `keep`, `reword` or `decline`, with why, from the evidence.
+4. **Review.** Fill [conventions-review.html](conventions-review.html) to publish as an artifact, or [conventions-review.local.html](conventions-review.local.html) for a local file, as its head comment describes (every `<` inside a JSON string written as `\u003c`). The developer settles the conflicts first, then goes through the topics: each candidate is kept, kept in their words, or declined with a reason.
+   - Published as a private artifact, declare `capabilities: {db: {}, user: {}}`: each decision is saved as a document in the `decisions` collection, and you read them back with your artifact data tool (list `decisions`).
+   - As a local file, the decisions stay in the developer's browser, and its Finish step has a button that copies them as JSON for the developer to paste into the conversation.
+5. **Read back.** A `keep` is the candidate's text; a `reword` is the developer's `words`; a `decline` goes in `declined.md` with its `note`. A conflict's `choice` is the option the developer picked. An undecided candidate is not written: ask about the rest in the chat, or leave them. Then carry on with step 4.
+
 ## 4. Write it down
 
 From the answers, draft the principles and conventions in plain language: short sentences a developer would say to a colleague, with no rulecast terms. Each one traces to an answer. Nothing goes in that the developer didn't say or choose.

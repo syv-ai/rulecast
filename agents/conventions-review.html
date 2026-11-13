@@ -1,0 +1,621 @@
+<!--
+  rulecast's conventions review page (agents/CONVENTIONS.md, "Many candidates"). When mining the
+  project's conventions turns up more candidates than a chat can take one question at a time, an
+  agent copies this file, replaces the JSON in <script id="review-data"> with the merged candidates,
+  and shows the page. The developer decides each one on the page; the agent reads the decisions back.
+
+  Two copies of one page: conventions-review.html is a fragment, as an artifact publisher takes it
+  (it wraps the page in its own document); conventions-review.local.html is the same page as a whole
+  document, for a local file, generated from the first by pnpm sync-version. Change only the data
+  block.
+
+  Where decisions are kept:
+  - Published as an artifact with capabilities {db: {}, user: {}}: one document per decision in the
+    collection "decisions", id = the candidate's or conflict's id. Read them back with the artifact
+    data tool (list "decisions"). Each is {kind, choice, words, note, at}.
+  - Anywhere else (a local file): the viewer's browser. The Finish step shows the decisions as JSON
+    with a button to copy them, which the developer pastes into the conversation.
+
+  Data (every string is text; `backticks` become code, nothing else is markup). Write every "<"
+  inside a string as <, so text such as a closing script tag cannot end the data block early.
+  {
+    "project": "tidewater",                     the repository's name, in the title
+    "lead":    "One or two sentences: where the candidates came from and what to do.",
+    "conflicts": [                               two sources disagree: decided first
+      { "id": "commit-owner",                    unique across conflicts and candidates
+        "question": "Who commits the transaction?",
+        "options": [ { "label": "The service", "means": "What choosing it means." } ],
+        "recommend": "The service",              one option's label, or null
+        "evidence": ["Where each side was said or done, with the words."] }
+    ],
+    "topics": [                                  one step each, in dependency order
+      { "id": "how-we-build", "title": "How we build", "intro": "Why this topic comes first.",
+        "candidates": [
+          { "id": "one-source-per-rule",
+            "text": "The convention as it would be written down.",
+            "recommend": "keep" | "reword" | "decline",
+            "why": "Why you recommend that, from the evidence.",
+            "sources": [ { "where": "docs/x.md:12", "quote": "the words, exactly" } ],
+            "followed": "What the code does today, with counts: 51 files declare a mirror.",
+            "checkable": "regex" | "ast-grep" | "linter" | "command" | "llm" | "no",
+            "enforce": "git hook" | "rulecast" | "both" | "practice",
+            "lands": "Where it would be written: docs/conventions/design.md" }
+        ] }
+    ]
+  }
+  Choices: a candidate is "keep", "reword" (with `words`, the developer's wording) or "decline"
+  (with `note`, the reason, which goes in declined.md); a conflict's choice is an option's label,
+  with an optional note.
+-->
+<title>rulecast conventions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* The setup page's surfaces and ink. One column: a sticky bar of steps, then cards that close as
+   they are decided and open the next undecided one. Green kept, blue reworded, red declined. */
+:root {
+  --bg: #080b10;
+  --tone-1: #0e131a;
+  --tone-2: #141a23;
+  --tone-3: #1b232e;
+  --ink: #e6eaf0;
+  --muted: #8b95a4;
+  --faint: #566070;
+  --said: #9cc2ee;
+  --found: #d9bd8f;
+  --keep: #9fd6b4;
+  --decline: #ec9a9a;
+  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f5f1;
+    --tone-1: #eeece6;
+    --tone-2: #e6e3db;
+    --tone-3: #dcd8ce;
+    --ink: #1b2129;
+    --muted: #59636f;
+    --faint: #8b939e;
+    --said: #2a64a8;
+    --found: #94661c;
+    --keep: #2c7a4b;
+    --decline: #b23a3a;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.6 var(--display); padding: 0 16px 80px; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 400; }
+p { margin: 0; }
+code { font: 400 0.88em var(--mono); }
+button, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--said); outline-offset: 2px; }
+
+.page { max-width: 880px; margin: 0 auto; padding-top: 56px; display: grid; gap: 28px; }
+header { display: grid; gap: 12px; }
+h1 { font-size: 36px; line-height: 1.1; letter-spacing: -0.02em; font-weight: 300; }
+h1 b { font-weight: 500; }
+.lead { color: var(--muted); font-size: 16px; max-width: 62ch; }
+
+.bar { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 12px 0; display: grid; gap: 10px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.step { background: var(--tone-1); border: 0; border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--muted); font-variant-numeric: tabular-nums; }
+.step .count { color: var(--faint); margin-left: 6px; }
+.step.done { color: var(--keep); }
+.step.active { background: var(--tone-3); color: var(--ink); }
+.progress { height: 4px; background: var(--tone-1); border-radius: 999px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--keep); transition: width .25s; }
+.bar-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.bar-row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.where.local { color: var(--found); }
+
+.panel { display: grid; gap: 10px; }
+.panel-head { display: grid; gap: 4px; margin-bottom: 6px; }
+.panel-head h2 { font-size: 22px; }
+.panel-head p { color: var(--muted); max-width: 62ch; }
+
+.card { background: var(--tone-1); border-radius: 10px; }
+.card > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; align-items: start; }
+.card > summary::-webkit-details-marker { display: none; }
+.card[open] > summary { background: var(--tone-2); border-radius: 10px 10px 0 0; }
+.card .text { font-size: 15px; }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--faint); grid-column: 1; }
+.badge { font-size: 12px; font-weight: 500; border-radius: 6px; padding: 2px 8px; background: var(--tone-3); color: var(--muted); white-space: nowrap; }
+.badge.keep { color: var(--keep); }
+.badge.reword { color: var(--said); }
+.badge.decline { color: var(--decline); }
+.card.decided .text { color: var(--muted); }
+.body { padding: 14px 16px 16px; display: grid; gap: 14px; }
+.why { color: var(--muted); max-width: 68ch; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13.5px; }
+.facts dt { color: var(--faint); }
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sources { display: grid; gap: 8px; }
+.sources-toggle { cursor: pointer; font-size: 13px; color: var(--said); }
+.source { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--tone-3); }
+.source .at { font: 400 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.source q { color: var(--ink); quotes: "“" "”"; }
+
+.decide { background: var(--tone-2); border-radius: 8px; padding: 12px; display: grid; gap: 10px; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice { background: var(--tone-1); border: 1px solid var(--tone-3); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.choice:hover { border-color: var(--muted); }
+.choice .rec { color: var(--faint); font-size: 12px; margin-left: 6px; }
+.choice[aria-pressed="true"] { border-color: currentColor; }
+.choice[aria-pressed="true"].keep { color: var(--keep); }
+.choice[aria-pressed="true"].reword, .choice[aria-pressed="true"].option { color: var(--said); }
+.choice[aria-pressed="true"].decline { color: var(--decline); }
+.option-means { color: var(--muted); font-size: 13px; }
+textarea { width: 100%; min-height: 64px; resize: vertical; background: var(--tone-1); border: 1px solid var(--tone-3); border-radius: 6px; padding: 8px 10px; }
+.hint { font-size: 12.5px; color: var(--faint); }
+.hint.need { color: var(--found); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { background: var(--ink); color: var(--bg); border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 500; cursor: pointer; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.ghost { background: transparent; color: var(--said); border: 1px solid var(--tone-3); }
+
+.tally { display: flex; flex-wrap: wrap; gap: 8px; }
+.tally span { background: var(--tone-1); border-radius: 6px; padding: 6px 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.tally b { font-weight: 500; margin-right: 6px; }
+.outstanding { color: var(--found); }
+pre.out { background: var(--tone-1); border-radius: 8px; padding: 12px; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; margin: 0; }
+.empty { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+.card > summary .badge { justify-self: end; }
+@media (max-width: 640px) { h1 { font-size: 28px; } .card > summary { grid-template-columns: 1fr; } .card > summary .badge { justify-self: start; } }
+</style>
+<main class="page" id="app"></main>
+
+<script type="application/json" id="review-data">
+{
+  "project": "tidewater",
+  "lead": "38 candidate conventions from the docs, the agent doc, review comments and the code, merged where they said the same thing. Two sources disagree twice: settle those first. Then decide each convention: keep it, keep it in your words, or decline it with your reason.",
+  "conflicts": [
+    {
+      "id": "error-suffix",
+      "question": "Do exception classes end in `Error` or `Exception`?",
+      "options": [
+        { "label": "Error", "means": "New classes end in `Error`; the existing ones are renamed in their own pull request." },
+        { "label": "Error for new classes only", "means": "Existing names stay." },
+        { "label": "Exception", "means": "The existing house style stays." }
+      ],
+      "recommend": "Error",
+      "evidence": [
+        "PEP 8: use the suffix Error on exception names if the exception is an error.",
+        "app/core/errors.py: 14 classes end in `Exception`, 9 in `Error`."
+      ]
+    },
+    {
+      "id": "commit-owner",
+      "question": "Who commits the transaction: the data layer or the service?",
+      "options": [
+        { "label": "The service", "means": "Data access stages writes; a service commits once per act." },
+        { "label": "The data layer (today)", "means": "Each data function commits by default." }
+      ],
+      "recommend": "The service",
+      "evidence": [
+        "A review comment: “a helper that hides commit() obscures the transaction boundary”.",
+        "app/crud: 41 calls to `.commit()`."
+      ]
+    }
+  ],
+  "topics": [
+    {
+      "id": "how-we-build",
+      "title": "How we build",
+      "intro": "The principles the later topics apply. Settle these first.",
+      "candidates": [
+        {
+          "id": "one-source-per-rule",
+          "text": "Every rule or format lives in one place and every other site reads it; two things that must agree become one source, never a copy kept in step by a comment.",
+          "recommend": "keep",
+          "why": "Said in three places, and the most common review comment.",
+          "sources": [
+            { "where": "docs/design.md:14", "quote": "Write each rule once and call it from every other site." },
+            { "where": "PR review, 2026-10-02", "quote": "Did this PR add to our shotgun surgery problem or diminish it?" }
+          ],
+          "followed": "12 files say they mirror another (`mirrors the backend`).",
+          "checkable": "llm",
+          "enforce": "rulecast",
+          "lands": "AGENTS.md"
+        },
+        {
+          "id": "no-premature-optimisation",
+          "text": "Readability wins over speed unless a measured run is slower than `main`.",
+          "recommend": "reword",
+          "why": "The docs say it without naming the floor to measure against.",
+          "sources": [ { "where": "CONTRIBUTING.md:40", "quote": "No premature optimisation." } ],
+          "followed": "Not checkable from the code.",
+          "checkable": "no",
+          "enforce": "practice",
+          "lands": "AGENTS.md"
+        }
+      ]
+    },
+    {
+      "id": "python",
+      "title": "Python",
+      "intro": "Conventions for the backend's Python.",
+      "candidates": [
+        {
+          "id": "absolute-imports",
+          "text": "Imports are absolute: `from app.services import orders`, never `from . import orders`.",
+          "recommend": "keep",
+          "why": "The code nearly always does it already; Ruff can check it.",
+          "sources": [ { "where": "AGENTS.md:31", "quote": "Never use relative imports." } ],
+          "followed": "7 relative imports in 412 files.",
+          "checkable": "linter",
+          "enforce": "both",
+          "lands": "docs/conventions/python.md"
+        },
+        {
+          "id": "docstring-on-everything",
+          "text": "Every function has a docstring.",
+          "recommend": "decline",
+          "why": "Short functions are clearer without one; the docs ask for short docstrings where they help.",
+          "sources": [ { "where": "a sister project's conventions", "quote": "Every public function has a docstring." } ],
+          "followed": "38% of functions have one.",
+          "checkable": "linter",
+          "enforce": "practice",
+          "lands": "docs/conventions/python.md"
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<script id="render">
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }
+const asText = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ESCAPES[char])
+/** Text with `backticks` as code; nothing else is markup. */
+const inline = (value) =>
+  asText(value)
+    .split("`")
+    .map((part, index) => (index % 2 === 1 ? `<code>${part}</code>` : part))
+    .join("")
+
+const CHOICES = [
+  ["keep", "Keep"],
+  ["reword", "Keep, in my words"],
+  ["decline", "Decline"],
+]
+const DONE_LABEL = { keep: "kept", reword: "reworded", decline: "declined" }
+
+/** Every step: conflicts (when there are any), each topic, then the finish. */
+function stepsOf(data) {
+  const steps = []
+  if ((data.conflicts ?? []).length > 0) {
+    steps.push({ id: "conflicts", title: "Conflicts", items: data.conflicts.map((conflict) => conflict.id) })
+  }
+  for (const topic of data.topics ?? []) {
+    steps.push({ id: topic.id, title: topic.title, items: (topic.candidates ?? []).map((candidate) => candidate.id) })
+  }
+  steps.push({ id: "finish", title: "Finish", items: [] })
+  return steps
+}
+
+/** A decision is complete when it says what the page asks for: words to reword, a reason to decline. */
+function complete(decision) {
+  if (!decision?.choice) return false
+  if (decision.kind === "candidate" && decision.choice === "reword") return (decision.words ?? "").trim() !== ""
+  if (decision.kind === "candidate" && decision.choice === "decline") return (decision.note ?? "").trim() !== ""
+  return true
+}
+
+function allIds(data) {
+  return [
+    ...(data.conflicts ?? []).map((conflict) => conflict.id),
+    ...(data.topics ?? []).flatMap((topic) => (topic.candidates ?? []).map((candidate) => candidate.id)),
+  ]
+}
+
+function barHtml(data, decisions, view) {
+  const ids = allIds(data)
+  const done = ids.filter((id) => complete(decisions[id])).length
+  const steps = stepsOf(data)
+    .map((step) => {
+      const left = step.items.filter((id) => !complete(decisions[id])).length
+      const finished = step.items.length > 0 && left === 0
+      const count = step.items.length === 0 ? "" : `<span class="count">${finished ? "✓" : left}</span>`
+      const classes = ["step", step.id === view.step ? "active" : "", finished ? "done" : ""].filter(Boolean).join(" ")
+      return `<button class="${classes}" data-step="${asText(step.id)}"${step.id === view.step ? ' aria-current="step"' : ""}>${asText(step.title)}${count}</button>`
+    })
+    .join("")
+  const width = ids.length === 0 ? 0 : Math.round((done / ids.length) * 100)
+  const where =
+    view.store === "db"
+      ? '<span class="where">Saved with the page: your agent reads it back.</span>'
+      : '<span class="where local">Saved in this browser only: copy your decisions from Finish.</span>'
+  return (
+    `<nav class="bar" aria-label="Review steps"><div class="steps">${steps}</div>` +
+    `<div class="progress" aria-hidden="true"><div style="width:${width}%"></div></div>` +
+    `<div class="bar-row"><span>${done} of ${ids.length} decided</span>` +
+    `<label><input type="checkbox" data-undecided${view.undecidedOnly ? " checked" : ""}> Show undecided only</label>${where}</div></nav>`
+  )
+}
+
+function factsHtml(candidate) {
+  const rows = [
+    ["The code today", candidate.followed],
+    ["Could check it", candidate.checkable],
+    ["Enforced by", candidate.enforce],
+    ["Goes in", candidate.lands],
+  ].filter(([, value]) => value)
+  if (rows.length === 0) return ""
+  return `<dl class="facts">${rows.map(([label, value]) => `<dt>${label}</dt><dd>${inline(value)}</dd>`).join("")}</dl>`
+}
+
+function sourcesHtml(sources) {
+  if (!sources || sources.length === 0) return ""
+  const items = sources
+    .map(
+      (source) =>
+        `<div class="source"><span class="at">${asText(source.where)}</span>${source.quote ? `<q>${inline(source.quote)}</q>` : ""}</div>`,
+    )
+    .join("")
+  return `<details class="sources"><summary class="sources-toggle">Where it was said (${sources.length})</summary>${items}</details>`
+}
+
+function candidateHtml(candidate, decision, open) {
+  const decided = complete(decision)
+  const badge = decided
+    ? `<span class="badge ${decision.choice}">${DONE_LABEL[decision.choice]}</span>`
+    : `<span class="badge">recommend ${asText(candidate.recommend ?? "keep")}</span>`
+  const chosen = decision?.choice ?? null
+  const buttons = CHOICES.map(
+    ([value, label]) =>
+      `<button class="choice ${value}" data-choose="${asText(candidate.id)}" data-value="${value}" aria-pressed="${chosen === value}">${label}${candidate.recommend === value ? '<span class="rec">recommended</span>' : ""}</button>`,
+  ).join("")
+  const words =
+    chosen === "reword"
+      ? `<label class="hint${(decision.words ?? "").trim() === "" ? " need" : ""}" for="words-${asText(candidate.id)}">Your wording, as it will be written down</label>` +
+        // The convention as written, to edit; it counts as reworded once the developer types.
+        `<textarea id="words-${asText(candidate.id)}" data-words="${asText(candidate.id)}">${asText(decision.words || candidate.text)}</textarea>`
+      : ""
+  const note =
+    chosen === null
+      ? ""
+      : `<label class="hint${chosen === "decline" && (decision.note ?? "").trim() === "" ? " need" : ""}" for="note-${asText(candidate.id)}">${chosen === "decline" ? "Why not: it goes in declined.md, so it isn't proposed again" : "A note for your agent (optional)"}</label>` +
+        `<textarea id="note-${asText(candidate.id)}" data-note="${asText(candidate.id)}">${asText(decision.note ?? "")}</textarea>`
+  return (
+    `<details class="card${decided ? " decided" : ""}" data-card="${asText(candidate.id)}"${open ? " open" : ""}>` +
+    `<summary><span class="text">${inline(decision?.choice === "reword" && decision.words ? decision.words : candidate.text)}</span>${badge}` +
+    `<span class="meta">${candidate.lands ? `<span>${inline(candidate.lands)}</span>` : ""}${candidate.enforce ? `<span>${asText(candidate.enforce)}</span>` : ""}</span></summary>` +
+    `<div class="body">${candidate.why ? `<p class="why">${inline(candidate.why)}</p>` : ""}${factsHtml(candidate)}${sourcesHtml(candidate.sources)}` +
+    `<div class="decide"><div class="choices">${buttons}</div>${words}${note}</div></div></details>`
+  )
+}
+
+function conflictHtml(conflict, decision, open) {
+  const decided = complete(decision)
+  const chosen = decision?.choice ?? null
+  const badge = decided ? `<span class="badge keep">${asText(chosen)}</span>` : `<span class="badge">undecided</span>`
+  const options = (conflict.options ?? [])
+    .map(
+      (option) =>
+        `<div><button class="choice option" data-choose="${asText(conflict.id)}" data-value="${asText(option.label)}" aria-pressed="${chosen === option.label}">${inline(option.label)}${conflict.recommend === option.label ? '<span class="rec">recommended</span>' : ""}</button>` +
+        `${option.means ? ` <span class="option-means">${inline(option.means)}</span>` : ""}</div>`,
+    )
+    .join("")
+  const evidence = (conflict.evidence ?? []).map((line) => `<div class="source"><q>${inline(line)}</q></div>`).join("")
+  const note =
+    chosen === null
+      ? ""
+      : `<label class="hint" for="note-${asText(conflict.id)}">A note for your agent (optional)</label><textarea id="note-${asText(conflict.id)}" data-note="${asText(conflict.id)}">${asText(decision.note ?? "")}</textarea>`
+  return (
+    `<details class="card${decided ? " decided" : ""}" data-card="${asText(conflict.id)}"${open ? " open" : ""}>` +
+    `<summary><span class="text">${inline(conflict.question)}</span>${badge}</summary>` +
+    `<div class="body">${evidence ? `<div class="sources">${evidence}</div>` : ""}<div class="decide"><div class="choices" style="display:grid;gap:8px">${options}</div>${note}</div></div></details>`
+  )
+}
+
+/** The decisions as the agent reads them: one entry per id, in the page's order. */
+function decisionsJson(data, decisions) {
+  const out = {}
+  for (const id of allIds(data)) if (decisions[id]) out[id] = decisions[id]
+  return JSON.stringify(out, null, 2)
+}
+
+function finishHtml(data, decisions, view) {
+  const ids = allIds(data)
+  const counts = { keep: 0, reword: 0, decline: 0 }
+  for (const topic of data.topics ?? [])
+    for (const candidate of topic.candidates ?? []) {
+      const decision = decisions[candidate.id]
+      if (complete(decision)) counts[decision.choice]++
+    }
+  const settled = (data.conflicts ?? []).filter((conflict) => complete(decisions[conflict.id])).length
+  const left = ids.filter((id) => !complete(decisions[id])).length
+  const tally =
+    `<div class="tally"><span><b>${counts.keep}</b>kept</span><span><b>${counts.reword}</b>reworded</span><span><b>${counts.decline}</b>declined</span>` +
+    `${(data.conflicts ?? []).length > 0 ? `<span><b>${settled}</b>of ${(data.conflicts ?? []).length} conflicts settled</span>` : ""}</div>`
+  const outstanding = left > 0 ? `<p class="outstanding">${left} still undecided. Your agent writes only what you decided.</p>` : ""
+  const hand =
+    view.store === "db"
+      ? "<p>Your decisions are saved with this page. Tell your agent you're done; it reads them from here.</p>"
+      : `<p>This page keeps your decisions in this browser only. Copy them and paste them into the conversation.</p><div class="actions"><button class="btn" data-copy>Copy decisions</button><span class="hint" data-copied></span></div>`
+  return `${tally}${outstanding}${hand}<pre class="out" data-out>${asText(decisionsJson(data, decisions))}</pre>`
+}
+
+/**
+ * The whole page for `data`, the developer's `decisions` (id to decision) and the `view`: the step
+ * shown, the open card, whether to hide decided ones, and where decisions are kept.
+ */
+function render(data, decisions = {}, view = {}) {
+  const steps = stepsOf(data)
+  const current = { step: steps[0].id, open: null, undecidedOnly: false, store: "local", ...view }
+  const step = steps.find((one) => one.id === current.step) ?? steps[0]
+  const header =
+    `<header><h1>Conventions for <b>${asText(data.project)}</b></h1>` +
+    `${data.lead ? `<p class="lead">${inline(data.lead)}</p>` : ""}</header>`
+  let panel
+  if (step.id === "finish") {
+    panel = `<section class="panel"><div class="panel-head"><h2>Finish</h2></div>${finishHtml(data, decisions, current)}</section>`
+  } else {
+    const firstOpen = current.open ?? step.items.find((id) => !complete(decisions[id])) ?? null
+    const shown = (id) => !current.undecidedOnly || !complete(decisions[id])
+    let cards
+    let head
+    if (step.id === "conflicts") {
+      head = `<h2>Conflicts</h2><p>Where two sources disagree. Settle these first: some topics depend on them.</p>`
+      cards = (data.conflicts ?? [])
+        .filter((conflict) => shown(conflict.id))
+        .map((conflict) => conflictHtml(conflict, decisions[conflict.id], conflict.id === firstOpen))
+    } else {
+      const topic = (data.topics ?? []).find((one) => one.id === step.id)
+      head = `<h2>${asText(topic.title)}</h2>${topic.intro ? `<p>${inline(topic.intro)}</p>` : ""}`
+      cards = (topic.candidates ?? [])
+        .filter((candidate) => shown(candidate.id))
+        .map((candidate) => candidateHtml(candidate, decisions[candidate.id], candidate.id === firstOpen))
+    }
+    const index = steps.indexOf(step)
+    const next = steps[index + 1]
+    panel =
+      `<section class="panel"><div class="panel-head">${head}</div>${cards.length > 0 ? cards.join("") : '<p class="empty">Everything here is decided.</p>'}` +
+      `${next ? `<div class="actions"><button class="btn ghost" data-step="${asText(next.id)}">Next: ${asText(next.title)}</button></div>` : ""}</section>`
+  }
+  return `${header}${barHtml(data, decisions, current)}${panel}`
+}
+</script>
+<script>
+const data = JSON.parse(document.getElementById("review-data").textContent)
+document.title = `rulecast conventions for ${data.project}`
+const app = document.getElementById("app")
+const LOCAL_KEY = `rulecast-conventions:${data.project}`
+const kindOf = (id) => ((data.conflicts ?? []).some((conflict) => conflict.id === id) ? "conflict" : "candidate")
+let decisions = {}
+const view = { step: stepsOf(data)[0].id, open: null, undecidedOnly: false, store: "local" }
+let db = null
+
+const readLocal = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? "{}")
+  } catch {
+    return {}
+  }
+}
+const writeLocal = () => {
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(decisions))
+  } catch {}
+}
+
+function draw() {
+  app.innerHTML = render(data, decisions, view)
+}
+
+/** One write per decision change, awaited per document, as the store asks. */
+const pending = new Map()
+async function save(id) {
+  writeLocal()
+  if (db === null) return
+  const previous = pending.get(id) ?? Promise.resolve()
+  const next = previous.then(() => db.collection("decisions").doc(id).set({ ...decisions[id] })).catch(() => {})
+  pending.set(id, next)
+  await next
+}
+
+function decide(id, patch) {
+  decisions[id] = { kind: kindOf(id), choice: null, words: "", note: "", ...decisions[id], ...patch, at: new Date().toISOString() }
+  return save(id)
+}
+
+/** After a decision is complete, open the next undecided card in this step. */
+function advance(id) {
+  const step = stepsOf(data).find((one) => one.id === view.step)
+  if (!step || !complete(decisions[id])) {
+    view.open = id
+    return
+  }
+  view.open = step.items.find((other) => !complete(decisions[other])) ?? null
+}
+
+app.addEventListener("click", async (event) => {
+  const target = event.target.closest("button, input")
+  if (!target) return
+  if (target.dataset.step) {
+    view.step = target.dataset.step
+    view.open = null
+    draw()
+    window.scrollTo({ top: 0 })
+  } else if (target.dataset.choose) {
+    event.preventDefault()
+    const id = target.dataset.choose
+    await decide(id, { choice: target.dataset.value })
+    advance(id)
+    draw()
+  } else if (target.dataset.copy !== undefined) {
+    const text = decisionsJson(data, decisions)
+    try {
+      await navigator.clipboard.writeText(text)
+      app.querySelector("[data-copied]").textContent = "Copied."
+    } catch {
+      app.querySelector("[data-copied]").textContent = "Select the text below and copy it."
+    }
+  } else if (target.dataset.undecided !== undefined) {
+    view.undecidedOnly = target.checked
+    view.open = null
+    draw()
+  }
+})
+
+// Typing saves once the developer pauses, and only redraws when the decision becomes complete.
+const timers = new Map()
+app.addEventListener("input", (event) => {
+  const field = event.target
+  const id = field.dataset.words ?? field.dataset.note
+  if (!id) return
+  const was = complete(decisions[id])
+  decisions[id] = { ...decisions[id], [field.dataset.words ? "words" : "note"]: field.value }
+  clearTimeout(timers.get(id))
+  timers.set(
+    id,
+    setTimeout(async () => {
+      await decide(id, {})
+      if (complete(decisions[id]) !== was) {
+        const focused = document.activeElement?.id
+        const at = document.activeElement?.selectionStart
+        draw()
+        const again = focused ? document.getElementById(focused) : null
+        if (again) {
+          again.focus()
+          if (at !== undefined) again.setSelectionRange(at, at)
+        }
+      }
+    }, 600),
+  )
+})
+
+decisions = readLocal()
+draw()
+
+// Published as an artifact with the db capability: decisions live with the page, and the agent
+// reads them back. Elsewhere use() is absent or resolves null, and the browser keeps them.
+;(async () => {
+  const use = globalThis.claude?.use
+  if (typeof use !== "function") return
+  const store = await use("db").catch(() => null)
+  if (!store) return
+  db = store
+  view.store = "db"
+  draw()
+  db.collection("decisions").onSnapshot(
+    (snap) => {
+      const saved = {}
+      for (const doc of snap.docs) if (doc.exists) saved[doc.id] = doc.data()
+      // A decision being typed here wins over an older copy from the store.
+      decisions = { ...saved, ...Object.fromEntries([...timers.keys()].filter((id) => decisions[id]).map((id) => [id, decisions[id]])) }
+      if (!app.contains(document.activeElement) || document.activeElement === document.body) draw()
+    },
+    () => {
+      view.store = "local"
+      draw()
+    },
+  )
+})()
+</script>

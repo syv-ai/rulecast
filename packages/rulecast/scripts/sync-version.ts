@@ -207,11 +207,11 @@ export const SETUP_PAGE = "agents/setup-page.html"
 /** The same page as a whole document, for an agent that shows it as a local file. */
 export const SETUP_PAGE_LOCAL = "agents/setup-page.local.html"
 
-/** The fragment as a document: its title, links and style in a head, the rest in a body. */
+/** A page fragment as a document: its title, links and style in a head, the rest in a body. */
 export function setupPageDocument(fragment: string): string {
   const main = fragment.indexOf("<main")
   const title = fragment.indexOf("<title>")
-  if (main === -1 || title === -1) throw new Error(`${SETUP_PAGE}: expected a <title> and a <main>`)
+  if (main === -1 || title === -1) throw new Error("a page fragment needs a <title> and a <main>")
   const comment = fragment.slice(0, title).trimEnd()
   return [
     "<!DOCTYPE html>",
@@ -236,6 +236,19 @@ export async function generateSetupPageLocal(): Promise<{ target: string; source
   return { target: path.join(repoRoot, SETUP_PAGE_LOCAL), source: setupPageDocument(fragment) }
 }
 
+/** The conventions review page (#82): a fragment, and the same page as a whole document. */
+export const CONVENTIONS_REVIEW = "agents/conventions-review.html"
+export const CONVENTIONS_REVIEW_LOCAL = "agents/conventions-review.local.html"
+
+export async function generateConventionsReviewLocal(): Promise<{ target: string; source: string }> {
+  const fragment = await readFile(path.join(repoRoot, CONVENTIONS_REVIEW), "utf8")
+  const document = setupPageDocument(fragment).replace(
+    `Generated from ${SETUP_PAGE} by`,
+    `Generated from ${CONVENTIONS_REVIEW} by`,
+  )
+  return { target: path.join(repoRoot, CONVENTIONS_REVIEW_LOCAL), source: document }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const files = [
     await generateVersionFile(),
@@ -248,6 +261,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await generateInstallScript(),
     await generatePreCommitHooks(),
     await generateSetupPageLocal(),
+    await generateConventionsReviewLocal(),
   ]
   if (process.argv.includes("--check")) {
     for (const { target, source } of files) {

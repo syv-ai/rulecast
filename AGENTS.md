@@ -26,7 +26,7 @@ CI checks each of these with `--check`:
 - `pnpm manifest` → `.rulecast-rules.yaml`, the catalog manifest built from `packages/rules-*/rules.yaml`.
 - `pnpm lenses` → `agents/lenses/`, the pages agents read from the lens catalog in `packages/lenses/` (it validates the catalog first).
 - `pnpm readme` → `packages/rulecast/README.md` and `LICENSE`, mirrored from the root ones. Edit the root `README.md`, then run this.
-- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`, and the version in the README, `guides/git-hooks-ci.md`, `agents/reference/rule-format.md`, `agents/DRAFT-RULES.md`, `install.sh` and the plugin (its manifest and skills). It also writes the git-hook commands into `.pre-commit-hooks.yaml` and the guide's lefthook and hk snippets, and `agents/setup-page.local.html` from `agents/setup-page.html`.
+- `pnpm sync-version` → `packages/rulecast/src/core/version.ts` from `package.json`, and the version in the README, `guides/git-hooks-ci.md`, `agents/reference/rule-format.md`, `agents/DRAFT-RULES.md`, `install.sh` and the plugin (its manifest and skills). It also writes the git-hook commands into `.pre-commit-hooks.yaml` and the guide's lefthook and hk snippets, and the `.local.html` copies of `agents/setup-page.html` and `agents/conventions-review.html`.
 - `pnpm demo` → `.github/assets/demo.svg`, the README's terminal demo, from the README's opening output and a renderer golden.
 
 ### Git hooks
