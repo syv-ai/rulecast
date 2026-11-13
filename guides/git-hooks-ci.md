@@ -33,12 +33,28 @@ In `lefthook.yml`:
 pre-commit:
   jobs:
     - name: rulecast
-      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if command -v rulecast >/dev/null 2>&1; then rulecast run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if command -v rulecast >/dev/null 2>&1; then rulecast run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
 pre-push:
   jobs:
     - name: rulecast
-      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; if command -v rulecast >/dev/null 2>&1; then rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; exec "${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD' --
+      run: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; if command -v rulecast >/dev/null 2>&1; then rulecast run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
 ```
+
+## A team
+
+The agent hooks and git hooks you commit run for everyone who works in the project. A teammate who hasn't installed rulecast isn't blocked:
+
+- **Claude Code:** the hooks find no rulecast and do nothing. The start of each session says so; an unattended run hears it at every stop.
+- **pre-commit and lefthook:** the hook prints that rulecast isn't installed and lets the commit or push through.
+- **CI:** `rulecast doctor --ci` fails when rulecast is missing, so CI is where a missing install shows up.
+
+So everyone is checked only once everyone has installed it. A line for the project's README:
+
+```sh
+curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
+```
+
+With rulecast as a devDependency (`pnpm add -D @syv-ai/rulecast`), the project's own install covers it, and everyone runs the same version.
 
 ## GitHub Actions
 

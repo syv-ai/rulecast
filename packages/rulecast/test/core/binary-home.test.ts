@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { gitHookCommand, probeRulecast } from "../../src/core/binary-home"
+import { GIT_HOOK_MISSING, gitHookCommand, probeRulecast } from "../../src/core/binary-home"
 import { childEnv, markOwnEnv, unmarkOwnEnv } from "../../src/core/child-env"
 import { breakPathRulecast, LOOKUP_FIXTURES, lookupEnv, lookupSetup } from "../helpers/lookup"
 import { createProject } from "../helpers/project"
@@ -69,4 +69,36 @@ describe("gitHookCommand", () => {
       expect(readFileSync(path.join(root, `ran-${runs}`), "utf8")).toBe("run\n")
     },
   )
+
+  test.each([
+    { name: "with no rulecast anywhere", places: [] as const, brokenPath: false },
+    { name: "when the only rulecast cannot run", places: ["path"] as const, brokenPath: true },
+  ])("the git hook warns and lets the commit through $name (#84)", async ({ places, brokenPath }) => {
+    const root = await createProject({})
+    const setup = lookupSetup([...places], root)
+    if (brokenPath) breakPathRulecast(setup)
+    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
+    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
+      cwd: root,
+      env: lookupEnv(setup, undefined, BASE_PATH),
+      encoding: "utf8",
+    })
+    expect(result.status).toBe(0)
+    // A PATH rulecast that cannot run makes the shell say so first; the warning ends it either way.
+    expect(result.stderr.endsWith(`${GIT_HOOK_MISSING}\n`)).toBe(true)
+  })
+
+  test("install.sh's rulecast that runs and finds something still fails the hook", async () => {
+    const root = await createProject({})
+    const setup = lookupSetup(["installed"], root)
+    writeFileSync(setup.file.installed, "#!/bin/sh\nexit 3\n")
+    const script = gitHookCommand("run").slice("sh -c '".length, -"' --".length)
+    const result = spawnSync("/bin/sh", ["-c", script, "--"], {
+      cwd: root,
+      env: lookupEnv(setup, undefined, BASE_PATH),
+      encoding: "utf8",
+    })
+    expect(result.status).toBe(3)
+    expect(result.stderr).toBe("")
+  })
 })

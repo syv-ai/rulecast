@@ -56,7 +56,7 @@ export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.loc
 
 /**
  * The git hooks' command: the project's own rulecast, else the PATH's, else install.sh's in its
- * directory, the order the agent hooks use. Git hooks run from the repository's root. The PATH's is
+ * directory, the order the agent hooks use. With none that can run, it warns and exits 0. Git hooks run from the repository's root. The PATH's is
  * run rather than exec'd so that one the shell cannot run (126 or 127: a binary for another
  * machine, a shim with nothing behind it) counts as none and the lookup goes on, as in the hook
  * script; it has read no input when it could not run.
@@ -66,9 +66,19 @@ export function gitHookCommand(args: string): string {
     `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
     `if command -v rulecast >/dev/null 2>&1; then rulecast ${args}; status=$?; ` +
     `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
-    `exec ${INSTALLED_SH} ${args}' --`
+    `installed=${INSTALLED_SH}; if [ -x "$installed" ]; then "$installed" ${args}; status=$?; ` +
+    `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
+    `echo "${GIT_HOOK_MISSING}" >&2; exit 0' --`
   )
 }
+
+/**
+ * What the git hook says when it finds no rulecast to run, before it lets the commit or push
+ * through: a teammate who has not installed rulecast is told, not stopped (#84). The agent hooks
+ * skip the same way. `rulecast doctor --ci` is where a missing rulecast fails.
+ */
+// No ": " in it: the command sits unquoted in YAML (.pre-commit-hooks.yaml, the lefthook snippet).
+export const GIT_HOOK_MISSING = `rulecast is not installed, so this hook checked nothing. To install it, run ${INSTALL_COMMAND}`
 
 /**
  * Runs `<file> --version`. Null when it cannot run at all (missing, not executable, a binary for
