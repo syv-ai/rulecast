@@ -23,6 +23,18 @@ examples:
 
 The rest, such as pinning the lines a `bad` example must flag, is in [Examples](../agents/reference/rule-format.md#examples).
 
+## Testing a rule on faults you already had
+
+The best evidence for a rule is a mistake that really happened. Take commits where a reviewer sent something back: each fault is a commit `F` that introduced it and a commit `X` that fixed it. Keep a candidate rule only if it passes all three:
+
+```sh
+rulecast run <id> --from-ref F^ --to-ref F   # it fires on the fault
+rulecast run <id> --from-ref X^ --to-ref X   # it is quiet on the fix
+rulecast test <id> --history --commits 80   # it is quiet on recent history, the faults aside
+```
+
+Each `run` judges only what that commit added, as a session judges an edit. The history check lists the commits it fired on, so the faults themselves show up there; anything else it lists is a false alarm or a fault nobody caught. A rule that fires on the fault but also across recent history describes the code rather than the mistake: narrow it, or drop it. One that misses the fault catches something else. With a few faults and a few candidates each, most candidates drop out, and the ones that stay have shown they catch what your reviewers catch.
+
 ## Guidance with nothing to catch
 
 A rule with `context` and no `detect` is a touch rule: it delivers its doc section the first time an agent reads or edits a matching file. Use it for a convention no pattern can express. Keep each one to the one or two sections agents get wrong in that area: every touch rule matching a file arrives in the same message, and what does not fit is only named. `rulecast doctor` warns about files whose touch context is too long.
