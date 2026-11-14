@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { existsSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -96,9 +96,28 @@ function existingDir(dir: string): string {
 }
 
 /**
+ * Whether the checkout at `top` has a detached HEAD: a throwaway copy, such as a gate's
+ * `git worktree add --detach` to run tests in, not a place anyone edits. Read from files, without git.
+ */
+function detached(top: string): boolean {
+  try {
+    const dotGit = path.join(top, ".git")
+    let gitDir = dotGit
+    if (statSync(dotGit).isFile()) {
+      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))
+      if (pointer === null) return false
+      gitDir = path.resolve(top, pointer[1]!.trim())
+    }
+    return !readFileSync(path.join(gitDir, "HEAD"), "utf8").startsWith("ref:")
+  } catch {
+    return false
+  }
+}
+
+/**
  * The other checkouts of the repository that `command` works in and rulecast is not checking for
  * this call: they hold a config, above or below the named place, and none of `checked` (the projects
- * the call ran) is in them. `skip` leaves out a checkout before its configs are looked for (one the
+ * the call ran) is in them, and their HEAD is on a branch (a detached one is a throwaway copy). `skip` leaves out a checkout before its configs are looked for (one the
  * agent was told about). Sorted, so the notice reads the same each time. A checkout of the same
  * repository is one whose `.git` leads to the same common git directory (core/git.ts `checkoutOf`),
  * read from disk: git runs only to list configs below a named place in another checkout.
@@ -119,7 +138,7 @@ export async function uncheckedCheckouts(
     // Outside every checkout, in this one, or in another repository: not another checkout of this one.
     if (there === null || there.top === here.top || there.commonDir !== here.commonDir) continue
     const tree = there.top
-    if (found.has(tree) || covered.has(tree) || skip(tree)) continue
+    if (found.has(tree) || covered.has(tree) || detached(tree) || skip(tree)) continue
     // Only a checkout rulecast would judge: a config above the named place inside the checkout, or below it.
     const configs =
       configRootsAbove(near).some((root) => inside(realPath(root), tree)) || (await configRootsBelow(near)).length > 0

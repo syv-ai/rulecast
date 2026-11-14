@@ -1,11 +1,11 @@
-import { mkdtemp } from "node:fs/promises"
+import { mkdtemp, realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test, vi } from "vitest"
 
 import * as gitModule from "../../../src/core/git"
 import { namedPaths, uncheckedCheckouts, untold } from "../../../src/core/session/elsewhere"
-import { createRepo } from "../../helpers/git"
+import { createRepo, git } from "../../helpers/git"
 
 vi.mock("../../../src/core/git", { spy: true })
 
@@ -66,6 +66,18 @@ describe("uncheckedCheckouts", () => {
     spy.mockClear()
     expect(await uncheckedCheckouts(`ls ${outside} /tmp && cat ${outside}/.npmrc`, root, [])).toEqual([])
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe("uncheckedCheckouts: which checkouts", () => {
+  test("a checkout on a branch is reported; a detached one, such as a gate's throwaway copy, is not", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": "repos: []\n", "a.py": "" })
+    const branch = `${root}-w1`
+    const copy = `${root}-gate`
+    await git(root, "worktree", "add", "-q", "-b", "w1", branch)
+    await git(root, "worktree", "add", "-q", "--detach", copy)
+    expect(await uncheckedCheckouts(`cd ${copy} && uv sync && pytest`, root, [])).toEqual([])
+    expect(await uncheckedCheckouts(`cd ${branch} && pytest`, root, [])).toEqual([await realpath(branch)])
   })
 })
 
