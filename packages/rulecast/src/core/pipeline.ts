@@ -749,7 +749,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     if (event.kind === "verify" && event.files.length === 0 && session) {
       // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
       // edited is never swept: it was changed by a tool call, only not by this agent's.
-      requested = run.relevant(editedBy(view.work, session.agent))
+      // A file edited and then deleted has nothing left to check: a tool given its path would only
+      // report that it is missing (ruff's E902), at every stop, and nothing the agent does fixes that.
+      requested = run.relevant(editedBy(view.work, session.agent)).filter((file) => existsSync(path.join(root, file)))
       // A subagent the agent started still runs here: its files are its own until it finishes, and
       // what it writes with its shell is not settled, so the sweep waits for a later stop. A running
       // shell job (a dev server, a watcher) never holds it: it may run all session (Event.running).
