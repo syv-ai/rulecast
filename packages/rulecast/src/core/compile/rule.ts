@@ -47,8 +47,11 @@ export interface CompiledRule {
   /** false: switched off with `enabled: false`; never selected for an event (spec §4). */
   enabled: boolean
   stages: Stage[]
-  /** The rule's own `files` and `exclude`, as written, for `rulecast list`; `matches` is what decides. */
-  patterns: { files: string; exclude: string }
+  /**
+   * The rule's own `files`, `exclude` and type tags, as written (none: "", "^$", []), for `rulecast
+   * list` and doctor; `matches` is what decides.
+   */
+  patterns: { files: string; exclude: string; types: string[]; typesOr: string[]; excludeTypes: string[] }
   matches(file: string): boolean
   detector: CompiledDetector | null
   message: string | null
@@ -105,6 +108,11 @@ export interface RuleContext {
   read(file: string): Promise<string | null>
   /** Default: attended. */
   mode?: Mode
+  /**
+   * The project's directory, which rules' paths are relative to: a script's shebang there gives its
+   * type when its name does not. Absent (a rule repo's manifest): types come from paths alone.
+   */
+  root?: string
 }
 
 /** A reference's ref without its anchor, for messages. */
@@ -236,6 +244,7 @@ export async function compileRule(
     types: data.types ?? ["file"],
     typesOr: data.types_or ?? [],
     excludeTypes: data.exclude_types ?? [],
+    ...(context.root === undefined ? {} : { root: context.root }),
   })
   if (typeof filter === "string") return filter
 
@@ -308,7 +317,13 @@ export async function compileRule(
     refuseWrite: data.refuse_write === true || (unattended && data.refuse_write === "unattended"),
     enabled: data.enabled !== false,
     stages,
-    patterns: { files: data.files ?? "", exclude: data.exclude ?? "^$" },
+    patterns: {
+      files: data.files ?? "",
+      exclude: data.exclude ?? "^$",
+      types: data.types ?? [],
+      typesOr: data.types_or ?? [],
+      excludeTypes: data.exclude_types ?? [],
+    },
     matches: (file) => global(file) && filter(file),
     detector,
     message: data.message ?? null,

@@ -43,7 +43,7 @@ export async function missingManager(top: string, manager: "pre-commit" | "lefth
   return `no ${files[0]} in the repository, so ${manager} is not set up here and this rule cannot run; point the rule at the hook manager the project uses now, or remove it`
 }
 
-type JsonObject = Record<string, unknown>
+export type JsonObject = Record<string, unknown>
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
@@ -59,6 +59,20 @@ export async function findPreCommitHook(
   root: string,
   id: string,
 ): Promise<{ id: string; stage: string; givenFiles: boolean } | null> {
+  const found = await preCommitEntry(root, id)
+  if (found === null) return null
+  const stages = strings(found.hook.stages) ?? found.defaults
+  // "commit" is the pre-3.2 name of the pre-commit stage.
+  const runsAtCommit = stages === null || stages.includes("pre-commit") || stages.includes("commit")
+  const givenFiles = await getsItsFiles(found.repo, found.hook)
+  return { id, stage: runsAtCommit ? "pre-commit" : stages[0]!, givenFiles }
+}
+
+/** The repo entry and hook entry for an id (or alias) in the git top's .pre-commit-config.yaml. */
+async function preCommitEntry(
+  root: string,
+  id: string,
+): Promise<{ repo: JsonObject; hook: JsonObject; defaults: string[] | null } | null> {
   let text: string
   try {
     text = await readFile(path.join(root, PRE_COMMIT_CONFIG), "utf8")
@@ -72,37 +86,84 @@ export async function findPreCommitHook(
   for (const repo of config.repos) {
     if (!isObject(repo) || !Array.isArray(repo.hooks)) continue
     for (const hook of repo.hooks) {
-      if (!isObject(hook) || (hook.id !== id && hook.alias !== id)) continue
-      const stages = strings(hook.stages) ?? defaults
-      // "commit" is the pre-3.2 name of the pre-commit stage.
-      const runsAtCommit = stages === null || stages.includes("pre-commit") || stages.includes("commit")
-      const givenFiles = await getsItsFiles(repo, hook)
-      return { id, stage: runsAtCommit ? "pre-commit" : stages[0]!, givenFiles }
+      if (isObject(hook) && (hook.id === id || hook.alias === id)) return { repo, hook, defaults }
     }
   }
   return null
 }
 
+/** The files a pre-commit hook says it checks, as its config and manifest write them. */
+export interface PreCommitFilter {
+  types: string[]
+  typesOr: string[]
+  excludeTypes: string[]
+  /** A Python regex searched in paths relative to the git top; "" for every file. */
+  files: string
+}
+
+/**
+ * How a pre-commit hook runs: always_run and pass_filenames (null when unknown: a remote hook with
+ * no clone), and the filter it states (null when unknown and the config states none of it).
+ */
+export interface PreCommitScope {
+  alwaysRun: boolean | null
+  passFilenames: boolean | null
+  filter: PreCommitFilter | null
+}
+
+/** A hook's scope, by id in the git top's .pre-commit-config.yaml; null when the id is not there. */
+export async function preCommitHookScope(root: string, id: string): Promise<PreCommitScope | null> {
+  const found = await preCommitEntry(root, id)
+  return found === null ? null : preCommitScope(found.repo, found.hook)
+}
+
+const FILTER_KEYS = ["types", "types_or", "exclude_types", "files"] as const
+
+/**
+ * A hook's scope from its entry in the config: the config's own keys win over its manifest's, the
+ * remote repository's .pre-commit-hooks.yaml read from the clone pre-commit or prek already made.
+ * A local hook is all in the config, with pre-commit's defaults.
+ */
+export async function preCommitScope(repo: JsonObject, hook: JsonObject): Promise<PreCommitScope> {
+  const local = typeof repo.repo !== "string" || repo.repo === "local" || repo.repo === "meta"
+  const entry = local ? {} : await manifestEntry(repo, hook)
+  const flag = (field: "always_run" | "pass_filenames", fallback: boolean) => {
+    if (typeof hook[field] === "boolean") return hook[field] as boolean
+    if (entry === null) return null
+    return typeof entry[field] === "boolean" ? (entry[field] as boolean) : fallback
+  }
+  const own = FILTER_KEYS.some((key) => hook[key] !== undefined)
+  const value = (key: (typeof FILTER_KEYS)[number]) => hook[key] ?? entry?.[key]
+  const filter =
+    entry === null && !own
+      ? null
+      : {
+          types: strings(value("types")) ?? [],
+          typesOr: strings(value("types_or")) ?? [],
+          excludeTypes: strings(value("exclude_types")) ?? [],
+          files: text(value("files")),
+        }
+  return { alwaysRun: flag("always_run", false), passFilenames: flag("pass_filenames", true), filter }
+}
+
 /**
  * Whether a hook gets the files it is run on: always_run and pass_filenames: false run it over the
- * project instead. The config's own values win; a remote hook's defaults are in its repository's
- * .pre-commit-hooks.yaml, read from the clone pre-commit or prek already made at that rev. Unknown,
+ * project instead. The config's own values decide without the manifest when they can. Unknown,
  * with no clone, counts as not given.
  */
 async function getsItsFiles(repo: JsonObject, hook: JsonObject): Promise<boolean> {
-  const own = (field: "always_run" | "pass_filenames") =>
-    typeof hook[field] === "boolean" ? (hook[field] as boolean) : undefined
-  if (own("always_run") === true || own("pass_filenames") === false) return false
-  if (own("always_run") === false && own("pass_filenames") === true) return true
-  // A local hook is all in the config: pre-commit's defaults, always_run false and pass_filenames true.
-  if (typeof repo.repo !== "string" || repo.repo === "local" || repo.repo === "meta") return true
-  if (typeof repo.rev !== "string") return false
+  if (hook.always_run === true || hook.pass_filenames === false) return false
+  if (hook.always_run === false && hook.pass_filenames === true) return true
+  const scope = await preCommitScope(repo, hook)
+  return scope.alwaysRun === false && scope.passFilenames === true
+}
+
+/** A remote hook's entry in its repository's manifest at the config's rev; null when no clone has it. */
+async function manifestEntry(repo: JsonObject, hook: JsonObject): Promise<JsonObject | null> {
+  if (typeof repo.repo !== "string" || typeof repo.rev !== "string") return null
   const manifest = await cachedManifest(repo.repo, repo.rev)
   const entry = manifest?.find((one) => isObject(one) && one.id === hook.id)
-  if (!isObject(entry)) return false
-  const always = own("always_run") ?? entry.always_run === true
-  const names = own("pass_filenames") ?? entry.pass_filenames !== false
-  return !always && names
+  return isObject(entry) ? entry : null
 }
 
 /**
@@ -353,18 +414,31 @@ function findJob(jobs: unknown, name: string): JsonObject | null {
   return isObject(jobs) && isObject(jobs[name]) ? (jobs[name] as JsonObject) : null
 }
 
-/** `<hook>/<job>` in a dump: the job's command and directory. Null when there is none, or it is a group or a script. */
-export function findLefthookJob(dump: unknown, spec: string): { run: string; root: string } | null {
+/**
+ * `<hook>/<job>` in a dump: the job's command, directory and globs. Null when there is none, or it
+ * is a group or a script.
+ */
+export function findLefthookJob(dump: unknown, spec: string): { run: string; root: string; globs: string[] } | null {
   const slash = spec.indexOf("/")
   const hook = isObject(dump) ? dump[spec.slice(0, slash)] : undefined
   if (!isObject(hook)) return null
   const name = spec.slice(slash + 1)
   const job = findJob(hook.jobs, name) ?? findJob(hook.commands, name)
   if (!job || typeof job.run !== "string") return null
-  return { run: job.run, root: typeof job.root === "string" ? job.root.replace(/\/+$/, "") : "" }
+  return {
+    run: job.run,
+    root: typeof job.root === "string" ? job.root.replace(/\/+$/, "") : "",
+    globs: globsOf(job.glob),
+  }
 }
 
 const quote = (file: string) => `'${file.replaceAll("'", "'\\''")}'`
+
+/** A lefthook job's `glob`: one, or a list of them, any of which it runs on; [] for none. */
+export function globsOf(value: unknown): string[] {
+  const all = Array.isArray(value) ? value : [value]
+  return all.filter((glob): glob is string => typeof glob === "string" && glob !== "")
+}
 
 /** lefthook's file templates: a job's command that has one is given files. */
 export const FILE_TEMPLATE = /\{(staged_files|files|all_files|push_files)\}/

@@ -59,16 +59,24 @@ describe("findLefthookJob", () => {
           name: "fix-then-check",
           group: { jobs: [{ name: "biome", run: "biome check --write {staged_files}" }] },
         },
-        { name: "typecheck", run: "pnpm typecheck", root: "packages/app/" },
+        { name: "typecheck", run: "pnpm typecheck", root: "packages/app/", glob: "*.ts" },
       ],
     },
     "pre-push": { commands: { test: { run: "pnpm test" } } },
   }
 
   test("a job by name, inside groups too, and an old-style command", () => {
-    expect(findLefthookJob(dump, "pre-commit/biome")).toEqual({ run: "biome check --write {staged_files}", root: "" })
-    expect(findLefthookJob(dump, "pre-commit/typecheck")).toEqual({ run: "pnpm typecheck", root: "packages/app" })
-    expect(findLefthookJob(dump, "pre-push/test")).toEqual({ run: "pnpm test", root: "" })
+    expect(findLefthookJob(dump, "pre-commit/biome")).toEqual({
+      run: "biome check --write {staged_files}",
+      root: "",
+      globs: [],
+    })
+    expect(findLefthookJob(dump, "pre-commit/typecheck")).toEqual({
+      run: "pnpm typecheck",
+      root: "packages/app",
+      globs: ["*.ts"],
+    })
+    expect(findLefthookJob(dump, "pre-push/test")).toEqual({ run: "pnpm test", root: "", globs: [] })
   })
 
   test("an unknown hook or job, or a group, is null", () => {

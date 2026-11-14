@@ -1,4 +1,7 @@
-import { describe, expect, test } from "vitest"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { stringify } from "yaml"
 
 import { RULE_ID } from "../../src/core/config/schema"
@@ -7,6 +10,16 @@ import { addLocalRules, newConfigText } from "../../src/init/config-text"
 import { detectHooks, globToRegex, hookRule, notOfferedLines, rebaseGlob, scanHooks } from "../../src/init/hooks"
 
 const files = (map: Record<string, string>) => async (file: string) => map[file] ?? null
+
+/** init reads remote hooks' manifests from pre-commit's and prek's clones: none but the ones a test makes. */
+let cacheHome = ""
+beforeEach(async () => {
+  cacheHome = await mkdtemp(path.join(tmpdir(), "rulecast-init-hooks-cache-"))
+  vi.stubEnv("XDG_CACHE_HOME", cacheHome)
+  vi.stubEnv("PRE_COMMIT_HOME", "")
+  vi.stubEnv("PREK_HOME", "")
+  return () => vi.unstubAllEnvs()
+})
 
 const PRE_COMMIT = `repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -479,7 +492,7 @@ describe("hooks for a project below the git top", () => {
       ["hook/pre-commit-eslint", "^.*/.*\\.ts$"],
     ])
     expect(patterns(await detectHooks(files({ "lefthook.yml": ROOTED })))).toEqual([
-      ["hook/pre-commit-pytest", "^backend/.*\\.py$"],
+      ["hook/pre-commit-pytest", "^(?=backend/).*\\.py$"],
       ["hook/pre-commit-eslint", "^frontend/.*/.*\\.ts$"],
     ])
   })
@@ -563,6 +576,29 @@ describe("hooks for a project below the git top", () => {
     expect(hookRule(top!).description).toBeUndefined()
   })
 
+  test("lefthook matches a glob from the git top, then keeps the files under root: so does the rule", async () => {
+    const lefthook = `pre-commit:
+  jobs:
+    - name: src
+      root: backend/
+      glob: "backend/src/*.py"
+      run: mypy
+`
+    const at = async (project: string) => (await detectHooks(files({ "lefthook.yml": lefthook }), project))[0]!.files
+    expect(await at("")).toBe("^(?=backend/)backend/src/.*\\.py$")
+    expect(await at("backend")).toBe("^src/.*\\.py$")
+    const rooted = `pre-commit:\n  jobs:\n    - name: all\n      root: backend/api/\n      run: mypy {staged_files}\n`
+    expect((await detectHooks(files({ "lefthook.yml": rooted }), "backend"))[0]!.files).toBe("^api/")
+  })
+
+  test("glob classes: [jt] and [!a] are classes, and [ ends a glob's literal start", () => {
+    expect(globToRegex("*.[jt]s")).toBe("^.*\\.[jt]s$")
+    expect(globToRegex("[!_]*.py")).toBe("^[^_].*\\.py$")
+    expect(globToRegex("a[.py")).toBe("^a\\[\\.py$")
+    expect(rebaseGlob("web/[ab]/*.ts", "web/")).toBe("^[ab]/.*\\.ts$")
+    expect(rebaseGlob("[wx]eb/*.ts", "web/")).toBeUndefined()
+  })
+
   test("rebaseGlob: exact rebases only; anything else is not offered", () => {
     expect(rebaseGlob("backend/*.py", "backend/")).toBe("^.*\\.py$")
     expect(rebaseGlob("backend/src/*.py", "backend/")).toBe("^src/.*\\.py$")
@@ -631,5 +667,204 @@ describe("hook rules in the config", () => {
   test("a rule already in the local repo is not added twice", () => {
     const once = addLocalRules("repos:\n  - repo: local\n    rules: []\n", [hookRule(mypy)])
     expect(addLocalRules(once, [hookRule(mypy)])).toBe(once)
+  })
+})
+
+describe("a hook that does not get its files: always_run, pass_filenames: false (AIP)", () => {
+  const config = (hooks: string) => `repos:
+  - repo: local
+    hooks:
+${hooks}`
+  const hook = (id: string, keys: string) =>
+    `      - id: ${id}\n        name: ${id}\n        entry: uv run mypy app/\n        language: system\n${keys}`
+  const ALWAYS = "        always_run: true\n        pass_filenames: false\n        stages: [manual]\n"
+  const detect = async (hooks: string, project = "") =>
+    detectHooks(files({ ".pre-commit-config.yaml": config(hooks) }), project)
+  /** What init says of an always_run hook it could give no filter. */
+  const note = async (keys: string, project = "") =>
+    (await detect(hook("check", `${ALWAYS}${keys}`), project))[0]!.everyChange
+  /** What the description says a filter skips: a config file the tool reads, named for its types when they say which. */
+  const CONFIG_ALONE = (example?: string) =>
+    `Changing only a config file it reads${example === undefined ? "" : `, such as ${example},`} doesn't run it.`
+
+  test("always_run with types rulecast reads as pre-commit does: the rule runs only on those, and says why", async () => {
+    const [found] = await detect(hook("tsc", `${ALWAYS}        types_or: [ts, tsx]\n`))
+    expect(found).toMatchObject({ files: null, types_or: ["ts", "tsx"] })
+    expect(found!.everyChange).toBeUndefined()
+    const rule = hookRule(found!)
+    expect(rule.types_or).toEqual(["ts", "tsx"])
+    expect(rule.description).toBe(
+      `Runs only when a TypeScript or TSX file changed: the hook is always_run, so pre-commit would run it on every commit. ${CONFIG_ALONE("tsconfig.json")}`,
+    )
+    expect(newConfigText([rule])).toContain("        types_or: [ts, tsx]\n")
+  })
+
+  test("types: [python] is carried over: rulecast types scripts by shebang and name, as pre-commit does", async () => {
+    const [found] = await detect(hook("mypy-check", `${ALWAYS}        types: [python]\n`))
+    expect(found).toMatchObject({ files: null, types: ["python"] })
+    expect(found!.everyChange).toBeUndefined()
+    expect(hookRule(found!).description).toBe(
+      `Runs only when a Python file changed: the hook is always_run, so pre-commit would run it on every commit. ${CONFIG_ALONE("pyproject.toml")}`,
+    )
+  })
+
+  test("what can't be carried over is said, tag by tag, beside what is", async () => {
+    // types is all of them: leaving text out of it only widens the rule.
+    const keys = "        types: [file, text, python]\n        exclude_types: [markdown, python, ts, dockerfile]\n"
+    const rule = hookRule((await detect(hook("check", `${ALWAYS}${keys}`)))[0]!)
+    expect(rule).toMatchObject({ types: ["python"], exclude_types: ["markdown"] })
+    expect(rule.description).toBe(
+      "Runs only when a Python file other than Markdown changed: the hook is always_run, so pre-commit would run it on every commit. " +
+        `${CONFIG_ALONE("pyproject.toml")} Left out of the hook's filter: exclude_types [python, ts, dockerfile] ` +
+        "(python, ts: rulecast's takes in files pre-commit's does not; dockerfile: rulecast has no such file type).",
+    )
+    expect(newConfigText([rule])).toContain("        types: [python]\n        exclude_types: [markdown]\n")
+    // One tag of types_or that can't be carried leaves the whole of it out.
+    expect(await note("        types_or: [ts, dockerfile]\n")).toBe(
+      "always_run, and its types_or [ts, dockerfile] can't be carried over (dockerfile: rulecast has no such file type)",
+    )
+    expect(await note("        types: [text]\n")).toBe(
+      "always_run, and its types [text] can't be carried over (text: pre-commit decides text from a file's content)",
+    )
+    const [partly] = await detect(hook("check", `${ALWAYS}        types_or: [ts, dockerfile]\n        files: ^app/\n`))
+    expect(hookRule(partly!).description).toBe(
+      "Runs only when a file matching ^app/ changed: the hook is always_run, so pre-commit would run it on every commit. " +
+        `${CONFIG_ALONE()} Left out of the hook's filter: types_or [ts, dockerfile] (dockerfile: rulecast has no such file type).`,
+    )
+  })
+
+  test("a remote always_run hook whose manifest isn't on disk: its filter is unknown, and init says so", async () => {
+    const remote =
+      "repos:\n  - repo: https://github.com/example/none\n    rev: v1\n    hooks:\n      - id: typecheck\n        always_run: true\n"
+    const [found] = await detectHooks(files({ ".pre-commit-config.yaml": remote }))
+    expect(found!.everyChange).toBe("always_run, and its manifest isn't on disk, so its filter is unknown")
+  })
+
+  test("a regex with a lookbehind is not rebased below the top: it could look at the directory taken off", async () => {
+    expect(await note("        files: ^backend/(?<=d/)src/\n", "backend")).toBe(
+      "always_run, and its files ^backend/(?<=d/)src/ can't be carried over (it can't be made relative to backend)",
+    )
+  })
+
+  test("always_run with a files regex: the rule gets it, rebased onto a project below the top", async () => {
+    const keys = `${ALWAYS}        files: ^backend/app/\n`
+    const [top] = await detect(hook("mypy-check", keys))
+    expect(top!.files).toBe("^backend/app/")
+    expect(hookRule(top!).description).toBe(
+      `Runs only when a file matching ^backend/app/ changed: the hook is always_run, so pre-commit would run it on every commit. ${CONFIG_ALONE()}`,
+    )
+    const [below] = await detect(hook("mypy-check", keys), "backend")
+    expect(below!.files).toBe("^app/")
+  })
+
+  test("a regex with a top-level | is not rebased: its other alternatives would keep the directory", async () => {
+    const keys = "        files: ^backend/src/|^backend/tests/\n"
+    expect(await note(keys, "backend")).toBe(
+      "always_run, and its files ^backend/src/|^backend/tests/ can't be carried over (it can't be made relative to backend)",
+    )
+    // At the top it needs no rebasing, and a | inside a group is fine below it.
+    expect((await detect(hook("check", `${ALWAYS}${keys}`)))[0]!.files).toBe("^backend/src/|^backend/tests/")
+    expect((await detect(hook("check", `${ALWAYS}        files: ^backend/(src|tests)/\n`), "backend"))[0]!.files).toBe(
+      "^(src|tests)/",
+    )
+  })
+
+  test("a regex JavaScript reads otherwise than Python is not carried over", async () => {
+    const python =
+      "always_run, and its files %s can't be carried over (JavaScript does not read it as pre-commit's Python does)"
+    for (const regex of ["\\.py\\Z", "\\Aapp/", "^a{,3}/", "^\\w+\\.py$", "(?x)^app/", "(?P<dir>app)/"]) {
+      expect(await note(`        files: '${regex}'\n`)).toBe(python.replace("%s", regex))
+    }
+  })
+
+  test("a filter that takes in every file of the project is no filter: it runs on every change", async () => {
+    expect(await note("        files: ^backend/\n", "backend")).toBe(
+      "always_run, and its files and types take in every file in this project",
+    )
+  })
+
+  test("always_run with nothing to filter on: offered unchanged, and init says it runs on every change", async () => {
+    const [found] = await detect(hook("mypy-check", ALWAYS))
+    expect(found).toMatchObject({ files: null, everyChange: "always_run, and it names no files or types" })
+    const rule = hookRule(found!)
+    expect(rule.description).toBeUndefined()
+    expect(rule.types ?? rule.types_or ?? rule.files).toBeUndefined()
+  })
+
+  test("pass_filenames: false: pre-commit already skips it when no file matches, so only an unfiltered one is noted", async () => {
+    const [typed, bare] = await detect(
+      `${hook("typed", "        pass_filenames: false\n        types: [ts]\n")}${hook("bare", "        pass_filenames: false\n")}`,
+    )
+    expect(typed!.types).toBeUndefined()
+    expect(typed!.everyChange).toBeUndefined()
+    expect(bare!.everyChange).toBe("pass_filenames: false, and it names no files or types")
+  })
+
+  test("a hook that gets its files is unchanged: pre-commit filters it", async () => {
+    const [found] = await detect(hook("mypy", "        types: [python]\n"))
+    expect(found).toEqual({
+      id: "hook/mypy",
+      name: "mypy",
+      detect: { "pre-commit": "mypy" },
+      files: null,
+      modifies: false,
+      source: ".pre-commit-config.yaml",
+    })
+  })
+
+  test("a remote hook's always_run and types come from its manifest in pre-commit's clone", async () => {
+    const url = "https://github.com/example/hooks"
+    const clone = path.join(cacheHome, "pre-commit", "repoabc")
+    await mkdir(path.join(clone, ".git"), { recursive: true })
+    await writeFile(path.join(clone, ".git", "FETCH_HEAD"), `0123\t\ttag 'v1.0.0' of ${url}\n`)
+    await writeFile(
+      path.join(clone, ".pre-commit-hooks.yaml"),
+      "- id: typecheck\n  entry: typecheck\n  language: system\n  always_run: true\n  types_or: [ts, tsx]\n",
+    )
+    const remote = `repos:\n  - repo: ${url}\n    rev: v1.0.0\n    hooks:\n      - id: typecheck\n`
+    const [found] = await detectHooks(files({ ".pre-commit-config.yaml": remote }))
+    expect(found!.types_or).toEqual(["ts", "tsx"])
+    // The config's own keys win over the manifest's.
+    const own = `${remote}        types: [tsx]\n`
+    const [overridden] = await detectHooks(files({ ".pre-commit-config.yaml": own }))
+    expect(overridden).toMatchObject({ types: ["tsx"], types_or: ["ts", "tsx"] })
+  })
+
+  test("lefthook: a job with no files template and no glob or root is noted; every glob of a list becomes files", async () => {
+    const lefthook = `pre-commit:
+  jobs:
+    - name: mypy
+      run: uv run mypy app/
+    - name: typed
+      glob: "*.py"
+      run: uv run mypy app/
+    - name: listed
+      glob: ["*.py", "*.pyi"]
+      run: uv run mypy app/
+    - name: given
+      run: ruff check {staged_files}
+`
+    const hooks = await detectHooks(files({ "lefthook.yml": lefthook }))
+    expect(hooks.map((one) => [one.id, one.files, one.everyChange])).toEqual([
+      ["hook/pre-commit-mypy", null, "its command is given no files, and it names no glob or root"],
+      ["hook/pre-commit-typed", "^.*\\.py$", undefined],
+      ["hook/pre-commit-listed", "^.*\\.py$|^.*\\.pyi$", undefined],
+      ["hook/pre-commit-given", null, undefined],
+    ])
+  })
+
+  test("lefthook: a glob list below the top drops globs for other directories, and is not offered if one can't be rebased", async () => {
+    const lefthook = `pre-commit:
+  jobs:
+    - name: both
+      glob: ["backend/*.py", "frontend/*.ts"]
+      run: check
+    - name: odd
+      glob: ["backend/*.py", "*/x/*.py"]
+      run: check
+`
+    const scan = await scanHooks(files({ "lefthook.yml": lefthook }), "backend")
+    expect(scan.offered.map((one) => [one.id, one.files])).toEqual([["hook/pre-commit-both", "^.*\\.py$"]])
+    expect(scan.skipped.map((one) => one.reason)).toEqual(["glob */x/*.py can't be rebased onto backend"])
   })
 })

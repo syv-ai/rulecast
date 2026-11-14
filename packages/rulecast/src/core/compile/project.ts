@@ -176,7 +176,14 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     })
   }
   const compiled: Compiled[] = []
-  const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }
+  const context: RuleContext = {
+    config,
+    registry: options.registry,
+    global,
+    read: createReader(),
+    mode: mode.mode,
+    root,
+  }
   const project: ReferenceRoot = { dir: root, label: null }
   const error = (
     source: string,

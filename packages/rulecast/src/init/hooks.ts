@@ -1,13 +1,17 @@
 import { parse } from "yaml"
 
 import {
+  FILE_TEMPLATE,
+  globsOf,
   HK_CONFIGS,
   HK_PRE_PUSH_UNREAD,
   type HkPlan,
   hkStepNeverRuns,
   LEFTHOOK_CONFIGS,
   PRE_COMMIT_CONFIG,
+  preCommitScope,
 } from "../detectors/hook/resolve"
+import { filesSaid, type RuleFilter, verdictOf } from "../detectors/hook/scope"
 
 /** A hook the project already declares, as init offers it. */
 export interface DetectedHook {
@@ -22,6 +26,20 @@ export interface DetectedHook {
    * file, and the runner filters.
    */
   files: string | null
+  /**
+   * The rule's type tags, from an always_run pre-commit hook's own `types`, `types_or` and
+   * `exclude_types`: pre-commit would run it on every commit, so the rule says when it matters.
+   */
+  types?: string[]
+  types_or?: string[]
+  exclude_types?: string[]
+  /** Why the rule has the filter above (or `files`) that the runner would not apply, said in its description. */
+  scoped?: string
+  /**
+   * Why it runs on every change, when no filter could be given it: "always_run, and it names no
+   * files or types". Said where init offers it.
+   */
+  everyChange?: string
   /**
    * true: it looks like a formatter or a fixer, by its name, its flags or the package script it
    * runs. null: it runs a script init cannot see into (`runs`), so it may. false: neither.
@@ -355,13 +373,68 @@ const overlaps = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
 /** The project's directory as init names it: "backend", from "backend/". */
 const dirName = (prefix: string) => prefix.replace(/\/$/, "")
 
-function preCommitHooks(
+/**
+ * What an always_run or pass_filenames: false pre-commit hook needs in its rule. pre-commit runs an
+ * always_run hook whatever changed; a pass_filenames: false one it still skips when no file matches
+ * its filter, so only one with no filter at all runs on every change.
+ */
+async function wholeProject(
+  repo: Record<string, unknown>,
+  hook: Record<string, unknown>,
+  project: string,
+): Promise<Pick<DetectedHook, "types" | "types_or" | "exclude_types" | "scoped" | "everyChange"> & RuleFilter> {
+  const scope = await preCommitScope(repo, hook)
+  const why = scope.alwaysRun === true ? "always_run" : scope.passFilenames === false ? "pass_filenames: false" : null
+  if (why === null) return {}
+  if (scope.filter === null) {
+    // A remote hook with no clone and no filter of its own in the config.
+    return why === "always_run"
+      ? { everyChange: `${why}, and its manifest isn't on disk, so its filter is unknown` }
+      : {}
+  }
+  const verdict = verdictOf(scope.filter, project)
+  if (verdict.kind === "none") return { everyChange: `${why}, and it names no files or types` }
+  // pre-commit takes in every file here too, so it runs a pass_filenames: false hook on every change.
+  if (verdict.kind === "whole")
+    return { everyChange: `${why}, and its files and types take in every file in this project` }
+  if (why !== "always_run") return {}
+  if (verdict.kind === "left")
+    return { everyChange: `${why}, and its ${verdict.parts} can't be carried over (${verdict.why})` }
+  const rule = verdict.rule
+  const scoped =
+    `Runs only when ${filesSaid(rule)} changed: the hook is always_run, so pre-commit would run it on every commit. ` +
+    `Changing only a config file it reads${configExample(rule)} doesn't run it.` +
+    (verdict.left === null ? "" : ` Left out of the hook's filter: ${verdict.left.parts} (${verdict.left.why}).`)
+  return { ...rule, scoped }
+}
+
+/** The config file a tool for these types usually reads, when they all name the same one. */
+const CONFIG_FOR: Readonly<Record<string, string>> = {
+  python: "pyproject.toml",
+  pyi: "pyproject.toml",
+  ts: "tsconfig.json",
+  tsx: "tsconfig.json",
+  javascript: "package.json",
+  jsx: "package.json",
+  rust: "Cargo.toml",
+  go: "go.mod",
+}
+
+/** ", such as pyproject.toml,", or "" when the rule's types don't say which config. */
+function configExample(rule: RuleFilter): string {
+  const tags = [...(rule.types ?? []), ...(rule.types_or ?? [])]
+  const configs = new Set(tags.map((tag) => CONFIG_FOR[tag]))
+  const [config] = configs
+  return configs.size === 1 && config !== undefined ? `, such as ${config},` : ""
+}
+
+async function preCommitHooks(
   config: unknown,
   project: string,
   source: string,
   scan: HookScan,
   scripts: PackageScripts,
-): void {
+): Promise<void> {
   if (!isObject(config) || !Array.isArray(config.repos)) return
   const hooks = scan.offered
   const defaultStages = stagesOf(config.default_stages)
@@ -386,11 +459,13 @@ function preCommitHooks(
       const description = text(hook.description)
       const neverFails = swallowsExit(`${entry} ${args}`, scripts)
       const stages = stagesOf(hook.stages) ?? defaultStages
+      const { files, ...scope } = await wholeProject(repo, hook, project)
       hooks.push({
         id: `hook/${idSegment(hook.id)}`,
         name,
         detect: { "pre-commit": hook.id },
-        files: null,
+        files: files ?? null,
+        ...scope,
         ...(FIXER_NAME.test(hook.id) ? { modifies: true } : writes(`${entry} ${args}`, scripts)),
         source,
         ...(description === "" ? {} : { description }),
@@ -410,7 +485,14 @@ export function globToRegex(glob: string): string {
       while (glob[i + 1] === "*") i++
       out += ".*"
     } else if (char === "?") out += "."
-    else if (char === "{") out += "("
+    else if (char === "[" && glob.indexOf("]", i + 2) !== -1) {
+      // A class, `[!…]` negated; `]` right after the opening is part of it.
+      const close = glob.indexOf("]", i + 2)
+      const body = glob.slice(i + 1, close)
+      const negated = body.startsWith("!")
+      out += `[${negated ? "^" : ""}${(negated ? body.slice(1) : body).replace(/[\\^]/g, "\\$&")}]`
+      i = close
+    } else if (char === "{") out += "("
     else if (char === "}") out += ")"
     else if (char === ",") out += "|"
     else out += char.replace(/[.+^$()|[\]\\]/g, "\\$&")
@@ -418,7 +500,7 @@ export function globToRegex(glob: string): string {
   return `^${out}$`
 }
 
-const GLOB_SPECIAL = /[*?{]/
+const GLOB_SPECIAL = /[*?{[]/
 
 /**
  * A glob over paths relative to the git top, as a `files` regex over paths relative to `project`
@@ -450,6 +532,45 @@ export function rebaseGlob(glob: string, project: string): string | null | undef
 /** `^.*$` matches every file, which no `files` at all says. */
 const everything = (regex: string): string | null => (regex === "^.*$" ? null : regex)
 
+/**
+ * A lefthook job's globs and root (a prefix: "" or ending in "/"), as one `files` regex over paths
+ * from `project`. lefthook runs the job when any glob matches a file's path from the git top, and
+ * keeps the files under its root (lefthook 2.1). null: every file. `skip`: why the job is not
+ * offered: no glob reaches the project, its root is elsewhere, or a glob that reaches the project
+ * can't be rebased exactly, and the others alone would be narrower than the job.
+ */
+export function rebaseJob(
+  globs: readonly string[],
+  root: string,
+  project: string,
+): { files: string | null } | { skip: string; elsewhere: boolean } {
+  if (root !== "" && !overlaps(root, project)) return { skip: `runs outside ${dirName(project)}`, elsewhere: true }
+  // The root's part below the project, which a file's path from the project must start with.
+  const under = root.startsWith(project) ? root.slice(project.length) : ""
+  const prefix = under.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  if (globs.length === 0) return { files: under === "" ? null : `^${prefix}` }
+  const rebased: string[] = []
+  let every = false
+  for (const glob of globs) {
+    const one = rebaseGlob(glob, project)
+    if (one === null) every = true
+    else if (one !== undefined) rebased.push(one)
+    else {
+      // No file of the project can match when the glob's literal start leads elsewhere.
+      const special = glob.search(GLOB_SPECIAL)
+      const literal = special === -1 ? glob : glob.slice(0, special)
+      if (overlaps(literal, project)) {
+        return { skip: `glob ${glob} can't be rebased onto ${dirName(project)}`, elsewhere: false }
+      }
+    }
+  }
+  if (!every && rebased.length === 0) return { skip: `runs outside ${dirName(project)}`, elsewhere: true }
+  if (under === "") return { files: every ? null : rebased.join("|") }
+  // Under the root, and matching a glob: each glob's regex starts with ^, which the root's lookahead follows.
+  if (every) return { files: `^${prefix}` }
+  return { files: rebased.map((one) => `^(?=${prefix})${one.slice(1)}`).join("|") }
+}
+
 /** A lefthook `root:` as a directory prefix relative to the git top: "", or ending in "/". */
 function rootPrefix(root: unknown): string {
   const dir = text(root)
@@ -469,28 +590,26 @@ function lefthookJobs(
   const add = (name: string, job: JsonObject) => {
     const run = text(job.run)
     if (run === "" || runsRulecast(run)) return
-    const glob = Array.isArray(job.glob) ? text(job.glob[0]) : text(job.glob)
+    const globs = globsOf(job.glob)
     const root = rootPrefix(job.root)
-    // A job's root: limits it to files below it, and its glob is matched under it.
-    const full = `${root}${glob === "" ? "*" : glob}`
-    const files = glob === "" && root === "" ? null : rebaseGlob(full, project)
-    if (files === undefined) {
-      // No file of the project can match when the glob's literal start leads elsewhere.
-      const special = full.search(GLOB_SPECIAL)
-      const literal = special === -1 ? full : full.slice(0, special)
-      const elsewhere = !overlaps(literal, project)
-      const reason = elsewhere
-        ? `runs outside ${dirName(project)}`
-        : `glob ${full} can't be rebased onto ${dirName(project)}`
-      scan.skipped.push({ name, source, reason, elsewhere })
+    const rebased = rebaseJob(globs, root, project)
+    if ("skip" in rebased) {
+      scan.skipped.push({ name, source, reason: rebased.skip, elsewhere: rebased.elsewhere })
       return
     }
+    const files = rebased.files
     const neverFails = swallowsExit(run, scripts)
+    // rulecast runs the job's command itself: one with no files template checks what it likes.
+    const everyChange =
+      globs.length === 0 && root === "" && !FILE_TEMPLATE.test(run)
+        ? "its command is given no files, and it names no glob or root"
+        : undefined
     scan.offered.push({
       id: `hook/${idSegment(`${hook}-${name}`)}`,
       name,
       detect: { lefthook: `${hook}/${name}` },
       files,
+      ...(everyChange === undefined ? {} : { everyChange }),
       ...(job.stage_fixed === true ? { modifies: true } : writes(run, scripts)),
       source,
       ...(neverFails === undefined ? {} : { neverFails }),
@@ -649,7 +768,7 @@ export async function scanHooks(
   const up = prefix === "" ? "" : "../".repeat(prefix.split("/").length - 1)
   const scan: HookScan = { offered: [], skipped: [] }
   const scripts = packageScripts(await read("package.json"))
-  preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`, scan, scripts)
+  await preCommitHooks(load(await read(PRE_COMMIT_CONFIG)), prefix, `${up}${PRE_COMMIT_CONFIG}`, scan, scripts)
   for (const file of LEFTHOOK_CONFIGS) {
     const config = load(await read(file))
     if (!isObject(config)) continue
@@ -688,7 +807,9 @@ export interface LocalRule {
   name: string
   description?: string
   files?: string
+  types?: string[]
   types_or?: string[]
+  exclude_types?: string[]
   detect: Record<string, unknown>
   message: string
   context: string[]
@@ -703,12 +824,15 @@ export function hookRule(hook: DetectedHook): LocalRule {
   const note = outside
     ? `Runs the ${what} ${hook.name} from ${hook.source}. No doc section: the config is outside this project.`
     : ""
-  const description = [hook.description ?? "", note].filter((part) => part !== "").join(" ")
+  const description = [hook.description ?? "", hook.scoped ?? "", note].filter((part) => part !== "").join(" ")
   return {
     id: hook.id,
     name: `${hook.name} (${runner})`,
     ...(description === "" ? {} : { description }),
     ...(hook.files === null ? {} : { files: hook.files }),
+    ...(hook.types === undefined ? {} : { types: hook.types }),
+    ...(hook.types_or === undefined ? {} : { types_or: hook.types_or }),
+    ...(hook.exclude_types === undefined ? {} : { exclude_types: hook.exclude_types }),
     detect: { hook: hook.detect },
     message: "{{file}}:{{line}}: {{message}}",
     // A reference cannot leave its project: a config at the git top above it is not cited.
