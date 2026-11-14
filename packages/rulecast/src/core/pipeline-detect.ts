@@ -15,6 +15,7 @@ import { fileBytes } from "./detection/per-rule"
 import { selectDetectorRules } from "./detection/select"
 import { type DisabledGroup, disabledRules } from "./disabled"
 import { findingIds } from "./finding-id"
+import { deletedFilesSince } from "./git"
 import type { Run } from "./pipeline"
 import { DISABLED_WARNING, detectorWarnings } from "./pipeline-warnings"
 import type { ClassifiedFinding } from "./session/decide"
@@ -168,11 +169,18 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
   }
   const lines = sourceLines(read)
   // At a verify with a commit to compare with: what the whole change removed, read once, and only
-  // if an llm rule with `removed_definitions` asks (#72).
+  // if an llm rule with `removed_definitions` asks (#72). Deleted files are in no list of changed
+  // files, and a moved definition's old file is often one, so they are asked of git here: all of
+  // them, as a definition can move out of a file no rule checks.
   const commit = event.kind === "verify" ? (event.baseCommit ?? baseline.startCommit) : null
   let gone: Promise<RemovedDefinition[]> | undefined
   const definitionsGone =
-    commit === null ? undefined : () => (gone ??= removedDefinitions(root, requested, commit, read))
+    commit === null
+      ? undefined
+      : () =>
+          (gone ??= deletedFilesSince(root, commit, source).then((deleted) =>
+            removedDefinitions(root, [...requested, ...deleted], commit, read),
+          ))
   const detected = await runDetectionFrom(
     {
       detection,
@@ -183,6 +191,7 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       read,
       lines,
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : Math.max(1, verifyEnds - Date.now()),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
     source,
   )

@@ -1,3 +1,4 @@
+import { constants } from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -12,7 +13,7 @@ import {
 import { INSTALL_COMMAND, installDir, pinnedInstallCommand } from "../core/binary-home"
 import type { CompiledProject } from "../core/compile/project"
 import { compile, diagnosticText } from "../core/compile/project"
-import { isDetectorRule } from "../core/compile/rule"
+import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { type ActiveMode, ciVariable } from "../core/config/mode"
 import { createReferenceResolver, type ReferenceResolver } from "../core/delivery/resolve"
@@ -26,6 +27,8 @@ import { errorMessage } from "../core/errors"
 import { FINDING_ID_VERSION } from "../core/finding-id"
 import { allFiles, isShallow, mergeBase } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
+import { runPipeline } from "../core/pipeline"
+import { configRootsAbove } from "../core/projects"
 import { cachedRepo } from "../core/repos/fetch"
 import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
@@ -226,6 +229,8 @@ export async function doctorCommand(
       io.stdout(line(result.level, result.what, `${result.detail}${rules}`))
     }
   }
+  // Rules that cannot run here: said once, above, and not timed again (--time).
+  const broken = new Set(results.filter((result) => result.level === "error").flatMap((result) => result.rules))
 
   // Every config is its own project: the others a session started here also runs.
   const dir = settingsDir(io.cwd)
@@ -334,31 +339,62 @@ export async function doctorCommand(
       io.stdout(line(check.level, check.what, check.detail))
     }
   }
-  io.stdout("\ndry run\n")
-  const dry = await dryRun(project, detectionFor(project, registry, stateDir, createReferenceResolver(root)), listed)
-  if (dry.length === 0) io.stdout("  nothing to run\n")
-  for (const result of dry) {
-    count(result.level)
-    io.stdout(line(result.level, result.rule, result.detail))
+  // The dry run and --time run the project's tools, a formatter hook among them, which rewrites files
+  // until it is put back. Ctrl-C there ends the tools (core/detection/tool.ts forwards it), lets the
+  // rule being run put back what it changed, and stops before the next.
+  const stop: { signal: NodeJS.Signals | null } = { signal: null }
+  // Ends the detection running now, so a hook rule does not go on to its next hook's tool.
+  const cancel = new AbortController()
+  const interrupt = (signal: NodeJS.Signals) => {
+    stop.signal ??= signal
+    cancel.abort()
   }
-  // A rule with violations in four files and none in the one tried reads "no match" above.
-  if (dry.some((result) => result.tried)) io.stdout(`  ${DRY_RUN_FOOTER}\n`)
-
-  if (flags.time) {
-    io.stdout("\ntiming\n")
-    const timed = await timeRules(
+  for (const signal of INTERRUPTS) process.on(signal, interrupt)
+  try {
+    io.stdout("\ndry run\n")
+    const dry = await dryRun(
       project,
       detectionFor(project, registry, stateDir, createReferenceResolver(root)),
       listed,
+      () => stop.signal !== null,
+      cancel.signal,
     )
-    if (timed.length === 0) io.stdout("  no rule runs a tool\n")
-    for (const result of timed) {
+    if (dry.length === 0) io.stdout("  nothing to run\n")
+    for (const result of dry) {
       count(result.level)
       io.stdout(line(result.level, result.rule, result.detail))
+      if (result.failed === true) broken.add(result.rule)
     }
+    // A rule with violations in four files and none in the one tried reads "no match" above.
+    if (dry.some((result) => result.tried)) io.stdout(`  ${DRY_RUN_FOOTER}\n`)
+
+    if (flags.time && stop.signal === null) {
+      io.stdout("\ntiming\n")
+      const timed = await timeRules({
+        project,
+        detection: detectionFor(project, registry, stateDir, createReferenceResolver(root)),
+        registry,
+        stateDir,
+        listed,
+        broken,
+        stopped: () => stop.signal !== null,
+        cancel: cancel.signal,
+      })
+      for (const result of timed) {
+        count(result.level)
+        io.stdout(line(result.level, result.rule, result.detail))
+      }
+    }
+  } finally {
+    for (const signal of INTERRUPTS) process.off(signal, interrupt)
+  }
+  if (stop.signal !== null) {
+    io.stderr("rulecast: doctor interrupted; the tools it ran have stopped, and files they changed are put back\n")
+    return 128 + constants.signals[stop.signal]
   }
 
-  const payloads = await touchPayloads(project, listed, createReferenceResolver(root))
+  const neighbours = await neighbourProjects(project, listed, registry, home, io.env)
+  const payloads = await touchPayloads(project, listed, createReferenceResolver(root), neighbours)
   if (payloads.length > 0) {
     io.stdout("\ntouch context\n")
     for (const payload of payloads) {
@@ -480,7 +516,12 @@ interface DryRunLine {
   detail: string
   /** true: the rule's detector ran over one of its matching files. */
   tried?: boolean
+  /** true: the rule's detector failed, so --time does not run it again. A timeout is not a failure. */
+  failed?: boolean
 }
+
+/** What doctor stops on, once the rule being run has ended and put back what it changed. */
+const INTERRUPTS = ["SIGINT", "SIGTERM"] as const
 
 const DRY_RUN_FOOTER = "the dry run tries one file per rule; rulecast run --all-files checks them all"
 
@@ -498,6 +539,8 @@ async function dryRun(
   project: CompiledProject,
   detection: DetectionContext,
   listed: { files: string[] } | { error: unknown },
+  stopped: () => boolean,
+  cancel: AbortSignal,
 ): Promise<DryRunLine[]> {
   if (project.rules.length === 0) return []
   if ("error" in listed) return [{ rule: "not run", level: "warning", detail: errorMessage(listed.error) }]
@@ -505,6 +548,7 @@ async function dryRun(
 
   const lines: DryRunLine[] = []
   for (const rule of project.rules) {
+    if (stopped()) break
     if (!rule.enabled) {
       lines.push({ rule: rule.id, level: "skipped", detail: "disabled" })
       continue
@@ -552,10 +596,14 @@ async function dryRun(
       changes: new Map(),
       read: (name) => readSourceFile(project.root, name),
       timeoutMs,
+      // A tool past its deadline is ended, and a formatter hook has put its files back, before the next rule runs.
+      settle: true,
+      signal: cancel,
     })
+    if (stopped()) break
     const failure = output.errors[0]
     if (failure) {
-      lines.push({ rule: rule.id, level: "error", detail: failure.message })
+      lines.push({ rule: rule.id, level: "error", detail: failure.message, failed: true })
       continue
     }
     if (output.timedOut.length > 0) {
@@ -581,31 +629,83 @@ function agentBudget(): number | null {
   return budgets.length === 0 ? null : Math.min(...budgets)
 }
 
+/** Another project whose config also applies to some of this project's files (core/projects.ts). */
+interface Neighbour {
+  project: CompiledProject
+  /** How doctor names it: its config's path from this project's root. */
+  label: string
+}
+
+/**
+ * The other projects a hook runs for this project's files: the configs above each file's directory,
+ * as `projectsForFiles` finds them, this one left out. Compiled from the cache only, as the hooks do.
+ */
+async function neighbourProjects(
+  project: CompiledProject,
+  listed: { files: string[] } | { error: unknown },
+  registry: DetectorRegistry,
+  home: string,
+  env: CliIo["env"],
+): Promise<Neighbour[]> {
+  if (!("files" in listed)) return []
+  if (!project.rules.some((rule) => rule.enabled && rule.stages.includes("touch"))) return []
+  const roots = new Set<string>()
+  const seen = new Set<string>()
+  for (const file of listed.files) {
+    const dir = path.dirname(path.join(project.root, file))
+    if (seen.has(dir)) continue
+    seen.add(dir)
+    for (const root of configRootsAbove(dir)) if (path.resolve(root) !== path.resolve(project.root)) roots.add(root)
+  }
+  const neighbours: Neighbour[] = []
+  for (const root of [...roots].sort()) {
+    const other = await compile({ root, registry, repos: cachedRepos(home), env }).catch(() => null)
+    if (other === null) continue
+    neighbours.push({ project: other, label: path.join(path.relative(project.root, root), CONFIG_FILE) })
+  }
+  return neighbours
+}
+
+/** The neighbours whose touch rules send context on the first open of `file`, a path from `root`. */
+function alsoSending(root: string, file: string, neighbours: readonly Neighbour[]): Neighbour[] {
+  const absolute = path.join(root, file)
+  return neighbours.filter(({ project }) => {
+    const relative = path.relative(project.root, absolute)
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return false
+    const own = relative.split(path.sep).join("/")
+    return project.rules.some((rule) => rule.enabled && rule.stages.includes("touch") && rule.matches(own))
+  })
+}
+
 /**
  * What the first open of a file sends from its touch rules, for every set of touch rules some file
  * matches: run through the hook's own assemble and budget (core/session/decide.ts), so a section
- * reported cut is one the hook would cut (#69). Empty when no touch rule matches a file.
+ * reported cut is one the hook would cut (#69). When other configs' touch rules send context for the
+ * same file, the hook divides the message among them (commands/hook.ts `budgetSeats`), and so does
+ * this. Empty when no touch rule matches a file.
  */
 async function touchPayloads(
   project: CompiledProject,
   listed: { files: string[] } | { error: unknown },
   resolver: ReferenceResolver,
+  neighbours: readonly Neighbour[],
 ): Promise<{ level: Level; what: string; detail: string }[]> {
   if (!("files" in listed)) return []
   const touchRules = project.rules.filter((rule) => rule.enabled && rule.stages.includes("touch"))
   if (touchRules.length === 0) return []
-  const groups = new Map<string, { rules: typeof touchRules; files: string[] }>()
+  const groups = new Map<string, { rules: typeof touchRules; sharing: Neighbour[]; files: string[] }>()
   for (const file of listed.files) {
     const rules = touchRules.filter((rule) => rule.matches(file))
     if (rules.length === 0) continue
-    const key = rules.map((rule) => rule.id).join("\0")
+    const sharing = alsoSending(project.root, file, neighbours)
+    const key = [...rules.map((rule) => rule.id), "", ...sharing.map((one) => one.label)].join("\0")
     const group = groups.get(key)
-    if (group === undefined) groups.set(key, { rules, files: [file] })
+    if (group === undefined) groups.set(key, { rules, sharing, files: [file] })
     else group.files.push(file)
   }
   const budget = agentBudget()
   const cuts: { level: Level; what: string; detail: string; refs: number }[] = []
-  for (const { rules, files } of groups.values()) {
+  for (const { rules, sharing, files } of groups.values()) {
     const decision = await decide({
       agent: "main",
       findings: [],
@@ -617,18 +717,22 @@ async function touchPayloads(
       resolver,
       maxBytes: project.config.context.maxBytes,
       maxBlocks: 1,
-      maxContextChars: budget,
+      maxContextChars: budget === null ? null : Math.floor(budget / (1 + sharing.length)),
       maxMatchesPerRule: project.config.maxMatchesPerRule,
       stopGate: false,
     })
     const cut = decision.delivery.references.filter((one) => one.state === "read" && one.reason === "budget")
     if (cut.length === 0) continue
     const others = files.length - 1
+    const share =
+      sharing.length === 0
+        ? "more than one message holds"
+        : `more than its share of one message holds: ${sharing.map((one) => one.label).join(", ")} ${sharing.length === 1 ? "sends" : "send"} context for it too, and the message is divided among them`
     cuts.push({
       level: "warning",
       what: `${files[0]}${others === 0 ? "" : ` and ${plural(others, "other file")}`}`,
       detail:
-        `the first open sends the context of ${plural(rules.length, "touch rule")}, more than one message holds: ` +
+        `the first open sends the context of ${plural(rules.length, "touch rule")}, ${share}: ` +
         `${cut.map((one) => one.ref).join(", ")} would be named, not sent. ` +
         `Narrow these rules to the one or two sections that area gets wrong${naming(rules.map((rule) => rule.id))}`,
       refs: cut.length,
@@ -641,27 +745,63 @@ async function touchPayloads(
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
 /**
+ * What to do about a rule that does not fit: `rulecast run` has the same verify_ms, so a git hook or
+ * CI job running rulecast cuts it off too, and `stages: [edit]` has the 350 ms edit deadline and no
+ * stop to run again at. The tool keeps running only on its own, outside rulecast.
+ */
+const OVER_ADVICE =
+  "Raise timeouts.verify_ms (then run rulecast install), or switch the rule off (enabled: false) and run the tool from a git hook or CI job of its own"
+
+interface TimeInput {
+  project: CompiledProject
+  detection: DetectionContext
+  registry: DetectorRegistry
+  stateDir: string
+  listed: { files: string[] } | { error: unknown }
+  /** Rules that cannot run here (a missing tool, a failed dry run): said already, not timed. */
+  broken: ReadonlySet<string>
+  stopped: () => boolean
+  /** Aborted on Ctrl-C: ends the detection running then. */
+  cancel: AbortSignal
+}
+
+/**
  * `--time` (#83): each rule that runs a tool at a stop (a hook, a command, a linter), once, over
  * every file it matches: the most a stop can hand it. Its wall time against `timeouts.verify_ms`,
  * the stop check's budget, says whether it fits before it is turned on. Metered rules (llm) are
- * not run: their time is a model's, and each run costs money. Rules run one after another, so
- * each time is its own.
+ * not run: their time is a model's, and each run costs money.
+ *
+ * Alone, one rule's time is its own. A stop runs every rule in one budget, hooks after the others
+ * and one at a time, after measuring the baseline, so rules that each fit can still be cut off
+ * together: the last line runs them all as `rulecast run --all-files` does, which is that stop.
  */
-async function timeRules(
-  project: CompiledProject,
-  detection: DetectionContext,
-  listed: { files: string[] } | { error: unknown },
-): Promise<DryRunLine[]> {
-  if (!("files" in listed)) return []
+async function timeRules(input: TimeInput): Promise<DryRunLine[]> {
+  const { project, detection, listed, broken } = input
+  if (!("files" in listed)) {
+    return [
+      { rule: "not timed", level: "skipped", detail: "the project's files could not be listed (see the dry run)" },
+    ]
+  }
   const budget = project.config.timeouts.verifyMs
+  const atStop = project.rules.filter(
+    (rule): rule is DetectorRule =>
+      rule.enabled &&
+      isDetectorRule(rule) &&
+      rule.stages.includes("verify") &&
+      listed.files.some((file) => rule.matches(file)),
+  )
+  const metered = (rule: DetectorRule) => detection.registry.get(rule.detector.kind)?.metered === true
+  // In-process detectors (regex, ast-grep, path) take milliseconds; llm costs money per run.
+  const tools = atStop.filter((rule) => detection.registry.get(rule.detector.kind)?.guards !== true && !metered(rule))
+  if (tools.length === 0) return [{ rule: "no rule runs a tool when an agent stops", level: "ok", detail: "" }]
   const lines: DryRunLine[] = []
-  for (const rule of project.rules) {
-    if (!rule.enabled || !isDetectorRule(rule) || !rule.stages.includes("verify")) continue
-    const implementation = detection.registry.get(rule.detector.kind)
-    // In-process detectors (regex, ast-grep, path) take milliseconds; llm costs money per run.
-    if (implementation === undefined || implementation.guards === true || implementation.metered === true) continue
+  for (const rule of tools) {
+    if (input.stopped()) return lines
+    if (broken.has(rule.id)) {
+      lines.push({ rule: rule.id, level: "skipped", detail: "not timed: it cannot run here (see above)" })
+      continue
+    }
     const files = listed.files.filter((file) => rule.matches(file))
-    if (files.length === 0) continue
     const started = Date.now()
     const output = await runDetection({
       detection: { ...detection, cacheFor: () => memoryCache(), contextFor: async () => [] },
@@ -670,7 +810,11 @@ async function timeRules(
       changes: new Map(),
       read: (name) => readSourceFile(project.root, name),
       timeoutMs: budget,
+      settle: true,
+      signal: input.cancel,
     })
+    // Ended by Ctrl-C, not by the tool: its result says nothing.
+    if (input.stopped()) return lines
     const took = Date.now() - started
     const over = output.timedOut.length > 0
     const failure = output.errors[0]
@@ -678,11 +822,40 @@ async function timeRules(
       rule: rule.id,
       level: over ? "warning" : failure ? "error" : "ok",
       detail: over
-        ? `over timeouts.verify_ms (${seconds(budget)}) on ${plural(files.length, "file")}: a stop would cut it off. Leave it off agent stops (stages: [edit] or a git hook), or raise timeouts.verify_ms`
+        ? `over timeouts.verify_ms (${seconds(budget)}) on ${plural(files.length, "file")}: a stop or rulecast run that hands it these files cuts it off. ${OVER_ADVICE}`
         : failure
           ? `${seconds(took)}, then failed: ${failure.message}`
           : `${seconds(took)} of ${seconds(budget)} on ${plural(files.length, "file")}`,
     })
   }
+  const together = atStop.filter((rule) => !broken.has(rule.id) && !metered(rule))
+  // One rule alone was timed above; in-process rules alone take milliseconds.
+  if (together.length < 2 || !together.some((rule) => tools.includes(rule)) || input.stopped()) return lines
+  const files = listed.files.filter((file) => together.some((rule) => rule.matches(file)))
+  const started = Date.now()
+  const result = await runPipeline({
+    project,
+    stateDir: input.stateDir,
+    event: { kind: "verify", files, cwd: project.root },
+    registry: input.registry,
+    maxContextChars: null,
+    skipDetectorKinds: new Set(input.registry.kinds().filter((kind) => input.registry.get(kind)?.metered === true)),
+    onlyRules: new Set(together.map((rule) => rule.id)),
+    signal: input.cancel,
+  })
+  if (input.stopped()) return lines
+  const took = Date.now() - started
+  const cut = together.filter((rule) => result.ran?.has(rule.id) !== true).map((rule) => rule.id)
+  const what = `all ${together.length} rules together`
+  const how = `as a stop that changed every file runs them, on ${plural(files.length, "file")}`
+  lines.push(
+    took >= budget
+      ? {
+          rule: what,
+          level: "warning",
+          detail: `over timeouts.verify_ms (${seconds(budget)}) ${how}: ${cut.length === 0 ? "the stop" : cut.join(", ")} would be cut off. ${OVER_ADVICE}, for the slowest`,
+        }
+      : { rule: what, level: "ok", detail: `${seconds(took)} of ${seconds(budget)} ${how}` },
+  )
   return lines
 }

@@ -29,6 +29,15 @@ export interface DetectionInput {
    * `rulecast test` set it (core/fix/); no `PipelineOptions` key reaches it, so a hook never does.
    */
   fixes?: boolean
+  /**
+   * Return only once every detector run has ended, those past the deadline too. Off, a run past the
+   * deadline is left to end on its own, except a kind that changes files (a formatter hook), which
+   * is always waited for: it puts the files back when it ends. Doctor sets it, so no tool of one rule
+   * is still running while the next is timed.
+   */
+  settle?: boolean
+  /** Ends the run early, as the deadline would: doctor's Ctrl-C. */
+  signal?: AbortSignal
 }
 
 export interface DetectionOutput {
@@ -61,6 +70,9 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     controller.signal.addEventListener("abort", () => resolve(TIMED_OUT), { once: true })
   })
   const timer = setTimeout(() => controller.abort(), input.timeoutMs)
+  const cancel = () => controller.abort()
+  if (input.signal?.aborted === true) cancel()
+  else input.signal?.addEventListener("abort", cancel, { once: true })
   // The wall clock, not the signal, is what says the deadline passed. A detector that blocked the
   // event loop resolves its own promise in a microtask, which runs ahead of the queued abort timer,
   // so it would win the race and be recorded as a clean on-time run at any multiple of its budget.
@@ -72,6 +84,9 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
     | { status: "error"; kind: string; selections: Selection[]; message: string }
     | { status: "timedOut"; kind: string; selections: Selection[] }
 
+  // Every detector run, whether or not it beat the deadline: waited for before returning (`settle`).
+  const runs: Promise<unknown>[] = []
+  const changesFiles = (kind: string) => input.detection.registry.get(kind)?.changesFiles === true
   const runKind = async ([kind, selections]: [string, Selection[]]): Promise<Outcome> => {
     const detector = input.detection.registry.get(kind)
     if (!detector) return { status: "error", kind, selections, message: `detector "${kind}" is not registered` }
@@ -84,23 +99,22 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
           context: await input.detection.contextFor(rule),
         })),
       )
-      const result = await Promise.race([
-        detector.run({
-          event: input.event,
-          rules,
-          read: input.read,
-          fromDisk: input.fromDisk ?? true,
-          changes: input.changes,
-          ...(input.removedDefinitions === undefined ? {} : { removedDefinitions: input.removedDefinitions }),
-          cache: input.detection.cacheFor(kind),
-          settings: input.detection.settings,
-          cwd: input.detection.root,
-          signal: controller.signal,
-          deadlineAt,
-          ...(input.fixes === true ? { fixes: true } : {}),
-        }),
-        deadline,
-      ])
+      const running = detector.run({
+        event: input.event,
+        rules,
+        read: input.read,
+        fromDisk: input.fromDisk ?? true,
+        changes: input.changes,
+        ...(input.removedDefinitions === undefined ? {} : { removedDefinitions: input.removedDefinitions }),
+        cache: input.detection.cacheFor(kind),
+        settings: input.detection.settings,
+        cwd: input.detection.root,
+        signal: controller.signal,
+        deadlineAt,
+        ...(input.fixes === true ? { fixes: true } : {}),
+      })
+      if (input.settle === true || changesFiles(kind)) runs.push(running.catch(() => {}))
+      const result = await Promise.race([running, deadline])
       if (result === TIMED_OUT || late()) return { status: "timedOut", kind, selections }
       return { status: "ok", kind, selections, result }
     } catch (error) {
@@ -112,10 +126,13 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
   }
   // A kind that changes files while it runs (a formatter hook, which puts them back after) goes
   // after the others, one at a time, so no other detector reads a file while it is changed.
-  const changesFiles = (kind: string) => input.detection.registry.get(kind)?.changesFiles === true
   const perKind = await Promise.all([...byKind].filter(([kind]) => !changesFiles(kind)).map(runKind))
   for (const entry of [...byKind].filter(([kind]) => changesFiles(kind))) perKind.push(await runKind(entry))
   clearTimeout(timer)
+  input.signal?.removeEventListener("abort", cancel)
+  // A run past the deadline was aborted: a tool's whole process group is ended (detection/tool.ts),
+  // so this waits for the kill and for a formatter hook to put its files back, not for the tool.
+  await Promise.all(runs)
 
   for (const outcome of perKind) {
     const ids = outcome.selections.map((selection) => selection.rule.id)

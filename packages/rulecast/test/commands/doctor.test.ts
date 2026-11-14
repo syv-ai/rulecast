@@ -890,6 +890,33 @@ describe("rulecast doctor", () => {
       expect(code).toBe(0)
     })
 
+    test("touch context shares the message with other configs that send context for the same file, as the hook divides it (#69)", async () => {
+      // Each section alone fits one message; the hook gives each config half of it.
+      const section = `## One\n${"word ".repeat(1000)}\n`
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          { id: "root-ctx", name: "Root", files: "^pkg/", stages: ["touch"], context: ["@docs/a.md#one"] },
+        ]),
+        "docs/a.md": `# A\n${section}`,
+        "pkg/.rulecast-config.yaml": localConfig([
+          { id: "pkg-ctx", name: "Pkg", files: "\\.ts$", stages: ["touch"], context: ["@docs/b.md#one"] },
+        ]),
+        "pkg/docs/b.md": `# B\n${section}`,
+        "pkg/x.ts": "const x = 1\n",
+        "other/y.ts": "const y = 1\n",
+      })
+      const atRoot = (await doctor(root)).stdout
+      expect(atRoot).toContain(
+        "warning  pkg/x.ts — the first open sends the context of 1 touch rule, more than its share of one message holds: " +
+          "pkg/.rulecast-config.yaml sends context for it too, and the message is divided among them: docs/a.md#one would be named, not sent",
+      )
+      const inPkg = (await doctor(path.join(root, "pkg"))).stdout
+      expect(inPkg).toContain(
+        "warning  x.ts — the first open sends the context of 1 touch rule, more than its share of one message holds: ",
+      )
+      expect(inPkg).toContain("../.rulecast-config.yaml sends context for it too")
+    })
+
     test("--time runs each tool-backed rule over all its files against timeouts.verify_ms (#83)", async () => {
       const root = await createRepo({
         ".rulecast-config.yaml": localConfig(
@@ -918,10 +945,226 @@ describe("rulecast doctor", () => {
       const { stdout } = await runCli(root, ["doctor", "--time"])
       const timing = stdout.slice(stdout.indexOf("\ntiming\n"))
       expect(timing).toMatch(/ok {7}quick — \d+\.\d s of 0\.8 s on 2 files/)
-      expect(timing).toContain("warning  slow — over timeouts.verify_ms (0.8 s) on 2 files: a stop would cut it off")
-      // An in-process detector takes milliseconds: not timed.
-      expect(timing).not.toContain("pattern")
+      expect(timing).toContain(
+        "warning  slow — over timeouts.verify_ms (0.8 s) on 2 files: a stop or rulecast run that hands it these files cuts it off. " +
+          "Raise timeouts.verify_ms (then run rulecast install), or switch the rule off (enabled: false) and run the tool from a git hook or CI job of its own",
+      )
+      // An in-process detector takes milliseconds: not timed on its own.
+      expect(timing).not.toMatch(/ {2}pattern — /)
       expect((await doctor(root)).stdout).not.toContain("\ntiming\n")
+    })
+
+    /** A lefthook the hook detector finds in node_modules/.bin, whose `dump` has these jobs. */
+    async function lefthookRepo(
+      jobs: Record<string, string>,
+      rules: Record<string, unknown>[],
+      settings: Record<string, unknown>,
+      files: Record<string, string>,
+    ): Promise<string> {
+      const dump = JSON.stringify({
+        "pre-commit": { jobs: Object.entries(jobs).map(([name, run]) => ({ name, run })) },
+      })
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig(rules, settings),
+        "lefthook.yml": "pre-commit:\n  jobs: []\n",
+        "node_modules/.bin/lefthook": `#!/bin/sh\ncat <<'OUT'\n${dump}\nOUT\n`,
+        ...files,
+      })
+      await chmod(path.join(root, "node_modules/.bin/lefthook"), 0o755)
+      for (const file of Object.keys(files)) if (file.endsWith(".sh")) await chmod(path.join(root, file), 0o755)
+      return root
+    }
+
+    const hookRule = (id: string, job: string) => ({
+      id,
+      name: id,
+      files: "\\.py$",
+      detect: { hook: { lefthook: `pre-commit/${job}` } },
+      message: "{{message}}",
+    })
+
+    const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    test("a formatter hook past the deadline is ended with everything it started, and its files are put back (#83)", async () => {
+      // The job's shell starts the formatter as a child of its own, which ending the shell alone left running.
+      const root = await lefthookRepo(
+        { fmt: "./fmt.sh {staged_files}" },
+        [hookRule("fmt", "fmt")],
+        { timeouts: { verify_ms: 700 } },
+        {
+          "fmt.sh": `#!/bin/sh\nsh -c 'sleep 1.5; for f in "$@"; do printf REFORMATTED > "$f"; done' _ "$@"\ntrue\n`,
+          "a.py": "a = 1\n",
+          "b.py": "b = 1\n",
+        },
+      )
+      const { stdout } = await runCli(root, ["doctor", "--time"])
+      expect(stdout).toContain("error    fmt — timed out after 700 ms")
+      expect(stdout).toContain("warning  fmt — over timeouts.verify_ms (0.7 s) on 2 files")
+      await settle(2000)
+      expect(await readFile(path.join(root, "a.py"), "utf8")).toBe("a = 1\n")
+      expect(await readFile(path.join(root, "b.py"), "utf8")).toBe("b = 1\n")
+    })
+
+    test("Ctrl-C during --time ends the tools, puts their files back and exits 130 (#83)", async () => {
+      // Writes at once, then takes its time: interrupted while every file is rewritten.
+      const root = await lefthookRepo(
+        { fmt: "./fmt.sh {staged_files}" },
+        [hookRule("fmt", "fmt")],
+        { timeouts: { verify_ms: 20_000 } },
+        {
+          "fmt.sh": `#!/bin/sh\nfor f in "$@"; do printf REFORMATTED > "$f"; done\necho "$#" >> ran.log\nsleep 5\n`,
+          "a.py": "a = 1\n",
+          "b.py": "b = 1\n",
+        },
+      )
+      const running = runCli(root, ["doctor", "--time"])
+      // The dry run's one file, then --time's two: interrupted once the second run has started.
+      const log = path.join(root, "ran.log")
+      while (!(existsSync(log) && (await readFile(log, "utf8")).includes("2\n"))) await settle(50)
+      process.emit("SIGINT", "SIGINT")
+      const { code, stdout, stderr } = await running
+      expect(code).toBe(130)
+      expect(stderr).toContain("doctor interrupted")
+      expect(stdout).not.toContain("touch context")
+      expect(await readFile(path.join(root, "a.py"), "utf8")).toBe("a = 1\n")
+      expect(await readFile(path.join(root, "b.py"), "utf8")).toBe("b = 1\n")
+    }, 30_000)
+
+    test("Ctrl-C during the run of all rules together stops it before the next hook starts (#83)", async () => {
+      // Quick for the dry run's two calls and --time's two; the run of both together then takes its time.
+      const job = `#!/bin/sh\necho "$0" >> calls.log\n[ "$(wc -l < calls.log)" -ge 5 ] && { touch together; sleep 8; }\ntrue\n`
+      const root = await lefthookRepo(
+        { one: "./job.sh", two: "./job.sh" },
+        [hookRule("one", "one"), hookRule("two", "two")],
+        { timeouts: { verify_ms: 30_000 } },
+        { "job.sh": job, "a.py": "a = 1\n" },
+      )
+      const running = runCli(root, ["doctor", "--time"])
+      while (!existsSync(path.join(root, "together"))) await settle(50)
+      const interrupted = Date.now()
+      process.emit("SIGINT", "SIGINT")
+      const { code } = await running
+      expect(code).toBe(130)
+      expect(Date.now() - interrupted).toBeLessThan(3000)
+      // The second hook never started.
+      expect((await readFile(path.join(root, "calls.log"), "utf8")).trim().split("\n")).toHaveLength(5)
+    }, 30_000)
+
+    test("--time also runs every rule together, as a stop schedules them, against verify_ms (#83)", async () => {
+      // Hooks run one at a time: each fits alone, the two together do not.
+      const root = await lefthookRepo(
+        { one: "sleep 1", two: "sleep 1" },
+        [hookRule("one", "one"), hookRule("two", "two")],
+        { timeouts: { verify_ms: 1500 } },
+        { "a.py": "a = 1\n" },
+      )
+      const { stdout } = await runCli(root, ["doctor", "--time"])
+      const timing = stdout.slice(stdout.indexOf("\ntiming\n"))
+      expect(timing).toMatch(/ok {7}one — \d+\.\d s of 1\.5 s on 1 file/)
+      expect(timing).toMatch(/ok {7}two — \d+\.\d s of 1\.5 s on 1 file/)
+      expect(timing).toMatch(
+        /warning {2}all 2 rules together — over timeouts\.verify_ms \(1\.5 s\) as a stop that changed every file runs them, on 1 file: (one, )?two would be cut off/,
+      )
+    }, 20_000)
+
+    test("--time names a rule that fails over all its files as an error, and exits 2 (#83)", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "picky",
+            name: "Picky",
+            files: "\\.py$",
+            // Fine on the dry run's one file; fails on more.
+            detect: {
+              command: { run: ["./picky.sh", "{{files}}"], output: { lines: "gcc" }, exit_codes: { error: [3] } },
+            },
+            message: "{{message}}",
+          },
+        ]),
+        "picky.sh": `#!/bin/sh\n[ "$#" -gt 1 ] && { echo 'too many files' >&2; exit 3; }\nexit 0\n`,
+        "a.py": "a = 1\n",
+        "b.py": "b = 1\n",
+      })
+      await chmod(path.join(root, "picky.sh"), 0o755)
+      const { stdout, code } = await runCli(root, ["doctor", "--time"])
+      expect(stdout).toMatch(/ok {7}picky — tried a\.py/)
+      expect(stdout).toMatch(/error {4}picky — \d+\.\d s, then failed: .*too many files/)
+      expect(code).toBe(2)
+    })
+
+    test("--time does not time a rule that cannot run here: it is counted once, where it is found (#83)", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "gone",
+            name: "Gone",
+            files: "\\.py$",
+            detect: { command: { run: ["no-such-tool-xyz", "{{files}}"] } },
+            message: "{{message}}",
+          },
+        ]),
+        "a.py": "a = 1\n",
+      })
+      const { stdout } = await runCli(root, ["doctor", "--time"])
+      expect(stdout).toContain("skipped  gone — not timed: it cannot run here (see above)")
+      expect(stdout).not.toContain("then failed")
+      // The environment's error and the dry run's, with the uninstalled hooks' warning.
+      expect(stdout).toContain("2 errors, 1 warning")
+    })
+
+    test("--time says why nothing was timed (#83)", async () => {
+      const editOnly = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "edit-only",
+            name: "Edit only",
+            files: "\\.py$",
+            stages: ["edit"],
+            detect: { command: { run: ["sh", "-c", "exit 0"], output: { lines: "gcc" } } },
+            message: "{{message}}",
+          },
+        ]),
+        "a.py": "a = 1\n",
+      })
+      expect((await runCli(editOnly, ["doctor", "--time"])).stdout).toContain(
+        "timing\n  ok       no rule runs a tool when an agent stops\n",
+      )
+      // Outside git the files cannot be listed: that is not "no rule runs a tool".
+      const unlisted = await createProject({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "tool",
+            name: "Tool",
+            files: "\\.py$",
+            detect: { command: { run: ["sh", "-c", "exit 0"], output: { lines: "gcc" } } },
+            message: "{{message}}",
+          },
+        ]),
+        "a.py": "a = 1\n",
+      })
+      expect((await runCli(unlisted, ["doctor", "--time"])).stdout).toContain(
+        "timing\n  skipped  not timed — the project's files could not be listed (see the dry run)\n",
+      )
+    })
+
+    test("a commit-msg rule is not dry-run on files: it says what runs it (#79)", async () => {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          {
+            id: "no-trailer",
+            name: "No trailer",
+            stages: ["commit-msg"],
+            detect: { regex: { pattern: "Co-Authored-By" } },
+            message: "trailer",
+          },
+        ]),
+        "a.py": "a = 1\n",
+      })
+      const { stdout, code } = await runCli(root, ["doctor", "--time"])
+      expect(stdout).toContain("ok       no-trailer — judges commit messages: rulecast run --commit-msg FILE runs it")
+      expect(stdout).not.toContain("tried")
+      expect(stdout).toContain("timing\n  ok       no rule runs a tool when an agent stops\n")
+      expect(code).toBe(0)
     })
 
     test("environment and dry-run errors are counted together", async () => {

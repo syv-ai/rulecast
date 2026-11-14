@@ -86,6 +86,8 @@ export interface PipelineOptions {
    * A hook leaves this off: it warned when it disabled the rule.
    */
   reportDisabled?: boolean
+  /** Ends detection early, as the deadline would: doctor's Ctrl-C. Hooks never pass one. */
+  signal?: AbortSignal
   /** Debug log sink. */
   log?: (line: string) => void
   /**

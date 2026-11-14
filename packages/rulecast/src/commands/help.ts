@@ -250,7 +250,7 @@ export const COMMANDS: CommandHelp[] = [
       ["--from-ref REF", "Also check that rulecast run --from-ref REF finds a merge base here (implies --ci)"],
       [
         "--time",
-        "Run each rule that runs a tool (hook, command, linter) over all its files and compare with timeouts.verify_ms; may take minutes",
+        "Run each rule that runs a tool (hook, command, linter) over all its files, alone and then with every rule as a stop runs them, and compare with timeouts.verify_ms; may take minutes",
       ],
     ],
   },
