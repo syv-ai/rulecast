@@ -3,6 +3,8 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } fr
 import { homedir } from "node:os"
 import path from "node:path"
 
+import { checkoutOf } from "./git"
+
 export type Env = Readonly<Record<string, string | undefined>>
 
 /**
@@ -24,13 +26,27 @@ export function projectStateDir(home: string, root: string): string {
   return path.join(home, "projects", hash)
 }
 
-/** Creates the project's state directory and its "root" file (the project path, for doctor and clean). */
+/**
+ * In a project's state directory: the repository's common git directory and the checkout's top
+ * directory, one per line. `stats --worktrees` finds a removed checkout's log by it.
+ */
+export const CHECKOUT_FILE = "checkout"
+
+/**
+ * Creates the project's state directory, its "root" file (the project path, for doctor and clean)
+ * and, in a git repository, its checkout file.
+ */
 export function ensureProjectState(home: string, root: string): string {
   const dir = projectStateDir(home, root)
   const file = path.join(dir, "root")
   if (!existsSync(file)) {
     mkdirSync(dir, { recursive: true })
     writeFileSync(file, `${realpathSync(root)}\n`)
+  }
+  const checkout = path.join(dir, CHECKOUT_FILE)
+  if (!existsSync(checkout)) {
+    const found = checkoutOf(root)
+    if (found !== null) writeFileSync(checkout, `${found.commonDir}\n${found.top}\n`)
   }
   return dir
 }

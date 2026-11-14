@@ -16,6 +16,12 @@ import { providerByName } from "./providers/index"
 import { type LlmFinding, type LlmProvider, LlmUnavailableError } from "./providers/types"
 import { type LlmConfig, llmSchema } from "./schema"
 
+/**
+ * The most definitions removed elsewhere one prompt lists: more would cost more than they tell, as
+ * a change that removed that much is a rewrite. Counted after the call's own file is left out.
+ */
+const MAX_REMOVED_DEFINITIONS = 60
+
 /** One prompt: a file, a model, and every rule that asked about that file with that model. */
 interface Call {
   file: string
@@ -125,7 +131,9 @@ async function runCall(
   const rules = promptRules(call.rules)
   const removedElsewhere =
     call.removedDefinitions && input.removedDefinitions !== undefined
-      ? (await input.removedDefinitions()).filter((removed) => removed.file !== call.file)
+      ? (await input.removedDefinitions())
+          .filter((removed) => removed.file !== call.file)
+          .slice(0, MAX_REMOVED_DEFINITIONS)
       : undefined
   const key = callKey({
     file: call.file,

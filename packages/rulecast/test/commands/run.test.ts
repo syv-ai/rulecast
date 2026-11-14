@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises"
+import { rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -764,5 +764,61 @@ describe("rulecast run: an llm rule told what the change removed elsewhere (#72)
 
   test("without it, the prompt is as before", async () => {
     for (const prompt of await moved(false)) expect(prompt).not.toContain("Removed elsewhere")
+  })
+
+  // The usual move: the old file goes. A deleted file is in no list of changed files, so it is
+  // found on its own; each way of choosing files is checked, since each reads the change differently.
+  test.each([
+    ["--from-ref with --to-ref", ["--from-ref", "HEAD~1", "--to-ref", "HEAD"], true],
+    ["--from-ref on the working tree", ["--from-ref", "HEAD"], false],
+    ["a staged run", [], false],
+  ])("a definition in a deleted file is listed: %s", async (_name, args, commit) => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([rule(true)]),
+      "app/a.py": "class Order:\n    pass\n\nclass Other:\n    pass\n",
+    })
+    await stubAgentCli(root, "claude")
+    await rm(path.join(root, "app/a.py"))
+    await writeFile(path.join(root, "app/b.py"), "class Order:\n    pass\n")
+    if (args.length === 0 || commit) await git(root, "add", "-A")
+    if (commit) await git(root, "commit", "-q", "-m", "move Order")
+    await run(root, ...args, "--llm")
+    const forB = (await stubStdin(root, "claude")).find((prompt) => prompt.includes("## File: app/b.py"))
+    expect(forB).toContain("- app/a.py: class Order:")
+    expect(forB).toContain("- app/a.py: class Other:")
+  })
+
+  test("a definition in a deleted file no rule includes is listed", async () => {
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([rule(true)]),
+      "lib/a.py": "class Order:\n    pass\n",
+      "app/__init__.py": "",
+    })
+    await stubAgentCli(root, "claude")
+    await rm(path.join(root, "lib/a.py"))
+    await writeFile(path.join(root, "app/b.py"), "class Order:\n    pass\n")
+    await git(root, "add", "-A")
+    await git(root, "commit", "-q", "-m", "move Order")
+    await run(root, "--from-ref", "HEAD~1", "--to-ref", "HEAD", "--llm")
+    const forB = (await stubStdin(root, "claude")).find((prompt) => prompt.includes("## File: app/b.py"))
+    expect(forB).toContain("- lib/a.py: class Order:")
+  })
+
+  test("the 60-line cap counts only other files' definitions", async () => {
+    const many = Array.from({ length: 61 }, (_, index) => `def f${index}():\n    pass\n`).join("")
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([rule(true)]),
+      "app/a.py": many,
+      "app/b.py": "class Order:\n    pass\n",
+    })
+    await stubAgentCli(root, "claude")
+    // a.py is rewritten, losing 61 definitions, and takes Order from b.py.
+    await writeFile(path.join(root, "app/a.py"), "class Order:\n    pass\n")
+    await writeFile(path.join(root, "app/b.py"), "x = 1\n")
+    await git(root, "add", "-A")
+    await git(root, "commit", "-q", "-m", "rewrite")
+    await run(root, "--from-ref", "HEAD~1", "--to-ref", "HEAD", "--llm")
+    const forA = (await stubStdin(root, "claude")).find((prompt) => prompt.includes("## File: app/a.py"))
+    expect(forA).toContain("- app/b.py: class Order:")
   })
 })

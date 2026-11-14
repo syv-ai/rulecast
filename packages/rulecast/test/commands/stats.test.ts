@@ -1,17 +1,19 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, realpath, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
 import { STATS_SCHEMA_VERSION } from "../../src/adapters/cli/contract"
 import { parseSince } from "../../src/commands/stats"
+import { CHECKOUT_FILE } from "../../src/core/home"
 import { FINDINGS_LOG, FINDINGS_LOG_ROTATED, FINDINGS_WEEKLY, type FindingsRecord } from "../../src/core/stats/log"
 import type { WeekRow } from "../../src/core/stats/weekly"
 
 import { runCli } from "../helpers/cli"
 import { createFixture, fixtureRules } from "../helpers/fixture"
-import { stateDirFor } from "../helpers/home"
+import { stateDirFor, TEST_HOME } from "../helpers/home"
 
 const RULE = "backend/no-httpexception"
 const USERS = "app/services/users.py"
@@ -417,29 +419,36 @@ describe("rulecast stats", () => {
 })
 
 describe("rulecast stats --worktrees (#71)", () => {
-  const writeLog = async (stateDir: string, records: FindingsRecord[], root: string) => {
+  /** A project's cache directory as rulecast leaves it: the log, its root, and the checkout it was in. */
+  const writeLog = async (stateDir: string, records: FindingsRecord[], root: string, commonDir: string) => {
     await mkdir(stateDir, { recursive: true })
     await writeFile(path.join(stateDir, "root"), `${root}\n`)
+    await writeFile(path.join(stateDir, CHECKOUT_FILE), `${commonDir}\n${root}\n`)
     await writeFile(path.join(stateDir, FINDINGS_LOG), records.map((item) => `${JSON.stringify(item)}\n`).join(""))
   }
+  /** A cache directory for a checkout that no longer exists, so has no real path to hash. */
+  const removedState = (name: string) => path.join(TEST_HOME, "projects", `gone-${name}`)
 
   test("merges the checkouts a glob picks, removed ones included, keeping one session's checkouts apart", async () => {
     const root = await realpath(await projectWithLog(RECORDS.slice(0, 4)))
+    const common = path.join(root, ".git")
     const trees = path.join(root, ".claude", "worktrees")
     const w1 = path.join(trees, "w1")
     execFileSync("git", ["worktree", "add", "-q", "-b", "w1", w1], { cwd: root })
     // The same session, the same finding id and file, in another checkout: left open there.
-    await writeLog(stateDirFor(w1), [record("2026-10-01T11:00:00.000Z", "stop", [["a1", RULE, "delivered"]])], w1)
-    // A checkout removed since: its log is still in the cache, beside w1.
-    const gone = path.join(trees, "w2")
-    const goneState = path.join(path.dirname(stateDirFor(root)), "0000000000gone00")
-    await writeLog(goneState, [record("2026-10-02T09:00:00.000Z", "edit", [], "s3")], gone)
-    const hashed = path.join(
-      path.dirname(stateDirFor(root)),
-      createHash("sha256").update(gone).digest("hex").slice(0, 16),
+    await writeLog(
+      stateDirFor(w1),
+      [record("2026-10-01T11:00:00.000Z", "stop", [["a1", RULE, "delivered"]])],
+      w1,
+      common,
     )
-    await mkdir(path.dirname(hashed), { recursive: true })
-    execFileSync("cp", ["-R", goneState, hashed])
+    // A checkout removed since: its log is still in the cache.
+    await writeLog(
+      removedState("w2"),
+      [record("2026-10-02T09:00:00.000Z", "edit", [], "s3")],
+      path.join(trees, "w2"),
+      common,
+    )
 
     const all = await runCli(w1, ["stats", "--worktrees", "w*", "--format", "json"])
     const document = JSON.parse(all.stdout)
@@ -464,6 +473,71 @@ describe("rulecast stats --worktrees (#71)", () => {
 
     const text = (await runCli(root, ["stats", "--worktrees", "w*"])).stdout
     expect(text).toContain("2 checkouts: w1, w2 (removed)")
+  })
+
+  test("a removed checkout is found wherever it was, and only when it was this repository's", async () => {
+    const root = await realpath(await projectWithLog(RECORDS.slice(0, 4)))
+    // Another repository beside this one, with a log of its own: not a checkout of this one.
+    const other = await realpath(await projectWithLog(RECORDS.slice(4)))
+    await writeLog(stateDirFor(other), RECORDS.slice(4), other, path.join(other, ".git"))
+    // A worktree of this repository that lived somewhere else entirely, removed since.
+    const elsewhere = path.join(path.dirname(TEST_HOME), "elsewhere-gone", "w3")
+    await writeLog(
+      removedState("w3"),
+      [record("2026-10-02T09:00:00.000Z", "edit", [], "s3")],
+      elsewhere,
+      path.join(root, ".git"),
+    )
+    const document = JSON.parse((await runCli(root, ["stats", "--worktrees", "*", "--format", "json"])).stdout)
+    expect(
+      document.checkouts.map((checkout: { name: string; exists: boolean }) => [checkout.name, checkout.exists]),
+    ).toEqual([
+      [path.basename(root), true],
+      ["w3", false],
+    ])
+  })
+
+  test("a worktree rulecast ran in is found after it is removed, from where it lived", async () => {
+    const root = await realpath(await projectWithLog(RECORDS.slice(0, 1)))
+    const parent = await realpath(await mkdtemp(path.join(tmpdir(), "rulecast-elsewhere-")))
+    const tree = path.join(parent, "w4")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w4", tree], { cwd: root })
+    // Any command that keeps state records the checkout, as the hooks do.
+    await runCli(tree, ["run", "--all-files"])
+    execFileSync("git", ["worktree", "remove", "--force", tree], { cwd: root })
+    const document = JSON.parse((await runCli(root, ["stats", "--worktrees", "w4", "--format", "json"])).stdout)
+    expect(
+      document.checkouts.map((checkout: { name: string; exists: boolean }) => [checkout.name, checkout.exists]),
+    ).toEqual([["w4", false]])
+  })
+
+  test("one session in several checkouts is one session in the weekly counts too", async () => {
+    const root = await realpath(await projectWithLog(RECORDS.slice(0, 1)))
+    for (const name of ["w1", "w2"]) {
+      const tree = path.join(root, ".claude", "worktrees", name)
+      execFileSync("git", ["worktree", "add", "-q", "-b", name, tree], { cwd: root })
+      await writeLog(stateDirFor(tree), RECORDS.slice(0, 1), tree, path.join(root, ".git"))
+    }
+    const document = JSON.parse((await runCli(root, ["stats", "--worktrees", "*", "--format", "json"])).stdout)
+    expect(document.sessions).toBe(1)
+    const rule = document.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)
+    expect(rule.weeks.map((week: { sessions: number }) => week.sessions)).toEqual([1])
+    expect(rule.fired).toBe(3)
+    expect(rule.recurringFiles).toEqual([])
+  })
+
+  test("the weekly summary's counts are added per checkout: it keeps no session ids", async () => {
+    const root = await realpath(await projectWithLog(RECORDS.slice(0, 1)))
+    const tree = path.join(root, ".claude", "worktrees", "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", tree], { cwd: root })
+    await writeLog(stateDirFor(tree), RECORDS.slice(0, 1), tree, path.join(root, ".git"))
+    // One session's week, summarised in each checkout.
+    for (const dir of [root, tree]) await withSummary(dir, SUMMARY_TO, [{ week: "2026-09-21", runs: 30, sessions: 1 }])
+    const document = JSON.parse((await runCli(root, ["stats", "--worktrees", "*", "--format", "json"])).stdout)
+    const rule = document.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)
+    const week = (start: string) => rule.weeks.find((entry: { week: string }) => entry.week === start).sessions
+    expect(week("2026-09-21")).toBe(2)
+    expect(week("2026-09-28")).toBe(1)
   })
 
   test("a glob that matches no checkout is a usage error", async () => {

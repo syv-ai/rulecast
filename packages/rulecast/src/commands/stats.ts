@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import { existsSync, realpathSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
@@ -8,8 +7,8 @@ import { STATS_SCHEMA_VERSION } from "../adapters/cli/contract"
 import { compile, diagnosticText } from "../core/compile/project"
 import { CONFIG_FILE } from "../core/config/load"
 import type { DetectorRegistry } from "../core/detection/registry"
-import { git, repositoryTop } from "../core/git"
-import { cacheHome, projectStateDir } from "../core/home"
+import { checkoutOf, git, repositoryTop } from "../core/git"
+import { CHECKOUT_FILE, cacheHome, projectStateDir } from "../core/home"
 import { cachedRepos } from "../core/repos/provider"
 import { derive, type RuleStats, ruleStats } from "../core/stats/derive"
 import { type FindingsRecord, readFindingsLog, readWeeklyRollup } from "../core/stats/log"
@@ -69,11 +68,13 @@ export interface StatsDocument {
   checkouts?: { name: string; root: string; exists: boolean; records: number }[]
 }
 
-/** One checkout's log and weekly rows, ready to merge with others'. */
+/** One checkout's log and weekly summary, ready to merge with others'. */
 interface Loaded {
   records: FindingsRecord[]
-  /** The weekly rows: the summary's and the log's, counted once (see the comment where they are made). */
-  rows: WeekRow[]
+  /** The records the weekly summary does not count already (see the comment where they are chosen). */
+  uncounted: FindingsRecord[]
+  /** The weekly summary's rows. */
+  rolledUp: WeekRow[]
   skipped: number
   rotated: boolean
   rolledUpTo: string | null
@@ -90,14 +91,14 @@ async function loadLog(stateDir: string, tag: string | null): Promise<Loaded> {
     tag === null ? log.records : log.records.map((record) => ({ ...record, s: `${record.s}\u0000${tag}` }))
   // A log file is counted from the summary or from the log, whole, never both: `findings.1.jsonl` is
   // in the summary only after a rotation that summarised it and then did not rename (a crash).
-  const counted =
+  const uncounted =
     log.rotatedFingerprint !== null && rollup.logs.has(log.rotatedFingerprint)
       ? records.slice(log.rotatedRecords)
-      : null
-  const live = counted === null ? weekRows(records, derive(records)) : weekRows(counted, derive(counted))
+      : records
   return {
     records,
-    rows: [...rollup.rows, ...live],
+    uncounted,
+    rolledUp: rollup.rows,
     skipped: log.skipped + rollup.skipped,
     rotated: log.rotated,
     rolledUpTo: rollup.rolledUpTo,
@@ -120,14 +121,15 @@ function globMatcher(globs: readonly string[]): (name: string) => boolean {
 
 /**
  * This project in every checkout of its repository whose directory name matches `globs`: the
- * checkouts `git worktree list` names, and those removed since whose log is still in the cache,
- * found beside a live one (as `.claude/worktrees/*` are). Sorted by name.
+ * checkouts `git worktree list` names, and those removed since whose log is still in the cache.
+ * A removed one counts only when its cache directory recorded this repository's git directory
+ * (core/home.ts), wherever the checkout was. Sorted by name.
  */
 async function checkoutProjects(
   root: string,
   home: string,
   globs: readonly string[],
-): Promise<{ name: string; root: string; exists: boolean }[]> {
+): Promise<{ name: string; root: string; exists: boolean; stateDir: string | null }[]> {
   const real = (dir: string) => {
     try {
       return realpathSync(dir)
@@ -135,7 +137,8 @@ async function checkoutProjects(
       return path.resolve(dir)
     }
   }
-  const top = real(await repositoryTop(root))
+  const here = checkoutOf(root)
+  const top = here?.top ?? real(await repositoryTop(root))
   const inside = path.relative(top, real(root))
   const listed = await git(root, ["worktree", "list", "--porcelain"])
   const live = listed.ok
@@ -144,21 +147,27 @@ async function checkoutProjects(
         .filter((line) => line.startsWith("worktree "))
         .map((line) => real(line.slice("worktree ".length)))
     : [top]
-  const checkouts = new Map<string, boolean>(live.map((tree) => [tree, true]))
-  const parents = new Set(live.map((tree) => path.dirname(tree)))
-  // A removed checkout's project: a cached root that is `inside` below a directory beside a live checkout.
-  const cached = await readdir(path.join(home, "projects")).catch(() => [] as string[])
-  for (const dir of cached) {
-    const recorded = await readFile(path.join(home, "projects", dir, "root"), "utf8").catch(() => null)
-    if (recorded === null) continue
-    const project = recorded.trim()
-    const tree =
-      inside === "" ? project : project.endsWith(`${path.sep}${inside}`) ? project.slice(0, -inside.length - 1) : null
-    if (tree !== null && !checkouts.has(tree) && parents.has(path.dirname(tree))) checkouts.set(tree, false)
+  const checkouts = new Map<string, { exists: boolean; stateDir: string | null }>()
+  for (const tree of live) {
+    const project = path.join(tree, inside)
+    // A live checkout whose branch lacks this project has no log to read.
+    checkouts.set(tree, { exists: true, stateDir: existsSync(project) ? projectStateDir(home, project) : null })
+  }
+  if (here !== null) {
+    const projects = path.join(home, "projects")
+    for (const dir of await readdir(projects).catch(() => [] as string[])) {
+      const recorded = await readFile(path.join(projects, dir, CHECKOUT_FILE), "utf8").catch(() => null)
+      const project = await readFile(path.join(projects, dir, "root"), "utf8").catch(() => null)
+      if (recorded === null || project === null) continue
+      const [commonDir, tree] = recorded.split("\n")
+      if (commonDir !== here.commonDir || tree === undefined || tree === "" || checkouts.has(tree)) continue
+      if (path.relative(tree, project.trim()) !== inside) continue
+      checkouts.set(tree, { exists: false, stateDir: path.join(projects, dir) })
+    }
   }
   const matches = globMatcher(globs)
   return [...checkouts]
-    .map(([tree, exists]) => ({ name: path.basename(tree), root: path.join(tree, inside), exists }))
+    .map(([tree, found]) => ({ name: path.basename(tree), root: path.join(tree, inside), ...found }))
     .filter((checkout) => matches(checkout.name))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }
@@ -368,14 +377,27 @@ export async function statsCommand(
   if (checkouts === null) loaded.push({ ...(await loadLog(projectStateDir(home, root), null)), checkout: null })
   else {
     for (const checkout of checkouts) {
-      const stateDir = existsSync(checkout.root)
-        ? projectStateDir(home, checkout.root)
-        : path.join(home, "projects", createHash("sha256").update(checkout.root).digest("hex").slice(0, 16))
-      loaded.push({ ...(await loadLog(stateDir, checkout.name)), checkout })
+      const log =
+        checkout.stateDir === null
+          ? { records: [], uncounted: [], rolledUp: [], skipped: 0, rotated: false, rolledUpTo: null }
+          : await loadLog(checkout.stateDir, checkout.name)
+      loaded.push({ ...log, checkout })
     }
   }
   const records = loaded.flatMap((one) => one.records)
-  const rows = loaded.flatMap((one) => one.rows)
+  // A session's own id, without the checkout `--worktrees` marked it with.
+  const untagged = (session: string) => session.split("\u0000")[0]!
+  const sessionOf = (record: FindingsRecord) => untagged(record.s)
+  // The log's weekly rows, counted over every checkout at once: lives are told apart by the tagged
+  // ids, sessions are counted on the real ones, so one session in three checkouts is one session.
+  // The summaries' rows hold counts, not session ids, so they are added as they are: in the weeks a
+  // summary covers, a session that ran in two checkouts counts twice.
+  const uncounted = loaded.flatMap((one) => one.uncounted)
+  const live = weekRows(
+    uncounted.map((record) => ({ ...record, s: sessionOf(record) })),
+    derive(uncounted).map((life) => ({ ...life, session: untagged(life.session) })),
+  )
+  const rows = [...loaded.flatMap((one) => one.rolledUp), ...live]
   const skipped = loaded.reduce((sum, one) => sum + one.skipped, 0)
   const rotated = loaded.some((one) => one.rotated)
   const rolledUpTo = loaded.reduce<string | null>(
@@ -383,8 +405,6 @@ export async function statsCommand(
       one.rolledUpTo !== null && (latest === null || one.rolledUpTo > latest) ? one.rolledUpTo : latest,
     null,
   )
-  // A session's own id, without the checkout `--worktrees` marked it with.
-  const sessionOf = (record: FindingsRecord) => record.s.split("\u0000")[0]!
   if (records.length === 0 && rows.length === 0 && values.format === "terminal") {
     io.stdout(
       checkouts === null

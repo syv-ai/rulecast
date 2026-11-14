@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process"
+import { readFileSync, realpathSync, statSync } from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
 import { childEnv } from "./child-env"
 import { isNotFound } from "./errors"
+import type { ContentSource } from "./types"
 
 const exec = promisify(execFile)
 
@@ -160,6 +162,25 @@ export async function stagedFiles(cwd: string): Promise<string[]> {
   return nulSeparated(result.stdout)
 }
 
+/**
+ * Files `commit` holds that `source` no longer does: the deletions the lists above leave out. With
+ * renames off, so a moved file reads as deleted here. Empty when git cannot tell. Sorted.
+ */
+export async function deletedFilesSince(cwd: string, commit: string, source: ContentSource): Promise<string[]> {
+  const since =
+    source.kind === "commit" ? [commit, source.ref] : source.kind === "index" ? ["--cached", commit] : [commit]
+  const result = await git(cwd, [
+    "diff",
+    "--name-only",
+    "-z",
+    "--relative",
+    "--no-renames",
+    "--diff-filter=D",
+    ...since,
+  ])
+  return result.ok ? nulSeparated(result.stdout) : []
+}
+
 /** Files changed from `from` to `to` that exist at `to`. Sorted. */
 export async function changedFilesBetween(cwd: string, from: string, to: string): Promise<string[]> {
   const result = await git(cwd, ["diff", "--name-only", "-z", "--relative", "--diff-filter=d", from, to])
@@ -182,4 +203,42 @@ export async function repositoryTop(root: string): Promise<string> {
 export async function insideWorkTree(dir: string): Promise<boolean> {
   const result = await git(dir, ["rev-parse", "--is-inside-work-tree"])
   return result.ok && result.stdout.trim() === "true"
+}
+
+/**
+ * The checkout `dir` is in, from the files git leaves and without running it (a hook pays for every
+ * process): the checkout's top directory, and the repository's common git directory, which every
+ * worktree of one repository shares. Real paths. Null outside a repository.
+ */
+export function checkoutOf(dir: string): { top: string; commonDir: string } | null {
+  let top: string
+  try {
+    top = realpathSync(dir)
+  } catch {
+    return null
+  }
+  for (;;) {
+    const dotGit = path.join(top, ".git")
+    const stat = statSync(dotGit, { throwIfNoEntry: false })
+    if (stat?.isDirectory()) return { top, commonDir: dotGit }
+    if (stat?.isFile()) {
+      try {
+        // A worktree's `.git` names its own git directory, whose `commondir` names the shared one.
+        const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))
+        if (pointer === null) return null
+        const gitDir = path.resolve(top, pointer[1]!.trim())
+        // A submodule's has none: its git directory is its own.
+        const commondir = path.join(gitDir, "commondir")
+        const common = statSync(commondir, { throwIfNoEntry: false })
+          ? path.resolve(gitDir, readFileSync(commondir, "utf8").trim())
+          : gitDir
+        return { top, commonDir: realpathSync(common) }
+      } catch {
+        return null
+      }
+    }
+    const parent = path.dirname(top)
+    if (parent === top) return null
+    top = parent
+  }
 }
