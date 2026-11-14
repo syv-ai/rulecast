@@ -1,6 +1,6 @@
 {
   "hook": "pre-commit",
-  "runType": "fix",
+  "runType": "check",
   "steps": [
     {
       "name": "noprint",
@@ -15,5 +15,5 @@
       "fileCount": 2
     }
   ],
-  "generatedAt": "2026-11-13T21:12:56.449057+00:00"
+  "generatedAt": "2026-11-13T23:09:51.234124+00:00"
 }

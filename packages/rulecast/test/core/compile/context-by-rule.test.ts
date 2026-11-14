@@ -132,6 +132,20 @@ describe("context_by_rule", () => {
     ])
   })
 
+  test("rejects a bare Biome rule name as a key: Biome reports group/rule", async () => {
+    expect(
+      await errorsOf({
+        id: "linter/biome",
+        name: "Biome errors",
+        detect: { linter: { tool: "biome" } },
+        message: "{{message}} ({{ruleId}})",
+        context_by_rule: { "suspicious/noDebugger": "@docs/conventions.md", noConsole: "@docs/conventions.md" },
+      }),
+    ).toEqual([
+      ["linter/biome", "context_by_rule.noConsole: biome reports rules as group/rule, such as suspicious/noDebugger"],
+    ])
+  })
+
   test("ruleContextFor puts the rule's own context first, then each fired lint rule's, once", async () => {
     const rule = await compiledEslint({
       context: ["@docs/async.md"],

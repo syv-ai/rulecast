@@ -11,10 +11,10 @@ import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { errorMessage } from "../core/errors"
 import { allFiles, isTracked, repositoryTop } from "../core/git"
-import { cacheHome } from "../core/home"
+import { cacheHome, type Env } from "../core/home"
 import { type Catalog, catalogEntry, groupOf, loadCatalog, PACKS } from "../core/repos/catalog"
 import { type Adapter, type InstallScope, LLM_PROVIDERS, type LlmProviderName } from "../core/types"
-import { hkCommand, hkSteps } from "../detectors/hook/resolve"
+import { hkCommand, hkNeedsNetwork, hkPlan } from "../detectors/hook/resolve"
 import type { ConfigSettings, RuleSelection } from "../init/config-text"
 import { type Detection, detectionSummary, detectProject, markerExists } from "../init/detect"
 import { type SetupFacts, setupFacts } from "../init/facts"
@@ -26,7 +26,7 @@ import {
   type OfferedPath,
   readHead,
 } from "../init/generated"
-import { type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
+import { type HkReader, type HookScan, hookRule, notOfferedLines, scanHooks } from "../init/hooks"
 import {
   linterLines,
   linterRule,
@@ -182,19 +182,26 @@ const idOf = (entry: unknown): string | null => {
 
 /**
  * The project's own pre-commit, lefthook and hk hooks, read at the git top as the hook detector does.
- * hk's steps are asked of hk itself, when it is installed: its config is Pkl.
+ * hk's steps are asked of hk itself, when it is installed and that needs no network: its config is
+ * Pkl, and a Pkl package not yet in hk's cache would be downloaded.
  */
-async function projectHooks(root: string): Promise<HookScan> {
+async function projectHooks(root: string, env: Env): Promise<HookScan> {
   const top = await repositoryTop(root)
   const project = path.relative(top, root).split(path.sep).join("/")
   const signal = AbortSignal.timeout(HK_TIMEOUT_MS)
-  const hk = await hkCommand(root, top, signal)
-  const steps = hk === null ? undefined : (hook: string) => hkSteps(hk, top, hook, signal).catch(() => null)
-  return scanHooks((file) => readSourceFile(top, file), project, steps)
+  const command = await hkCommand(root, top, signal)
+  const network = command === null ? null : await hkNeedsNetwork(top, env)
+  const hk: HkReader | undefined =
+    command === null
+      ? undefined
+      : network !== null
+        ? { unread: network }
+        : { plan: (hook) => hkPlan(command, top, hook, signal).catch((error) => ({ error: errorMessage(error) })) }
+  return scanHooks((file) => readSourceFile(top, file), project, hk)
 }
 
-/** hk evaluates hk.pkl, which may fetch hk's Pkl package the first time. */
-const HK_TIMEOUT_MS = 60_000
+/** hk evaluates hk.pkl from packages already in its cache. */
+const HK_TIMEOUT_MS = 30_000
 
 /**
  * The agents `init` installs hooks for unless told otherwise: the detected ones, or — when nothing
@@ -390,7 +397,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     adapters: ADAPTERS,
   })
 
-  const scan = await projectHooks(root)
+  const scan = await projectHooks(root, io.env)
   const local = config?.repos.find((repo) => repo.repo === "local")
   const configured = new Set((local?.rules ?? []).map(idOf).filter((id): id is string => id !== null))
   const unknown = flags.hooks.find((id) => !scan.offered.some((hook) => hook.id === id))

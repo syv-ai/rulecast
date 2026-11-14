@@ -8,6 +8,7 @@ import { findingIds } from "../../../src/core/finding-id"
 import { type DetectorRuleInput, defaultDetectorSettings } from "../../../src/core/types"
 import { linterDetector } from "../../../src/detectors/linter/detector"
 import type { LinterConfig } from "../../../src/detectors/linter/schema"
+import { ruleSelects } from "../../../src/detectors/linter/schema"
 import { brokenTool, linkTool, stubArgv, stubCalls, stubCwds, stubTool } from "../../helpers/linters"
 import { createProject, fromDisk } from "../../helpers/project"
 
@@ -71,6 +72,15 @@ describe("linter detector", () => {
       ["src/a.js", "no-debugger"],
     ])
     expect(inA.match.docs).toMatch(/^https:\/\/oxc\.rs\//)
+  })
+
+  test("biome: a rule named without its group is refused, since Biome reports group/rule and it would never match", () => {
+    const parsed = linterDetector.schema.safeParse({ tool: "biome", rules: ["suspicious/noDebugger", "noConsole"] })
+    expect(parsed.success).toBe(false)
+    expect(parsed.error?.issues.map((issue) => issue.message)).toEqual([
+      "noConsole: biome reports rules as group/rule, such as suspicious/noDebugger",
+    ])
+    expect(linterDetector.schema.safeParse({ tool: "biome", rules: ["a11y/useAltText"] }).success).toBe(true)
   })
 
   test("biome: its rdjson, rule ids as biome.json writes them, levels from the project's config (#75)", async () => {
@@ -253,6 +263,71 @@ describe("linter detector", () => {
     expect(byRule("imports")).toEqual(["F401"])
     expect(byRule("both").sort()).toEqual(["F401", "T201"])
     expect(byRule("other-file")).toEqual([])
+  })
+
+  test("a ruff rule that names a selector takes the findings it selects: T takes T201, F4 takes F401", async () => {
+    const root = await createProject({ "app/a.py": PY })
+    await stubTool(root, "ruff")
+    const result = await run(root, [
+      ruleFor("linter", { tool: "ruff", rules: ["T"] }, ["app/a.py"]),
+      ruleFor("group", { tool: "ruff", rules: ["F4"] }, ["app/a.py"]),
+      ruleFor("other", { tool: "ruff", rules: ["F5", "TRY"] }, ["app/a.py"]),
+      ruleFor("all", { tool: "ruff", rules: ["ALL"] }, ["app/a.py"]),
+    ])
+    expect(result.errors).toEqual([])
+    const byRule = (id: string) =>
+      result.findings.filter((finding) => finding.rule === id).map((finding) => finding.match.captures.ruleId)
+    expect(byRule("linter")).toEqual(["T201"])
+    expect(byRule("group")).toEqual(["F401"])
+    expect(byRule("other")).toEqual([])
+    expect(byRule("all").sort()).toEqual(["F401", "T201"])
+  })
+
+  test.each([
+    ["B", "B006", true],
+    ["B0", "B006", true],
+    ["B006", "B006", true],
+    ["B1", "B006", false],
+    ["B", "BLE001", false],
+    ["E", "ERA001", false],
+    ["E5", "E501", true],
+    ["C", "C901", true],
+    ["C4", "C901", false],
+    ["PL", "PLR0913", true],
+    ["PLR", "PLR0913", true],
+    ["PLR09", "PLR0913", true],
+    ["PLC", "PLR0913", false],
+    ["ALL", "RUF100", true],
+    // Renamed selectors still pass ruff, which reports the new code: TCH is TC, TRIO is ASYNC.
+    ["TCH", "TC001", true],
+    ["TCH001", "TC001", true],
+    ["TCH006", "TC010", true],
+    ["TCH001", "TC002", false],
+    ["TRIO", "ASYNC100", true],
+    ["TRIO", "ASYNC210", false],
+    ["PDV", "PD011", true],
+    ["U", "UP006", true],
+    ["U00", "UP006", true],
+    ["R", "RET505", true],
+    ["IC", "ICN001", true],
+    ["IC003", "ICN001", true],
+    ["I25", "TID252", true],
+    ["C9", "C901", true],
+    ["T1", "T100", true],
+    ["T2", "T201", true],
+    ["M", "RUF100", true],
+    ["T001", "FIX001", true],
+    ["TRY200", "B904", true],
+    ["PLW0117", "PLW0177", true],
+    ["C901", "C901", true],
+  ])("ruff selector %s selects %s: %s", (selector, code, selects) => {
+    expect(ruleSelects("ruff", selector, code)).toBe(selects)
+  })
+
+  test("other tools' rule ids match exactly", () => {
+    expect(ruleSelects("eslint", "no-console", "no-console")).toBe(true)
+    expect(ruleSelects("eslint", "no", "no-console")).toBe(false)
+    expect(ruleSelects("biome", "suspicious/noDebugger", "suspicious/noDebugger")).toBe(true)
   })
 
   test("tools run independently: a failing one fails only its own rules", async () => {

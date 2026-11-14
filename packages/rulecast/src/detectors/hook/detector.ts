@@ -14,8 +14,13 @@ import { restoreChanged, snapshot } from "./modified"
 import {
   findLefthookJob,
   findPreCommitHook,
+  HK_ENV,
+  HK_PRE_PUSH_UNREAD,
+  type HkPlan,
   hkCommand,
-  hkSteps,
+  hkNeedsNetwork,
+  hkPlan,
+  hkStepNeverRuns,
   lefthookCommand,
   lefthookDump,
   missingManager,
@@ -86,6 +91,14 @@ async function runLefthook(spec: string, files: string[], input: DetectorRun<Hoo
 }
 
 /**
+ * What a pre-push run needs to take the rule's files without asking the git remote (hk 2.12). Its
+ * first two arguments are the remote and its url, so stand-ins come before the files; without a
+ * ref range hk runs `git ls-remote` for the default branch, and HEAD..HEAD gives one with no files
+ * of its own, so the given files are the ones checked.
+ */
+export const HK_PRE_PUSH_ARGS = ["--from-ref", "HEAD", "--to-ref", "HEAD", "rulecast", "rulecast"]
+
+/**
  * One hk step in check mode on the rule's files: `--check` runs its check command, never its fix,
  * and `--stash none` leaves the working tree as it is. Run from the repository's top, where hk.pkl is.
  */
@@ -93,14 +106,28 @@ async function runHk(spec: string, files: string[], input: DetectorRun<HookConfi
   const top = await repositoryTop(input.cwd)
   const command = await hkCommand(input.cwd, top, input.signal)
   if (command === null) throw new Error("hk is not installed")
+  // A hook rule never makes hk download its Pkl package: the developer fetches it, visibly, once.
+  const network = await hkNeedsNetwork(top, process.env)
+  if (network !== null) {
+    // A package stays in hk's cache once fetched; for a module read over http(s) there is no such step.
+    const fix = network.startsWith("hk's Pkl package")
+      ? "; run `hk validate` once to download it, and the rule runs from then on"
+      : ""
+    throw new Error(`not run: ${network}${fix}`)
+  }
   const slash = spec.indexOf("/")
   const [hook, step] = [spec.slice(0, slash), spec.slice(slash + 1)]
   const args = ["run", hook, "--check", "--step", step, "--stash", "none", "--no-stage", "--format", "json"]
-  const ran = await runTool(command, [...args, ...filesFrom(top, input.cwd, files)], {
-    cwd: top,
-    signal: input.signal,
-    notFound: "hk is not installed",
-  })
+  const ran = await runTool(
+    command,
+    [...args, ...(hook === "pre-push" ? HK_PRE_PUSH_ARGS : []), ...filesFrom(top, input.cwd, files)],
+    {
+      cwd: top,
+      signal: input.signal,
+      notFound: "hk is not installed",
+      env: HK_ENV,
+    },
+  )
   const run = parseHkRun(ran.stdout)
   if (run === null) throw new Error(toolFailure("hk", ran))
   const result = run.steps.find((one) => one.name === step)
@@ -323,16 +350,45 @@ export const hookDetector: Detector<HookConfig> = {
       results.push({ what: "hk", level: "ok", detail: shown(command), rules: [] })
       const bySpec = new Map<string, string[]>()
       for (const rule of hk) bySpec.set(rule.config.hk!, [...(bySpec.get(rule.config.hk!) ?? []), rule.id])
-      const stepsOf = new Map<string, string[] | null>()
+      // hk is asked for its plan only when that needs no network: a Pkl package already in its
+      // cache, and never the pre-push plan, which asks the git remote.
+      const network = await hkNeedsNetwork(top, input.env)
+      if (network !== null) {
+        results.push({ what: "hk steps", level: "warning", detail: `not checked: ${network}`, rules: [] })
+        return results
+      }
+      const plans = new Map<string, HkPlan>()
       for (const [spec, rules] of bySpec) {
         const slash = spec.indexOf("/")
-        const hook = spec.slice(0, slash)
-        if (!stepsOf.has(hook)) stepsOf.set(hook, await hkSteps(command, top, hook, input.signal))
-        const steps = stepsOf.get(hook)
-        if (steps === null || steps === undefined) {
+        const [hook, name] = [spec.slice(0, slash), spec.slice(slash + 1)]
+        if (hook === "pre-push") {
+          results.push({ what: `hk step "${spec}"`, level: "warning", detail: HK_PRE_PUSH_UNREAD, rules })
+          continue
+        }
+        if (!plans.has(hook)) plans.set(hook, await hkPlan(command, top, hook, input.signal))
+        const plan = plans.get(hook)!
+        if ("missing" in plan) {
           results.push({ what: `hk hook "${hook}"`, level: "error", detail: "not in hk.pkl", rules })
-        } else if (!steps.includes(spec.slice(slash + 1))) {
-          results.push({ what: `hk step "${spec}"`, level: "error", detail: "no such step", rules })
+        } else if ("error" in plan) {
+          results.push({
+            what: `hk hook "${hook}"`,
+            level: "error",
+            detail: `hk could not plan it: ${plan.error}`,
+            rules,
+          })
+        } else {
+          const step = plan.steps.find((one) => one.name === name)
+          const never = step === undefined ? null : hkStepNeverRuns(step)
+          if (step === undefined) {
+            results.push({ what: `hk step "${spec}"`, level: "error", detail: "no such step", rules })
+          } else if (never !== null) {
+            results.push({
+              what: `hk step "${spec}"`,
+              level: "error",
+              detail: `hk never runs it to check: ${never}`,
+              rules,
+            })
+          }
         }
       }
     }

@@ -1,6 +1,13 @@
 import { parse } from "yaml"
 
-import { HK_CONFIGS, LEFTHOOK_CONFIGS, PRE_COMMIT_CONFIG } from "../detectors/hook/resolve"
+import {
+  HK_CONFIGS,
+  HK_PRE_PUSH_UNREAD,
+  type HkPlan,
+  hkStepNeverRuns,
+  LEFTHOOK_CONFIGS,
+  PRE_COMMIT_CONFIG,
+} from "../detectors/hook/resolve"
 
 /** A hook the project already declares, as init offers it. */
 export interface DetectedHook {
@@ -115,20 +122,159 @@ function packageRun(command: string): { manager: string; name: string; explicit:
 /** The project's package.json scripts, by name. */
 export type PackageScripts = Readonly<Record<string, string>>
 
-/** Ways a command exits 0 whatever it finds: the first match, as written, is the evidence. */
-const SWALLOWS_EXIT = /\|\|\s*(?:true|:|exit\s+0)(?=\s*(?:$|[;'")&]))|;\s*exit\s+0\b(?=\s*(?:$|['"]))|\bset\s+\+e\b/
+/** `bash -c '…'` (or sh, zsh, dash, with flags such as -e): what follows is a script. */
+const SHELL_C = /^\s*(?:(?:\S*\/)?env\s+)?(?:\S*\/)?(?:ba|z|da)?sh\s+(?:-\w+\s+)*?-\w*c\s+(['"])/
 
 /**
- * Whether a hook's command can never fail, and the part that says so. A package script it runs is
- * looked at too, one level down, as for `modifies`.
+ * The script a `bash -c '…'` command runs, or the command itself when it is not one, and whether
+ * the shell was started with -e (`sh -ec '…'`, `bash -e -c '…'`).
+ */
+function shellBody(command: string): { body: string; errexit: boolean } {
+  const match = SHELL_C.exec(command)
+  if (!match) return { body: command, errexit: false }
+  const quote = match[1]!
+  let body = ""
+  for (let i = match.index + match[0].length; i < command.length; i++) {
+    const char = command[i]!
+    if (quote === '"' && char === "\\" && i + 1 < command.length) body += char + command[++i]!
+    else if (char !== quote) body += char
+    // `'\''` closes the quote, adds a quote and opens it again.
+    else if (quote === "'" && command.startsWith("\\''", i + 1)) {
+      body += "'"
+      i += 3
+    } else break
+  }
+  return { body, errexit: /\s-[a-z]*e[a-z]*\s/.test(match[0]) }
+}
+
+/** `set -e`, `set -euo pipefail`, `set -o errexit`: a failing command ends the script with its code. */
+const ERREXIT = /\bset\s+(?:-[a-z]*e[a-z]*\b|(?:-[a-z]+\s+)*-o\s+errexit\b)/
+/** An exit with a code that may not be 0: `exit 1`, `exit $?`, `exit $status`. */
+const FAILING_EXIT = /\bexit\s+(?:0*[1-9]|\$)/
+
+/** One part of a shell script's top level: a command's text, or the operator after it. */
+type Piece = { op: null; text: string } | { op: ";" | "&" | "&&" | "||" | "|" }
+
+/**
+ * A script's top level as commands and operators, leaving out comments and what is inside quotes,
+ * `$(…)`, `(…)` and `{…}`: `rm -f x || true; mypy .` is `rm -f x`, `||`, `true`, `;`, `mypy .`.
+ * A newline separates commands as `;` does, unless a backslash continues the line.
+ */
+function topLevel(script: string): Piece[] {
+  const pieces: Piece[] = []
+  let text = ""
+  // The last character added, kept apart: reading it off `text` makes V8 flatten the growing string
+  // every time, which turns a long command quadratic.
+  let prev = ""
+  const add = (part: string) => {
+    text += part
+    prev = part.at(-1) ?? prev
+  }
+  let quote: string | null = null
+  let depth = 0
+  const end = (op: Piece["op"]) => {
+    pieces.push({ op: null, text: text.trim() })
+    if (op !== null) pieces.push({ op } as Piece)
+    text = ""
+    prev = ""
+  }
+  for (let i = 0; i < script.length; i++) {
+    const char = script[i]!
+    if (quote !== null) {
+      if (char === "\\" && quote !== "'") add(char + (script[++i] ?? ""))
+      else {
+        add(char)
+        if (char === quote) quote = null
+      }
+      continue
+    }
+    if (char === "\\") {
+      if (script[i + 1] === "\n") i++
+      else add(char + (script[++i] ?? ""))
+    } else if (char === "'" || char === '"' || char === "`") {
+      quote = char
+      add(char)
+    } else if (char === "(" || char === "{") {
+      depth++
+      add(char)
+    } else if (char === ")" || char === "}") {
+      depth = Math.max(0, depth - 1)
+      add(char)
+    } else if (char === "#" && depth === 0 && (prev === "" || /[\s;&|]/.test(prev))) {
+      while (i + 1 < script.length && script[i + 1] !== "\n") i++
+    } else if (depth > 0 || (char === "&" && (prev === "<" || prev === ">" || script[i + 1] === ">"))) add(char)
+    else if (char === "\n" || char === ";") end(";")
+    else if (char === "&" || char === "|") {
+      const double = script[i + 1] === char
+      if (double) i++
+      end(double ? (char === "&" ? "&&" : "||") : char)
+    } else add(char)
+  }
+  end(null)
+  // Blank lines and a trailing `;` leave empty commands and repeated separators: they say nothing.
+  const out: Piece[] = []
+  for (const piece of pieces) {
+    if (piece.op === null ? piece.text === "" : out.length === 0 || out.at(-1)!.op !== null) continue
+    out.push(piece)
+  }
+  while (out.length > 0 && out.at(-1)!.op !== null) out.pop()
+  return out
+}
+
+/** A command that always succeeds: `true`, `:`, `exit 0`, `{ true; }`, or one that only prints. */
+const ALWAYS_ZERO = /^(?:true|:|exit\s+0|\{\s*(?:true|:)\s*;?\s*\}|(?:echo|printf)(?:\s.*)?)$/s
+
+/**
+ * How a script exits 0 whatever its checks find, as written: its last command list ends in
+ * `|| true` (or `|| :`, `|| exit 0`, `|| echo …`), is `exit 0` or `true` on its own, or pipes into
+ * `tee` without pipefail. Only the end counts: `rm -f x || true; mypy .` fails when mypy does, and
+ * so does `set +e; mypy .; status=$?; exit $status`. A bare `exit 0` at the end counts only when
+ * nothing could stop the script before it (no set -e, no earlier `exit 1`). `tail`: its last command.
+ */
+function exitSwallowed(script: string, shellErrexit = false): { evidence: string | null; tail: string } {
+  const pieces = topLevel(script)
+  let from = pieces.length
+  while (from > 0 && pieces[from - 1]!.op !== ";" && pieces[from - 1]!.op !== "&") from--
+  const list = pieces.slice(from)
+  const tail = list.at(-1)
+  const op = list.at(-2)
+  if (tail === undefined || tail.op !== null) return { evidence: null, tail: "" }
+  // A `sh -c '…'` that is the last command exits as its script does: the script decides.
+  if (SHELL_C.test(tail.text)) {
+    const shell = shellBody(tail.text)
+    return exitSwallowed(shell.body, shell.errexit)
+  }
+  const command = tail.text.replace(/\s+/g, " ")
+  if (op === undefined) {
+    // A bare `exit 0` at the end is reached only when nothing before it stopped the script: under
+    // set -e a failing check does, and so does an earlier `exit 1` or `exit $?`.
+    const earlier = pieces.slice(0, from)
+    const fails =
+      shellErrexit ||
+      ERREXIT.test(script) ||
+      earlier.some((piece) => piece.op === null && FAILING_EXIT.test(piece.text))
+    const alone = !fails && /^(?:true|:|exit 0)$/.test(command)
+    return { evidence: alone ? (from > 0 ? `; ${command}` : command) : null, tail: command }
+  }
+  if (op.op === "||" && ALWAYS_ZERO.test(command)) return { evidence: `|| ${command}`, tail: command }
+  if (op.op === "|" && /^tee\b/.test(command) && !/\bpipefail\b/.test(script)) {
+    return { evidence: "| tee", tail: command }
+  }
+  return { evidence: null, tail: command }
+}
+
+/**
+ * Whether a hook's command can never fail, and the part that says so. The package script its last
+ * command runs is looked at too, one level down, as for `modifies`: in `npm run prep && npm run
+ * lint`, lint's.
  */
 function swallowsExit(command: string, scripts: PackageScripts): string | undefined {
-  const own = SWALLOWS_EXIT.exec(command)
-  if (own) return own[0].replace(/\s+/g, " ")
-  const run = packageRun(command)
+  const own = exitSwallowed(command)
+  if (own.evidence !== null) return own.evidence
+  const run = packageRun(own.tail)
   const body = run !== null && Object.hasOwn(scripts, run.name) ? scripts[run.name] : undefined
-  const inScript = body === undefined ? null : SWALLOWS_EXIT.exec(body)
-  return inScript ? `${inScript[0].replace(/\s+/g, " ")} (in ${run!.manager} run ${run!.name})` : undefined
+  const inScript = body === undefined ? null : exitSwallowed(body).evidence
+  return inScript === null ? undefined : `${inScript} (in ${run!.manager} run ${run!.name})`
 }
 
 /** A hook's `stages`, when they are a list of names. */
@@ -423,58 +569,81 @@ function packageScripts(text: string | null): PackageScripts {
 }
 
 /**
- * The hk hooks whose steps init offers, in this order: a step in several is offered from the first.
- * `check` is hk's own hook for `hk check`; `commit-msg` steps check messages and say so (stages).
+ * The hk hooks whose steps init reads, in this order: a step in several is offered from the first,
+ * with every hook it is in as its stages. `check` is hk's own hook for `hk check`. commit-msg steps
+ * are read to say why they are not offered. pre-push is never planned: hk asks the git remote.
  */
-const HK_HOOKS = ["pre-commit", "pre-push", "check", "commit-msg"]
+const HK_HOOKS = ["pre-commit", "check", "commit-msg"]
 
 /**
- * hk's steps, read by asking hk: hk.pkl is Pkl, which only hk evaluates. `steps` lists one hook's
- * steps (null: no such hook); undefined when hk is not installed, and the steps are said to be unread.
+ * How init reads hk's steps: `plan` asks hk for one hook's plan; `unread` says why hk is not asked
+ * (asking would download its Pkl package). Absent: hk is not installed.
  */
+export type HkReader = { plan: (hook: string) => Promise<HkPlan> } | { unread: string }
+
 async function hkHooks(
   read: (file: string) => Promise<string | null>,
   up: string,
   scan: HookScan,
-  steps: ((hook: string) => Promise<string[] | null>) | undefined,
+  hk: HkReader | undefined,
 ): Promise<void> {
   let config: string | undefined
-  for (const file of HK_CONFIGS) if ((await read(file)) !== null) config = file
+  let text = ""
+  for (const file of HK_CONFIGS) {
+    const found = await read(file)
+    if (found === null) continue
+    config = file
+    text = found
+    break
+  }
   if (config === undefined) return
   const source = `${up}${config}`
-  if (steps === undefined) {
-    scan.skipped.push({
-      name: "hk steps",
-      source,
-      reason: "hk is not installed, so its steps can't be read",
-      elsewhere: false,
-    })
-    return
-  }
+  const skip = (name: string, reason: string) => scan.skipped.push({ name, source, reason, elsewhere: false })
+  if (hk === undefined) return void skip("hk steps", "hk is not installed, so its steps can't be read")
+  if ("unread" in hk)
+    return void skip("hk steps", `not read: ${hk.unread}; \`hk run pre-commit --plan\` downloads it and lists them`)
+  const offered = new Map<string, DetectedHook>()
   const seen = new Set<string>()
   for (const hook of HK_HOOKS) {
-    for (const step of (await steps(hook)) ?? []) {
-      if (seen.has(step)) continue
-      seen.add(step)
+    const plan = await hk.plan(hook)
+    if ("missing" in plan) continue
+    if ("error" in plan) return void skip("hk steps", `hk could not read them: ${plan.error}`)
+    for (const step of plan.steps) {
+      const known = offered.get(step.name)
+      if (known !== undefined) known.stages = [...(known.stages ?? []), hook]
+      if (seen.has(step.name)) continue
+      seen.add(step.name)
+      if (hook === "commit-msg") {
+        skip(step.name, "commit-msg: checks the commit message, and a hook rule runs on files")
+        continue
+      }
+      const never = hkStepNeverRuns(step)
+      if (never !== null) {
+        skip(step.name, `hk never runs it to check: ${never}`)
+        continue
+      }
       // Run with --check, the step never fixes: hk runs its check command only.
-      scan.offered.push({
-        id: `hook/${idSegment(`${hook}-${step}`)}`,
-        name: step,
-        detect: { hk: `${hook}/${step}` },
+      const detected: DetectedHook = {
+        id: `hook/${idSegment(`${hook}-${step.name}`)}`,
+        name: step.name,
+        detect: { hk: `${hook}/${step.name}` },
         files: null,
         modifies: false,
         source,
         stages: [hook],
-      })
+      }
+      offered.set(step.name, detected)
+      scan.offered.push(detected)
     }
   }
+  if (/["']pre-push["']/.test(text)) skip("hk pre-push steps", HK_PRE_PUSH_UNREAD)
 }
 
 /** detectHooks, with the hooks left out of this project and why: init says so rather than drop them. */
 export async function scanHooks(
   read: (file: string) => Promise<string | null>,
   project = "",
-  hkSteps?: (hook: string) => Promise<string[] | null>,
+  hk?: HkReader,
 ): Promise<HookScan> {
   const prefix = project === "" || project === "." ? "" : `${project.replace(/\/+$/, "")}/`
   const up = prefix === "" ? "" : "../".repeat(prefix.split("/").length - 1)
@@ -491,7 +660,7 @@ export async function scanHooks(
     }
     break
   }
-  await hkHooks(read, up, scan, hkSteps)
+  await hkHooks(read, up, scan, hk)
   return { ...scan, offered: distinctIds(scan.offered) }
 }
 

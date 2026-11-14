@@ -1,0 +1,19 @@
+{
+  "hook": "pre-commit",
+  "runType": "check",
+  "steps": [
+    {
+      "name": "noprint",
+      "status": "skipped",
+      "orderIndex": 0,
+      "reasons": [
+        {
+          "kind": "no_command",
+          "detail": "no command defined for run type: check"
+        }
+      ],
+      "fileCount": 0
+    }
+  ],
+  "generatedAt": "2026-11-13T23:09:51.338792+00:00"
+}

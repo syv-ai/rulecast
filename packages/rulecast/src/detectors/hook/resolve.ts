@@ -1,9 +1,12 @@
-import { readFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { readdir, readFile } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { parse } from "yaml"
 
 import { runTool } from "../../core/detection/tool"
 import { isNotFound } from "../../core/errors"
+import type { Env } from "../../core/home"
 import { localBin, onPath } from "../../core/which"
 import type { Runner } from "./framing"
 
@@ -14,8 +17,10 @@ const LEFTHOOK_ANY = ["", ".", ".config/"].flatMap((dir) =>
   ["yml", "yaml", "toml", "json", "jsonc"].map((ext) => `${dir}lefthook.${ext}`),
 )
 
-/** The names hk reads its config from at the repository's top. */
-export const HK_CONFIGS = ["hk.pkl", ".hk.pkl", ".config/hk.pkl"]
+/** The project configs hk reads at the repository's top, in hk's order: it evaluates the first there (hk 2.12). */
+export const HK_CONFIGS = ["hk.pkl", ".config/hk.pkl"]
+/** Personal configs hk evaluates instead, when there: they usually amend hk.pkl. */
+const HK_LOCAL_CONFIGS = ["hk.local.pkl", ".config/hk.local.pkl"]
 
 /** Whether the repository's top holds `file`. */
 export async function hasConfig(top: string, file: string): Promise<boolean> {
@@ -41,6 +46,7 @@ export async function missingManager(top: string, manager: "pre-commit" | "lefth
 type JsonObject = Record<string, unknown>
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+const text = (value: unknown): string => (typeof value === "string" ? value : "")
 const strings = (value: unknown): string[] | null =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? (value as string[]) : null
 
@@ -119,25 +125,137 @@ export function parseHkRun(stdout: string): { status: string; failure: string | 
   return { status: parsed.status, failure: typeof parsed.failure === "string" ? parsed.failure : null, steps }
 }
 
-/** The steps of one hk hook, from `hk run <hook> --plan --json --all`; null when hk does not know the hook. */
-export async function hkSteps(
-  command: string,
-  top: string,
-  hook: string,
-  signal: AbortSignal,
-): Promise<string[] | null> {
-  const ran = await runTool(command, ["run", hook, "--plan", "--json", "--all"], {
+/**
+ * The environment every hk call gets: HK_PKL_OFFLINE makes hk refuse to download a Pkl package it
+ * has not cached (hk 2.12), so no plan or run can fetch one, whatever `hkNeedsNetwork` concluded.
+ */
+export const HK_ENV: Readonly<Record<string, string>> = { HK_PKL_OFFLINE: "1" }
+
+/** One step of hk's plan for a hook: `skipped` with a reason when hk would not run it. */
+export interface HkPlanStep {
+  name: string
+  status: string
+  reasons: { kind: string; detail: string }[]
+}
+
+/** hk's plan for one hook: its steps, `missing` when hk.pkl has no such hook, or hk's error. */
+export type HkPlan = { steps: HkPlanStep[] } | { missing: true } | { error: string }
+
+/**
+ * hk's plan for one hook in check mode, from `hk run <hook> --plan --json --all --check`. A
+ * commit-msg hook takes the message file first: an empty one stands in. Never ask this for
+ * pre-push: its plan asks the git remote for the default branch (hk 2.12).
+ */
+export async function hkPlan(command: string, top: string, hook: string, signal: AbortSignal): Promise<HkPlan> {
+  const message = hook === "commit-msg" ? [os.devNull] : []
+  const ran = await runTool(command, ["run", hook, ...message, "--plan", "--json", "--all", "--check"], {
     cwd: top,
     signal,
     notFound: "hk is not installed",
+    env: HK_ENV,
   })
+  if (`${ran.stderr}\n${ran.stdout}`.includes(`Hook '${hook}' not found`)) return { missing: true }
+  let plan: unknown
   try {
-    const plan: unknown = JSON.parse(ran.stdout)
-    if (!isObject(plan) || !Array.isArray(plan.steps)) return null
-    return plan.steps.flatMap((step) => (isObject(step) && typeof step.name === "string" ? [step.name] : []))
+    plan = JSON.parse(ran.stdout)
   } catch {
-    return null
+    plan = null
   }
+  if (!isObject(plan) || !Array.isArray(plan.steps)) {
+    // hk's error ends in its cause: "hk.pkl:2:62: Missing `}` delimiter.", "HTTP fetch failed for …".
+    const said = `${ran.stderr}\n${ran.stdout}`
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/^(?:Error:|\d+:)\s*/, ""))
+      .filter((line) => line !== "" && !/^(?:Caused by:|Error output:|Location:|See |[✔❯|]|\d+\s*\|)/.test(line))
+    return { error: said.at(-1) ?? `hk exited ${ran.exitCode}` }
+  }
+  const steps = plan.steps.flatMap((step): HkPlanStep[] => {
+    if (!isObject(step) || typeof step.name !== "string") return []
+    const reasons = Array.isArray(step.reasons)
+      ? step.reasons.filter(isObject).map((reason) => ({ kind: text(reason.kind), detail: text(reason.detail) }))
+      : []
+    return [{ name: step.name, status: text(step.status), reasons }]
+  })
+  return { steps }
+}
+
+/** Why hk never runs a planned step in check mode, as hk says it, or null when it may run it. */
+export function hkStepNeverRuns(step: HkPlanStep): string | null {
+  if (step.status !== "skipped") return null
+  // no_command: only a fix command. profile_exclude: a profile rulecast does not enable.
+  const reason = step.reasons.find((one) => one.kind === "no_command" || one.kind === "profile_exclude")
+  return reason === undefined ? null : reason.detail || reason.kind
+}
+
+/** Why hk's pre-push steps are not read: the plan reaches the network. */
+export const HK_PRE_PUSH_UNREAD =
+  "not read: hk's plan for pre-push asks the git remote for its default branch; `hk run pre-push --plan` lists them"
+
+/**
+ * Why hk can't be asked for its plan without the network, or null when it can. hk evaluates its
+ * Pkl config with pklr, which downloads each `package://` module the first time into its cache
+ * (`<cache>/pklr/packages`, one `.url` file per download naming the zip it came from). So hk is
+ * asked only when every package the configs it reads use is already there, and no config reads an
+ * http(s) module.
+ */
+export async function hkNeedsNetwork(top: string, env: Env): Promise<string | null> {
+  const home = env.HOME || os.homedir()
+  const entry = [...HK_LOCAL_CONFIGS, ...HK_CONFIGS].find((file) => existsSync(path.join(top, file)))
+  const roots = [
+    ...(entry === undefined ? [] : [path.join(top, entry)]),
+    path.join(top, ".hkrc.pkl"),
+    path.join(home, ".hkrc.pkl"),
+    path.join(home, ".config", "hk", "config.pkl"),
+  ]
+  const packages = new Set<string>()
+  const seen = new Set<string>()
+  const queue = [...roots]
+  while (queue.length > 0) {
+    const file = queue.shift()!
+    if (seen.has(file)) continue
+    seen.add(file)
+    let source: string
+    try {
+      source = await readFile(file, "utf8")
+    } catch {
+      continue
+    }
+    for (const match of source.matchAll(PKL_MODULE)) {
+      const uri = match[1]!
+      if (uri.startsWith("package://")) packages.add(uri)
+      else if (/^https?:/.test(uri)) return `${path.relative(top, file) || file} reads ${uri}, which hk would download`
+      else if (!/^[a-z]+:/.test(uri)) queue.push(path.resolve(path.dirname(file), uri))
+    }
+  }
+  if (packages.size === 0) return null
+  const cached = await pklrCached(env, home)
+  for (const uri of packages) {
+    const zip = `https://${uri.slice("package://".length).replace(/#.*$/, "")}.zip`
+    if (!cached.has(zip)) return `hk's Pkl package ${zip} is not in hk's cache, and reading hk.pkl would download it`
+  }
+  return null
+}
+
+/** A module a Pkl file amends, extends, imports or reads: `amends "package://…#/Config.pkl"`. */
+const PKL_MODULE = /\b(?:amends|extends|import\*?|read[?*]?\s*\()\s*"([^"]+)"/g
+
+/**
+ * The zips pklr has downloaded. Its cache is $HK_PKL_CACHE_DIR when hk is given one, else `pklr` in
+ * the platform's cache directory (dirs::cache_dir); the packages sit in `packages/` under it.
+ */
+async function pklrCached(env: Env, home: string): Promise<Set<string>> {
+  const base =
+    process.platform === "darwin"
+      ? path.join(home, "Library", "Caches")
+      : process.platform === "win32"
+        ? (env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"))
+        : env.XDG_CACHE_HOME || path.join(home, ".cache")
+  const dir = path.join(env.HK_PKL_CACHE_DIR || path.join(base, "pklr"), "packages")
+  const names = await readdir(dir).catch(() => [] as string[])
+  const urls = await Promise.all(
+    names.filter((name) => name.endsWith(".url")).map((name) => readFile(path.join(dir, name), "utf8").catch(() => "")),
+  )
+  return new Set(urls.map((url) => url.trim()))
 }
 
 export async function lefthookCommand(root: string, top: string, signal?: AbortSignal): Promise<string | null> {

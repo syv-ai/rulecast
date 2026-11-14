@@ -8,7 +8,7 @@ import { errorMessage } from "../../core/errors"
 import { repositoryTop } from "../../core/git"
 import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Match } from "../../core/types"
 import { describeTool, resolveTool, runDirFor } from "./resolve"
-import { type LinterConfig, linterSchema, type ToolName } from "./schema"
+import { type LinterConfig, linterSchema, ruleIdProblem, ruleSelects, type ToolName } from "./schema"
 import { type LinterFinding, TOOLS } from "./tools"
 
 /** Where one run of a tool happens: its working directory, the project root and the repository's top. */
@@ -93,9 +93,8 @@ export const linterDetector: Detector<LinterConfig> = {
   kind: "linter",
   schema: linterSchema,
   captures: () => ["message", "ruleId"],
-  // ruff reports codes (B006); a key in its name form (mutable-argument-default) could never match.
-  checkRuleId: (config, id) =>
-    config.tool === "ruff" && !/^[A-Z]+[0-9]+$/.test(id) ? "ruff reports rule codes such as B006, not names" : null,
+  // ruff reports codes (B006) and Biome group/rule ids: a key in another form could never match.
+  checkRuleId: (config, id) => ruleIdProblem(config.tool, id),
   // A copy: compileRule stores this as the rule's stages, and module-level data must not escape into it.
   events: (config) => [...TOOLS[config.tool].events],
   takesContent: (config) => TOOLS[config.tool].stdinArgs !== undefined,
@@ -153,7 +152,8 @@ export const linterDetector: Detector<LinterConfig> = {
               // A rule that names no lint rules delivers what the project's config makes an error.
               // A named rule's ids run as errors anyway, and the line below decides.
               if (finding.level !== "error" && !rule.config.rules) continue
-              if (rule.config.rules && !rule.config.rules.includes(finding.ruleId)) continue
+              const selects = (selector: string) => ruleSelects(tool, selector, finding.ruleId)
+              if (rule.config.rules && !rule.config.rules.some(selects)) continue
               result.findings.push({ rule: rule.id, match })
             }
           }

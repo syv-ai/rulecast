@@ -3,6 +3,10 @@ import { z } from "zod"
 import { outputSchema } from "../../core/detection/outputs"
 import { capturesSchema, exitCodesSchema, ruleIdsSchema } from "../command/schema"
 
+/** A hook rule runs a step on files; hk's commit-msg steps take the commit message instead. */
+export const HK_COMMIT_MSG =
+  "an hk commit-msg step checks the commit message, and a hook rule runs on files; a rule with stages: [commit-msg] judges the message"
+
 export const hookSchema = z
   .object({
     /** A hook id (or alias) in the project's .pre-commit-config.yaml, run by prek or pre-commit. */
@@ -16,6 +20,7 @@ export const hookSchema = z
     hk: z
       .string()
       .regex(/^[^/\s]+\/.+$/, "hk names a hook and a step: pre-commit/eslint")
+      .refine((spec) => !spec.startsWith("commit-msg/"), HK_COMMIT_MSG)
       .optional(),
     /** Most hooks print gcc-style lines; a hook that prints nothing a format reads still reports its failure. */
     output: outputSchema.default({ lines: "gcc" }),

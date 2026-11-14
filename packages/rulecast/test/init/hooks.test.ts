@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest"
+import { stringify } from "yaml"
 
 import { RULE_ID } from "../../src/core/config/schema"
+import { HK_PRE_PUSH_UNREAD, type HkPlan } from "../../src/detectors/hook/resolve"
 import { addLocalRules, newConfigText } from "../../src/init/config-text"
 import { detectHooks, globToRegex, hookRule, notOfferedLines, rebaseGlob, scanHooks } from "../../src/init/hooks"
 
@@ -95,9 +97,6 @@ describe("detectHooks", () => {
       - id: exit-zero
         entry: bash -c 'pytest; exit 0'
         language: system
-      - id: lenient
-        entry: bash -c 'set +e; ty check'
-        language: system
       - id: via-script
         entry: npm run typecheck
         language: system
@@ -111,10 +110,85 @@ describe("detectHooks", () => {
       ["hook/mypy-gate", "|| true"],
       ["hook/knip-check", "|| true"],
       ["hook/exit-zero", "; exit 0"],
-      ["hook/lenient", "set +e"],
       ["hook/via-script", "|| : (in npm run typecheck)"],
       ["hook/honest", undefined],
     ])
+  })
+
+  test("reading a huge command stays linear", async () => {
+    for (const run of ["a#".repeat(200_000), "a&>".repeat(200_000), "a ".repeat(200_000)]) {
+      const started = performance.now()
+      await detectHooks(files({ "lefthook.yml": stringify({ "pre-commit": { jobs: [{ name: "x", run }] } }) }))
+      expect(performance.now() - started).toBeLessThan(2_000)
+    }
+  })
+
+  // Only the script the last command runs counts, one level down.
+  test.each([
+    ["npm run prep && npm run lint", undefined],
+    ["npm run lint && npm run soft", "|| true (in npm run soft)"],
+    ["pnpm soft", "|| true (in pnpm run soft)"],
+    ["(npm run soft) && eslint .", undefined],
+    ["npm run soft && eslint .", undefined],
+  ])("never fails through a package script: %j -> %s", async (run, neverFails) => {
+    const scripts = { prep: "rm -rf out || true", lint: "eslint .", soft: "eslint . || true" }
+    const config = stringify({ "pre-commit": { jobs: [{ name: "check", run }] } })
+    const [hook] = await detectHooks(files({ "lefthook.yml": config, "package.json": JSON.stringify({ scripts }) }))
+    expect(hook?.neverFails).toBe(neverFails)
+  })
+
+  // Only how the script ends decides: a guarded setup line, a substitution, a string, a comment or
+  // `set +e … exit $status` leaves the check's own exit code in place.
+  test.each([
+    ["mypy . || exit 1", undefined],
+    ["mypy . || true", "|| true"],
+    ["mypy . || exit 0", "|| exit 0"],
+    ["mypy . ||true", "|| true"],
+    ["mypy . 2>&1 || true", "|| true"],
+    ["mypy . 2>&1", undefined],
+    ["true &>/dev/null; mypy . 2>&1", undefined],
+    ["mypy . || :", "|| :"],
+    ["mypy .; exit 0", "; exit 0"],
+    ["mypy . ; true", "; true"],
+    ["mypy . || echo failed", "|| echo failed"],
+    ["mypy . || echo 'mypy failed'", "|| echo 'mypy failed'"],
+    ["mypy . || exit 0 # tolerate", "|| exit 0"],
+    ["mypy . || { true; }", "|| { true; }"],
+    ["mypy .\nexit 0\n", "; exit 0"],
+    ["mypy . | tee out.txt", "| tee"],
+    ["set -o pipefail; mypy . | tee out.txt", undefined],
+    ["mypy . || true && false", undefined],
+    ["test -f x || true; mypy .", undefined],
+    ["[ -d node_modules ] || true\nnpm run lint", undefined],
+    ["bash -c 'set +e; mypy .; status=$?; set -e; exit $status'", undefined],
+    ["bash -c 'set +e; ty check'", undefined],
+    ["echo '|| true' && mypy .", undefined],
+    ["# ignore errors || true\nmypy .", undefined],
+    ["bash -c 'cd x || true; mypy .'", undefined],
+    ["bash -c 'rm -f .mypy.out || true; mypy . '", undefined],
+    ["bash -c 'files=$(git diff --name-only HEAD | grep \\.py$ || true); [ -z \"$files\" ] || mypy $files'", undefined],
+    ["bash -c 'mypy . || true' --", "|| true"],
+    // A trailing exit 0 or true is reached only when the check passed, or exits nothing at all.
+    ["if ! mypy .; then\n  exit 1\nfi\nexit 0", undefined],
+    ["mypy . || exit 1\nexit 0", undefined],
+    ["mypy . || exit $?\nexit 0", undefined],
+    ["set -e\nmypy .\ntrue", undefined],
+    ["set -e; mypy .; echo ok; exit 0", undefined],
+    ["set -euo pipefail; mypy .; exit 0", undefined],
+    ["set -o errexit; mypy .; exit 0", undefined],
+    ["sh -ec 'mypy .; exit 0'", undefined],
+    ["bash -e -c 'mypy .; exit 0'", undefined],
+    ["set -e\nmypy . || true", "|| true"],
+    // The command line around a `sh -c '…'` decides when it goes on after it.
+    ["sh -c 'mypy .' || true", "|| true"],
+    ["bash -c 'mypy .'; exit 0", "; exit 0"],
+    ['sh -c "mypy ." || :', "|| :"],
+    ["sh -c 'mypy . || true' && mypy .", undefined],
+    ["cd web && bash -c 'tsc || true'", "|| true"],
+  ])("never fails: %j -> %s", async (run, neverFails) => {
+    const config = stringify({ "pre-commit": { jobs: [{ name: "check", run }] } })
+    const [hook] = await detectHooks(files({ "lefthook.yml": config }))
+    expect(hook?.neverFails).toBe(neverFails)
   })
 
   test("a hook's stages come from its own stages, the config's default_stages, or its lefthook hook (#78)", async () => {
@@ -144,14 +218,30 @@ repos:
     expect(lefthook.map((hook) => hook.stages)).toEqual([["pre-commit"], ["pre-commit"], ["pre-push"]])
   })
 
-  test("hk: steps hk reports for each hook, offered once each, run in check mode (#87)", async () => {
-    const steps: Record<string, string[]> = { "pre-commit": ["eslint", "ruff"], check: ["eslint", "knip"] }
-    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "", async (hook) => steps[hook] ?? null)
+  const planned = (name: string, status = "included", reasons: { kind: string; detail: string }[] = []) => ({
+    name,
+    status,
+    reasons,
+  })
+
+  test("hk: steps hk plans for each hook, offered once each with every hook as a stage, run in check mode (#87)", async () => {
+    const plans: Record<string, HkPlan> = {
+      "pre-commit": { steps: [planned("eslint"), planned("ruff")] },
+      check: { steps: [planned("eslint"), planned("knip")] },
+    }
+    const asked: string[] = []
+    const plan = async (hook: string): Promise<HkPlan> => {
+      asked.push(hook)
+      return plans[hook] ?? { missing: true }
+    }
+    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "", { plan })
     expect(scan.offered.map((hook) => [hook.id, hook.detect, hook.modifies, hook.stages])).toEqual([
-      ["hook/pre-commit-eslint", { hk: "pre-commit/eslint" }, false, ["pre-commit"]],
+      ["hook/pre-commit-eslint", { hk: "pre-commit/eslint" }, false, ["pre-commit", "check"]],
       ["hook/pre-commit-ruff", { hk: "pre-commit/ruff" }, false, ["pre-commit"]],
       ["hook/check-knip", { hk: "check/knip" }, false, ["check"]],
     ])
+    // pre-push's plan asks the git remote: never planned.
+    expect(asked).toEqual(["pre-commit", "check", "commit-msg"])
     expect(hookRule(scan.offered[0]!)).toMatchObject({
       name: "eslint (hk)",
       detect: { hook: { hk: "pre-commit/eslint" } },
@@ -159,12 +249,59 @@ repos:
     })
   })
 
-  test("hk without hk installed: its steps are said to be unread, not silently missing", async () => {
-    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "")
+  test("hk: steps hk never runs to check, commit-msg steps and pre-push say why they are not offered", async () => {
+    const plans: Record<string, HkPlan> = {
+      "pre-commit": {
+        steps: [
+          planned("fmt", "skipped", [{ kind: "no_command", detail: "no command defined for run type: check" }]),
+          planned("slow", "skipped", [{ kind: "profile_exclude", detail: "required profile(s) not enabled: slow" }]),
+          planned("py", "skipped", [{ kind: "filter_no_match", detail: "no files matched filters" }]),
+        ],
+      },
+      "commit-msg": { steps: [planned("conventional")] },
+    }
+    const hkPkl = 'hooks { ["pre-commit"] {} ["pre-push"] {} }\n'
+    const scan = await scanHooks(files({ "hk.pkl": hkPkl }), "", {
+      plan: async (hook) => plans[hook] ?? { missing: true },
+    })
+    // A step whose glob matches no file today still runs when one does.
+    expect(scan.offered.map((hook) => hook.id)).toEqual(["hook/pre-commit-py"])
+    expect(notOfferedLines(scan.skipped)).toEqual([
+      "Not offered from hk.pkl: fmt (hk never runs it to check: no command defined for run type: check)",
+      "Not offered from hk.pkl: slow (hk never runs it to check: required profile(s) not enabled: slow)",
+      "Not offered from hk.pkl: conventional (commit-msg: checks the commit message, and a hook rule runs on files)",
+      `Not offered from hk.pkl: hk pre-push steps (${HK_PRE_PUSH_UNREAD})`,
+    ])
+  })
+
+  test("hk: a plan hk could not make is said, not silently empty", async () => {
+    const scan = await scanHooks(files({ "hk.pkl": "hooks {\n" }), "", {
+      plan: async () => ({ error: "hk.pkl:2:62: Missing `}` delimiter." }),
+    })
     expect(scan.offered).toEqual([])
     expect(notOfferedLines(scan.skipped)).toEqual([
-      "Not offered from hk.pkl: hk steps (hk is not installed, so its steps can't be read)",
+      "Not offered from hk.pkl: hk steps (hk could not read them: hk.pkl:2:62: Missing `}` delimiter.)",
     ])
+  })
+
+  test("hk: when reading the steps would download hk's Pkl package, hk is not asked", async () => {
+    const scan = await scanHooks(files({ "hk.pkl": 'amends "..."\n' }), "", {
+      unread: "hk's Pkl package x is not cached",
+    })
+    expect(notOfferedLines(scan.skipped)).toEqual([
+      "Not offered from hk.pkl: hk steps (not read: hk's Pkl package x is not cached; `hk run pre-commit --plan` downloads it and lists them)",
+    ])
+  })
+
+  test("hk: the config hk reads first is the one cited: hk.pkl before .config/hk.pkl", async () => {
+    const plan = async (hook: string): Promise<HkPlan> =>
+      hook === "pre-commit" ? { steps: [planned("eslint")] } : { missing: true }
+    const both = await scanHooks(files({ "hk.pkl": "a\n", ".config/hk.pkl": "b\n" }), "", { plan })
+    expect(both.offered.map((hook) => hook.source)).toEqual(["hk.pkl"])
+    const config = await scanHooks(files({ ".config/hk.pkl": "b\n", ".hk.pkl": "c\n" }), "", { plan })
+    expect(config.offered.map((hook) => hook.source)).toEqual([".config/hk.pkl"])
+    // hk 2.12 does not read .hk.pkl.
+    expect((await scanHooks(files({ ".hk.pkl": "c\n" }), "", { plan })).offered).toEqual([])
   })
 
   test("hook names that are not rule ids become valid, distinct ids; detect keeps the real name", async () => {
