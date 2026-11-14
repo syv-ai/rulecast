@@ -72,7 +72,12 @@ export async function findPreCommitHook(
 async function preCommitEntry(
   root: string,
   id: string,
-): Promise<{ repo: JsonObject; hook: JsonObject; defaults: string[] | null } | null> {
+): Promise<{
+  repo: JsonObject
+  hook: JsonObject
+  defaults: string[] | null
+  global: { files: string; exclude: string }
+} | null> {
   let text: string
   try {
     text = await readFile(path.join(root, PRE_COMMIT_CONFIG), "utf8")
@@ -83,10 +88,12 @@ async function preCommitEntry(
   const config: unknown = parse(text)
   if (!isObject(config) || !Array.isArray(config.repos)) return null
   const defaults = strings(config.default_stages)
+  const regex = (value: unknown) => (typeof value === "string" ? value : "")
+  const global = { files: regex(config.files), exclude: regex(config.exclude) }
   for (const repo of config.repos) {
     if (!isObject(repo) || !Array.isArray(repo.hooks)) continue
     for (const hook of repo.hooks) {
-      if (isObject(hook) && (hook.id === id || hook.alias === id)) return { repo, hook, defaults }
+      if (isObject(hook) && (hook.id === id || hook.alias === id)) return { repo, hook, defaults, global }
     }
   }
   return null
@@ -99,6 +106,8 @@ export interface PreCommitFilter {
   excludeTypes: string[]
   /** A Python regex searched in paths relative to the git top; "" for every file. */
   files: string
+  /** Likewise, the files it leaves out; "" for none. */
+  exclude: string
 }
 
 /**
@@ -109,15 +118,17 @@ export interface PreCommitScope {
   alwaysRun: boolean | null
   passFilenames: boolean | null
   filter: PreCommitFilter | null
+  /** The config's own top-level `files` and `exclude`, which every hook's filter is applied within; "" when absent. */
+  global: { files: string; exclude: string }
 }
 
 /** A hook's scope, by id in the git top's .pre-commit-config.yaml; null when the id is not there. */
 export async function preCommitHookScope(root: string, id: string): Promise<PreCommitScope | null> {
   const found = await preCommitEntry(root, id)
-  return found === null ? null : preCommitScope(found.repo, found.hook)
+  return found === null ? null : { ...(await preCommitScope(found.repo, found.hook)), global: found.global }
 }
 
-const FILTER_KEYS = ["types", "types_or", "exclude_types", "files"] as const
+const FILTER_KEYS = ["types", "types_or", "exclude_types", "files", "exclude"] as const
 
 /**
  * A hook's scope from its entry in the config: the config's own keys win over its manifest's, the
@@ -142,8 +153,14 @@ export async function preCommitScope(repo: JsonObject, hook: JsonObject): Promis
           typesOr: strings(value("types_or")) ?? [],
           excludeTypes: strings(value("exclude_types")) ?? [],
           files: text(value("files")),
+          exclude: text(value("exclude")),
         }
-  return { alwaysRun: flag("always_run", false), passFilenames: flag("pass_filenames", true), filter }
+  return {
+    alwaysRun: flag("always_run", false),
+    passFilenames: flag("pass_filenames", true),
+    filter,
+    global: { files: "", exclude: "" },
+  }
 }
 
 /**

@@ -232,6 +232,12 @@ export interface DetectorRun<Config> {
    * back (detectors/hook/modified.ts). Absent: false, and a detector computes no edit.
    */
   fixes?: boolean
+  /**
+   * Run by an agent's hook, where another agent may be editing the same files: a detector that
+   * changes files (a formatter hook) leaves its change in place, and only reports it. Absent: it
+   * puts the files back (detectors/hook/modified.ts).
+   */
+  leaveChanges?: boolean
 }
 
 /**

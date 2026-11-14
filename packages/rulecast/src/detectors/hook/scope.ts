@@ -1,5 +1,5 @@
-import { KNOWN_TAGS } from "../../core/files"
-import type { PreCommitFilter } from "./resolve"
+import { compileFilter, type FileFilter, KNOWN_TAGS } from "../../core/files"
+import type { PreCommitFilter, PreCommitScope } from "./resolve"
 
 /** The part of a rule that picks its files, as init writes it and doctor suggests it. */
 export interface RuleFilter {
@@ -87,6 +87,48 @@ export function ruleFilterOf(
   }
   const stated = all.length > 0 || filter.typesOr.length > 0 || excluded.length > 0 || filter.files !== ""
   return { rule, stated, left }
+}
+
+/**
+ * The files of a project, `project` below the git top ("" or ending in "/"), that a pre-commit hook
+ * would be given: its filter as `ruleFilterOf` carries it over, then its `exclude` and the config's
+ * top-level `files` and `exclude`, each where JavaScript reads it as Python does. What can't be
+ * carried is left out, so this takes in every file pre-commit gives the hook, and maybe more.
+ * Paths are relative to `root`, the project's directory, whose shebangs give unknown files a type.
+ * Null: the filter is unknown, or takes in every file.
+ */
+export function hookFileFilter(scope: PreCommitScope, project: string, root: string): FileFilter | null {
+  const regex = (source: string, none: string) => {
+    if (source === "") return none
+    const rebased = rebaseRegex(source, project)
+    return typeof rebased === "string" ? rebased : none
+  }
+  const own = scope.filter === null ? {} : ruleFilterOf(scope.filter, project).rule
+  const parts = [
+    {
+      files: own.files ?? "",
+      exclude: regex(scope.filter?.exclude ?? "", "^$"),
+      types: own.types ?? [],
+      typesOr: own.types_or ?? [],
+      excludeTypes: own.exclude_types ?? [],
+    },
+    {
+      files: regex(scope.global.files, ""),
+      exclude: regex(scope.global.exclude, "^$"),
+      types: [],
+      typesOr: [],
+      excludeTypes: [],
+    },
+  ]
+  const filters: FileFilter[] = []
+  for (const part of parts) {
+    const unfiltered = part.files === "" && part.exclude === "^$" && part.types.length === 0
+    if (unfiltered && part.typesOr.length === 0 && part.excludeTypes.length === 0) continue
+    const filter = compileFilter({ ...part, root })
+    if (typeof filter !== "string") filters.push(filter)
+  }
+  if (filters.length === 0) return null
+  return (file) => filters.every((filter) => filter(file))
 }
 
 /**

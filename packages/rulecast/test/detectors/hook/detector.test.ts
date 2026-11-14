@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -65,8 +65,9 @@ const ruleFor = (id: string, config: unknown, files: string[]): DetectorRuleInpu
   context: [],
 })
 
-const run = (cwd: string, rules: DetectorRuleInput<HookConfig>[]) =>
+const run = (cwd: string, rules: DetectorRuleInput<HookConfig>[], options: { leaveChanges?: boolean } = {}) =>
   hookDetector.run({
+    ...options,
     event: "verify",
     rules,
     changes: new Map(),
@@ -172,6 +173,81 @@ describe("hook detector: pre-commit hooks", () => {
         },
       },
     ])
+  })
+
+  // In an agent session another agent may be editing the same file while the hook runs: putting
+  // the file back would revert that edit (AKA lead, 0.16.0). The developer's decision: leave it.
+  test("in an agent's hook (leaveChanges): the hook's change stays, and it is still the finding", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello   \nworld\n" })
+    await stubRunner(root, "prek", `printf 'hello\\nworld\\n' > t.txt\n${replay("prek.modified.txt", 1)}`)
+    const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["t.txt"])], {
+      leaveChanges: true,
+    })
+    expect(await readFile(path.join(root, "t.txt"), "utf8")).toBe("hello\nworld\n")
+    expect(result.findings.map((finding) => finding.match.captures.message)).toEqual([
+      "trailing-whitespace would change this file",
+    ])
+  })
+
+  // A file another agent changed while the hook ran is not the hook's change: pre-commit says when
+  // the hook modified files, and when it does not, nothing is the hook's, nothing is put back.
+  test.each([false, true])(
+    "a file that changed while a hook that modified nothing ran: not its finding, not put back (leaveChanges %s)",
+    async (leaveChanges) => {
+      const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello\n" })
+      await stubRunner(root, "prek", "printf 'edited by another agent\\n' > t.txt\necho 'trim.........Passed'")
+      const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["t.txt"])], {
+        leaveChanges,
+      })
+      expect(await readFile(path.join(root, "t.txt"), "utf8")).toBe("edited by another agent\n")
+      expect(result.findings).toEqual([])
+    },
+  )
+
+  // AKA lead, 0.16.0: a Python-only hook's rule, with no filter of its own, ran it on a Markdown
+  // file. The hook's own filter (and the config's) decides which of the rule's files it gets.
+  test("only the rule's files the hook's pre-commit filter takes are run, compared and reported", async () => {
+    const config = `files: ^(backend|docs)/
+exclude: ^backend/generated/
+repos:
+  - repo: local
+    hooks:
+      - id: fmt
+        name: fmt
+        entry: fmt
+        language: system
+        types: [python]
+        files: ^backend/
+        exclude: _test\\.py$
+`
+    const root = await createProject({
+      ".pre-commit-config.yaml": config,
+      "backend/a.py": "a=1\n",
+      "backend/a_test.py": "t=1\n",
+      "backend/generated/g.py": "g=1\n",
+      "docs/PLAN.md": "# plan\n",
+      "tools/t.py": "t=1\n",
+    })
+    // A stub that rewrites every file it is given, whatever its type.
+    await stubRunner(
+      root,
+      "prek",
+      `for f in "$@"; do [ -f "$f" ] && printf 'x\\n' > "$f"; done\n${replay("prek.modified.txt", 1)}`,
+    )
+    const files = ["backend/a.py", "backend/a_test.py", "backend/generated/g.py", "docs/PLAN.md", "tools/t.py"]
+    const result = await run(root, [ruleFor("fmt", { "pre-commit": "fmt" }, files)])
+    expect(await calls(root, "prek")).toEqual(["run fmt --files backend/a.py"])
+    expect(result.findings.map((finding) => finding.match.file)).toEqual(["backend/a.py"])
+  })
+
+  test("a hook whose filter takes none of the rule's files is not run", async () => {
+    const config =
+      "repos:\n  - repo: local\n    hooks:\n      - id: fmt\n        name: fmt\n        entry: fmt\n        language: system\n        types: [python]\n"
+    const root = await createProject({ ".pre-commit-config.yaml": config, "docs/PLAN.md": "# plan\n" })
+    await stubRunner(root, "prek", replay("prek.modified.txt", 1))
+    const result = await run(root, [ruleFor("fmt", { "pre-commit": "fmt" }, ["docs/PLAN.md"])])
+    expect(result).toEqual({ findings: [], errors: [] })
+    expect(existsSync(path.join(root, "prek.calls"))).toBe(false)
   })
 
   /** A prek stub whose hook failed with `exit` and printed `lines`, indented as prek does. */

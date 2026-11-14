@@ -11,7 +11,7 @@ import type { CheckResult, Detector, DetectorResult, DetectorRuleInput, Detector
 import { distribute } from "../command/detector"
 import { isToolError, toolFailure } from "../command/exit"
 import { stripRunnerFraming } from "./framing"
-import { restoreChanged, snapshot } from "./modified"
+import { changedSince, restore, snapshot } from "./modified"
 import {
   FILE_TEMPLATE,
   findLefthookJob,
@@ -28,10 +28,12 @@ import {
   missingManager,
   PRE_COMMIT_CONFIG,
   parseHkRun,
+  preCommitHookScope,
   preCommitRunner,
   substituteFiles,
 } from "./resolve"
 import { type HookConfig, hookName, hookSchema, managerOf } from "./schema"
+import { hookFileFilter } from "./scope"
 
 const ALWAYS = ["message", "ruleId", "severity"] as const
 /** How many lines of an unreadable failure the finding carries. */
@@ -47,6 +49,11 @@ interface HookRun {
   dir: string
   /** The hook's command got the files it was run on (not always_run, pass_filenames: false, a job without them). */
   givenFiles: boolean
+  /**
+   * The runner said whether the hook modified files (pre-commit's "files were modified by this
+   * hook"); undefined when it does not say (lefthook, hk).
+   */
+  modified?: boolean
 }
 
 /** The repository declares and runs the hook, from its top; the files are the project's. */
@@ -72,6 +79,7 @@ async function runPreCommit(id: string, files: string[], input: DetectorRun<Hook
     output: framed.output,
     dir: top,
     givenFiles: hook.givenFiles,
+    modified: framed.modified,
   }
 }
 
@@ -244,6 +252,32 @@ function forHook(rules: DetectorRuleInput<HookConfig>[], name: string) {
   return rules.filter((rule) => !rule.config.rules || rule.config.rules.includes(name))
 }
 
+/**
+ * Of the rule's files, the ones a pre-commit hook is given: its own filter and the config's, as
+ * pre-commit applies them, so a Python hook is never run on, compared over or blamed for a
+ * Markdown file (AKA lead, 0.16.0). Where a part of the filter can't be read as pre-commit does it is
+ * left out, so no file the hook would get is dropped. Null: pre-commit would not run the hook on
+ * any of them. Other runners get the rule's files as they are.
+ */
+async function filesForHook(
+  config: HookConfig,
+  files: string[],
+  input: DetectorRun<HookConfig>,
+): Promise<string[] | null> {
+  const id = config["pre-commit"]
+  if (id === undefined) return files
+  const top = await repositoryTop(input.cwd)
+  const scope = await preCommitHookScope(top, id)
+  // An id the config doesn't have: running it says so.
+  if (scope === null) return files
+  const relative = path.relative(top, input.cwd)
+  const project = relative === "" ? "" : `${relative.split(path.sep).join("/")}/`
+  const filter = hookFileFilter(scope, project, input.cwd)
+  const taken = filter === null ? files : files.filter(filter)
+  // An always_run hook runs whatever it is given, none included.
+  return taken.length === 0 && scope.alwaysRun !== true ? null : taken
+}
+
 /** A command as doctor shows it: its path, or "(PATH)" after a bare name, as for command and linter. */
 const shown = (command: string) => (command.includes("/") ? command : `${command} (PATH)`)
 
@@ -255,7 +289,8 @@ export const hookDetector: Detector<HookConfig> = {
   events: () => ["verify"],
   // A hook runs in the project with its own environment; a scratch copy is not that project.
   wholeProject: () => true,
-  // A formatter hook rewrites files until they are put back: nothing else may read them meanwhile.
+  // A formatter hook rewrites files, and outside an agent's hook puts them back: no other rule may
+  // read them meanwhile.
   changesFiles: true,
   async run(input) {
     const result: DetectorResult = { findings: [], errors: [] }
@@ -276,11 +311,13 @@ export const hookDetector: Detector<HookConfig> = {
     for (const rules of groups.values()) {
       const config = rules[0]!.config
       const name = hookName(config)
-      const files = [...new Set(rules.flatMap((rule) => rule.files))].sort()
-      if (files.length === 0) continue
+      const selected = [...new Set(rules.flatMap((rule) => rule.files))].sort()
+      if (selected.length === 0) continue
       try {
+        const files = await filesForHook(config, selected, input)
+        if (files === null) continue
         const before = await snapshot(files, input.cwd)
-        let ran: HookRun
+        let ran: HookRun | undefined
         let changed: string[] = []
         try {
           ran = config["pre-commit"]
@@ -289,7 +326,11 @@ export const hookDetector: Detector<HookConfig> = {
               ? await runLefthook(config.lefthook, files, input)
               : await runHk(config.hk!, files, input)
         } finally {
-          changed = await restoreChanged(before, input.cwd)
+          // A file that changed while a hook that modified nothing ran was changed by someone else.
+          changed = ran?.modified === false ? [] : await changedSince(before, input.cwd)
+          // In an agent's hook another agent may be editing these files: putting one back would revert
+          // its edit, so the hook's change stays and is only reported (the developer's call, 2026-11-15).
+          if (input.leaveChanges !== true) await restore(before, changed, input.cwd)
           const findings = await Promise.all(
             changed.map((file) => hookFinding(file, name, `${name} would change this file`, input.read)),
           )

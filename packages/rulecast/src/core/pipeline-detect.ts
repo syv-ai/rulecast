@@ -193,6 +193,7 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       read,
       lines,
       timeoutMs: event.kind === "edit" ? config.timeouts.editDeadlineMs : Math.max(1, verifyEnds - Date.now()),
+      ...(options.agentHook === true ? { leaveChanges: true } : {}),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
     source,

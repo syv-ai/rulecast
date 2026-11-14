@@ -516,8 +516,9 @@ describe("hooks for a project below the git top", () => {
 `
     const ids = async (project: string) =>
       (await detectHooks(files({ ".pre-commit-config.yaml": config }), project)).map((hook) => [hook.id, hook.files])
+    // The rule takes the hook's files: rebased below backend/ where it can be, else all of them.
     expect(await ids("backend")).toEqual([
-      ["hook/api", null],
+      ["hook/api", "^.*\\.py$"],
       ["hook/any", null],
       ["hook/top", null],
     ])
@@ -687,6 +688,15 @@ ${hooks}`
   const CONFIG_ALONE = (example?: string) =>
     `Changing only a config file it reads${example === undefined ? "" : `, such as ${example},`} doesn't run it.`
 
+  // AKA lead, 0.16.0: a rule without the hook's filter selected every file, so a Python hook was
+  // run on Markdown. Every hook's rule now gets its filter, not only an always_run one's.
+  test("a hook that gets its files: its rule gets its filter too, with no note", async () => {
+    const [found] = await detect(hook("nested", "        types: [python]\n        files: ^backend/.*\\.py$\n"))
+    expect(found).toMatchObject({ files: "^backend/.*\\.py$", types: ["python"] })
+    expect(found!.everyChange).toBeUndefined()
+    expect(found!.scoped).toBeUndefined()
+  })
+
   test("always_run with types rulecast reads as pre-commit does: the rule runs only on those, and says why", async () => {
     const [found] = await detect(hook("tsc", `${ALWAYS}        types_or: [ts, tsx]\n`))
     expect(found).toMatchObject({ files: null, types_or: ["ts", "tsx"] })
@@ -800,13 +810,14 @@ ${hooks}`
     expect(bare!.everyChange).toBe("pass_filenames: false, and it names no files or types")
   })
 
-  test("a hook that gets its files is unchanged: pre-commit filters it", async () => {
+  test("a hook that gets its files: its rule takes the hook's types, and nothing more is said", async () => {
     const [found] = await detect(hook("mypy", "        types: [python]\n"))
     expect(found).toEqual({
       id: "hook/mypy",
       name: "mypy",
       detect: { "pre-commit": "mypy" },
       files: null,
+      types: ["python"],
       modifies: false,
       source: ".pre-commit-config.yaml",
     })

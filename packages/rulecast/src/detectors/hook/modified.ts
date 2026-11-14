@@ -20,24 +20,32 @@ export async function snapshot(files: string[], cwd: string): Promise<Snapshot> 
 }
 
 /**
- * Puts back every file the hook changed and returns them. rulecast never rewrites an agent's file
- * behind its back: a formatter hook's change is reported as a finding, and the agent makes it.
- * A file the hook created is left alone; only files the rule selected are compared.
+ * The files whose bytes changed since the snapshot. A file created since is left out (a hook's
+ * new file is not one the rule selected), and so is one that existed and is gone.
  */
-export async function restoreChanged(taken: Snapshot, cwd: string): Promise<string[]> {
+export async function changedSince(taken: Snapshot, cwd: string): Promise<string[]> {
   const changed: string[] = []
   for (const [file, before] of taken) {
-    const full = path.resolve(cwd, file)
     let after: Buffer | null
     try {
-      after = await readFile(full)
+      after = await readFile(path.resolve(cwd, file))
     } catch (error) {
       if (!isNotFound(error)) throw error
       after = null
     }
     if (before === null || (after !== null && before.equals(after))) continue
-    await writeFile(full, before)
     changed.push(file)
   }
   return changed
+}
+
+/**
+ * Puts `files` back as the snapshot has them: outside an agent's hooks, a formatter hook's change is
+ * reported as a finding and the file is left as it was (`DetectorRun.leaveChanges`).
+ */
+export async function restore(taken: Snapshot, files: readonly string[], cwd: string): Promise<void> {
+  for (const file of files) {
+    const before = taken.get(file)
+    if (before !== undefined && before !== null) await writeFile(path.resolve(cwd, file), before)
+  }
 }

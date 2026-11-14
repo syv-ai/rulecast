@@ -685,6 +685,19 @@ describe("rulecast doctor", () => {
       expect(filtered.stdout).not.toContain("on every change")
     })
 
+    // AKA lead, 0.16.0: the rule selected every file, so `rulecast list` and the stop took Markdown
+    // to a Python hook. The detector now narrows; doctor tells the rule to say so itself.
+    test("a hook that gets its files: the rule is told to take its filter, as information", async () => {
+      const { stdout, code } = await doctor(await repo("        types: [python]\n"))
+      expect(stdout).toContain(
+        "  info     mypy — selects every file, but its hook mypy-check is only given Python files; " +
+          "add `types: [python]` to the rule so it selects the same\n",
+      )
+      expect(code).toBe(0)
+      const filtered = await doctor(await repo("        types: [python]\n", { types: ["python"] }))
+      expect(filtered.stdout).not.toContain("selects every file")
+    })
+
     test("types: [python] (AIP): the rule is told to take the hook's types", async () => {
       const { stdout } = await doctor(await repo(`${ALWAYS}        types: [python]\n`))
       expect(stdout).toContain(

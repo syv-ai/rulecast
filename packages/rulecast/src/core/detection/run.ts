@@ -32,12 +32,14 @@ export interface DetectionInput {
   /**
    * Return only once every detector run has ended, those past the deadline too. Off, a run past the
    * deadline is left to end on its own, except a kind that changes files (a formatter hook), which
-   * is always waited for: it puts the files back when it ends. Doctor sets it, so no tool of one rule
+   * is always waited for: outside an agent's hook it puts the files back when it ends. Doctor sets it, so no tool of one rule
    * is still running while the next is timed.
    */
   settle?: boolean
   /** Ends the run early, as the deadline would: doctor's Ctrl-C. */
   signal?: AbortSignal
+  /** Handed to detectors as `DetectorRun.leaveChanges`: an agent's hook. */
+  leaveChanges?: boolean
 }
 
 export interface DetectionOutput {
@@ -112,6 +114,7 @@ export async function runDetection(input: DetectionInput): Promise<DetectionOutp
         signal: controller.signal,
         deadlineAt,
         ...(input.fixes === true ? { fixes: true } : {}),
+        ...(input.leaveChanges === true ? { leaveChanges: true } : {}),
       })
       if (input.settle === true || changesFiles(kind)) runs.push(running.catch(() => {}))
       const result = await Promise.race([running, deadline])

@@ -331,6 +331,7 @@ async function runProject(root: string, routing: Routing, routed: Routed): Promi
       shareBudget: seat.claim,
       restoredFiles: adapter.restoredFiles,
       stopGate: projectEvent.kind === "verify",
+      agentHook: true,
       subagentsProject: routing.subagents,
       recordMode: true,
       displayFrom: parsed.cwd,

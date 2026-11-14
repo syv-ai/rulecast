@@ -65,6 +65,11 @@ export interface PipelineOptions {
    * to use in place of `maxContextChars`. Never called on a path that applies no budget.
    */
   shareBudget?: (delivers: boolean) => Promise<number | null>
+  /**
+   * Run by an agent's hook (commands/hook.ts): a formatter hook leaves its change in the files
+   * (DetectorRun.leaveChanges), since another agent may be editing them. The CLI and doctor put them back.
+   */
+  agentHook?: boolean
   /** Recently accessed files the agent re-attaches after compaction (adapter.restoredFiles); reset re-delivers their touch context. */
   restoredFiles?: number
   /** Detector kinds to skip entirely: the metered ones, for a staged run or --no-llm (commands/run.ts). */

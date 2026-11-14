@@ -252,8 +252,8 @@ export async function doctorCommand(
       io.stdout(line(result.level, result.what, `${result.detail}${rules}`))
     }
     for (const result of everyChange) {
-      count("warning")
-      io.stdout(line("warning", result.rule, result.detail))
+      count(result.level)
+      io.stdout(line(result.level, result.rule, result.detail))
     }
   }
   // Rules that cannot run here: said once, above, and not timed again (--time).
@@ -463,12 +463,14 @@ const unfiltered = ({ patterns }: DetectorRule) =>
  * the files it is run on (always_run, pass_filenames: false, a lefthook job with no files
  * template), and the rule names no files. pre-commit still skips a pass_filenames: false hook when
  * no file matches its filter, so only one with none counts. hk applies a step's glob and types to
- * the files it is given, so its rules are not here.
+ * the files it is given, so its rules are not here. Also, as information, the rules of pre-commit
+ * hooks that do get their files and have a filter the rule could take: the detector narrows to it,
+ * but the rule still selects every file.
  */
 async function everyChangeHooks(
   project: CompiledProject,
   signal: AbortSignal,
-): Promise<{ rule: string; detail: string }[]> {
+): Promise<{ rule: string; detail: string; level: "warning" | "info" }[]> {
   const rules = project.rules.filter(
     (rule): rule is DetectorRule =>
       isDetectorRule(rule) && rule.enabled && rule.detector.kind === "hook" && unfiltered(rule),
@@ -477,9 +479,9 @@ async function everyChangeHooks(
   const top = await repositoryTop(project.root).catch(() => project.root)
   const relative = path.relative(top, project.root)
   const prefix = relative === "" ? "" : `${relative.split(path.sep).join("/")}/`
-  const found: { rule: string; detail: string }[] = []
+  const found: { rule: string; detail: string; level: "warning" | "info" }[] = []
   const say = (rule: DetectorRule, hook: string, detail: string) =>
-    found.push({ rule: rule.id, detail: `runs ${hook} on every change, docs included${detail}` })
+    found.push({ rule: rule.id, detail: `runs ${hook} on every change, docs included${detail}`, level: "warning" })
   const NAME_THEM = "add `files` or `types_or` to the rule naming the files it checks"
   const NONE = `, and the hook names no files or types; ${NAME_THEM}`
   const UNKNOWN = `, and the hook's manifest isn't on disk, so its filter is unknown; ${NAME_THEM}`
@@ -504,8 +506,17 @@ async function everyChangeHooks(
         const whatever = scope.alwaysRun === true || scope.passFilenames === false
         if (verdict.kind === "none" && whatever) say(rule, hook, NONE)
         else if (verdict.kind === "whole" && whatever) say(rule, hook, WHOLE)
-        else if (scope.alwaysRun !== true) continue
-        else if (verdict.kind === "filter") {
+        else if (scope.alwaysRun !== true) {
+          // pre-commit gives the hook only its filter's files, and the detector narrows to them too,
+          // but the rule still selects the rest: `rulecast list` and what a stop takes say so.
+          if (verdict.kind === "filter") {
+            found.push({
+              rule: rule.id,
+              detail: `selects every file, but its hook ${hook} is only given ${filesSaid(verdict.rule, true)}; add ${filterText(verdict.rule)} to the rule so it selects the same`,
+              level: "info",
+            })
+          }
+        } else if (verdict.kind === "filter") {
           const said =
             verdict.left === null
               ? filesSaid(verdict.rule, true)

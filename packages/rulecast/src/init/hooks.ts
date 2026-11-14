@@ -374,9 +374,11 @@ const overlaps = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
 const dirName = (prefix: string) => prefix.replace(/\/$/, "")
 
 /**
- * What an always_run or pass_filenames: false pre-commit hook needs in its rule. pre-commit runs an
- * always_run hook whatever changed; a pass_filenames: false one it still skips when no file matches
- * its filter, so only one with no filter at all runs on every change.
+ * What a pre-commit hook's rule needs from the hook: its filter, so the rule selects the files the
+ * hook checks and no others (a Python hook's rule is never run on Markdown), and for an always_run
+ * or pass_filenames: false hook a note on what that means. pre-commit runs an always_run hook
+ * whatever changed; a pass_filenames: false one it still skips when no file matches its filter, so
+ * only one with no filter at all runs on every change.
  */
 async function wholeProject(
   repo: Record<string, unknown>,
@@ -385,7 +387,13 @@ async function wholeProject(
 ): Promise<Pick<DetectedHook, "types" | "types_or" | "exclude_types" | "scoped" | "everyChange"> & RuleFilter> {
   const scope = await preCommitScope(repo, hook)
   const why = scope.alwaysRun === true ? "always_run" : scope.passFilenames === false ? "pass_filenames: false" : null
-  if (why === null) return {}
+  if (why === null) {
+    // pre-commit gives the hook only the files its filter takes: the rule takes the same, or more
+    // where a part can't be carried over, which pre-commit then leaves out itself.
+    if (scope.filter === null) return {}
+    const verdict = verdictOf(scope.filter, project)
+    return verdict.kind === "filter" ? verdict.rule : {}
+  }
   if (scope.filter === null) {
     // A remote hook with no clone and no filter of its own in the config.
     return why === "always_run"
@@ -447,7 +455,7 @@ async function preCommitHooks(
       const entry = text(hook.entry)
       if (hook.id === "rulecast" || runsRulecast(entry)) continue
       // The runner applies `files:` itself; it only decides whether the hook can reach this project.
-      // Python regexes are not rewritten into the rule's `files`: only a `^literal` start is read.
+      // Only a `^literal` start is read here, to skip a hook for another part of the repository.
       const prefix = typeof hook.files === "string" ? anchoredPrefix(hook.files) : null
       const name = text(hook.name) || hook.id
       if (project !== "" && prefix !== null && !overlaps(prefix, project)) {

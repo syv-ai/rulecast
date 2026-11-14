@@ -194,4 +194,4 @@ hook:
   output: { lines: gcc }
 ```
 
-A formatter hook (ruff-format, prettier, black) works too: the file is put back, and each file it would change is a finding.
+A formatter hook (ruff-format, prettier, black) works too: each file it would change is a finding. At an agent's stop the formatted file stays as the hook left it; from the CLI it is put back.
