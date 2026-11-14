@@ -174,30 +174,141 @@ describe("hook detector: pre-commit hooks", () => {
     ])
   })
 
-  test("a hook that fails with output no format reads is one finding carrying that output", async () => {
-    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n", "b.py": "y\n" })
+  /** A prek stub whose hook failed with `exit` and printed `lines`, indented as prek does. */
+  const failing = (lines: string[], exit = 1) =>
+    `printf '%s\\n' 'licence....Failed' '- hook id: licence' '- exit code: ${exit}' '' ${lines
+      .map((line) => `'  ${line.replaceAll("'", "'\\''")}'`)
+      .join(" ")}\nexit 1`
+
+  test("a hook whose output no format reads is a finding at the line it names, in a file it was given", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\ny\n", "b.py": "y\n" })
+    await stubRunner(root, "prek", failing(["error[bad-licence]: missing licence header", " --> a.py:2:1"]))
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py", "b.py"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => [f.match.file, f.match.line, f.match.captures.message])).toEqual([
+      ["a.py", 2, "licence failed: error[bad-licence]: missing licence header\n --> a.py:2:1"],
+    ])
+  })
+
+  // An always_run, whole-project hook failed over a file nobody staged: it was pinned to the first
+  // staged file (.claude/hooks/rulecast.sh:1:1).
+  test("a hook that fails over files it was not given is never pinned to one it was given", async () => {
+    const root = await createProject({
+      ".pre-commit-config.yaml": CONFIG,
+      ".claude/hooks/rulecast.sh": "#!/bin/sh\n",
+      "backend/app/api/deps/user.py": "x\n",
+    })
     await stubRunner(
       root,
       "prek",
-      "printf 'licence....Failed\\n- hook id: licence\\n- exit code: 1\\n\\n  missing licence header\\n'\nexit 1",
+      failing([
+        "warning[unused-ignore-comment]: Unused blanket `type: ignore` directive",
+        " --> backend/app/api/deps/user.py:93:5",
+      ]),
     )
-    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py", "b.py"])])
+    const result = await run(root, [ruleFor("ty", { "pre-commit": "licence" }, [".claude/hooks/rulecast.sh"])])
+    expect(result.findings).toEqual([])
+    expect(result.errors).toEqual([
+      {
+        rule: "ty",
+        message:
+          "licence failed over files this run did not give it (backend/app/api/deps/user.py:93), not over its own: warning[unused-ignore-comment]: Unused blanket `type: ignore` directive\n --> backend/app/api/deps/user.py:93:5",
+      },
+    ])
+  })
+
+  test("a gcc-style line about a file it was not given is not pinned either", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n", "b.py": "y\n" })
+    await stubRunner(root, "prek", failing(["b.py:3:1: error: imported module is broken"]))
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
+    expect(result.findings).toEqual([])
+    expect(result.errors.map((error) => error.message)).toEqual([
+      "licence failed over files this run did not give it (b.py:3), not over its own: b.py:3:1: error: imported module is broken",
+    ])
+  })
+
+  test("a hook given exactly one file that fails naming no file is a finding on that file", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n" })
+    await stubRunner(root, "prek", failing(["missing licence header"]))
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
+    expect(result.errors).toEqual([])
     expect(result.findings.map((f) => [f.match.file, f.match.line, f.match.captures.message])).toEqual([
       ["a.py", 1, "licence failed: missing licence header"],
     ])
   })
 
-  test("a hook that fails over files the rule did not select still says it failed", async () => {
-    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n", "b.py": "y\n" })
-    await stubRunner(
-      root,
-      "prek",
-      "printf 'licence....Failed\\n- hook id: licence\\n- exit code: 1\\n\\n  b.py:3:1: error: imported module is broken\\n'\nexit 1",
-    )
-    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
-    expect(result.findings.map((f) => [f.match.file, f.match.captures.message])).toEqual([
-      ["a.py", "licence failed: b.py:3:1: error: imported module is broken"],
+  test.each([
+    ["several files", CONFIG, ["a.py", "b.py"]],
+    ["always_run", CONFIG.replace("entry: ./licence.sh", "entry: ./licence.sh\n        always_run: true"), ["a.py"]],
+    [
+      "pass_filenames: false",
+      CONFIG.replace("entry: ./licence.sh", "entry: ./licence.sh\n        pass_filenames: false"),
+      ["a.py"],
+    ],
+  ])(
+    "a hook that fails naming no file, given %s, says its output is about the project",
+    async (_name, config, files) => {
+      const root = await createProject({ ".pre-commit-config.yaml": config, "a.py": "x\n", "b.py": "y\n" })
+      await stubRunner(root, "prek", failing(["Found 3 errors in 2 files"]))
+      const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, files)])
+      expect(result.findings).toEqual([])
+      expect(result.errors).toEqual([
+        {
+          rule: "licence",
+          message:
+            "licence failed and named no file, so this is its output about the project: Found 3 errors in 2 files",
+        },
+      ])
+    },
+  )
+
+  // A tool that could not start is not a finding: `uv run mypy` with a stale venv was reported as
+  // "mypy-check failed" on DECISIONS.md:1:1.
+  test.each([
+    ["uv's", ["error: Failed to spawn: `mypy`", "  Caused by: No such file or directory (os error 2)"], 2],
+    ["pre-commit's", ["Executable `mypy` not found"], 1],
+    ["the shell's", ["/bin/sh: mypy: command not found"], 127],
+    [
+      "a stale shebang's",
+      ["/bin/sh: .venv/bin/mypy: /old/venv/bin/python: bad interpreter: No such file or directory"],
+      126,
+    ],
+    ["an exit 127", ["something went wrong"], 127],
+  ])("a hook whose tool could not run is a rule error, not a finding: %s", async (_name, lines, exit) => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "DECISIONS.md": "# d\n" })
+    await stubRunner(root, "prek", failing(lines, exit))
+    const result = await run(root, [ruleFor("mypy", { "pre-commit": "licence" }, ["DECISIONS.md"])])
+    expect(result.findings).toEqual([])
+    expect(result.errors).toEqual([
+      { rule: "mypy", message: `licence could not run, so it checked nothing: ${lines.join("\n")}` },
     ])
+  })
+
+  test.each([
+    ["with its files", "./lint.sh {staged_files}", "finding"],
+    ["without them", "./lint.sh", "error"],
+  ])("a lefthook job run %s on one file that fails naming no file", async (_name, command, kind) => {
+    const root = await createProject({ "a.ts": "x\n" })
+    const dump = JSON.stringify({ "pre-commit": { jobs: [{ name: "lint", run: command }] } })
+    await stubRunner(root, "lefthook", `cat <<'OUT'\n${dump}\nOUT`)
+    await writeFile(path.join(root, "lint.sh"), "#!/bin/sh\necho 'lint failed'\nexit 1\n")
+    await chmod(path.join(root, "lint.sh"), 0o755)
+    const result = await run(root, [ruleFor("lint", { lefthook: "pre-commit/lint" }, ["a.ts"])])
+    expect([result.findings.length, result.errors.length]).toEqual(kind === "finding" ? [1, 0] : [0, 1])
+  })
+
+  test("a lefthook job whose command is not installed could not run", async () => {
+    const root = await createProject({ "a.ts": "x\n" })
+    const dump = JSON.stringify({
+      "pre-commit": { jobs: [{ name: "lint", run: "rulecast-no-such-tool {staged_files}" }] },
+    })
+    await stubRunner(root, "lefthook", `cat <<'OUT'\n${dump}\nOUT`)
+    const result = await run(root, [ruleFor("lint", { lefthook: "pre-commit/lint" }, ["a.ts"])])
+    expect(result.findings).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]!.message).toMatch(
+      /^pre-commit\/lint could not run, so it checked nothing: .*rulecast-no-such-tool.*not found/,
+    )
   })
 
   test("a hook that passed is clean", async () => {

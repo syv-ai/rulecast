@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import path from "node:path"
 
 import { readOutput, type ToolFinding } from "../../core/detection/outputs"
@@ -12,6 +13,7 @@ import { isToolError, toolFailure } from "../command/exit"
 import { stripRunnerFraming } from "./framing"
 import { restoreChanged, snapshot } from "./modified"
 import {
+  FILE_TEMPLATE,
   findLefthookJob,
   findPreCommitHook,
   HK_ENV,
@@ -43,6 +45,8 @@ interface HookRun {
   output: string
   /** Where relative paths in the output are relative to. */
   dir: string
+  /** The hook's command got the files it was run on (not always_run, pass_filenames: false, a job without them). */
+  givenFiles: boolean
 }
 
 /** The repository declares and runs the hook, from its top; the files are the project's. */
@@ -67,6 +71,7 @@ async function runPreCommit(id: string, files: string[], input: DetectorRun<Hook
     failed: framed.status === "failed",
     output: framed.output,
     dir: top,
+    givenFiles: hook.givenFiles,
   }
 }
 
@@ -87,7 +92,14 @@ async function runLefthook(spec: string, files: string[], input: DetectorRun<Hoo
     signal: input.signal,
     notFound: "/bin/sh is not available",
   })
-  return { exitCode: ran.exitCode, failed: ran.exitCode !== 0, output: `${ran.stdout}\n${ran.stderr}`, dir }
+  return {
+    exitCode: ran.exitCode,
+    failed: ran.exitCode !== 0,
+    output: `${ran.stdout}\n${ran.stderr}`,
+    dir,
+    // A job without a files template runs over whatever it chooses, not the rule's files.
+    givenFiles: FILE_TEMPLATE.test(job.run),
+  }
 }
 
 /**
@@ -134,10 +146,59 @@ async function runHk(spec: string, files: string[], input: DetectorRun<HookConfi
   // No step ran: hk stopped before it, at an unknown hook or step, and says why in `failure`.
   if (result === undefined) {
     if (run.status === "failed") throw new Error(`hk: ${run.failure ?? "the step did not run"}`)
-    return { exitCode: null, failed: false, output: "", dir: top }
+    return { exitCode: null, failed: false, output: "", dir: top, givenFiles: false }
   }
   const failed = result.status === "failed"
-  return { exitCode: failed ? ran.exitCode : null, failed, output: result.output ?? "", dir: top }
+  // A step's command may ignore the files hk hands it ({{files}}), and hk does not say: not counted as given.
+  return { exitCode: failed ? ran.exitCode : null, failed, output: result.output ?? "", dir: top, givenFiles: false }
+}
+
+/**
+ * What a tool that could not start prints: uv's "Failed to spawn", a shell's "command not found"
+ * (dash: "not found"), pre-commit's "Executable `x` not found", a shebang to an interpreter that is
+ * gone ("bad interpreter"), Rust tools' "(os error 2)".
+ */
+const CANT_RUN =
+  /Failed to spawn|command not found|: not found$|Executable `[^`]+` not found|bad interpreter|No such file or directory \(os error 2\)/m
+
+/** The hook failed because its tool could not start: exit 126 or 127, or it said so. */
+const couldNotRun = (ran: HookRun) =>
+  ran.failed && (ran.exitCode === 126 || ran.exitCode === 127 || CANT_RUN.test(ran.output))
+
+/** `path:line` anywhere on a line, as tools print it outside their main format (ty's ` --> a.py:3:5`). */
+const LOCATION = String.raw`(?:^|[\s(<>'"])(?<file>[\w@+.-]*(?:/[\w@+.-]+)*\.[A-Za-z0-9]+):(?<line>\d+)(?::\d+)?(?<message>)`
+
+/**
+ * The files and lines a failed hook's output names, project-relative: what its format read, and
+ * any `path:line` in its lines that is a file on disk. Once each, in the order printed.
+ */
+function namedLocations(findings: ToolFinding[], ran: HookRun, cwd: string): { file: string; line: number }[] {
+  const scanned = readOutput({ lines: { pattern: LOCATION } }, ran.output, ran.dir, cwd)
+  const seen = new Set<string>()
+  const out: { file: string; line: number }[] = []
+  for (const { file, line } of [...findings, ...scanned]) {
+    const key = `${file}:${line}`
+    if (seen.has(key) || !existsSync(path.join(cwd, file))) continue
+    seen.add(key)
+    out.push({ file, line })
+  }
+  return out
+}
+
+/** A finding at the line a failed hook's output named. */
+function lineFinding(location: { file: string; line: number }, ruleId: string, message: string): ToolFinding {
+  return {
+    file: location.file,
+    line: location.line,
+    column: 1,
+    endLine: location.line,
+    endColumn: null,
+    ruleId,
+    message,
+    severity: "error",
+    text: "",
+    properties: {},
+  }
 }
 
 /**
@@ -228,21 +289,34 @@ export const hookDetector: Detector<HookConfig> = {
         if (ran.exitCode !== null && isToolError(ran.exitCode, config)) {
           throw new Error(toolFailure(name, { stdout: ran.output, stderr: "", exitCode: ran.exitCode }))
         }
+        const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
+        // A tool that could not start found nothing: that is the rule's error, not a finding.
+        if (couldNotRun(ran)) throw new Error(`${name} could not run, so it checked nothing: ${said}`)
         const findings = readOutput(config.output, ran.output, ran.dir, input.cwd)
         await distribute(findings, rules, input.read, result)
         if (ran.failed && changed.length === 0) {
-          // The hook failed and nothing it said reached a rule — no format reads it, or it is all
-          // about files the rule did not select: the agent still hears that it failed, and what it said.
-          const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
+          // The hook failed and nothing it said reached a rule: no format reads it, or it is about
+          // files the rule did not give it (a whole-project, always_run hook). The agent still hears
+          // it, but never on a file the hook did not name.
+          const named = namedLocations(findings, ran, input.cwd)
           const told = new Set(result.findings.map((finding) => finding.rule))
           for (const rule of forHook(rules, name).filter((rule) => !told.has(rule.id))) {
-            const finding = await hookFinding(
-              rule.files[0]!,
-              name,
-              `${name} failed${said ? `: ${said}` : ""}`,
-              input.read,
-            )
-            await distribute([finding], [rule], input.read, result)
+            const own = named.filter((location) => rule.files.includes(location.file))
+            if (own.length > 0) {
+              const at = own.map((location) => lineFinding(location, name, `${name} failed: ${said}`))
+              await distribute(at, [rule], input.read, result)
+            } else if (named.length > 0) {
+              const where = named.slice(0, 3).map((location) => `${location.file}:${location.line}`)
+              const message = `${name} failed over files this run did not give it (${where.join(", ")}), not over its own: ${said}`
+              result.errors.push({ rule: rule.id, message })
+            } else if (ran.givenFiles && files.length === 1 && rule.files.includes(files[0]!)) {
+              // Given one file and naming none, the hook can only be talking about that file.
+              const finding = await hookFinding(files[0]!, name, `${name} failed: ${said}`, input.read)
+              await distribute([finding], [rule], input.read, result)
+            } else {
+              const message = `${name} failed and named no file, so this is its output about the project: ${said}`
+              result.errors.push({ rule: rule.id, message })
+            }
           }
         }
       } catch (error) {

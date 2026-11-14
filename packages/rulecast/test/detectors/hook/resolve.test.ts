@@ -27,9 +27,17 @@ repos:
 describe("findPreCommitHook", () => {
   test("finds a hook id in any repo, with the stage it runs at", async () => {
     const root = await createProject({ ".pre-commit-config.yaml": CONFIG })
-    expect(await findPreCommitHook(root, "mypy")).toEqual({ id: "mypy", stage: "pre-commit" })
-    expect(await findPreCommitHook(root, "slow-check")).toEqual({ id: "slow-check", stage: "pre-push" })
-    expect(await findPreCommitHook(root, "lint-alias")).toEqual({ id: "lint-alias", stage: "pre-commit" })
+    expect(await findPreCommitHook(root, "mypy")).toEqual({ id: "mypy", stage: "pre-commit", givenFiles: true })
+    expect(await findPreCommitHook(root, "slow-check")).toEqual({
+      id: "slow-check",
+      stage: "pre-push",
+      givenFiles: true,
+    })
+    expect(await findPreCommitHook(root, "lint-alias")).toEqual({
+      id: "lint-alias",
+      stage: "pre-commit",
+      givenFiles: true,
+    })
   })
 
   test("an unknown id, or no config, is null", async () => {

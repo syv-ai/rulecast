@@ -52,9 +52,13 @@ const strings = (value: unknown): string[] | null =>
 
 /**
  * A hook id (or alias) in .pre-commit-config.yaml, and the stage to run it at: `pre-commit` unless
- * the hook, or the config's `default_stages`, leaves that stage out. Null when the id is not there.
+ * the hook, or the config's `default_stages`, leaves that stage out. `givenFiles`: the hook gets
+ * the files it is run on. Null when the id is not there.
  */
-export async function findPreCommitHook(root: string, id: string): Promise<{ id: string; stage: string } | null> {
+export async function findPreCommitHook(
+  root: string,
+  id: string,
+): Promise<{ id: string; stage: string; givenFiles: boolean } | null> {
   let text: string
   try {
     text = await readFile(path.join(root, PRE_COMMIT_CONFIG), "utf8")
@@ -72,7 +76,9 @@ export async function findPreCommitHook(root: string, id: string): Promise<{ id:
       const stages = strings(hook.stages) ?? defaults
       // "commit" is the pre-3.2 name of the pre-commit stage.
       const runsAtCommit = stages === null || stages.includes("pre-commit") || stages.includes("commit")
-      return { id, stage: runsAtCommit ? "pre-commit" : stages[0]! }
+      // always_run and pass_filenames: false run the hook over the project, not the files given.
+      const givenFiles = hook.always_run !== true && hook.pass_filenames !== false
+      return { id, stage: runsAtCommit ? "pre-commit" : stages[0]!, givenFiles }
     }
   }
   return null
@@ -303,8 +309,11 @@ export function findLefthookJob(dump: unknown, spec: string): { run: string; roo
 
 const quote = (file: string) => `'${file.replaceAll("'", "'\\''")}'`
 
+/** lefthook's file templates: a job's command that has one is given files. */
+export const FILE_TEMPLATE = /\{(staged_files|files|all_files|push_files)\}/
+
 /** lefthook's file templates, each replaced by the rule's files: rulecast decides which files, not git. */
 export function substituteFiles(run: string, files: string[]): string {
   const list = files.map(quote).join(" ")
-  return run.replace(/\{(staged_files|files|all_files|push_files)\}/g, list)
+  return run.replace(new RegExp(FILE_TEMPLATE.source, "g"), list)
 }
