@@ -1,10 +1,15 @@
 import { existsSync } from "node:fs"
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { beforeAll, describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
-import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "../../src/adapters/claude-code/hook-script"
+import {
+  HOOK_COMMAND,
+  HOOK_SCRIPT,
+  HOOK_SCRIPT_FILE,
+  personalHookCommand,
+} from "../../src/adapters/claude-code/hook-script"
 import type { CatalogFit, InitReport } from "../../src/commands/init"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import type { Env } from "../../src/core/home"
@@ -65,6 +70,85 @@ const localIds = (text: string) =>
     .find((repo) => repo.repo === "local")!
     .rules.map((rule) => rule.id)
 
+describe("rulecast init: the same hooks rulecast install writes", () => {
+  const REFUSING =
+    "repos:\n  - repo: local\n    rules:\n      - id: gen/no-edit\n        name: Generated\n" +
+    "        files: ^gen/\n        detect:\n          path: {}\n        refuse_write: true\n" +
+    '        message: "{{file}} is generated."\n'
+  const guards = async (root: string, file = ".claude/settings.json") =>
+    (JSON.parse(await read(root, file)).hooks.PreToolUse as { matcher: string }[]).filter(
+      (group) => group.matcher === "Edit|Write",
+    ).length
+
+  test("no refuse_write rule: no write guard; one: the guard; install after init changes nothing", async () => {
+    const plain = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await init(plain, "--agent", "claude-code")).code).toBe(0)
+    expect(await guards(plain)).toBe(0)
+    expect((await runCli(plain, ["install"], "", env)).stdout).toContain("already installed")
+
+    const refusing = await createRepo({ ...PROJECT, [CONFIG_FILE]: REFUSING })
+    expect((await init(refusing, "--agent", "claude-code")).code).toBe(0)
+    expect(await guards(refusing)).toBe(1)
+    expect((await runCli(refusing, ["install"], "", env)).stdout).toContain("already installed")
+  })
+
+  test("a refuse_write rule in a rule repo not cached yet still gets the guard: init fetches first", async () => {
+    const manifest =
+      "- id: gen-guard\n  name: Generated\n  files: ^gen/\n  detect:\n    path: {}\n" +
+      '  refuse_write: true\n  message: "{{file}} is generated."\n'
+    const url = await createRuleRepo([{ tag: "v1.0.0", files: { ".rulecast-rules.yaml": manifest } }])
+    const top = await createRepo({
+      ...PROJECT,
+      [CONFIG_FILE]: "repos: []\n",
+      [`pkg/${CONFIG_FILE}`]: `repos:\n  - repo: ${url}\n    rev: v1.0.0\n    rules:\n      - id: gen-guard\n`,
+    })
+    expect((await init(top, "--agent", "claude-code")).code).toBe(0)
+    expect(await guards(top)).toBe(1)
+  })
+
+  test("--scope personal in a package writes the checkout top's settings.local.json", async () => {
+    const top = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n", "backend/app.py": "x = 1\n" })
+    const backend = path.join(top, "backend")
+    const result = await init(backend, "--agent", "claude-code", "--scope", "personal")
+    expect(result.stderr).toBe("")
+    expect(result.code).toBe(0)
+    expect(existsSync(path.join(backend, ".claude/settings.local.json"))).toBe(false)
+    const settings = JSON.parse(await read(top, ".claude/settings.local.json"))
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe(personalHookCommand(await realpath(top)))
+    expect((await runCli(backend, ["install", "--scope", "personal"], "", env)).stdout).toContain("already installed")
+  })
+
+  test("--scope personal where shared hooks run here is refused, as install refuses it", async () => {
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await runCli(root, ["install"], "", env)).code).toBe(0)
+    const result = await init(root, "--agent", "claude-code", "--scope", "personal")
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toContain("rulecast uninstall --scope shared here")
+    expect(existsSync(path.join(root, ".claude/settings.local.json"))).toBe(false)
+  })
+
+  test("shared hooks in a worktree, with personal ones in the main checkout: refused, the main file untouched", async () => {
+    const main = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await runCli(main, ["install", "--scope", "personal"], "", env)).code).toBe(0)
+    const personal = await read(main, ".claude/settings.local.json")
+    const worktree = path.join(main, ".claude", "worktrees", "wt")
+    await git(main, "worktree", "add", "-q", worktree)
+    const result = await init(worktree, "--agent", "claude-code")
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toContain("would run rulecast twice")
+    expect(await read(main, ".claude/settings.local.json")).toBe(personal)
+    expect(existsSync(path.join(worktree, ".claude/settings.json"))).toBe(false)
+  })
+
+  test("--scope personal writes the script's absolute path, as install does", async () => {
+    const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
+    expect((await init(root, "--agent", "claude-code", "--scope", "personal")).code).toBe(0)
+    const settings = JSON.parse(await read(root, ".claude/settings.local.json"))
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe(personalHookCommand(root))
+    expect((await runCli(root, ["install", "--scope", "personal"], "", env)).stdout).toContain("already installed")
+  })
+})
+
 describe("rulecast init", () => {
   test("a partial install in the personal settings is completed there, as install does (plan 21, #11)", async () => {
     // init used to skip a file holding only some hooks and write the full set into the shared
@@ -74,25 +158,19 @@ describe("rulecast init", () => {
     const personal = JSON.parse(await read(root, ".claude/settings.local.json"))
     delete personal.hooks.PostToolUseFailure
     await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
-    const result = await init(root, "--agent", "claude-code")
+    const result = await init(root, "--agent", "claude-code", "--scope", "personal")
     expect(result.code).toBe(0)
     expect(existsSync(path.join(root, ".claude/settings.json"))).toBe(false)
-    expect(JSON.parse(await read(root, ".claude/settings.local.json")).hooks.PostToolUseFailure).toHaveLength(1)
+    expect(JSON.parse(await read(root, ".claude/settings.local.json")).hooks.PostToolUseFailure).toHaveLength(2)
   })
 
-  test("a shared file that will run the hook script has the script committed, whichever file won", async () => {
-    // Personal settings with every hook on the old inline command, shared ones with only Stop: the
-    // personal file wins, but after init the shared one runs the script too, for every teammate.
+  test("a shared file that will run the hook script has the script committed", async () => {
+    // Shared settings with only Stop, on the old inline command: after init they run the script,
+    // for every teammate, so the script is committed with them.
     const INLINE = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     const root = await createRepo({ ...PROJECT, [CONFIG_FILE]: "repos: []\n" })
-    expect((await runCli(root, ["install", "--scope", "personal"])).code).toBe(0)
-    await rm(path.join(root, HOOK_SCRIPT_FILE))
-    const personal = JSON.parse(await read(root, ".claude/settings.local.json"))
-    for (const groups of Object.values(personal.hooks) as { hooks: { command: string }[] }[][]) {
-      for (const group of groups) for (const hook of group.hooks) hook.command = INLINE
-    }
-    await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
     const shared = { hooks: { Stop: [{ hooks: [{ type: "command", command: INLINE, timeout: 70 }] }] } }
+    await mkdir(path.join(root, ".claude"), { recursive: true })
     await writeFile(path.join(root, ".claude/settings.json"), JSON.stringify(shared))
     await git(root, "add", ".claude/settings.json")
     await git(root, "commit", "-q", "-m", "shared hook")
@@ -331,6 +409,32 @@ describe("rulecast init", () => {
     expect(result.stdout).toContain("Nothing written (--dry-run).")
   })
 
+  test("an always_run hook: its rule gets the hook's types; one with none is said to run on every change", async () => {
+    const always = (id: string, types: string) =>
+      `      - id: ${id}\n        name: ${id}\n        entry: uv run mypy app/\n        language: system\n        always_run: true\n${types}`
+    const root = await createRepo({
+      ...PROJECT,
+      ".pre-commit-config.yaml": `repos:\n  - repo: local\n    hooks:\n${always("tsc", "        types_or: [ts, tsx]\n")}${always("whole", "")}`,
+    })
+    const dry = await init(root, "--dry-run")
+    expect(dry.stdout).toContain(
+      "Offered as rules with --hooks: hook/tsc, hook/whole (runs on every change: always_run, and it names no files or types)",
+    )
+    const json = (await report(root, "--dry-run")).report
+    expect(json.hooks.offered).toContainEqual(
+      expect.objectContaining({ id: "hook/whole", everyChange: "always_run, and it names no files or types" }),
+    )
+    expect((await init(root, "--hooks", "hook/tsc")).code).toBe(0)
+    const config = parse(await read(root, CONFIG_FILE)) as { repos: { repo: string; rules: unknown[] }[] }
+    expect(config.repos.find((repo) => repo.repo === "local")!.rules[0]).toMatchObject({
+      id: "hook/tsc",
+      types_or: ["ts", "tsx"],
+      description:
+        "Runs only when a TypeScript or TSX file changed: the hook is always_run, so pre-commit would run it on every commit. " +
+        "Changing only a config file it reads, such as tsconfig.json, doesn't run it.",
+    })
+  })
+
   test("a config above the repository is not taken for this project's", async () => {
     // A stray .rulecast-config.yaml in a parent directory (the home directory, a workspace folder)
     // used to make init edit that file instead of creating the repository's own.
@@ -440,7 +544,7 @@ describe("rulecast init", () => {
     await writeFile(file, JSON.stringify(settings))
     const result = await init(root, "--agent", "claude-code")
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain("~11 hooks updated (Claude Code)")
+    expect(result.stdout).toContain("~14 hooks updated (Claude Code)")
     const after = JSON.parse(await readFile(file, "utf8"))
     expect(after.hooks.Stop[0].hooks[0].command).not.toBe(OLD)
     expect(after.hooks.Stop).toHaveLength(1)

@@ -28,19 +28,19 @@ describe("planHooks: the hook script", () => {
     expect(state).toBeNull()
     expect(write?.file).toBe(SHARED)
     expect(write?.created).toBe(true)
-    expect(write?.added).toHaveLength(11)
+    expect(write?.added).toHaveLength(15)
     expect(write?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
     expect(write?.files).toEqual([{ file: HOOK_SCRIPT_FILE, content: HOOK_SCRIPT, created: true }])
   })
 
   test("older settings and no script: stale alone, and the write rewrites the commands and adds the script", async () => {
     const { state, write } = await plan({ [SHARED]: settingsText(OLDER) })
-    expect(state?.stale).toHaveLength(11)
+    expect(state?.stale).toHaveLength(15)
     expect(state?.missing).toEqual([])
     // Hooks still on an older command do not run the script: its absence is not their problem yet.
     expect(state?.files).toEqual([])
     expect(write?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
-    expect(write?.updated).toHaveLength(11)
+    expect(write?.updated).toHaveLength(15)
     expect(write?.files).toEqual([{ file: HOOK_SCRIPT_FILE, content: HOOK_SCRIPT, created: true }])
   })
 
@@ -121,12 +121,12 @@ describe("planHooks: rulecast's hooks in more than one settings file", () => {
   test("both on an older command: the file install reports upgrades, and so does the other", async () => {
     const { state, write } = await plan({ [SHARED]: older, [PERSONAL]: older })
     expect(state?.file).toBe(SHARED)
-    expect(state?.stale).toHaveLength(11)
+    expect(state?.stale).toHaveLength(15)
     expect(state?.others).toEqual([{ file: PERSONAL, stale: expect.arrayContaining(["Stop"]) }])
     expect(write?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
     expect(write?.others).toHaveLength(1)
     expect(write?.others[0]?.file).toBe(PERSONAL)
-    expect(write?.others[0]?.updated).toHaveLength(11)
+    expect(write?.others[0]?.updated).toHaveLength(15)
     expect(write?.others[0]?.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
   })
 
@@ -142,8 +142,9 @@ describe("planHooks: rulecast's hooks in more than one settings file", () => {
   test("a timeout too short in the other file is stale too", async () => {
     const short = settingsText(HOOK_COMMAND).replace(/"timeout": 70/g, '"timeout": 5')
     const { state, write } = await plan({ [SHARED]: current, [PERSONAL]: short, [HOOK_SCRIPT_FILE]: HOOK_SCRIPT })
-    expect(state?.others).toEqual([{ file: PERSONAL, stale: ["Stop", "SubagentStop"] }])
-    expect(write?.others[0]?.updated).toEqual(["Stop", "SubagentStop"])
+    const stale = ["PreToolUse (SubagentHandback)", "Stop", "SubagentStop"]
+    expect(state?.others).toEqual([{ file: PERSONAL, stale }])
+    expect(write?.others[0]?.updated).toEqual(stale)
   })
 
   test("both current is fine: Claude Code runs identical handlers once", async () => {

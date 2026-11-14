@@ -1,0 +1,28 @@
+{
+  "session_id": "a14d2488-9582-4850-a7f0-1cba1de80cdb",
+  "transcript_path": "/home/user/.claude/projects/-project/a14d2488-9582-4850-a7f0-1cba1de80cdb.jsonl",
+  "cwd": "/project/.claude/worktrees/agent-a2bd60c5593ec0e01",
+  "prompt_id": "a1302ac2-b505-40da-80be-e4f5a21858b4",
+  "permission_mode": "auto",
+  "agent_id": "a2bd60c5593ec0e01",
+  "agent_type": "iso",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/project/.claude/worktrees/agent-a2bd60c5593ec0e01/notes.txt",
+    "content": "hi"
+  },
+  "tool_response": {
+    "type": "create",
+    "filePath": "/project/.claude/worktrees/agent-a2bd60c5593ec0e01/notes.txt",
+    "content": "hi",
+    "structuredPatch": [],
+    "originalFile": null,
+    "userModified": false
+  },
+  "tool_use_id": "toolu_01UGiGqbQNQveeQQ7E71KrZN",
+  "duration_ms": 8
+}

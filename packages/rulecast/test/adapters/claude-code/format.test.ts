@@ -63,6 +63,23 @@ describe("Claude Code adapter: format", () => {
     expect(output.hookSpecificOutput.additionalContext).toContain("another agent shares this working tree")
   })
 
+  test("a read that failed answers under PostToolUseFailure, the hook that fired", () => {
+    const value = delivery({ findings: [finding()] })
+    const failed: Event = { kind: "touch", files: [], cwd: "/project", session: { id: "s1" }, failed: true }
+    const output = JSON.parse(claudeCodeAdapter.format(value, failed, options).stdout)
+    expect(output.hookSpecificOutput.hookEventName).toBe("PostToolUseFailure")
+  })
+
+  test("a subagent's start is handed the convention docs as paths, and nothing when there are none", () => {
+    const value = delivery({ conventionDocs: ["docs/conventions.md", "backend/docs/api.md"] })
+    const output = JSON.parse(format(value, "agent-start").stdout)
+    expect(output.hookSpecificOutput.hookEventName).toBe("SubagentStart")
+    const text = output.hookSpecificOutput.additionalContext as string
+    expect(text).toContain("- docs/conventions.md\n- backend/docs/api.md")
+    expect(text.split("\n").length).toBeLessThanOrEqual(4)
+    expect(format(delivery(), "agent-start")).toEqual({ stdout: "", exitCode: 0 })
+  })
+
   test("touch and edit deliver agent text as additional context", () => {
     const value = delivery({ findings: [finding()] })
     for (const kind of ["touch", "edit"] as const) {
@@ -80,15 +97,60 @@ describe("Claude Code adapter: format", () => {
     }
   })
 
-  test("a blocked stop hands the findings to the agent as the block reason", () => {
+  test("attended, a blocked stop hands the findings to the agent as Stop context, not as a blocking error", () => {
+    // Stop's additionalContext continues the turn like a block, framed as context (2.1.325).
     const output = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout)
-    expect(output.decision).toBe("block")
-    expect(output.reason).toMatch(/^rulecast rules \(\.rulecast-config\.yaml\)/)
-    expect(output.reason).toContain("raises HTTPException(500)")
+    expect(Object.keys(output)).toEqual(["hookSpecificOutput"])
+    expect(output.hookSpecificOutput.hookEventName).toBe("Stop")
+    expect(output.hookSpecificOutput.additionalContext).toMatch(/^rulecast rules \(\.rulecast-config\.yaml\)/)
+    expect(output.hookSpecificOutput.additionalContext).toContain("raises HTTPException(500)")
+  })
+
+  test("a subagent's blocked stop is SubagentStop context", () => {
+    const subagent: Event = { kind: "verify", files: [], cwd: "/project", session: { id: "s1", agentId: "a1" } }
+    const output = JSON.parse(
+      claudeCodeAdapter.format(delivery({ findings: [finding()], stop: "block" }), subagent, options).stdout,
+    )
+    expect(output.hookSpecificOutput.hookEventName).toBe("SubagentStop")
+    expect(output.hookSpecificOutput.additionalContext).toContain("raises HTTPException(500)")
+  })
+
+  describe("a subagent's hand-back (auto mode)", () => {
+    const handback: Event = {
+      kind: "verify",
+      files: [],
+      cwd: "/project",
+      session: { id: "s1", agentId: "a1" },
+      handback: true,
+    }
+    const formatHandback = (value: Delivery) => JSON.parse(claudeCodeAdapter.format(value, handback, options).stdout)
+
+    test("a block refuses the hand-back, with the findings as the reason, attended or not", () => {
+      for (const unattended of [{}, { unattended: true as const }]) {
+        const output = formatHandback(delivery({ findings: [finding()], stop: "block", ...unattended }))
+        expect(output.hookSpecificOutput.hookEventName).toBe("PreToolUse")
+        expect(output.hookSpecificOutput.permissionDecision).toBe("deny")
+        expect(output.hookSpecificOutput.permissionDecisionReason).toContain("before you hand back your report")
+        expect(output.hookSpecificOutput.permissionDecisionReason).toContain("raises HTTPException(500)")
+        expect(output).not.toHaveProperty("decision")
+      }
+    })
+
+    test("an unattended report refuses it once more, to put what is left in the report", () => {
+      const output = formatHandback(delivery({ findings: [finding()], stop: "report", unattended: true }))
+      expect(output.hookSpecificOutput.permissionDecision).toBe("deny")
+      expect(output.hookSpecificOutput.permissionDecisionReason).toContain("Record each one as unresolved")
+    })
+
+    test("a reached cap lets the hand-back through and tells the user", () => {
+      const output = formatHandback(delivery({ findings: [finding()], stop: "capReached" }))
+      expect(output).toEqual({ systemMessage: expect.stringContaining("raises HTTPException(500)") })
+    })
   })
 
   test("attended, a disputed finding goes to the user; unattended, to the run's decisions file or report", () => {
-    const attended = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout).reason
+    const attended = JSON.parse(format(delivery({ findings: [finding()], stop: "block" }), "verify").stdout)
+      .hookSpecificOutput.additionalContext
     expect(attended).toContain("say so to the user")
     const value = delivery({ findings: [finding()], stop: "block", unattended: true })
     const output = JSON.parse(format(value, "verify").stdout)
@@ -170,7 +232,7 @@ describe("Claude Code adapter: format", () => {
     const big = delivery({ findings, stop: "block" })
     const wide = { maxMatchesPerRule: 1000 }
     const edit = JSON.parse(format(big, "edit", wide).stdout).hookSpecificOutput.additionalContext as string
-    const stop = JSON.parse(format(big, "verify", wide).stdout).reason as string
+    const stop = JSON.parse(format(big, "verify", wide).stdout).hookSpecificOutput.additionalContext as string
     for (const text of [edit, stop]) {
       expect(text.length).toBeLessThanOrEqual(CONTEXT_LIMIT)
       expect(text).toMatch(/Run `rulecast run --session s1 --format agent` for the full list\.$/)
@@ -220,10 +282,11 @@ describe("Claude Code adapter: format", () => {
   test("combined from several configs, the preambles and the cut notice name them", () => {
     const configs = [".rulecast-config.yaml", "backend/.rulecast-config.yaml"]
     const stop = JSON.parse(format(delivery({ findings: [finding()], stop: "block", configs }), "verify").stdout)
-    expect(stop.reason).toMatch(
+      .hookSpecificOutput.additionalContext
+    expect(stop).toMatch(
       /^rulecast rules \(these configs: \.rulecast-config\.yaml, backend\/\.rulecast-config\.yaml\) found problems/,
     )
-    expect(stop.reason).toContain("rather than changing these configs;")
+    expect(stop).toContain("rather than changing these configs;")
     const deny = JSON.parse(format(delivery({ findings: [finding()], configs }), "guard").stdout)
     expect(deny.hookSpecificOutput.permissionDecisionReason).toMatch(/^rulecast rules \(these configs: /)
     const findings = Array.from({ length: 300 }, (_, i) =>
@@ -281,13 +344,19 @@ describe("Claude Code adapter: format", () => {
 describe("Claude Code adapter: notices are for the user", () => {
   const NOTICE = "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced."
 
-  test("a block carries the notice as a system message, never in the reason", () => {
+  test("a block carries the notice as a system message, never in what the agent is given", () => {
     const output = JSON.parse(
       format(delivery({ findings: [finding()], stop: "block", notices: [NOTICE] }), "verify").stdout,
     )
-    expect(output.decision).toBe("block")
+    expect(output.hookSpecificOutput.additionalContext).toContain("raises HTTPException(500)")
     expect(output.systemMessage).toBe(NOTICE)
-    expect(output.reason).not.toContain("changed during this session")
+    expect(output.hookSpecificOutput.additionalContext).not.toContain("changed during this session")
+    const unattended = JSON.parse(
+      format(delivery({ findings: [finding()], stop: "block", unattended: true, notices: [NOTICE] }), "verify").stdout,
+    )
+    expect(unattended.decision).toBe("block")
+    expect(unattended.systemMessage).toBe(NOTICE)
+    expect(unattended.reason).not.toContain("changed during this session")
   })
 
   test("an allowed stop with nothing else to say still tells the user", () => {

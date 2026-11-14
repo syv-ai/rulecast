@@ -10,6 +10,10 @@ import { createRepo } from "../helpers/git"
 import { forgetSessionRoots, stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload, type Payload } from "../helpers/payloads"
 import { pipelineAt } from "../helpers/pipeline"
+import { stopVerdict } from "../helpers/stop"
+
+/** stopVerdict, as loosely typed as the JSON.parse it stands in for here. */
+const looseStop = (stdout: string): ReturnType<typeof JSON.parse> => stopVerdict(stdout)
 
 /**
  * Unattended mode (#24) through the hook command, with recorded Claude Code payloads: what a goal
@@ -46,7 +50,7 @@ async function session(settings: Record<string, unknown> = {}, env: Env = testEn
   /** The agent stops: the parsed hook output, or null when it printed nothing. */
   const stop = async () => {
     const { stdout } = await hook(stops++ === 0 ? "stop" : "stop.after-block")
-    return stdout === "" ? null : JSON.parse(stdout)
+    return stdout === "" ? null : looseStop(stdout)
   }
   /** `rulecast run --session s1` as the agent runs it from its shell: the findings' lines, by rule. */
   const runSession = async (runEnv: Env = testEnv) => {
@@ -173,7 +177,7 @@ describe("hook claude-code: unattended stops", () => {
     const kinds = []
     for (let n = 0; n < 4; n++) {
       const { stdout } = await hook(n === 0 ? "stop" : "stop.after-block")
-      kinds.push(kindOf(stdout === "" ? null : JSON.parse(stdout)))
+      kinds.push(kindOf(stdout === "" ? null : looseStop(stdout)))
     }
     expect(kinds).toEqual(["block", "block", "block", "block"])
   })
@@ -220,7 +224,7 @@ describe("hook claude-code: rules that did not run", () => {
     const hook = async (name: string, file?: string) => {
       const payload = JSON.stringify(claudeCodePayload(name, { root, file, sessionId: "s1" }))
       const { stdout } = await runCli(root, ["hook", "claude-code"], payload, env)
-      return stdout === "" ? null : JSON.parse(stdout)
+      return stdout === "" ? null : looseStop(stdout)
     }
     let stops = 0
     const stop = () => hook(stops++ === 0 ? "stop" : "stop.after-block")
@@ -320,10 +324,10 @@ describe("hook claude-code: rulecast-ignore in unattended mode", () => {
     const outputs = []
     for (let n = 0; n < 4; n++) outputs.push(await stop())
     expect(outputs.map(kindOf)).toEqual(["block", "block", "report", "systemMessage"])
-    expect(outputs[0].reason).toContain("raises HTTPException(500)")
-    expect(outputs[0].reason).toContain("does not silence a finding")
+    expect(outputs[0]?.reason).toContain("raises HTTPException(500)")
+    expect(outputs[0]?.reason).toContain("does not silence a finding")
     // The developer reading the run's log still learns the agent tried.
-    expect(outputs[0].systemMessage).toContain(ADDED_NOTICE)
+    expect(outputs[0]?.systemMessage).toContain(ADDED_NOTICE)
   })
 
   test("an ignore that was already in the code still silences its finding", async () => {
@@ -492,13 +496,13 @@ describe("hook claude-code: a removed assertion in unattended mode", () => {
       await writeFile(path.join(root, TEST), weakened)
       await hook("post-tool-use.edit", TEST)
       const { stdout } = await hook("stop")
-      return stdout === "" ? null : JSON.parse(stdout)
+      return stdout === "" ? null : looseStop(stdout)
     }
 
     const unattended = await run({ ...testEnv, RULECAST_MODE: "unattended" })
     expect(kindOf(unattended)).toBe("block")
-    expect(unattended.reason).toContain("error tests/keep-assertions")
-    expect(unattended.reason).toContain("removes assertions (1 of 2 removed)")
+    expect(unattended?.reason).toContain("error tests/keep-assertions")
+    expect(unattended?.reason).toContain("removes assertions (1 of 2 removed)")
 
     expect(kindOf(await run(testEnv))).not.toBe("block")
   })
@@ -530,7 +534,7 @@ describe("hook claude-code: a removed assertion in unattended mode", () => {
       await writeFile(path.join(root, TEST), content(kept))
       await hook("post-tool-use.edit", TEST)
       const { stdout } = await hook(index === 0 ? "stop" : "stop.after-block")
-      const output = stdout === "" ? null : JSON.parse(stdout)
+      const output = stdout === "" ? null : looseStop(stdout)
       seen.push({ kind: kindOf(output), reason: output?.reason ?? "" })
     }
     expect(seen.map(({ kind }) => kind)).toEqual(["block", "block", "report"])

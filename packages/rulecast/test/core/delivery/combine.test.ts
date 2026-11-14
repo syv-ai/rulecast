@@ -182,4 +182,16 @@ describe("combineDeliveries", () => {
       { ref: "docs/style.md", state: "read", location: "backend/.rulecast/refs/a.md" },
     ])
   })
+
+  test("convention docs of several configs are listed in part order, each once", () => {
+    const combined = combineDeliveries(
+      [
+        top({ conventionDocs: ["docs/conventions.md", "docs/api.md"] }),
+        backend({ conventionDocs: ["backend/docs/db.md", "docs/api.md"] }),
+      ],
+      FROM,
+    )
+    expect(combined.conventionDocs).toEqual(["docs/conventions.md", "docs/api.md", "backend/docs/db.md"])
+    expect(combineDeliveries([top({}), backend({})], FROM)).not.toHaveProperty("conventionDocs")
+  })
 })

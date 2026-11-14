@@ -1,0 +1,18 @@
+{
+  "session_id": "861321d1-d188-4e2f-9012-a2a7acfa5b61",
+  "transcript_path": "/home/user/.claude/projects/-project/861321d1-d188-4e2f-9012-a2a7acfa5b61.jsonl",
+  "cwd": "/project",
+  "prompt_id": "17495fa9-aa96-4a45-856e-c6dcb72d3ed2",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "NotebookEdit",
+  "tool_input": {
+    "notebook_path": "/project/n.ipynb",
+    "cell_id": "c1",
+    "new_source": "print(2)"
+  },
+  "tool_use_id": "toolu_01J7B8K9ZAgCzitvX5SNreFf"
+}

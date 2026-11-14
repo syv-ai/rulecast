@@ -39,11 +39,21 @@ import {
   type AgentChoice,
   type InitSelections,
   type PlannedChange,
+  planConfig,
   planInit,
   reviewText,
   uncommittedHookFiles,
 } from "../init/plan"
-import { configLabel, fetchHookRepos, hookConfigs, hooksInstalled, settingsDir } from "./install"
+import {
+  configLabel,
+  fetchHookRepos,
+  hookConfigs,
+  hooksInstalled,
+  refuseWriteRoots,
+  scopeConflict,
+  scopeRoot,
+  settingsDir,
+} from "./install"
 import type { CliIo } from "./main"
 import { UsageError } from "./usage"
 import { validationReport } from "./validate"
@@ -355,6 +365,8 @@ export interface InitReport {
       neverFails?: string
       /** The git stages it runs at, when its config names them: `commit-msg`, `manual`, `pre-push`. */
       stages?: string[]
+      /** Why its rule would run it on every change, docs included: no filter could be given it. */
+      everyChange?: string
     }[]
     skipped: { name: string; source: string; reason: string }[]
   }
@@ -478,8 +490,36 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
   const reached = await hookConfigs(root, "init", own, (problem) =>
     notes.push(`${problem}\nLeft out of the hooks' timeout and repo fetch.`),
   )
-  const planContext = { configText, verifyMs: reached.verifyMs, readText: (file: string) => readSourceFile(root, file) }
-  const changes = await planInit({ agents, hooks, linters, catalog: adopted, settings: flags.settings }, planContext)
+  const selections = { agents, hooks, linters, catalog: adopted, settings: flags.settings }
+  // The guard hook follows the configs as they will be, this one's as init is about to write it.
+  const planned = planConfig(selections, configText)?.content ?? configText
+  // Hooks never fetch, and a rule repo's refuse_write is known only once it is in the cache: every
+  // config's repos are fetched before the guard is judged, as rulecast install does. This one's own
+  // as it is about to be written. Not on a dry run, which changes nothing.
+  const plannedConfig = parseConfig(planned === null ? {} : (parse(planned) ?? {}))
+  let fetched = true
+  if (!flags.dryRun) {
+    const others = reached.configs.filter((each) => each !== own)
+    fetched = await fetchHookRepos([...(plannedConfig.ok ? [plannedConfig.value] : []), ...others], io)
+  }
+  const guard =
+    (
+      await refuseWriteRoots(reached.roots, registry, home, {
+        root,
+        data: planned === null ? {} : (parse(planned) ?? {}),
+      })
+    ).length > 0
+  const planContext = {
+    configText,
+    verifyMs: reached.verifyMs,
+    dir: root,
+    guard,
+    personalDirOf: (adapter: Adapter) => scopeRoot(root, adapter, "personal"),
+    conflict: async (adapter: Adapter, scope: InstallScope) =>
+      (await scopeConflict(root, adapter, scope))?.reason ?? null,
+    readText: (file: string) => readSourceFile(root, file),
+  }
+  const changes = await planInit(selections, planContext)
   const alsoCommit = await uncommittedHookFiles(agents, planContext, (file) => isTracked(root, file))
   if (agents.length === 0) {
     const above = await hooksAbove(root, reached.verifyMs)
@@ -544,6 +584,7 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
         ...(hook.sameAs === undefined ? {} : { sameAs: hook.sameAs }),
         ...(hook.neverFails === undefined ? {} : { neverFails: hook.neverFails }),
         ...(hook.stages === undefined ? {} : { stages: hook.stages }),
+        ...(hook.everyChange === undefined ? {} : { everyChange: hook.everyChange }),
       })),
       skipped: scan.skipped.map((hook) => ({ name: hook.name, source: hook.source, reason: hook.reason })),
     },
@@ -567,16 +608,10 @@ export async function initCommand(args: string[], registry: DetectorRegistry, io
     validate: null,
   }
 
-  let fetched = true
   if (!flags.dryRun) {
     await write(root, changes)
     report.written = true
     report.validate = await validationReport(root, home, registry)
-    // validate fetched this config's repos; hooks never fetch, so the other configs' are fetched here.
-    fetched = await fetchHookRepos(
-      reached.configs.filter((each) => each !== own),
-      io,
-    )
   }
 
   // \u003c rather than <: the agent pastes this into setup-page.html's script data block, which a
@@ -670,12 +705,14 @@ function writesNote(hook: {
   sameAs?: string
   neverFails?: string
   stages?: string[]
+  everyChange?: string
 }): string {
   if (hook.sameAs !== undefined) return ` (same as ${hook.sameAs}: offer that instead)`
   const notes: string[] = []
   if (hook.modifies === true) notes.push("changes files")
   if (hook.modifies === null) notes.push(`may change files: runs ${hook.runs}`)
   if (hook.neverFails !== undefined) notes.push(`never fails: ${hook.neverFails}`)
+  if (hook.everyChange !== undefined) notes.push(`runs on every change: ${hook.everyChange}`)
   const stages = hook.stages ?? []
   if (stages.length > 0 && !stages.some((stage) => CODE_STAGES.has(stage))) {
     if (stages.includes("commit-msg")) notes.push("commit-msg: checks the commit message, not the code")

@@ -74,9 +74,12 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: "uninstall",
     tier: "basic",
-    synopsis: "rulecast uninstall [--agent <name>]...",
+    synopsis: "rulecast uninstall [--agent <name>]... [--scope shared|personal]",
     summary: "Remove the agent hooks rulecast added",
-    flags: [["--agent <name>", "Only this agent; repeatable"]],
+    flags: [
+      ["--agent <name>", "Only this agent; repeatable"],
+      ["--scope shared|personal", "Only the shared or the personal settings file. Default: both"],
+    ],
   },
   {
     name: "run",

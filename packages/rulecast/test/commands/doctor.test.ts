@@ -254,7 +254,7 @@ describe("rulecast doctor", () => {
       "src/x.ts": "const x = 1\n",
     })
     const result = await doctor(root)
-    expect(result.stdout).toContain("warning  Claude Code — not installed (run rulecast install)")
+    expect(result.stdout).toContain("warning  Claude Code — not installed (run rulecast install here)")
     expect(result.code).toBe(0)
   })
 
@@ -355,7 +355,7 @@ describe("rulecast doctor", () => {
         setCommands(root, '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'),
       )
       expect(stdout).toContain(
-        `${CAN_NOT_RUN(setup.installDir)} Also: the hooks are out of date; run rulecast install.\n`,
+        `${CAN_NOT_RUN(setup.installDir)} Also: the hooks are out of date; run rulecast install here.\n`,
       )
     })
 
@@ -364,14 +364,14 @@ describe("rulecast doctor", () => {
         writeFile(path.join(root, ".claude/hooks/rulecast.sh"), "echo edited\n"),
       )
       expect(stdout).toContain(
-        `${CAN_NOT_RUN(setup.installDir)} Also: .claude/hooks/rulecast.sh is out of date; run rulecast install.\n`,
+        `${CAN_NOT_RUN(setup.installDir)} Also: .claude/hooks/rulecast.sh is out of date; run rulecast install here.\n`,
       )
     })
 
     test("a missing script stays first, since every hook fails, and the missing rulecast is said too", async () => {
       const { stdout, setup } = await ciDoctor((root) => rm(path.join(root, ".claude/hooks/rulecast.sh")))
       expect(stdout).toContain(
-        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install. " +
+        "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install here. " +
           `And rulecast is not in node_modules/.bin, on the PATH or in ${setup.installDir}, so no rules run. ` +
           `Install rulecast: ${INSTALL_COMMAND}, or add it to the project (pnpm add -D @syv-ai/rulecast).\n`,
       )
@@ -451,7 +451,7 @@ describe("rulecast doctor", () => {
     delete settings.hooks.PostToolUseFailure
     await writeFile(file, JSON.stringify(settings))
     expect((await doctor(root)).stdout).toContain(
-      "warning  Claude Code — .claude/settings.json — but hooks for Bash missing; run rulecast install",
+      "warning  Claude Code — .claude/settings.json — but hooks for Read, Bash missing; run rulecast install here",
     )
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
@@ -470,13 +470,13 @@ describe("rulecast doctor", () => {
     settings.hooks.Stop[0].hooks[0].timeout = 1
     await writeFile(file, JSON.stringify(settings))
     expect((await runCli(root, ["doctor"], "", env)).stdout).toContain(
-      "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install. " +
+      "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install here. " +
         `Also: it runs rulecast on the PATH (${setup.file.path}) 0.1.0, older than minimum_rulecast_version 0.8.0; ` +
         `install a newer one: ${INSTALL_COMMAND}, or update the global npm install\n`,
     )
   })
 
-  test("a missing script fails only the hooks that run it, and other files are named outright", async () => {
+  test("a missing script fails every shared hook; personal hooks on another command beside them run twice", async () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a")]),
       "src/x.ts": "const x = 1\n",
@@ -493,10 +493,12 @@ describe("rulecast doctor", () => {
           hook.command = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     }
     await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
-    expect((await doctor(root)).stdout).toContain(
-      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook that runs it fails; " +
-        "run rulecast install. Also: the hooks in .claude/settings.local.json are out of date\n",
+    // Only the shared file is the shared hooks' state; the personal one is judged on its own.
+    const output = (await doctor(root)).stdout
+    expect(output).toContain(
+      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast uninstall --scope personal here, then rulecast install here\n",
     )
+    expect(output).toContain("hooks twice")
   })
 
   test("a settings file that is not JSON is reported on the hooks line, and the report goes on", async () => {
@@ -507,16 +509,16 @@ describe("rulecast doctor", () => {
     })
     await chmod(path.join(root, "node_modules/.bin/rulecast"), 0o755)
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
-    await writeFile(path.join(root, ".claude/settings.local.json"), "{ not json")
+    await writeFile(path.join(root, ".claude/settings.json"), "{ not json")
     const result = await doctor(root)
     expect(result.code).toBe(0)
     expect(result.stdout).toMatch(
-      /warning {2}Claude Code — cannot read the hooks: \.claude\/settings\.local\.json: .+; fix it, then run rulecast install\n/,
+      /warning {2}Claude Code — cannot read the hooks: \.claude\/settings\.json: .+; fix it, then run rulecast install here\n/,
     )
     expect(result.stdout).toContain("\ndry run\n")
   })
 
-  test("hooks missing in one settings file and stale in another: both files are named", async () => {
+  test("hooks missing in the shared file, and personal ones beside them: both said, install refused until one goes", async () => {
     const root = await createRepo({
       ".rulecast-config.yaml": localConfig([RULE("a")]),
       "src/x.ts": "const x = 1\n",
@@ -531,12 +533,16 @@ describe("rulecast doctor", () => {
     const stop = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
     const personal = { hooks: { Stop: [{ hooks: [{ type: "command", command: stop, timeout: 70 }] }] } }
     await writeFile(path.join(root, ".claude/settings.local.json"), JSON.stringify(personal))
-    expect((await doctor(root)).stdout).toContain(
-      "warning  Claude Code — .claude/settings.json — but hooks for Bash missing, " +
-        "and the hooks in .claude/settings.local.json are out of date; run rulecast install\n",
+    const output = (await doctor(root)).stdout
+    expect(output).toContain(
+      "warning  Claude Code — .claude/settings.json — but hooks for Read, Bash missing; run rulecast uninstall --scope personal here, then rulecast install here\n",
     )
+    expect(output).toContain("hooks twice")
+    // Both files run rulecast for the same sessions: install refuses until one goes.
+    expect((await runCli(root, ["install"])).code).toBe(2)
+    await runCli(root, ["uninstall", "--scope", "personal"])
     const install = await runCli(root, ["install"])
-    expect(install.stdout).toContain("updated Claude Code hooks in .claude/settings.local.json: Stop\n")
+    expect(install.stdout).toContain("installed Claude Code hooks in .claude/settings.json: PostToolUseFailure (Read)")
     expect((await doctor(root)).stdout).toContain("ok       Claude Code — .claude/settings.json")
   })
 
@@ -557,7 +563,7 @@ describe("rulecast doctor", () => {
     await rm(path.join(root, ".claude/hooks/rulecast.sh"))
     const result = await doctor(root)
     expect(result.stdout).toContain(
-      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install\n",
+      "error    Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is missing, so every hook fails; run rulecast install here\n",
     )
     expect(result.code).toBe(2)
     expect(await runCli(root, ["install"])).toMatchObject({ code: 0 })
@@ -569,7 +575,7 @@ describe("rulecast doctor", () => {
     await writeFile(path.join(root, ".claude/hooks/rulecast.sh"), "#!/bin/sh\nexit 0\n")
     const result = await doctor(root)
     expect(result.stdout).toContain(
-      "warning  Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is out of date; run rulecast install\n",
+      "warning  Claude Code — .claude/settings.json — but .claude/hooks/rulecast.sh is out of date; run rulecast install here\n",
     )
     expect(result.code).toBe(0)
   })
@@ -584,7 +590,7 @@ describe("rulecast doctor", () => {
     for (const args of [[], ["--ci"]]) {
       const result = await runCli(root, ["doctor", ...args])
       expect(result.stdout).toContain(
-        "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install\n",
+        "warning  Claude Code — .claude/settings.json — but the hooks are out of date; run rulecast install here\n",
       )
       expect(result.stdout).not.toContain("rulecast.sh")
       expect(result.stdout).not.toMatch(/error {4}Claude Code/)
@@ -642,6 +648,157 @@ describe("rulecast doctor", () => {
     expect((await runCli(root, ["doctor"], "", global)).stdout).toContain(
       "ok       Claude Code — .claude/settings.json",
     )
+  })
+
+  /** AIP: an always_run hook wrapped by a rule with no filter runs its whole-project tool on every change. */
+  describe("a hook rule whose hook does not get its files", () => {
+    const preCommit = (keys: string) =>
+      `repos:\n  - repo: local\n    hooks:\n      - id: mypy-check\n        name: mypy\n        entry: uv run mypy app/\n        language: system\n${keys}`
+    const ALWAYS = "        always_run: true\n        pass_filenames: false\n"
+    const rule = (extra: Record<string, unknown> = {}) => ({
+      id: "mypy",
+      name: "mypy",
+      detect: { hook: { "pre-commit": "mypy-check" } },
+      message: "{{message}}",
+      ...extra,
+    })
+    /** A prek in node_modules/.bin that passes, so the environment and the dry run are clean. */
+    async function repo(keys: string, extra: Record<string, unknown> = {}): Promise<string> {
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([rule(extra)]),
+        ".pre-commit-config.yaml": preCommit(keys),
+        "node_modules/.bin/prek": "#!/bin/sh\necho 'mypy....Passed'\n",
+        "app/main.py": "x = 1\n",
+      })
+      await chmod(path.join(root, "node_modules/.bin/prek"), 0o755)
+      return root
+    }
+
+    test("warns, naming the types the hook cares about, and exits 0; quiet once the rule has them", async () => {
+      const result = await doctor(await repo(`${ALWAYS}        types_or: [ts, tsx]\n`))
+      expect(result.stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included; its hook only cares about TypeScript or TSX files; " +
+          "add `types_or: [ts, tsx]` to the rule to run it only then\n",
+      )
+      expect(result.code).toBe(0)
+      const filtered = await doctor(await repo(`${ALWAYS}        types_or: [ts, tsx]\n`, { types_or: ["ts", "tsx"] }))
+      expect(filtered.stdout).not.toContain("on every change")
+    })
+
+    test("types: [python] (AIP): the rule is told to take the hook's types", async () => {
+      const { stdout } = await doctor(await repo(`${ALWAYS}        types: [python]\n`))
+      expect(stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included; its hook only cares about Python files; " +
+          "add `types: [python]` to the rule to run it only then\n",
+      )
+      const filtered = await doctor(await repo(`${ALWAYS}        types: [python]\n`, { types: ["python"] }))
+      expect(filtered.stdout).not.toContain("on every change")
+    })
+
+    test("a filter a rule can't match is said tag by tag, and a partly matched one says what is left out", async () => {
+      const text = await doctor(await repo(`${ALWAYS}        types: [text]\n`))
+      expect(text.stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included; its hook's filter, types [text], can't be matched " +
+          "by a rule (text: pre-commit decides text from a file's content); add `files` or `types_or` to the rule naming the files it checks\n",
+      )
+      const partly = await doctor(await repo(`${ALWAYS}        types_or: [ts, dockerfile]\n        files: ^app/\n`))
+      expect(partly.stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included; its hook only cares about files matching ^app/, " +
+          "narrowed further by types_or [ts, dockerfile], which a rule can't match (dockerfile: rulecast has no such file type); " +
+          'add `files: "^app/"` to the rule to run it only then\n',
+      )
+    })
+
+    test("a remote always_run hook whose manifest isn't on disk: its filter is unknown", async () => {
+      vi.stubEnv("XDG_CACHE_HOME", "/nonexistent-cache")
+      vi.stubEnv("PRE_COMMIT_HOME", "")
+      vi.stubEnv("PREK_HOME", "")
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([rule()]),
+        ".pre-commit-config.yaml":
+          "repos:\n  - repo: https://github.com/example/none\n    rev: v1\n    hooks:\n      - id: mypy-check\n        always_run: true\n",
+        "node_modules/.bin/prek": "#!/bin/sh\necho 'mypy....Passed'\n",
+      })
+      await chmod(path.join(root, "node_modules/.bin/prek"), 0o755)
+      expect((await doctor(root)).stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included, and the hook's manifest isn't on disk, so its " +
+          "filter is unknown; add `files` or `types_or` to the rule naming the files it checks\n",
+      )
+    })
+
+    test("a hook whose filter takes in the whole project runs on every change there", async () => {
+      const root = await createRepo({
+        "backend/.rulecast-config.yaml": localConfig([rule()]),
+        ".pre-commit-config.yaml": preCommit(`${ALWAYS}        files: ^backend/\n`),
+        "node_modules/.bin/prek": "#!/bin/sh\necho 'mypy....Passed'\n",
+        "backend/main.py": "x = 1\n",
+      })
+      await chmod(path.join(root, "node_modules/.bin/prek"), 0o755)
+      const { stdout } = await doctor(path.join(root, "backend"))
+      expect(stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included, and the hook's files and types take in every " +
+          "file in this project; add `files` or `types_or` to the rule naming the files it checks\n",
+      )
+    })
+
+    test("a files regex is suggested as the rule's files", async () => {
+      const { stdout } = await doctor(await repo(`${ALWAYS}        files: ^app/\n`))
+      expect(stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included; its hook only cares about files matching ^app/; " +
+          'add `files: "^app/"` to the rule to run it only then\n',
+      )
+    })
+
+    test("a hook that names nothing: it runs on every change, and the rule should name what it checks", async () => {
+      const { stdout } = await doctor(await repo(ALWAYS))
+      expect(stdout).toContain(
+        "  warning  mypy — runs mypy-check on every change, docs included, and the hook names no files or types; " +
+          "add `files` or `types_or` to the rule naming the files it checks\n",
+      )
+    })
+
+    test("silent for a hook pre-commit filters itself: it gets its files, or pass_filenames: false with types", async () => {
+      expect((await doctor(await repo("        types: [python]\n"))).stdout).not.toContain("on every change")
+      const typed = await doctor(await repo("        pass_filenames: false\n        types: [python]\n"))
+      expect(typed.stdout).not.toContain("on every change")
+      const bare = await doctor(await repo("        pass_filenames: false\n"))
+      expect(bare.stdout).toContain("  warning  mypy — runs mypy-check on every change, docs included, and the hook")
+    })
+
+    test("lefthook: a job with no files template, by its glob when it has one", async () => {
+      const dump = JSON.stringify({
+        "pre-commit": {
+          jobs: [
+            { name: "mypy", run: "uv run mypy app/", glob: ["*.py", "*.pyi"] },
+            { name: "bare", run: "uv run mypy app/" },
+            { name: "given", run: "ruff check {staged_files}" },
+          ],
+        },
+      })
+      const lefthook = (id: string, job: string) => ({
+        id,
+        name: id,
+        detect: { hook: { lefthook: `pre-commit/${job}` } },
+        message: "{{message}}",
+      })
+      const root = await createRepo({
+        ".rulecast-config.yaml": localConfig([
+          lefthook("mypy", "mypy"),
+          lefthook("bare", "bare"),
+          lefthook("given", "given"),
+        ]),
+        "lefthook.yml": "pre-commit:\n  jobs: []\n",
+        "node_modules/.bin/lefthook": `#!/bin/sh\ncat <<'OUT'\n${dump}\nOUT\n`,
+      })
+      await chmod(path.join(root, "node_modules/.bin/lefthook"), 0o755)
+      const { stdout } = await doctor(root)
+      expect(stdout).toContain(
+        "  warning  mypy — runs pre-commit/mypy on every change, docs included; its hook only cares about files matching *.py or *.pyi; " +
+          'add `files: "^.*\\\\.py$|^.*\\\\.pyi$"` to the rule to run it only then\n',
+      )
+      expect(stdout).toContain("  warning  bare — runs pre-commit/bare on every change, docs included, and the hook")
+      expect(stdout).not.toContain("given — runs")
+    })
   })
 
   /** #29: what a fresh environment gets wrong, checked as the hooks and `rulecast run --from-ref` meet it. */

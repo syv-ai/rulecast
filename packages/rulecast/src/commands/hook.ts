@@ -1,3 +1,4 @@
+import { existsSync, realpathSync } from "node:fs"
 import path from "node:path"
 
 import { ADAPTERS, adapterByName } from "../adapters"
@@ -10,10 +11,15 @@ import { cacheHome, debugLogger, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
 import {
   configRootsAbove,
+  configRootsBelow,
+  dedupe,
   projectsForEvent,
   projectsForFiles,
   recordSessionRoots,
+  rememberSessionAgentType,
+  sessionAgentType,
   sessionRoots,
+  sessionStartRootsBelow,
 } from "../core/projects"
 import { cachedRepos } from "../core/repos/provider"
 import { elsewhereNotice, uncheckedCheckouts, untold, wasTold } from "../core/session/elsewhere"
@@ -40,12 +46,23 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
   // still exits 0. Each project's own failures go to its own debug log (runProject).
   try {
     const parsed = adapter.parse(input)
-    if (!parsed || (!parsed.event && !parsed.warmup)) return 0
+    if (!parsed) return 0
+    const home = cacheHome(io.env)
+    // The agent moved into a worktree: its projects are the agent's before it edits anything there.
+    if (parsed.workDirs !== undefined) await recordWorkDirs(home, parsed.workDirs)
+    if (!parsed.event && !parsed.warmup) return 0
+    if (parsed.event !== null && (await internalAgent(home, parsed))) return 0
     // The adapter reads only the payload; where the session started comes from the hook's environment.
     const launchDir = io.env.CLAUDE_PROJECT_DIR || parsed.cwd
     const event: Event | null = parsed.event ? { ...parsed.event, launchDir } : null
-    const home = cacheHome(io.env)
     const projects = await projectsFor(parsed, event, launchDir, home)
+    // A subagent starting above packages the session start found: those are its projects too, as
+    // its shell calls and stop reach them, so a stop while it runs knows where it works. Recorded
+    // even with no config above it, as in a monorepo whose top has none.
+    if (event?.kind === "agent-start" && event.session?.agentId !== undefined) {
+      const below = await sessionStartRootsBelow(home, event.session.id, parsed.cwd)
+      if (below.length > 0) await recordRoots(home, event.session.id, event.session.agentId, below)
+    }
     // A shell call under no config may still work in a checkout that has one (elsewhere, below).
     if (projects.size === 0 && event?.kind !== "shell-after") return 0
     const routed = {
@@ -66,8 +83,9 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
             io.stderr(`rulecast: ${errorMessage(error)}\n`),
           )
     const [, ...runs] = await Promise.all([
-      // An edit records the projects of its files; a Read or a guard is not work there.
-      event?.kind === "edit" ? record([...projects.keys()]) : undefined,
+      // An edit records the projects of its files; a Read or a guard is not work there. A subagent's
+      // start records those it starts in: an isolated one's worktree is its project from the start.
+      event?.kind === "edit" || event?.kind === "agent-start" ? record([...projects.keys()]) : undefined,
       ...[...projects].map(([root, routing]) => runProject(root, routing, routed)),
     ])
     const parts = runs.filter((run): run is ProjectRun => run !== null)
@@ -124,6 +142,8 @@ async function projectsFor(
     const routed = projectsForFiles(parsed.cwd, event.files)
     return new Map([...routed].map(([root, files]) => [root, { files, subagents: false }]))
   }
+  // A subagent starting: the configs where it starts, whose docs it is pointed at.
+  if (event?.kind === "agent-start") return new Map(configRootsAbove(parsed.cwd).map((root) => [root, NO_FILES]))
   const session = event?.session
   if (session === undefined) return new Map(configRootsAbove(parsed.cwd).map((root) => [root, NO_FILES]))
   const agent = session.agentId ?? MAIN_AGENT
@@ -138,6 +158,58 @@ async function projectsFor(
 }
 
 const NO_FILES: Routing = { files: null, subagents: false }
+
+/** Each directory's projects, above it and below it, recorded as the agent's (AdapterInput.workDirs). */
+async function recordWorkDirs(home: string, { dirs, session }: NonNullable<AdapterInput["workDirs"]>): Promise<void> {
+  const roots: string[] = []
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue
+    roots.push(...configRootsAbove(dir), ...(await configRootsBelow(dir)))
+  }
+  if (roots.length > 0) await recordRoots(home, session.id, session.agentId ?? MAIN_AGENT, dedupe(roots))
+}
+
+/**
+ * Whether the event is an internal agent's (compaction, a side question, prompt suggestions): a
+ * subagent stop or start whose type is the one the session runs as (`--agent`), which every
+ * main-thread event names and is remembered from. Without `--agent` such agents have an empty type,
+ * which the adapter already leaves out. A real subagent of the session's own type is skipped too:
+ * the main stop still checks its work.
+ */
+async function internalAgent(home: string, parsed: AdapterInput): Promise<boolean> {
+  const session = parsed.event?.session
+  if (session === undefined || parsed.agentType === undefined) return false
+  if (session.agentId === undefined) {
+    await rememberSessionAgentType(home, session.id, parsed.agentType)
+    return false
+  }
+  const kind = parsed.event?.kind
+  if (kind !== "verify" && kind !== "agent-start") return false
+  return (await sessionAgentType(home, session.id)) === parsed.agentType
+}
+
+/**
+ * A stop's running subagents, narrowed to those that worked in `root`: one in its own worktree
+ * holds nothing in this checkout. A subagent's start and edits record where it works.
+ */
+async function runningHere(home: string, event: Event, root: string): Promise<Event> {
+  if (event.kind !== "verify" || event.running === undefined || event.session === undefined) return event
+  const here = realpathOf(root)
+  const agents: string[] = []
+  for (const agent of event.running.agents) {
+    const roots = await sessionRoots(home, event.session.id, agent)
+    if (roots.some((each) => realpathOf(each) === here)) agents.push(agent)
+  }
+  return { ...event, running: { ...event.running, agents } }
+}
+
+function realpathOf(dir: string): string {
+  try {
+    return realpathSync(dir)
+  } catch {
+    return path.resolve(dir)
+  }
+}
 
 /** Appends the roots the agent has not run before; a repeat costs a read, not a write. */
 async function recordRoots(home: string, sessionId: string, agent: string, roots: string[]): Promise<void> {
@@ -240,7 +312,7 @@ async function runProject(root: string, routing: Routing, routed: Routed): Promi
     if (event === null) return null
     // Only the main agent's subagents ran this project, and its config leaves it to their own hooks.
     if (routing.subagents && project.config.subagentProjects === "exclude") return null
-    const projectEvent: Event = { ...event, files: routing.files ?? [], cwd: root }
+    const projectEvent: Event = await runningHere(home, { ...event, files: routing.files ?? [], cwd: root }, root)
     const result = await runPipeline({
       project,
       stateDir,

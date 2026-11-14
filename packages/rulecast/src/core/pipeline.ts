@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import path from "node:path"
 
 import type { CommittedBaseline } from "./baseline/committed"
@@ -461,7 +462,10 @@ async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boo
     context: state.context,
     resolver: outcome.resolver,
     maxBytes: config.context.maxBytes,
-    maxBlocks: project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
+    maxBlocks: maxBlocksFor(
+      event,
+      project.mode.mode === "unattended" ? config.unattended.maxBlocks : config.stopGate.maxBlocks,
+    ),
     mode: project.mode.mode,
     maxContextChars: outcome.budget.chars,
     maxMatchesPerRule: config.maxMatchesPerRule,
@@ -572,6 +576,42 @@ async function logFindings(run: Run, outcome: Outcome, agent: string, decision: 
   )
 }
 
+/** Said to the user at a stop whose sweep waits for a running subagent. */
+const DEFERRED_SWEEP =
+  "rulecast: a subagent is still running, so files changed outside the agents' tool calls are checked at a later stop."
+
+/**
+ * Claude Code retries a refused hand-back only a few times before the subagent's report is lost
+ * (four refusals in a row lost it on 2.1.325): a hand-back is blocked once, and unattended reported
+ * once more, whatever the configured budget.
+ */
+const HANDBACK_MAX_BLOCKS = 1
+
+function maxBlocksFor(event: Event, configured: number): number {
+  return event.kind === "verify" && event.handback === true ? Math.min(configured, HANDBACK_MAX_BLOCKS) : configured
+}
+
+/** Whether only `agents` edited `file`: their work, while they still run. */
+function onlyBy(work: WorkState, file: string, agents: ReadonlySet<string>): boolean {
+  const editors = work.editors.get(file)
+  return editors !== undefined && editors.size > 0 && [...editors].every((agent) => agents.has(agent))
+}
+
+/**
+ * The project's convention docs, root-relative: the `conventions` file or folder, then each file
+ * its enabled rules cite, in rule order, each once. A rule repo's docs live in the cache, not the
+ * project, and are left out; so is a file that is not there.
+ */
+function conventionDocs(project: CompiledProject, root: string): string[] {
+  const cited = project.rules
+    .filter((rule) => rule.enabled)
+    .flatMap((rule) => [...rule.context, ...[...rule.contextByRule.values()].flat()])
+    .map((spec) => spec.path)
+    .filter((file) => !path.isAbsolute(file))
+  const conventions = project.config.conventions === null ? [] : [path.posix.normalize(project.config.conventions)]
+  return [...new Set([...conventions, ...cited])].filter((file) => existsSync(path.join(root, file)))
+}
+
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
   const run = startRun(options)
   const { project, root, session, warnings, log } = run
@@ -587,6 +627,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (original.kind === "prompt") {
     if (session) await appendWork(session.dir, [{ t: "prompt", agent: session.agent }])
     return nothing()
+  }
+  if (original.kind === "agent-start") {
+    const docs = run.config.subagentDocs ? conventionDocs(project, root).map(run.shown) : []
+    return nothing(docs.length === 0 ? emptyDelivery() : { ...emptyDelivery(), conventionDocs: docs })
   }
   if (original.kind === "shell-before") {
     await shellBefore(run, original)
@@ -682,6 +726,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   let swept: string[] = []
+  let deferredSweep = false
   let detected: Detected | null = null
   if (event.kind === "edit" || event.kind === "verify") {
     let requested = run.relevant(event.files)
@@ -705,7 +750,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // A subagent's stop verifies its own edits; the main agent's, every agent's. What any agent
       // edited is never swept: it was changed by a tool call, only not by this agent's.
       requested = run.relevant(editedBy(view.work, session.agent))
-      if (options.stopGate === true) {
+      // A subagent the agent started still runs here: its files are its own until it finishes, and
+      // what it writes with its shell is not settled, so the sweep waits for a later stop. A running
+      // shell job (a dev server, a watcher) never holds it: it may run all session (Event.running).
+      const running = event.running?.agents ?? []
+      if (running.length > 0) {
+        const theirs = new Set(running)
+        requested = requested.filter((file) => !onlyBy(view.work, file, theirs))
+        if (options.stopGate === true && hasOwnTree(view.work, session.agent)) deferredSweep = true
+      }
+      if (options.stopGate === true && running.length === 0) {
         swept = await sweep(run, view, session)
         requested = [...requested, ...swept]
       }
@@ -723,7 +777,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     })
   }
 
-  return finish(
+  const finished = await finish(
     run,
     view,
     {
@@ -739,4 +793,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     },
     failedAtStart || detected?.failed === true,
   )
+  if (deferredSweep) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
+  return finished
 }

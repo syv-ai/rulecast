@@ -1,0 +1,9 @@
+{
+  "session_id": "260818eb-9dc0-4551-9aaa-e5e15a3ec787",
+  "transcript_path": "/home/user/.claude/projects/-project/260818eb-9dc0-4551-9aaa-e5e15a3ec787.jsonl",
+  "cwd": "/project",
+  "hook_event_name": "InstructionsLoaded",
+  "file_path": "/project/CLAUDE.md",
+  "memory_type": "Project",
+  "load_reason": "session_start"
+}

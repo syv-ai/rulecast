@@ -15,6 +15,7 @@ import { createRepo } from "../helpers/git"
 import { stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { createProject } from "../helpers/project"
+import { stopVerdict } from "../helpers/stop"
 
 const USERS = "app/services/users.py"
 const VIOLATION = "def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n"
@@ -44,7 +45,7 @@ describe("rulecast hook claude-code", () => {
     expect(additionalContext((await hook(root, "post-tool-use.edit", USERS)).stdout)).toContain(
       "raises HTTPException(500)",
     )
-    const stop = JSON.parse((await hook(root, "stop")).stdout)
+    const stop = stopVerdict((await hook(root, "stop")).stdout)
     expect(stop.decision).toBe("block")
     expect(stop.reason).toContain("raises HTTPException(500)")
   })

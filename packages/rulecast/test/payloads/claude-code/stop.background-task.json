@@ -1,0 +1,23 @@
+{
+  "session_id": "100c4f25-5bb4-4cad-81bd-4d0ba1a2a81f",
+  "transcript_path": "/home/user/.claude/projects/-project/100c4f25-5bb4-4cad-81bd-4d0ba1a2a81f.jsonl",
+  "cwd": "/project",
+  "prompt_id": "323027ea-4dc7-4bb5-adf6-ef3aad1065f3",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "I've launched the background subagent to write `bg.txt` containing `BG`. I'll give you its full final report verbatim once its completion notification arrives.",
+  "background_tasks": [
+    {
+      "id": "a65251da8a4fb4436",
+      "type": "subagent",
+      "status": "running",
+      "description": "Write bg.txt file",
+      "agent_type": "general-purpose"
+    }
+  ],
+  "session_crons": []
+}

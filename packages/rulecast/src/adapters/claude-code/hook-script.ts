@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { INSTALL_COMMAND, INSTALLED_SH } from "../../core/binary-home"
 
 /**
@@ -16,10 +18,29 @@ export const NOT_INSTALLED_UNATTENDED = `rulecast is configured in this project 
 export const HOOK_SCRIPT_FILE = ".claude/hooks/rulecast.sh"
 
 /**
- * The command every Claude Code hook entry runs. Through `sh`, so the script needs no executable
- * bit, which a checkout does not always keep. settings.ts recognises it by the script's path.
+ * The command every shared Claude Code hook entry runs. Through `sh`, so the script needs no
+ * executable bit, which a checkout does not always keep. settings.ts recognises it by the script's path.
  */
 export const HOOK_COMMAND = `sh "$CLAUDE_PROJECT_DIR"/${HOOK_SCRIPT_FILE}`
+
+/**
+ * The command a personal-scope entry runs: the script by its absolute path. Claude Code reads
+ * settings.local.json at the git top even when a session starts in a subdirectory, and sets
+ * $CLAUDE_PROJECT_DIR to that subdirectory, where HOOK_COMMAND's path would not exist (exit 127 on
+ * every event). The file is not committed, so a path of this machine's is safe in it.
+ */
+export function personalHookCommand(dir: string): string {
+  return `sh '${path.join(dir, HOOK_SCRIPT_FILE).replaceAll("'", `'\\''`)}'`
+}
+
+/** The directory a personalHookCommand runs the script of; null for any other command. */
+export function personalHookDir(command: string): string | null {
+  const quoted = /^sh '(.*)'$/s.exec(command)
+  if (quoted === null) return null
+  const file = quoted[1]!.replaceAll(`'\\''`, "'")
+  const suffix = `/${HOOK_SCRIPT_FILE}`
+  return path.isAbsolute(file) && file.endsWith(suffix) ? file.slice(0, -suffix.length) : null
+}
 
 /**
  * The hook script. A command naming a rulecast that is not there exits 127, which Claude Code shows
@@ -40,11 +61,37 @@ export const HOOK_SCRIPT = `#!/bin/sh
 #
 # It only looks for a rulecast to run. It never downloads or installs anything.
 
+# The project: where install wrote this script, two directories up. Not $CLAUDE_PROJECT_DIR, which
+# is where the session started and can be a directory below it.
+case "$0" in
+  */${HOOK_SCRIPT_FILE}) root=\${0%/${HOOK_SCRIPT_FILE}} ;;
+  *) root=$CLAUDE_PROJECT_DIR ;;
+esac
+
 # 1. The project's own rulecast. A devDependency is a version the project committed to, so it wins
 #    for everyone. It gets the payload on stdin untouched.
-project_rulecast="$CLAUDE_PROJECT_DIR/node_modules/.bin/rulecast"
+project_rulecast="$root/node_modules/.bin/rulecast"
 if [ -x "$project_rulecast" ]; then
   exec "$project_rulecast" hook claude-code
+fi
+
+# 2. A linked worktree (claude --worktree) has no node_modules of its own: the main checkout's
+#    rulecast. Found from the worktree's .git file and its git directory's commondir, read by the
+#    shell: no git process. A submodule's git directory has no commondir, so it is left alone.
+if [ -f "$root/.git" ]; then
+  gitdir=
+  IFS= read -r gitdir < "$root/.git"
+  gitdir=\${gitdir#gitdir: }
+  case "$gitdir" in "" | /*) ;; *) gitdir=$root/$gitdir ;; esac
+  if [ -n "$gitdir" ] && [ -f "$gitdir/commondir" ]; then
+    common=
+    IFS= read -r common < "$gitdir/commondir"
+    case "$common" in "" | /*) ;; *) common=$gitdir/$common ;; esac
+    main_rulecast="$common/../node_modules/.bin/rulecast"
+    if [ -n "$common" ] && [ -x "$main_rulecast" ]; then
+      exec "$main_rulecast" hook claude-code
+    fi
+  fi
 fi
 
 # Past here the payload is read once, so each rulecast tried can be given it.
@@ -61,12 +108,12 @@ run_rulecast() {
   fi
 }
 
-# 2. A rulecast on the PATH: install.sh's, or a global npm install.
+# 3. A rulecast on the PATH: install.sh's, or a global npm install.
 if command -v rulecast >/dev/null 2>&1; then
   run_rulecast rulecast
 fi
 
-# 3. install.sh's rulecast in its install directory. An agent started from the Dock or an IDE may run
+# 4. install.sh's rulecast in its install directory. An agent started from the Dock or an IDE may run
 #    hooks with a PATH that never read the shell's startup files, where install.sh put it.
 installed_rulecast=${INSTALLED_SH}
 if [ -x "$installed_rulecast" ]; then

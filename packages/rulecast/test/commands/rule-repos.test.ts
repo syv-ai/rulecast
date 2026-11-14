@@ -3,13 +3,13 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 import { stringify } from "yaml"
-
 import { repoDir, repoLabel } from "../../src/core/repos/layout"
 import { runCli } from "../helpers/cli"
 import { createRepo } from "../helpers/git"
 import { TEST_HOME } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { createRuleRepo } from "../helpers/rule-repo"
+import { stopVerdict } from "../helpers/stop"
 
 const USERS = "app/services/users.py"
 const REV = "v1.0.0"
@@ -156,7 +156,7 @@ describe("rule repos end to end", () => {
     // The agent can follow the pointer: the copy is inside the project.
     expect(existsSync(path.join(root, location))).toBe(true)
 
-    const stop = JSON.parse((await hook(root, "stop")).stdout)
+    const stop = stopVerdict((await hook(root, "stop")).stdout)
     expect(stop.decision).toBe("block")
     expect(stop.reason).toContain(`${USERS}:2 prints 1. Use the logger.`)
     // Delivered at the edit, so the stop only points at it.

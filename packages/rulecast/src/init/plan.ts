@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs"
+import path from "node:path"
+
 import { CONFIG_FILE } from "../core/config/load"
 import { errorMessage } from "../core/errors"
 import { planHooks } from "../core/hook-plan"
@@ -47,6 +50,17 @@ export interface PlanContext {
   /** The current .rulecast-config.yaml; null when the project has none. */
   configText: string | null
   verifyMs: number
+  /** The directory the settings go in, for a command that names it (a personal file's absolute path). */
+  dir: string
+  /**
+   * A config the hooks serve, this one as init will write it, has a refuse_write rule: the hook
+   * before every edit is wanted (install's refuseWriteRoots).
+   */
+  guard: boolean
+  /** Where the adapter's personal settings file is read for sessions in `dir` (install's scopeRoot). Absent: `dir`. */
+  personalDirOf?: (adapter: Adapter) => string
+  /** Why installing this scope would make sessions run rulecast twice (install's scopeConflict), or null. */
+  conflict?: (adapter: Adapter, scope: InstallScope) => Promise<string | null>
   /** Reads a repo-relative file; null when missing. */
   readText(file: string): Promise<string | null>
 }
@@ -60,7 +74,7 @@ function settingText(change: SettingChange): string {
   return change.from === null ? `+${change.key} ${change.to}` : `${change.key} ${change.from} → ${change.to}`
 }
 
-function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
+export function planConfig(selections: InitSelections, configText: string | null): PlannedChange | null {
   const { hooks, settings, catalog } = selections
   const linters = selections.linters ?? []
   const local = [...linters, ...hooks]
@@ -106,45 +120,56 @@ function planConfig(selections: InitSelections, configText: string | null): Plan
 async function planAgent(choice: AgentChoice, context: PlanContext): Promise<PlannedChange[]> {
   const install = choice.adapter.install
   if (install === null) return []
+  // Where the agent reads the personal file for sessions here (install's scopeRoot): maybe above.
+  const personalDir = context.personalDirOf?.(choice.adapter) ?? context.dir
+  const up = path.relative(realOr(context.dir), realOr(personalDir)).split(path.sep).join("/")
+  const at = (base: string, file: string) => (base === "" ? file : `${base}/${file}`)
+  // Never both scopes for one session, and never by removing hooks from a file nobody named.
+  const conflict = await context.conflict?.(choice.adapter, choice.scope)
+  if (conflict !== undefined && conflict !== null) throw new PlanError(conflict)
+  const base = choice.scope === "shared" ? "" : up
   const read = async (file: string) => {
-    const text = await context.readText(file)
+    const text = await context.readText(at(base, file))
     return text === null ? null : { text }
   }
   let plan: Awaited<ReturnType<typeof planHooks>>
   try {
-    plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs)
+    plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs, {
+      guard: context.guard,
+      dir: base === "" ? context.dir : personalDir,
+      only: choice.scope,
+    })
   } catch (error) {
     throw new PlanError(errorMessage(error))
   }
   const write = plan.write
-  if (write === null) return []
   const label = choice.adapter.label
   const commitOf = (file: string) => install.scopes.find((entry) => entry.file === file)?.scope === "shared"
   const changes: PlannedChange[] = []
-  if (write.settings !== null) {
+  if (write !== null && write.settings !== null) {
     const parts = [
       ...(write.added.length > 0 ? [`+${plural(write.added.length, "hook")}`] : []),
       ...(write.updated.length > 0 ? [`~${plural(write.updated.length, "hook")} updated`] : []),
     ]
     changes.push({
-      file: write.file,
+      file: at(base, write.file),
       content: `${JSON.stringify(write.settings, null, 2)}\n`,
       created: write.created,
       summary: `${parts.join(", ")} (${label})`,
       commit: commitOf(write.file),
     })
   }
-  for (const { file, settings, updated } of write.others) {
+  for (const { file, settings, updated } of write?.others ?? []) {
     changes.push({
-      file,
+      file: at(base, file),
       content: `${JSON.stringify(settings, null, 2)}\n`,
       created: false,
       summary: `~${plural(updated.length, "hook")} updated (${label})`,
       commit: commitOf(file),
     })
   }
-  for (const { file, content, created } of write.files) {
-    changes.push({ file, content, created, summary: `hook script (${label})`, commit: plan.sharedRuns })
+  for (const { file, content, created } of write?.files ?? []) {
+    changes.push({ file: at(base, file), content, created, summary: `hook script (${label})`, commit: plan.sharedRuns })
   }
   return changes
 }
@@ -166,7 +191,11 @@ export async function uncommittedHookFiles(
       const text = await context.readText(file)
       return text === null ? null : { text }
     }
-    const plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs).catch(() => null)
+    const plan = await planHooks(read, choice.adapter, choice.scope, context.verifyMs, {
+      guard: context.guard,
+      dir: context.dir,
+      only: choice.scope,
+    }).catch(() => null)
     if (plan === null || !plan.sharedRuns) continue
     const written = new Set((plan.write?.files ?? []).map((each) => each.file))
     for (const { file } of install.files) {
@@ -186,6 +215,14 @@ export async function planInit(selections: InitSelections, context: PlanContext)
     changes.push(...(await planAgent(choice, context)))
   }
   return changes
+}
+
+function realOr(dir: string): string {
+  try {
+    return realpathSync(dir)
+  } catch {
+    return path.resolve(dir)
+  }
 }
 
 /** The Review step: one line per file. */

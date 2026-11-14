@@ -1,5 +1,6 @@
-rulecast uninstall [--agent <name>]...
+rulecast uninstall [--agent <name>]... [--scope shared|personal]
 
 Remove the agent hooks rulecast added
 
-  --agent <name>  Only this agent; repeatable
+  --agent <name>           Only this agent; repeatable
+  --scope shared|personal  Only the shared or the personal settings file. Default: both

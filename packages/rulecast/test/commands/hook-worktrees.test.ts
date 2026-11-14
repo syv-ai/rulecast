@@ -9,6 +9,7 @@ import { localConfig } from "../helpers/config"
 import { createRepo, git } from "../helpers/git"
 import { testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
+import { stopVerdict } from "../helpers/stop"
 
 const RULES = [
   {
@@ -41,7 +42,7 @@ async function worktrees(settings: Record<string, unknown> = {}) {
   const told = (stdout: string) => (stdout === "" ? "" : JSON.parse(stdout).hookSpecificOutput.additionalContext)
   const stopOf = async (name: string, cwd: string, agentId?: string) => {
     const { stdout } = await hook(name, cwd, { agentId })
-    return (stdout === "" ? {} : JSON.parse(stdout)) as { decision?: string; reason?: string }
+    return stopVerdict(stdout)
   }
   /** The subagent edits b.py in its worktree with the edit tool, which records that worktree as its project. */
   const subEdits = async (content: string) => {

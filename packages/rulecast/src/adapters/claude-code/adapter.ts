@@ -1,11 +1,15 @@
 import { renderAgentText } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
-import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "./hook-script"
+import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE, personalHookCommand, personalHookDir } from "./hook-script"
 import { parseClaudeCode } from "./parse"
 import { mergeHooks, removeHooks } from "./settings"
 
-/** Claude Code replaces longer additionalContext with a pointer to a file (test/payloads/claude-code/README.md). */
+/**
+ * Claude Code replaces longer additionalContext (Stop's included) with a pointer to a file
+ * (test/payloads/claude-code/README.md). A block reason or a deny's reason is not capped there; it
+ * is held to the same limit as a budget of rulecast's own, so no answer outgrows another.
+ */
 export const CONTEXT_LIMIT = 10_000
 
 /** Budget handed to commit: far enough below the limit that rendering overhead never crosses it. */
@@ -28,21 +32,25 @@ function configsOf(delivery: Delivery): Configs {
   return { source: `rulecast rules (these configs: ${configs.join(", ")})`, files: "these configs" }
 }
 
-const BLOCK_PREAMBLE = ({ source, files }: Configs) =>
-  `${source} found problems in code changed in this session. Fix them before you finish. ` +
+/** When the agent must have fixed them: its stop, or (a subagent in auto mode) its hand-back. */
+type Before = "you finish" | "you hand back your report"
+
+const BLOCK_PREAMBLE = ({ source, files }: Configs, before: Before) =>
+  `${source} found problems in code changed in this session. Fix them before ${before}. ` +
   `If you believe a finding is wrong, say so to the user rather than changing ${files}; add a "rulecast-ignore: <rule> <reason>" comment only if they agree.`
 
 /** Nobody is there to ask: a disputed finding is written down where the run's results are read. */
-const UNATTENDED_BLOCK_PREAMBLE = ({ source, files }: Configs) =>
-  `${source} found problems in code changed in this session. Fix them before you finish. ` +
+const UNATTENDED_BLOCK_PREAMBLE = ({ source, files }: Configs, before: Before) =>
+  `${source} found problems in code changed in this session. Fix them before ${before}. ` +
   "Nobody is watching this run to ask. If you believe a finding is wrong, leave that code as it is, record the finding and your reason in this run's decisions file or final report, and carry on with the rest. " +
   `Do not change ${files}. A "rulecast-ignore" comment does not silence a finding in code changed in this run.`
 
 /** Unattended, once per prompt: the last block, which turns what is left into the run's report. */
-const REPORT_PREAMBLE = ({ source }: Configs) =>
+const REPORT_PREAMBLE = ({ source }: Configs, before: Before) =>
   `${source} still find these problems, and rulecast will not block this run for them again ` +
   "(its stop limit is reached, or they have already blocked twice). Do not keep retrying them. " +
-  "Record each one as unresolved in your final report, and in this run's decisions file if it keeps one, with why it is unresolved. Then finish."
+  "Record each one as unresolved in your final report, and in this run's decisions file if it keeps one, with why it is unresolved. " +
+  (before === "you finish" ? "Then finish." : "Then hand back your report.")
 
 /**
  * Unattended, once per prompt: nothing blocks, but rules did not run (#29). Reported, not repaired:
@@ -65,9 +73,15 @@ const SWEPT_PREAMBLE =
 const DENY_PREAMBLE = ({ source }: Configs) =>
   `${source} refuse this write. Change what you are writing, or the file you are writing it to, and try again.`
 
+/** At a subagent's start: where the project's conventions are written, for it to read. */
+const DOCS_PREAMBLE = "This project's conventions are written in these files; read the ones that bear on your task:"
+
+/** At most this many docs are listed; a subagent's start is a pointer, not a reading list. */
+const MAX_CONVENTION_DOCS = 8
+
 /**
- * Findings in files changed outside the agent's tool calls never block, and a Stop hook reaches the
- * agent only by blocking: the user is the one left to tell. Only those findings: the agent's own
+ * Findings in files changed outside the agent's tool calls never block, and an allowed stop does
+ * not continue the turn: the user is the one left to tell. Only those findings: the agent's own
  * warnings were told at its edits and are not news here. Null when no file was swept.
  */
 function sweptMessage(delivery: Delivery, event: Event, options: { maxMatchesPerRule: number }): string | null {
@@ -116,6 +130,15 @@ function withinLimit(text: string, delivery: Delivery, event: Event): string {
 const NONE = { stdout: "", exitCode: 0 }
 const json = (value: unknown) => ({ stdout: JSON.stringify(value), exitCode: 0 })
 
+/** A subagent's start: the project's convention docs as a short list of paths, into its own context. */
+function conventionDocs(docs: readonly string[]): { stdout: string; exitCode: number } {
+  if (docs.length === 0) return NONE
+  const listed = docs.slice(0, MAX_CONVENTION_DOCS)
+  const more = docs.length - listed.length
+  const lines = [DOCS_PREAMBLE, ...listed.map((doc) => `- ${doc}`), ...(more > 0 ? [`- and ${more} more`] : [])]
+  return json({ hookSpecificOutput: { hookEventName: "SubagentStart", additionalContext: lines.join("\n") } })
+}
+
 export const claudeCodeAdapter: Adapter = {
   name: "claude-code",
   label: "Claude Code",
@@ -124,6 +147,7 @@ export const claudeCodeAdapter: Adapter = {
   restoredFiles: 5,
   parse: parseClaudeCode,
   format(delivery, event, options) {
+    if (event.kind === "agent-start") return conventionDocs(delivery.conventionDocs ?? [])
     const text = renderAgentText(delivery, { ...options, notices: false, warnings: false })
     // For the user, never the model: config changes and ignores added this session (spec §9,
     // Oversight), and rule or detector problems, which only the human can fix (§11).
@@ -161,8 +185,8 @@ export const claudeCodeAdapter: Adapter = {
         return json(
           withNotices({
             hookSpecificOutput: {
-              // A command that failed fired PostToolUseFailure, which takes context only under its own name.
-              hookEventName: event.kind !== "touch" && event.failed === true ? "PostToolUseFailure" : "PostToolUse",
+              // A command or a read that failed fired PostToolUseFailure, which takes context only under its own name.
+              hookEventName: event.failed === true ? "PostToolUseFailure" : "PostToolUse",
               additionalContext: withinLimit(text, delivery, event),
             },
           }),
@@ -177,25 +201,47 @@ export const claudeCodeAdapter: Adapter = {
           }),
         )
       case "verify": {
-        // A Stop hook reaches the agent only by blocking: Claude Code takes no additionalContext from
-        // Stop, and a stop that is let through ends a headless run. So the unattended report is a block.
         if (delivery.stop === "block" || delivery.stop === "report") {
+          const handback = event.handback === true
           const preamble = (
             delivery.stop === "report"
               ? REPORT_PREAMBLE
               : delivery.unattended === true
                 ? UNATTENDED_BLOCK_PREAMBLE
                 : BLOCK_PREAMBLE
-          )(configsOf(delivery))
+          )(configsOf(delivery), handback ? "you hand back your report" : "you finish")
           // Before the findings, so the limit's cut, which takes the tail, never takes it.
           const notChecked =
             disabled.length === 0 ? "" : `${NOT_CHECKED}\n${disabled.map((d) => `- ${d}`).join("\n")}\n\n`
-          return json(
-            withNotices({
-              decision: "block",
-              reason: withinLimit(`${preamble}\n\n${notChecked}${text}`, delivery, event),
-            }),
-          )
+          const message = withinLimit(`${preamble}\n\n${notChecked}${text}`, delivery, event)
+          // Auto mode: refusing the hand-back keeps the subagent working; a SubagentStop block after
+          // it is recorded and lost. Claude Code retries a refused hand-back only so often before
+          // the report is lost, which the pipeline's cap stays under (README in test/payloads).
+          if (handback) {
+            return json(
+              withNotices({
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: message,
+                },
+              }),
+            )
+          }
+          // Attended, findings are context: Stop and SubagentStop take additionalContext, which
+          // continues the turn like a block (under the same loop protection) without reading as a
+          // blocking error. Unattended, the hold stays a block, worded as one: nobody is watching.
+          if (delivery.unattended !== true) {
+            return json(
+              withNotices({
+                hookSpecificOutput: {
+                  hookEventName: event.session?.agentId === undefined ? "Stop" : "SubagentStop",
+                  additionalContext: message,
+                },
+              }),
+            )
+          }
+          return json(withNotices({ decision: "block", reason: message }))
         }
         if (delivery.stop === "capReached") {
           const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
@@ -216,10 +262,15 @@ export const claudeCodeAdapter: Adapter = {
     markers: [".claude/", "CLAUDE.md"],
     scopes: [
       { scope: "shared", file: ".claude/settings.json" },
-      { scope: "personal", file: ".claude/settings.local.json" },
+      // Read at the git top, and in a worktree from the main checkout (test/payloads/claude-code/README.md).
+      { scope: "personal", file: ".claude/settings.local.json", at: "checkout" },
     ],
-    // Every entry runs the script; the script finds a rulecast, or says none is installed.
+    // Every entry runs the script; the script finds a rulecast, or says none is installed. A personal
+    // entry names it by its absolute path: settings.local.json is read at the git top even when a
+    // session starts below it, where $CLAUDE_PROJECT_DIR is (test/payloads/claude-code/README.md).
     command: HOOK_COMMAND,
+    commandFor: (scope, dir) => (scope === "personal" ? personalHookCommand(dir) : HOOK_COMMAND),
+    dirOf: personalHookDir,
     files: [{ file: HOOK_SCRIPT_FILE, content: HOOK_SCRIPT }],
     merge: mergeHooks,
     remove: removeHooks,

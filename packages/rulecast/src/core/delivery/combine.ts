@@ -27,6 +27,7 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  * - `stop`: the strongest (STOPS). `unattended` and `via: "shell"`: set if any part sets them.
  * - `warnings` and `notices`: concatenated, each prefixed with its config's path relative to
  *   `displayFrom`. `agentNotices` are about the session, not a config: unprefixed, said once.
+ * - `conventionDocs`: concatenated in part order, each path once.
  * - `configs`: the config of each part with something for the agent (`forAgent`), relative to
  *   `displayFrom`, in part order: a preamble names the configs whose rules it is about, not every
  *   config the event ran.
@@ -57,6 +58,7 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
   }
   const firstTemplate = new Map<string, string>()
   const agentNotices = new Set<string>()
+  const conventionDocs = new Set<string>()
 
   for (const { root, delivery } of parts) {
     // A rule id an earlier part already delivers with a different template gets this part's label.
@@ -97,11 +99,13 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
       combined.notices = [...(combined.notices ?? []), ...delivery.notices.map((notice) => prefix + notice)]
     }
     for (const notice of delivery.agentNotices ?? []) agentNotices.add(notice)
+    for (const doc of delivery.conventionDocs ?? []) conventionDocs.add(doc)
 
     mergeOmitted(combined.omitted, delivery.omitted, label)
   }
 
   if (agentNotices.size > 0) combined.agentNotices = [...agentNotices]
+  if (conventionDocs.size > 0) combined.conventionDocs = [...conventionDocs]
   return combined
 }
 

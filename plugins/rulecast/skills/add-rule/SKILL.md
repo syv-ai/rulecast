@@ -55,6 +55,8 @@ Follow [DRAFT-RULES.md](https://raw.githubusercontent.com/syv-ai/rulecast/v0.14.
 
 ## 5. Finish
 
+If the approved rule has `refuse_write` (adopted with `rulecast add` or written into the config), run `rulecast install` where sessions start, so the hook that refuses writes is registered. `rulecast add` says so when it is missing.
+
 Tell the developer, briefly:
 
 - the convention, and the doc section it now cites;

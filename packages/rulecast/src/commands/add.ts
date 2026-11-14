@@ -3,12 +3,18 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 import { parse } from "yaml"
 
+import { ADAPTERS } from "../adapters"
+import { compile } from "../core/compile/project"
 import { CONFIG_FILE, parseConfig } from "../core/config/load"
+import type { ActiveMode } from "../core/config/mode"
 import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { cacheHome } from "../core/home"
 import { catalogEntry, loadCatalog, selectRules } from "../core/repos/catalog"
+import { cachedRepos } from "../core/repos/provider"
 import { addCatalogRules } from "../init/config-text"
+import { guardMissing, installRemedy } from "./doctor-hooks"
+import { hookConfigs, hookState, settingsDir } from "./install"
 import type { CliIo } from "./main"
 import { hasProject } from "./project"
 import { UsageError } from "./usage"
@@ -67,6 +73,31 @@ export async function addCommand(root: string, args: string[], registry: Detecto
   out.push(`Added from ${catalog.label}:`, ...added.map((rule) => `  ${rule.id}  ${rule.name}`), "")
   const report = await validationReport(root, home, registry)
   out.push(...report.lines)
+  const remedy = await guardRemedy(root, new Set(added.map((rule) => rule.id)), registry, io)
+  if (remedy !== null) out.push(`Run ${remedy} so the write guard is registered.`)
   io.stdout(`${out.join("\n")}\n`)
   return report.errors > 0 ? 2 : 0
+}
+
+/**
+ * The install command to run when an added rule refuses writes (in either mode) while the hooks
+ * where sessions start here have no write guard to refuse them with; null otherwise.
+ */
+async function guardRemedy(
+  root: string,
+  ids: ReadonlySet<string>,
+  registry: DetectorRegistry,
+  io: CliIo,
+): Promise<string | null> {
+  const home = cacheHome(io.env)
+  const unattended: ActiveMode = { mode: "unattended", source: "default", detail: "" }
+  const project = await compile({ root, registry, repos: cachedRepos(home), mode: unattended }).catch(() => null)
+  if (!project?.rules.some((rule) => ids.has(rule.id) && rule.enabled && rule.refuseWrite)) return null
+  const dir = settingsDir(io.cwd)
+  const { verifyMs } = await hookConfigs(dir, "add", undefined, () => {}).catch(() => ({ verifyMs: 60_000 }))
+  for (const adapter of ADAPTERS) {
+    if (adapter.install === null || !(await guardMissing(dir, adapter, verifyMs))) continue
+    return installRemedy(dir, adapter, (await hookState(dir, adapter, verifyMs).catch(() => null))?.file ?? null)
+  }
+  return null
 }

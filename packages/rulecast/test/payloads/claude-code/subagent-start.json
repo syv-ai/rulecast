@@ -1,0 +1,9 @@
+{
+  "session_id": "997650a3-2a88-45db-be54-b73a7b6e1a0c",
+  "transcript_path": "/home/user/.claude/projects/-project/997650a3-2a88-45db-be54-b73a7b6e1a0c.jsonl",
+  "cwd": "/project",
+  "prompt_id": "7dee0cf4-e39e-4be9-b27e-017222bf33bc",
+  "agent_id": "a71f8ee6da970bffb",
+  "agent_type": "general-purpose",
+  "hook_event_name": "SubagentStart"
+}

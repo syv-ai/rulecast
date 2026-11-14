@@ -1,0 +1,7 @@
+{
+  "session_id": "d6fe2d63-4e87-4087-8f49-d18c0995be82",
+  "transcript_path": "/home/user/.claude/projects/-project--claude-worktrees-wt1/d6fe2d63-4e87-4087-8f49-d18c0995be82.jsonl",
+  "cwd": "/project/.claude/worktrees/wt1",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}

@@ -45,9 +45,10 @@ repos:
 | `timeouts.edit_deadline_ms` | `350` | Detection deadline after an edit. A detector still running then is dropped for that edit: the agent gets what finished, and the dropped rules that have the `verify` stage run again when it stops |
 | `timeouts.verify_ms` | `60000` | Detection timeout when an agent stops and in `rulecast run`. After raising it, run `rulecast install` where sessions start: the stop hooks' timeout follows the largest `verify_ms` of the configs they serve |
 | `subagent_projects` | `include` | Whether the main agent's shell calls and stop also check this project when only its subagents worked in it, as in a subagent's own worktree. `exclude` leaves it to the subagents' own hooks |
-| `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt |
+| `subagent_docs` | `true` | Whether a subagent starting in this project is handed the paths of its convention docs: the `conventions` file or folder and the files its local rules cite, at most 8, never their content. `false` hands nothing |
+| `stop_gate.max_blocks` | `1` | Stops blocked per agent per user prompt. A subagent's hand-back (Claude Code's auto mode) is blocked at most once, whatever this says ([below](#unattended-mode)) |
 | `mode` | none | `attended` or `unattended`: whether a person answers the agent. `RULECAST_MODE` overrides it, and it overrides CI detection ([below](#unattended-mode)) |
-| `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks` |
+| `unattended.max_blocks` | `10` | Stops blocked per agent per prompt in unattended mode, instead of `stop_gate.max_blocks`. Claude Code lets at most 8 blocks in a row through without a tool call in between ([below](#unattended-mode)) |
 | `unattended.escalate` | `[]` | Ids of `warning` rules that are `error` in unattended mode |
 | `refuse_gate.max_refusals` | `1` | Writes a `refuse_write` rule may refuse per file per session |
 | `llm.model` | none | The model for `llm` rules that name none. Set only when the developer has agreed to llm rules |
@@ -91,7 +92,7 @@ A repository can hold any number of `.rulecast-config.yaml` files: one at the to
 | `severity` | no, default `error` | `error` blocks the agent's stop and fails `rulecast run`; `warning` is delivered and never blocks |
 | `escalate` | no, default `false` | `true`: `error` in [unattended mode](#unattended-mode), whatever `severity` says. The same as listing the id in `unattended.escalate`. A catalog rule's `escalate: true` is turned off with `escalate: false` on its entry |
 | `scope` | no, default `instance` | Whether the convention belongs to the matched token or to the node around it, or, with `removed`, whether a file lost matches (below) |
-| `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode) |
+| `refuse_write` | no, default `false` | Refuse an edit-tool write when this rule fires on what the agent is writing; catch a shell write right after it (below). `unattended`: only in [unattended mode](#unattended-mode). After adding the first such rule, run `rulecast install` where sessions start: the hook that refuses writes is registered only where a config needs it |
 | `enabled` | no, default `true` | `false` switches the rule off without deleting it; works as an override on a catalog rule (below) |
 | `detect` | unless `stages: [touch]` | One detector, `{ <kind>: <config> }`: see [detectors.md](detectors.md) |
 | `fix` | no; inside `detect.regex` or `detect.ast-grep` | The replacement `rulecast fix` writes over each match (below). No other detector takes one |
@@ -242,6 +243,8 @@ once, with how to revert it (`git checkout -- <file>`, or "undo only your change
 uncommitted work before the session). Stop is blocked while the finding is new, whatever the rule's
 severity, and the developer is told which file the agent changed.
 
+The hook that refuses a write runs before every edit, so `rulecast install` registers it only where a config a session reaches has a `refuse_write` rule. After adding the first one, run `rulecast install` where sessions start; `rulecast add` and `rulecast doctor` say when it is missing.
+
 `refuse_write` needs a detector that can judge content it is handed: `regex`, `path` or `ast-grep`, and `edit` among the rule's stages.
 `linter`, `command` and `llm` hand a path to another program, which would read the file as it still
 is, so `rulecast validate` rejects them.
@@ -253,7 +256,7 @@ watching should not. Its requirements are the same as for `true`.
 ### Unattended mode
 
 The stop gate assumes someone is in the loop. When the agent stops with new `error` findings, the
-gate blocks the stop and the agent gets a turn to fix them. That happens once per user prompt
+gate holds the stop: the agent is given the findings and a turn to fix them. That happens once per user prompt
 (`stop_gate.max_blocks`). After that the findings go to the developer as a message. A goal loop
 (Claude Code's `/goal`), `claude -p`, a scheduled task or a CI job sends one prompt and has nobody
 reading messages, so it gets one block per run. After that enforcement quietly ends.
@@ -273,6 +276,22 @@ In unattended mode:
   findings and told to record each one as unresolved in its final report, or in the run's decisions
   file if it keeps one, and then finish. This happens once per prompt. A later stop is let through
   with the findings in a message, as in attended mode.
+
+Claude Code has a limit of its own: a stop hook may continue the turn at most 8 times in a row
+without the agent calling a tool in between (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`). Past it the stop
+goes through. An agent that fixes findings calls tools, which starts the count again, so the limit
+matters only to an agent that keeps stopping without changing anything. rulecast's own rules keep
+that short: a finding stops blocking after two blocks, and the report follows. A refused write
+changed with the shell blocks until it is reverted, so with `unattended.max_blocks` above 7 such a
+run can reach Claude Code's limit before rulecast's report. Other Stop hooks count towards the same
+limit.
+
+In Claude Code's auto mode a subagent ends by handing its report back to the main agent, and a
+block at its stop comes too late to keep it working. rulecast checks the subagent at the hand-back
+instead, and refuses it with the findings. Claude Code tries the hand-back again only a few times
+before the report is lost (four refusals in a row lost it in a recorded run), so a hand-back is
+refused at most once, and unattended once more to report, whatever `max_blocks` says. The main
+agent's stop checks the subagent's files as well.
 - **A block tells the agent that nobody is there to ask.** If it believes a finding is wrong, it
   leaves the code, records the finding and its reason in the decisions file or final report, and
   carries on. In attended mode it would say so to the developer.
@@ -461,7 +480,7 @@ A rule that fires three or more times has its `message` printed once, with the v
 
 ### File types
 
-`file` (every file), `text` (every extension below), `python` (`.py`, `.pyi`), `pyi`, `ts` (`.ts`, `.mts`, `.cts`), `tsx`, `javascript` (`.js`, `.mjs`, `.cjs`), `jsx`, `markdown` (`.md`), `mdx`, `yaml` (`.yaml`, `.yml`), `json`, `toml`, `css`, `scss`, `html`, `shell` (`.sh`), `sql`, `go`, `rust` (`.rs`), `plain-text` (`.txt`). `ts` does not include `tsx`: write `types_or: [ts, tsx]`. An unknown tag is a `rulecast validate` error.
+`file` (every file), `text` (every extension below), `python` (`.py`, `.pyi`, `.pyt`, `.wsgi`, `.tac`, `.gyp`, `.gypi`, `wscript`, `.pdbrc`), `pyi`, `ts` (`.ts`, `.mts`, `.cts`), `tsx`, `javascript` (`.js`, `.mjs`, `.cjs`), `jsx`, `markdown` (`.md`, `.markdown`), `mdx`, `yaml` (`.yaml`, `.yml`, `.eyaml`, `.yamlld`, `.clang-format` and other config names), `json` (`.json`, `.ipynb`, `.geojson`, `.jsonld`, `.babelrc`, `Pipfile.lock` and others), `toml` (`.toml`, `Cargo.toml`, `Cargo.lock`, `Pipfile`, `poetry.lock`), `css`, `scss`, `html` (`.html`, `.htm`, `.xhtml`), `shell` (`.sh`, `.bash`, `.zsh`, `.csh`, `.bats`, `.bashrc`, `.envrc`, `PKGBUILD` and other shell files), `sql`, `go`, `rust` (`.rs`), `plain-text` (`.txt`, `README`, `LICENSE`, `AUTHORS` and other such names, `README.md` too). These follow pre-commit's identify 2.6: a file name counts by its first part identify knows (`README` in `README.md`). An executable file whose name and extension identify doesn't know (no extension, or one such as `.foo`; never `deploy.rb`, which identify types as Ruby) is typed by its shebang, read as identify reads it: `python`, `python3.12` or `pypy` gives `python`; `sh`, `bash`, `zsh`, `dash`, `ksh` and other shells give `shell`; `node` gives `javascript`, also through `#!/usr/bin/env [-S] …`, a quoted interpreter path, or nix-shell's `-i` on a later `#!` line. Only its first 256 bytes are read (4 KiB for nix-shell), once per file per run, and only for a rule that has type tags. A symlink has no type, as in identify: a rule with type tags never takes it, and its `exclude_types` never leave it out. `ts` does not include `tsx`: write `types_or: [ts, tsx]`. An unknown tag is a `rulecast validate` error.
 
 ### Stages
 

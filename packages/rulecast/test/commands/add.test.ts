@@ -60,6 +60,19 @@ const catalogIds = (text: string) =>
     .sort()
 
 describe("rulecast add", () => {
+  test("a rule that refuses writes, added where the hooks have no write guard, says to run install", async () => {
+    const root = await createRepo(PROJECT)
+    expect((await runCli(root, ["install"], "", env)).code).toBe(0)
+    const plain = await runCli(root, ["add", "loop-safety/no-new-suppressions"], "", env)
+    expect(plain.stdout).not.toContain("write guard")
+    const refusing = await runCli(root, ["add", "loop-safety/protected-loop-config"], "", env)
+    expect(refusing.stdout).toContain("Run rulecast install here so the write guard is registered.")
+    expect((await runCli(root, ["install"], "", env)).code).toBe(0)
+    // Registered: a second refusing rule says nothing more.
+    const again = await runCli(root, ["add", "loop-safety/no-lowered-thresholds"], "", env)
+    expect(again.stdout).not.toContain("write guard")
+  })
+
   test("adds one catalog rule, pinned to the catalog's latest tag, keeping the config's text", async () => {
     const root = await createRepo(PROJECT)
     const result = await runCli(root, ["add", "python/no-silent-except"], "", env)

@@ -20,6 +20,7 @@ import { createRepo } from "../helpers/git"
 import { stateDirFor, testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 import { pipelineAt } from "../helpers/pipeline"
+import { stopVerdict } from "../helpers/stop"
 
 /** Rule A, in the top config: every Python file in the repository. */
 const TOP_RULES = [
@@ -85,7 +86,7 @@ function agent(repo: string, launch = ".", cwd = launch) {
   }
   const stop = async () => {
     const { stdout } = await hook("stop")
-    return stdout === "" ? null : JSON.parse(stdout)
+    return stopVerdict(stdout)
   }
   /** The guard's decision on writing `file` (relative to cwd): "deny", or null when it lets it through. */
   const guard = async (file: string): Promise<string | null> => {
@@ -318,7 +319,7 @@ describe("rulecast hook claude-code: configs anywhere", () => {
       const result = await pipelineAt(direct, event, { ...options, stopGate: kind === "verify" })
       formatted.push(claudeCodeAdapter.format(result.delivery, event, { maxMatchesPerRule }).stdout)
     }
-    expect(hooked[1]).toContain('"decision":"block"')
+    expect(stopVerdict(hooked[1]!).decision).toBe("block")
     expect(hooked).toEqual(formatted)
   })
 })

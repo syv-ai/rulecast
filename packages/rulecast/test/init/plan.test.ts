@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 import { parse } from "yaml"
 
 import { adapterByName } from "../../src/adapters"
-import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE } from "../../src/adapters/claude-code/hook-script"
+import { HOOK_SCRIPT, HOOK_SCRIPT_FILE, personalHookCommand } from "../../src/adapters/claude-code/hook-script"
 import { CONFIG_FILE } from "../../src/core/config/load"
 import { addCatalogRules, newConfigText, setSettings } from "../../src/init/config-text"
 import { type PlanContext, PlanError, planInit, reviewText } from "../../src/init/plan"
@@ -12,8 +12,10 @@ const install = claude.install!
 const settings = { conventions: "docs/conventions/", llmModel: "haiku" }
 
 /** Settings as install.merge would write them. */
-const merged = (settings: unknown) =>
-  `${JSON.stringify(install.merge(settings, install.command, 60000).settings, null, 2)}\n`
+const merged = (settings: unknown, command = install.command) =>
+  `${JSON.stringify(install.merge(settings, command, 60000).settings, null, 2)}\n`
+/** A personal settings file names the script by its absolute path, here the context's dir. */
+const PERSONAL_COMMAND = personalHookCommand("/project")
 
 /** The hook script, as init plans it beside the settings. */
 const script = (commit: boolean) => ({
@@ -28,6 +30,8 @@ function context(files: Record<string, string>, overrides: Partial<PlanContext> 
   return {
     configText: files[CONFIG_FILE] ?? null,
     verifyMs: 60000,
+    dir: "/project",
+    guard: true,
     readText: async (file) => files[file] ?? null,
     ...overrides,
   }
@@ -51,7 +55,7 @@ describe("planInit", () => {
         file: ".claude/settings.json",
         content: merged({}),
         created: true,
-        summary: "+11 hooks (Claude Code)",
+        summary: "+15 hooks (Claude Code)",
         commit: true,
       },
       script(true),
@@ -71,14 +75,14 @@ describe("planInit", () => {
     expect(changes).toEqual([
       {
         file: ".claude/settings.local.json",
-        content: merged(existing),
+        content: merged(existing, PERSONAL_COMMAND),
         created: false,
-        summary: "+11 hooks (Claude Code)",
+        summary: "+15 hooks (Claude Code)",
         commit: false,
       },
       script(false),
     ])
-    expect(changes[0]!.content).toContain(JSON.stringify(HOOK_COMMAND))
+    expect(changes[0]!.content).toContain(JSON.stringify(PERSONAL_COMMAND))
   })
 
   test("settings current and the script missing: only the script is planned", async () => {
@@ -92,29 +96,18 @@ describe("planInit", () => {
   test("re-running changes nothing that is already there", async () => {
     const files = {
       [CONFIG_FILE]: newConfigText([], settings),
-      ".claude/settings.local.json": merged({}),
+      ".claude/settings.local.json": merged({}, PERSONAL_COMMAND),
       [HOOK_SCRIPT_FILE]: HOOK_SCRIPT,
     }
-    const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
+    const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "personal" as const }] }
     expect(await planInit(selections, context(files))).toEqual([])
   })
 
-  test("hooks on an older command in both settings files: one change per file, each committed by its scope", async () => {
-    const OLDER = '"$CLAUDE_PROJECT_DIR"/node_modules/.bin/rulecast hook claude-code'
-    const older = `${JSON.stringify(install.merge({}, OLDER, 60000).settings, null, 2)}\n`
-    const files = {
-      [CONFIG_FILE]: newConfigText([], settings),
-      ".claude/settings.json": older,
-      ".claude/settings.local.json": older,
-      [HOOK_SCRIPT_FILE]: HOOK_SCRIPT,
-    }
+  test("a scope that would run rulecast twice is refused, as install refuses it, and nothing is planned", async () => {
+    const files = { [CONFIG_FILE]: newConfigText([], settings) }
     const selections = { hooks: [], catalog: null, settings, agents: [{ adapter: claude, scope: "shared" as const }] }
-    const changes = await planInit(selections, context(files))
-    expect(changes.map(({ file, commit, summary }) => ({ file, commit, summary }))).toEqual([
-      { file: ".claude/settings.json", commit: true, summary: "~11 hooks updated (Claude Code)" },
-      { file: ".claude/settings.local.json", commit: false, summary: "~11 hooks updated (Claude Code)" },
-    ])
-    expect(JSON.parse(changes[1]!.content)).toEqual(install.merge({}, HOOK_COMMAND, 60000).settings)
+    const conflict = async () => "sessions started here would run rulecast twice"
+    await expect(planInit(selections, { ...context(files), conflict })).rejects.toThrow("would run rulecast twice")
   })
 
   test("settings are added to an existing config", async () => {

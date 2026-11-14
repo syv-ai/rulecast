@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
 
@@ -149,6 +150,30 @@ function sessionRootsFile(cache: string, sessionId: string): string {
   return path.join(cache, "sessions", `${safeSegment(sessionId)}.roots`)
 }
 
+function sessionAgentTypeFile(cache: string, sessionId: string): string {
+  return path.join(cache, "sessions", `${safeSegment(sessionId)}.agent-type`)
+}
+
+/**
+ * The agent type the session runs as (Claude Code's `--agent`), as its main-thread events name it.
+ * Written only when it changes, so the event that names it again costs a read.
+ */
+export async function rememberSessionAgentType(cache: string, sessionId: string, agentType: string): Promise<void> {
+  if ((await sessionAgentType(cache, sessionId)) === agentType) return
+  const file = sessionAgentTypeFile(cache, sessionId)
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeFile(file, agentType)
+}
+
+/** The type rememberSessionAgentType kept, or null when no main-thread event named one. */
+export async function sessionAgentType(cache: string, sessionId: string): Promise<string | null> {
+  try {
+    return await readFile(sessionAgentTypeFile(cache, sessionId), "utf8")
+  } catch {
+    return null
+  }
+}
+
 /**
  * A root an agent of the session ran: `a` is the agent id, MAIN_AGENT for the main agent. `s` marks
  * the roots a session start found, above and below the launch directory.
@@ -248,16 +273,29 @@ export async function projectsForEvent(
     records.filter((record) => (record.a === event.agent) === mine).map((record) => record.r)
   if (!CHECKS.has(event.kind)) return { own: dedupe([...here, ...records.map((record) => record.r)]), subagents: [] }
   if (!main) {
-    const cwd = path.resolve(event.cwd)
-    const below = records
-      .filter((record) => record.s === true && record.r.startsWith(`${cwd}${path.sep}`))
-      .map((record) => record.r)
-      .filter((root) => !inOtherCheckout(root, cwd))
+    const below = startRootsBelow(records, event.cwd)
     return { own: dedupe([...here, ...below, ...recorded(true)]), subagents: [] }
   }
   const own = dedupe([...here, ...recorded(true)])
   const ownReal = new Set(own.map(realPath))
   return { own, subagents: dedupe(recorded(false)).filter((root) => !ownReal.has(realPath(root))) }
+}
+
+/**
+ * The roots the session start found below `cwd`, in `cwd`'s own checkout: a subagent's projects
+ * there, as its shell calls and stop reach them.
+ */
+function startRootsBelow(records: readonly RootRecord[], cwd: string): string[] {
+  const dir = path.resolve(cwd)
+  return records
+    .filter((record) => record.s === true && record.r.startsWith(`${dir}${path.sep}`))
+    .map((record) => record.r)
+    .filter((root) => !inOtherCheckout(root, dir))
+}
+
+/** startRootsBelow, read from the session's records. */
+export async function sessionStartRootsBelow(cache: string, sessionId: string, cwd: string): Promise<string[]> {
+  return startRootsBelow(await rootRecords(cache, sessionId), cwd)
 }
 
 function realPath(dir: string): string {

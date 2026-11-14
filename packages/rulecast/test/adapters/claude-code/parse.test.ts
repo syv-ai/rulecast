@@ -139,12 +139,189 @@ describe("Claude Code adapter: parse", () => {
 
   test.each([
     "post-tool-use.agent",
-    "post-tool-use-failure.read.too-large",
     "subagent-stop.compaction",
     "pre-compact.manual",
     "user-prompt-submit.task-notification",
+    // Recorded on 2.1.325: a background shell job and an isolated subagent finishing.
+    "user-prompt-submit.task-notification.shell",
+    "user-prompt-submit.task-notification.isolated",
+    // Auto mode: a subagent's report reaches the parent as a prompt of its own.
+    "user-prompt-submit.agent-message",
+    // Neither changes anything rulecast judges; the worktree is the PostToolUse's to report.
+    "pre-tool-use.enter-worktree",
+    "post-tool-batch",
+    "instructions-loaded",
   ])("%s has no event", (name) => {
     expect(parse(name).parsed).toEqual({ cwd: "/project", event: null, warmup: false })
+  })
+
+  describe("prompts: only the user's own reset the stop gate", () => {
+    const prompt = (fields: Record<string, unknown>) =>
+      parseClaudeCode({ ...claudeCodePayload("user-prompt-submit"), ...fields })?.event?.kind ?? null
+
+    test.each([
+      ["user", "prompt"],
+      ["sdk", "prompt"],
+      ["system", null],
+      ["loop_wakeup", null],
+      ["schedule_wakeup", null],
+      ["poll_event", null],
+    ])("source %s → %s", (source, kind) => {
+      expect(prompt({ source })).toBe(kind)
+    })
+
+    test("source, when the payload has it, decides over the prompt's text", () => {
+      expect(prompt({ source: "user", prompt: '<agent-message from="a1">\nquoted by the user' })).toBe("prompt")
+      expect(prompt({ source: "system", prompt: "fix the tests" })).toBeNull()
+    })
+
+    test("without source, a hand-back or a task notification is not a prompt", () => {
+      expect(prompt({ prompt: '<agent-message from="a65b7cea55f00760c">\n[Subagent hand-back]' })).toBeNull()
+      expect(prompt({ prompt: "<task-notification>\n<task-id>b1</task-id>" })).toBeNull()
+      expect(prompt({ prompt: "what does <agent-message mean?" })).toBe("prompt")
+    })
+  })
+
+  describe("agent types (--agent sessions)", () => {
+    test("a main-thread event names the type the session runs as; one without names none", () => {
+      const payload = { ...claudeCodePayload("stop"), agent_type: "reviewer" }
+      expect(parseClaudeCode(payload)?.agentType).toBe("reviewer")
+      expect(parseClaudeCode(claudeCodePayload("stop"))).not.toHaveProperty("agentType")
+    })
+
+    test("a subagent's stop carries its type, so the hook can tell an internal agent from a real one", () => {
+      const { payload, parsed } = parse("subagent-stop")
+      expect(parsed?.event?.kind).toBe("verify")
+      expect(parsed?.agentType).toBe(payload.agent_type)
+    })
+  })
+
+  describe("subagent hand-back (auto mode, 2.1.325)", () => {
+    test("pre-tool-use.subagent-handback → the subagent's stop, marked a hand-back", () => {
+      const { payload, parsed } = parse("pre-tool-use.subagent-handback")
+      expect(parsed?.event).toEqual({
+        kind: "verify",
+        files: [],
+        cwd: "/project",
+        session: { id: payload.session_id, agentId: payload.agent_id },
+        handback: true,
+      })
+    })
+
+    test("a SubagentStop after the hand-back has no event: its block would be lost, and the hand-back was checked", () => {
+      expect(parse("subagent-stop.after-handback").parsed?.event).toBeNull()
+      expect(parse("post-tool-use.subagent-handback").parsed?.event).toBeNull()
+    })
+
+    test("a SubagentStop after a refused hand-back is an ordinary stop", () => {
+      const { payload, parsed } = parse("subagent-stop.handback-denied")
+      expect(parsed?.event?.kind).toBe("verify")
+      expect(parsed?.event?.session).toEqual({ id: payload.session_id, agentId: payload.agent_id })
+    })
+
+    test("a SubagentStop without the last message outside auto mode is still checked", () => {
+      const payload = { ...claudeCodePayload("subagent-stop.after-handback"), permission_mode: "acceptEdits" }
+      expect(parseClaudeCode(payload)?.event?.kind).toBe("verify")
+    })
+  })
+
+  describe("work still running at a stop", () => {
+    test("stop.background-task names the running subagent", () => {
+      const event = parse("stop.background-task").parsed?.event
+      expect(event?.kind === "verify" ? event.running : null).toEqual({ agents: ["a65251da8a4fb4436"], shells: 0 })
+    })
+
+    test("stop.background-shell counts the running shell job", () => {
+      const event = parse("stop.background-shell").parsed?.event
+      expect(event?.kind === "verify" ? event.running : null).toEqual({ agents: [], shells: 1 })
+    })
+
+    test("a SubagentStop's tasks are the parent session's, the stopping subagent among them: ignored", () => {
+      const { payload, parsed } = parse("subagent-stop.background-self")
+      expect((payload.background_tasks as { id: string }[])[0]?.id).toBe(payload.agent_id)
+      expect(parsed?.event?.kind).toBe("verify")
+      expect(parsed?.event).not.toHaveProperty("running")
+    })
+
+    test("finished tasks are not running", () => {
+      const payload = claudeCodePayload("stop.background-task")
+      payload.background_tasks = [{ id: "a1", type: "subagent", status: "completed" }]
+      expect(parseClaudeCode(payload)?.event).not.toHaveProperty("running")
+    })
+  })
+
+  describe("worktrees the agent moves into", () => {
+    test.each([
+      ["post-tool-use.enter-worktree", "/project/.claude/worktrees/wt2"],
+      ["post-tool-use.exit-worktree", "/project/.claude/worktrees/wt2"],
+    ])("%s → the worktree, as a directory the agent works in", (name, dir) => {
+      const { payload, parsed } = parse(name)
+      expect(parsed?.event).toBeNull()
+      expect(parsed?.workDirs).toEqual({ dirs: [dir], session: { id: payload.session_id } })
+    })
+  })
+
+  describe("subagent start", () => {
+    test.each([
+      ["subagent-start", "/project"],
+      ["subagent-start.isolated", "/project/.claude/worktrees/agent-a2bd60c5593ec0e01"],
+    ])("%s → agent-start in the subagent's cwd", (name, cwd) => {
+      const { payload, parsed } = parse(name)
+      expect(parsed).toEqual({
+        cwd,
+        warmup: false,
+        agentType: payload.agent_type,
+        event: { kind: "agent-start", files: [], cwd, session: { id: payload.session_id, agentId: payload.agent_id } },
+      })
+    })
+
+    test("an internal agent's start (empty type) has no event", () => {
+      const payload = { ...claudeCodePayload("subagent-start"), agent_type: "" }
+      expect(parseClaudeCode(payload)?.event).toBeNull()
+    })
+  })
+
+  describe("other edit tools", () => {
+    test("post-tool-use.notebook-edit → edit of the notebook", () => {
+      const { payload, parsed } = parse("post-tool-use.notebook-edit")
+      expect(parsed?.event).toEqual({
+        kind: "edit",
+        files: ["/project/n.ipynb"],
+        cwd: "/project",
+        session: { id: payload.session_id },
+      })
+    })
+
+    test("a MultiEdit's PostToolUse → edit of its file", () => {
+      const payload = {
+        ...claudeCodePayload("post-tool-use.edit"),
+        tool_name: "MultiEdit",
+        tool_input: { file_path: "/project/src/math.ts", edits: [{ old_string: "a", new_string: "b" }] },
+      }
+      expect(parseClaudeCode(payload)?.event?.files).toEqual(["/project/src/math.ts"])
+    })
+
+    test("before a NotebookEdit or a MultiEdit there is no guard: what they would write is not known exactly", () => {
+      expect(parse("pre-tool-use.notebook-edit").parsed?.event).toBeNull()
+      const multi = {
+        ...claudeCodePayload("pre-tool-use.edit"),
+        tool_name: "MultiEdit",
+        tool_input: { file_path: "/project/src/math.ts", edits: [{ old_string: "a", new_string: "b" }] },
+      }
+      expect(parseClaudeCode(multi)?.event).toBeNull()
+    })
+
+    test("post-tool-use-failure.read.too-large → touch, not complete, marked failed", () => {
+      const { payload, parsed } = parse("post-tool-use-failure.read.too-large")
+      expect(parsed?.event).toEqual({
+        kind: "touch",
+        files: [(payload.tool_input as { file_path: string }).file_path],
+        cwd: "/project",
+        session: { id: payload.session_id },
+        completeRead: false,
+        failed: true,
+      })
+    })
   })
 
   test.each(["session-start.clear", "session-start.fork"])(

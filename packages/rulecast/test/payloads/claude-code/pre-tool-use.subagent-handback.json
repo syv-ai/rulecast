@@ -1,0 +1,18 @@
+{
+  "session_id": "4feb0756-aef1-4b25-b42a-923d1b66bff7",
+  "transcript_path": "/home/user/.claude/projects/-project/4feb0756-aef1-4b25-b42a-923d1b66bff7.jsonl",
+  "cwd": "/project",
+  "prompt_id": "87a19406-18bc-48c4-91e2-7fd52425cd5d",
+  "permission_mode": "auto",
+  "agent_id": "aeed669f00f10b5ab",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "SubagentHandback",
+  "tool_input": {
+    "message": "done. Created /project/n.txt containing the single character N."
+  },
+  "tool_use_id": "toolu_01YQsa1nguFYaySvsyTNFqkJ"
+}

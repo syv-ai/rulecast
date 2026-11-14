@@ -9,7 +9,9 @@ import {
   HOOK_SCRIPT_FILE,
   NOT_INSTALLED,
   NOT_INSTALLED_UNATTENDED,
+  personalHookCommand,
 } from "../../../src/adapters/claude-code/hook-script"
+import { createRepo, git } from "../../helpers/git"
 import { breakPathRulecast, LOOKUP_FIXTURES, lookupEnv, lookupSetup } from "../../helpers/lookup"
 import { createProject } from "../../helpers/project"
 
@@ -251,5 +253,50 @@ describe("the committed hook script", () => {
     const bare = path.join(parent, "it's bare")
     mkdirSync(bare, { recursive: true })
     expect(JSON.parse(hook(bare, { hook_event_name: "SessionStart" }).stdout)).toEqual({ systemMessage: NOT_INSTALLED })
+  })
+
+  describe("where the project is: beside the script, not where the session started", () => {
+    test("started in a subdirectory, the project's rulecast is still found (personal scope's absolute command)", async () => {
+      const root = await createProject({})
+      const seen = path.join(root, "seen.txt")
+      stub(path.join(root, "node_modules", ".bin"), seen, '{"ok":true}')
+      mkdirSync(path.join(root, "backend"), { recursive: true })
+      // Claude Code reads settings.local.json at the git top, but sets CLAUDE_PROJECT_DIR to the subdirectory.
+      mkdirSync(path.join(root, path.dirname(HOOK_SCRIPT_FILE)), { recursive: true })
+      writeFileSync(path.join(root, HOOK_SCRIPT_FILE), HOOK_SCRIPT)
+      const result = spawnSync("sh", ["-c", personalHookCommand(root)], {
+        input: "{}",
+        env: { PATH: "/usr/bin:/bin", CLAUDE_PROJECT_DIR: path.join(root, "backend") },
+        encoding: "utf8",
+      })
+      expect(result.stdout).toBe('{"ok":true}\n')
+    })
+
+    test("the personal command quotes a path with a space and a single quote", () => {
+      const command = personalHookCommand("/tmp/it's here")
+      expect(spawnSync("sh", ["-c", `printf '%s' ${command.slice(3)}`], { encoding: "utf8" }).stdout).toBe(
+        "/tmp/it's here/.claude/hooks/rulecast.sh",
+      )
+    })
+
+    test("a linked worktree without node_modules runs the main checkout's rulecast, found without git", async () => {
+      const main = await createRepo({ "a.txt": "a\n" })
+      const seen = path.join(main, "seen.txt")
+      stub(path.join(main, "node_modules", ".bin"), seen, '{"main":true}')
+      const worktree = path.join(main, ".claude", "worktrees", "wt1")
+      await git(main, "worktree", "add", "-q", worktree)
+      const result = hook(worktree, { hook_event_name: "PostToolUse" })
+      expect(result).toEqual({ code: 0, stdout: '{"main":true}\n', stderr: "" })
+      // The worktree's own rulecast, when it has one, wins.
+      stub(path.join(worktree, "node_modules", ".bin"), seen, '{"own":true}')
+      expect(hook(worktree, { hook_event_name: "PostToolUse" }).stdout).toBe('{"own":true}\n')
+    })
+
+    test("a submodule's .git file is no worktree: nothing is looked for above it", async () => {
+      const root = await createProject({})
+      mkdirSync(path.join(root, "gitdir"), { recursive: true })
+      writeFileSync(path.join(root, ".git"), "gitdir: gitdir\n")
+      expect(hook(root, { hook_event_name: "PostToolUse" })).toEqual({ code: 0, stdout: "", stderr: "" })
+    })
   })
 })

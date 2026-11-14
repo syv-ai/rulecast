@@ -1,0 +1,17 @@
+{
+  "session_id": "4feb0756-aef1-4b25-b42a-923d1b66bff7",
+  "transcript_path": "/home/user/.claude/projects/-project/4feb0756-aef1-4b25-b42a-923d1b66bff7.jsonl",
+  "cwd": "/project",
+  "prompt_id": "87a19406-18bc-48c4-91e2-7fd52425cd5d",
+  "permission_mode": "auto",
+  "agent_id": "aeed669f00f10b5ab",
+  "agent_type": "general-purpose",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/home/user/.claude/projects/-project/4feb0756-aef1-4b25-b42a-923d1b66bff7/subagents/agent-aeed669f00f10b5ab.jsonl",
+  "background_tasks": [],
+  "session_crons": []
+}

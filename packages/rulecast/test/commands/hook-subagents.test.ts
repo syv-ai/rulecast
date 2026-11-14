@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest"
 import { runCli } from "../helpers/cli"
 import { createFixture } from "../helpers/fixture"
 import { claudeCodePayload } from "../helpers/payloads"
+import { stopVerdict } from "../helpers/stop"
 
 const USERS = "app/services/users.py"
 const ORDERS = "app/services/orders.py"
@@ -15,7 +16,7 @@ function hook(root: string, name: string, overrides: { file?: string; agentId?: 
 }
 
 const stopOf = async (root: string, name: string, agentId?: string) =>
-  JSON.parse((await hook(root, name, { agentId })).stdout || "{}") as { decision?: string; reason?: string }
+  stopVerdict((await hook(root, name, { agentId })).stdout)
 
 describe("rulecast hook claude-code with two subagents", () => {
   test("each SubagentStop is blocked only for its own file; the main Stop for both", async () => {

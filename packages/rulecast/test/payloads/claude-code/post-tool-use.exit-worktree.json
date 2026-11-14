@@ -1,0 +1,26 @@
+{
+  "session_id": "af4ea9d7-34ed-4432-8447-e1d44affa982",
+  "transcript_path": "/home/user/.claude/projects/-project/af4ea9d7-34ed-4432-8447-e1d44affa982.jsonl",
+  "cwd": "/project",
+  "prompt_id": "30592383-81a4-488e-9a76-5b652224bd48",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "ExitWorktree",
+  "tool_input": {
+    "action": "keep"
+  },
+  "tool_response": {
+    "action": "keep",
+    "originalCwd": "/project",
+    "worktreePath": "/project/.claude/worktrees/wt2",
+    "worktreeBranch": "worktree-wt2",
+    "restoredCwd": "/project",
+    "originalCwdMissing": false,
+    "message": "Exited worktree. Your work is preserved at “/project/.claude/worktrees/wt2” on branch “worktree-wt2”. Session is now back in “/project”."
+  },
+  "tool_use_id": "toolu_01CMDyvGnAH4cTEKUc6EXgET",
+  "duration_ms": 510
+}

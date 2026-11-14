@@ -228,6 +228,11 @@ export const configSchema = z
      * subagent's never reach another agent's projects either way (core/projects.ts).
      */
     subagent_projects: z.enum(["include", "exclude"]).default("include"),
+    /**
+     * Whether a subagent is handed, as it starts, the paths of this project's convention docs: the
+     * `conventions` file or folder and the docs its local rules cite. Paths only, never content.
+     */
+    subagent_docs: z.boolean().default(true),
     stop_gate: z
       .object({ max_blocks: z.number().int().nonnegative().default(1) })
       .strict()
@@ -291,6 +296,7 @@ export const configSchema = z
     maxFileBytes: input.max_file_bytes,
     timeouts: { editDeadlineMs: input.timeouts.edit_deadline_ms, verifyMs: input.timeouts.verify_ms },
     subagentProjects: input.subagent_projects,
+    subagentDocs: input.subagent_docs,
     stopGate: { maxBlocks: input.stop_gate.max_blocks },
     refuseGate: { maxRefusals: input.refuse_gate.max_refusals },
     mode: input.mode ?? null,

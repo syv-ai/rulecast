@@ -25,7 +25,7 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
 import { FINDING_ID_VERSION } from "../core/finding-id"
-import { allFiles, isShallow, mergeBase } from "../core/git"
+import { allFiles, isShallow, mergeBase, repositoryTop } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
 import { runPipeline } from "../core/pipeline"
 import { configRootsAbove } from "../core/projects"
@@ -36,12 +36,24 @@ import { decide } from "../core/session/decide"
 import { emptyContext, emptyWork } from "../core/session/state"
 import { isOlder, VERSION } from "../core/version"
 import {
+  FILE_TEMPLATE,
+  findLefthookJob,
+  lefthookCommand,
+  lefthookDump,
+  preCommitHookScope,
+} from "../detectors/hook/resolve"
+import { type HookConfig, hookName } from "../detectors/hook/schema"
+import { filesSaid, filterText, type RuleFilter, verdictOf } from "../detectors/hook/scope"
+import { rebaseJob } from "../init/hooks"
+import { agentHookChecks, hooksWithoutProject, installRemedy, judgedGuard, unfetchedRepos } from "./doctor-hooks"
+import {
   configLabel,
   type HookRulecast,
   hookConfigs,
   hookRulecasts,
   hookState,
   reachableConfigs,
+  refuseWriteRoots,
   settingsDir,
 } from "./install"
 import type { CliIo } from "./main"
@@ -56,9 +68,11 @@ function runsLabel(runs: HookRulecast): string {
   const label =
     runs.via === "project"
       ? "node_modules/.bin/rulecast"
-      : runs.via === "path"
-        ? `rulecast on the PATH (${runs.path})`
-        : `install.sh's rulecast at ${runs.path}, ${runs.installedOnPath ? "on the PATH" : "which is not on the PATH"}`
+      : runs.via === "main-checkout"
+        ? `the main checkout's rulecast (${runs.path}), as this worktree has no node_modules`
+        : runs.via === "path"
+          ? `rulecast on the PATH (${runs.path})`
+          : `install.sh's rulecast at ${runs.path}, ${runs.installedOnPath ? "on the PATH" : "which is not on the PATH"}`
   return runs.version === null ? label : `${label} ${runs.version}`
 }
 
@@ -70,7 +84,7 @@ function runsLabel(runs: HookRulecast): string {
  * so only npm's update is offered. Printed, never run: installing is the developer's step.
  */
 function updateRemedy(runs: HookRulecast, minimum: string, dir: string): string {
-  if (runs.via === "project") return "update @syv-ai/rulecast in package.json"
+  if (runs.via === "project" || runs.via === "main-checkout") return "update @syv-ai/rulecast in package.json"
   const pinned = isOlder(VERSION, minimum)
   const install = pinned ? pinnedInstallCommand(minimum) : INSTALL_COMMAND
   if (runs.via === "installed") return `install a newer one: ${install}`
@@ -96,7 +110,14 @@ function naming(rules: string[]): string {
 
 /** "PreToolUse (Bash)", "PostToolUse (Bash)" → "Bash": the tools a missing hook watches, else the group. */
 function missingNames(groups: string[]): string {
-  const names = groups.map((group) => (/ToolUse/.test(group) ? (/\((.*)\)$/.exec(group)?.[1] ?? group) : group))
+  // The write guard shares its matcher with the edit hook: named by its event, so the two are told apart.
+  const names = groups.map((group) =>
+    group === "PreToolUse (Edit|Write)"
+      ? "the write guard (PreToolUse Edit|Write)"
+      : /ToolUse/.test(group)
+        ? (/\((.*)\)$/.exec(group)?.[1] ?? group)
+        : group,
+  )
   return [...new Set(names)].join(", ")
 }
 
@@ -160,6 +181,7 @@ export async function doctorCommand(
 
   if (!hasProject(root)) {
     io.stdout(`home       ${home}\n`)
+    await reportHooksWithoutProject(io)
     io.stderr(`rulecast: no ${CONFIG_FILE} in ${io.cwd} or its parents (run rulecast init)\n`)
     return 2
   }
@@ -221,12 +243,17 @@ export async function doctorCommand(
     env: io.env,
     timeoutMs: CHECK_TIMEOUT_MS,
   })
-  if (results.length > 0) {
+  const everyChange = await everyChangeHooks(project, AbortSignal.timeout(CHECK_TIMEOUT_MS))
+  if (results.length > 0 || everyChange.length > 0) {
     io.stdout("\nenvironment\n")
     for (const result of results) {
       count(result.level)
       const rules = result.level === "ok" ? "" : naming(result.rules)
       io.stdout(line(result.level, result.what, `${result.detail}${rules}`))
+    }
+    for (const result of everyChange) {
+      count("warning")
+      io.stdout(line("warning", result.rule, result.detail))
     }
   }
   // Rules that cannot run here: said once, above, and not timed again (--time).
@@ -252,18 +279,25 @@ export async function doctorCommand(
   const verifyMs =
     (await hookConfigs(dir, "doctor", undefined, () => {}).catch(() => null))?.verifyMs ??
     project.config.timeouts.verifyMs
+  // The configs here whose refuse_write rules need the hook before every edit (agentHookChecks).
+  const guardRoots = await refuseWriteRoots(await reachableConfigs(dir), registry, home)
+  const unfetched = await unfetchedRepos(dir, home)
   for (const adapter of ADAPTERS) {
     if (adapter.install === null) continue
     // Settings that cannot be read are a problem on this line, not the end of the report: the rest
     // of what doctor checks does not depend on them.
     let state: Awaited<ReturnType<typeof hookState>>
     try {
-      state = await hookState(dir, adapter, verifyMs)
+      state = await hookState(dir, adapter, verifyMs, await judgedGuard(dir, adapter, verifyMs, guardRoots, unfetched))
     } catch (error) {
       const level: Level = ci ? "error" : "warning"
       count(level)
       io.stdout(
-        line(level, adapter.label, `cannot read the hooks: ${errorMessage(error)}; fix it, then run rulecast install`),
+        line(
+          level,
+          adapter.label,
+          `cannot read the hooks: ${errorMessage(error)}; fix it, then run rulecast install here`,
+        ),
       )
       continue
     }
@@ -306,21 +340,27 @@ export async function doctorCommand(
       runs !== null && tooOld
         ? `${runsLabel(runs)}, older than minimum_rulecast_version ${minimum}; ${updateRemedy(runs, minimum!, installDir(io.env))}`
         : null
+    // The remedy for the hooks found: personal ones are upgraded by a personal install.
+    const reinstall = await installRemedy(dir, adapter, file)
     const detail =
       file === null
-        ? "not installed (run rulecast install)"
+        ? "not installed (run rulecast install here)"
         : gone !== null
           ? // Every hook that runs the file fails first; with no rulecast either, both need doing.
-            `${file} — but ${gone.file} is missing, so every hook ${state?.allRun ? "" : "that runs it "}fails; run rulecast install` +
+            `${file} — but ${gone.file} is missing, so every hook ${state?.allRun ? "" : "that runs it "}fails; run ${reinstall}` +
             (outOfDate === null ? "" : `. Also: ${outOfDate}`) +
             (runs ? (oldVersion === null ? "" : `. Also: it runs ${oldVersion}`) : `. And ${cannotRun}`)
           : !runs
             ? // The binary comes first: run rulecast install alone would leave a hook with nothing to run.
-              `${file} — but ${cannotRun}${outOfDate === null ? "" : ` Also: ${outOfDate}; run rulecast install.`}`
+              `${file} — but ${cannotRun}${outOfDate === null ? "" : ` Also: ${outOfDate}; run ${reinstall}.`}`
             : outOfDate !== null
-              ? `${file} — but ${outOfDate}; run rulecast install${oldVersion === null ? "" : `. Also: it runs ${oldVersion}`}`
+              ? `${file} — but ${outOfDate}; run ${reinstall}${oldVersion === null ? "" : `. Also: it runs ${oldVersion}`}`
               : `${file} — runs ${oldVersion ?? runsLabel(runs)}`
     io.stdout(line(level, adapter.label, detail))
+    for (const check of await agentHookChecks(dir, adapter, verifyMs, guardRoots, unfetched)) {
+      count(check.level)
+      io.stdout(line(check.level, check.what, check.detail))
+    }
   }
   io.stdout("\ncache\n")
   io.stdout(`  home       ${home}\n`)
@@ -410,6 +450,100 @@ export async function doctorCommand(
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** A rule that picks no files of its own: every change reaches its detector. */
+const unfiltered = ({ patterns }: DetectorRule) =>
+  patterns.files === "" &&
+  patterns.types.every((tag) => tag === "file") &&
+  patterns.typesOr.length === 0 &&
+  patterns.excludeTypes.length === 0
+
+/**
+ * Hook rules that run a whole-project hook on every change, docs included: the hook does not get
+ * the files it is run on (always_run, pass_filenames: false, a lefthook job with no files
+ * template), and the rule names no files. pre-commit still skips a pass_filenames: false hook when
+ * no file matches its filter, so only one with none counts. hk applies a step's glob and types to
+ * the files it is given, so its rules are not here.
+ */
+async function everyChangeHooks(
+  project: CompiledProject,
+  signal: AbortSignal,
+): Promise<{ rule: string; detail: string }[]> {
+  const rules = project.rules.filter(
+    (rule): rule is DetectorRule =>
+      isDetectorRule(rule) && rule.enabled && rule.detector.kind === "hook" && unfiltered(rule),
+  )
+  if (rules.length === 0) return []
+  const top = await repositoryTop(project.root).catch(() => project.root)
+  const relative = path.relative(top, project.root)
+  const prefix = relative === "" ? "" : `${relative.split(path.sep).join("/")}/`
+  const found: { rule: string; detail: string }[] = []
+  const say = (rule: DetectorRule, hook: string, detail: string) =>
+    found.push({ rule: rule.id, detail: `runs ${hook} on every change, docs included${detail}` })
+  const NAME_THEM = "add `files` or `types_or` to the rule naming the files it checks"
+  const NONE = `, and the hook names no files or types; ${NAME_THEM}`
+  const UNKNOWN = `, and the hook's manifest isn't on disk, so its filter is unknown; ${NAME_THEM}`
+  const WHOLE = `, and the hook's files and types take in every file in this project; ${NAME_THEM}`
+  const only = (said: string, filter: RuleFilter) =>
+    `; its hook only cares about ${said}; add ${filterText(filter)} to the rule to run it only then`
+  let dump: unknown
+  for (const rule of rules) {
+    const config = rule.detector.config as HookConfig
+    try {
+      if (config["pre-commit"] !== undefined) {
+        const scope = await preCommitHookScope(top, config["pre-commit"])
+        if (scope === null) continue
+        const hook = hookName(config)
+        if (scope.filter === null) {
+          // A remote hook with no clone and no filter of its own in the config.
+          if (scope.alwaysRun === true) say(rule, hook, UNKNOWN)
+          continue
+        }
+        const verdict = verdictOf(scope.filter, prefix)
+        // pre-commit skips a pass_filenames: false hook itself when no file matches its filter.
+        const whatever = scope.alwaysRun === true || scope.passFilenames === false
+        if (verdict.kind === "none" && whatever) say(rule, hook, NONE)
+        else if (verdict.kind === "whole" && whatever) say(rule, hook, WHOLE)
+        else if (scope.alwaysRun !== true) continue
+        else if (verdict.kind === "filter") {
+          const said =
+            verdict.left === null
+              ? filesSaid(verdict.rule, true)
+              : `${filesSaid(verdict.rule, true)}, narrowed further by ${verdict.left.parts}, which a rule can't match (${verdict.left.why})`
+          say(rule, hook, only(said, verdict.rule))
+        } else if (verdict.kind === "left") {
+          say(
+            rule,
+            hook,
+            `; its hook's filter, ${verdict.parts}, can't be matched by a rule (${verdict.why}); ${NAME_THEM}`,
+          )
+        }
+      } else if (config.lefthook !== undefined) {
+        if (dump === undefined) {
+          const command = await lefthookCommand(project.root, top, signal)
+          dump = command === null ? null : await lefthookDump(command, top, signal)
+        }
+        const job = findLefthookJob(dump, config.lefthook)
+        if (job === null || FILE_TEMPLATE.test(job.run)) continue
+        const root = job.root === "" ? "" : `${job.root}/`
+        const rebased = rebaseJob(job.globs, root, prefix)
+        if (job.globs.length === 0 && root === "") say(rule, config.lefthook, NONE)
+        else if (!("files" in rebased)) continue
+        else if (rebased.files === null) say(rule, config.lefthook, WHOLE)
+        else {
+          const where =
+            job.globs.length === 0
+              ? `files under ${root}`
+              : `files matching ${job.globs.join(" or ")}${root === "" ? "" : ` under ${root}`}`
+          say(rule, config.lefthook, only(where, { files: rebased.files }))
+        }
+      }
+    } catch {
+      // The environment checks above say what is wrong with the hook manager.
+    }
+  }
+  return found
+}
 
 /** "2026-03-02 (228 days ago)": a date says when, the count says whether to worry. */
 function dated(date: Date, now: Date): string {
@@ -858,4 +992,15 @@ async function timeRules(input: TimeInput): Promise<DryRunLine[]> {
       : { rule: what, level: "ok", detail: `${seconds(took)} of ${seconds(budget)} ${how}` },
   )
   return lines
+}
+
+/** With no config here or above, the hooks sessions here run are still said, and an error among them counted by the exit code doctor already returns. */
+async function reportHooksWithoutProject(io: CliIo): Promise<void> {
+  const dir = settingsDir(io.cwd)
+  const lines: string[] = []
+  for (const adapter of ADAPTERS) {
+    if (adapter.install === null) continue
+    for (const check of await hooksWithoutProject(dir, adapter)) lines.push(line(check.level, check.what, check.detail))
+  }
+  if (lines.length > 0) io.stdout(`\nhooks in ${dir}\n${lines.join("")}`)
 }

@@ -1,0 +1,9 @@
+{
+  "session_id": "861321d1-d188-4e2f-9012-a2a7acfa5b61",
+  "transcript_path": "/home/user/.claude/projects/-project/861321d1-d188-4e2f-9012-a2a7acfa5b61.jsonl",
+  "cwd": "/project",
+  "prompt_id": "e17da49e-b7b6-4012-8611-34d159803364",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<task-notification>\n<task-id>b6srtt01b</task-id>\n<tool-use-id>toolu_018tNULXkLpqFsHxWAFr9rf5</tool-use-id>\n<output-file>/private/tmp/claude-501/-home-user--claude-jobs-8781a7ba-tmp-impl-nb/861321d1-d188-4e2f-9012-a2a7acfa5b61/tasks/b6srtt01b.output</output-file>\n<status>completed</status>\n<summary>Background command \"Sleep 20 seconds then write done to s.txt\" completed (exit code 0)</summary>\n</task-notification>"
+}

@@ -1,0 +1,22 @@
+{
+  "session_id": "260818eb-9dc0-4551-9aaa-e5e15a3ec787",
+  "transcript_path": "/home/user/.claude/projects/-project/260818eb-9dc0-4551-9aaa-e5e15a3ec787.jsonl",
+  "cwd": "/project",
+  "prompt_id": "69b3aa9d-cf43-4371-9fe1-5caaf4d0d467",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolBatch",
+  "tool_calls": [
+    {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "printf 'hi' > notes.txt && cat notes.txt && echo && printf 'hello' > notes.txt && cat notes.txt",
+        "description": "Create notes.txt with hi, then overwrite with hello"
+      },
+      "tool_use_id": "toolu_01AN1mkXakjYx3x4pU6tPEEZ",
+      "tool_response": "hi\nhello"
+    }
+  ]
+}

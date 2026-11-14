@@ -1,0 +1,9 @@
+{
+  "session_id": "a14d2488-9582-4850-a7f0-1cba1de80cdb",
+  "transcript_path": "/home/user/.claude/projects/-project/a14d2488-9582-4850-a7f0-1cba1de80cdb.jsonl",
+  "cwd": "/project",
+  "prompt_id": "e7e76056-d1d5-4220-8f5d-00cfd46867ee",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<task-notification>\n<task-id>a2bd60c5593ec0e01</task-id>\n<tool-use-id>toolu_01FNfjyJ8q5gzU9pqVYd7JD2</tool-use-id>\n<output-file>/private/tmp/claude-501/-home-user--claude-jobs-8781a7ba-tmp-workshop-worktrees-repo/a14d2488-9582-4850-a7f0-1cba1de80cdb/tasks/a2bd60c5593ec0e01.output</output-file>\n<status>completed</status>\n<summary>Agent \"Create notes.txt with hi\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>This agent's report was delivered to you as a message from \"a2bd60c5593ec0e01\" (its SubagentHandback call). Read it there; it is not repeated here.\n</result>\n<usage><subagent_tokens>5044</subagent_tokens><tool_uses>2</tool_uses><duration_ms>8312</duration_ms></usage>\n<worktree><worktreePath>/project/.claude/worktrees/agent-a2bd60c5593ec0e01</worktreePath><worktreeBranch>worktree-agent-a2bd60c5593ec0e01</worktreeBranch></worktree>\n</task-notification>"
+}

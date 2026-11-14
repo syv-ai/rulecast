@@ -5,6 +5,8 @@ import type { DisabledGroup } from "./disabled"
 /**
  * `start`: the session began or resumed. `shell-before` / `shell-after`: around one call of the
  * agent's shell tool, whose writes rulecast finds by comparing the working tree (session/tree.ts).
+ * `agent-start`: a subagent was launched, in `cwd`; it may be handed pointers to the project's
+ * convention docs (Delivery.conventionDocs).
  */
 export type EventKind =
   | "touch"
@@ -16,6 +18,7 @@ export type EventKind =
   | "start"
   | "shell-before"
   | "shell-after"
+  | "agent-start"
 export type DetectorEvent = "edit" | "verify"
 export type Severity = "error" | "warning"
 export type ReferenceMode = "inject" | "read"
@@ -65,7 +68,13 @@ interface ShellCall {
 export type Event = EventBase &
   (
     | { kind: "guard" /** What the agent is about to write to `files[0]`. */; intent: WriteIntent }
-    | { kind: "touch" /** From a read: the whole file was read. */; completeRead?: boolean }
+    | {
+        kind: "touch"
+        /** From a read: the whole file was read. */
+        completeRead?: boolean
+        /** The read failed (a file too large to read): the agent asked for it all the same. */
+        failed?: boolean
+      }
     /** An edit tool's, or a shell call's after that changed files: then it keeps the call's fields. */
     | ({ kind: "edit" } & ShellCall)
     | {
@@ -74,10 +83,20 @@ export type Event = EventBase &
         baseCommit?: string
         /** From the CLI: where current content is read from. Absent: the working tree. */
         content?: ContentSource
+        /**
+         * A subagent handing its report back to its parent (Claude Code's SubagentHandback): a
+         * stop the adapter answers by refusing the hand-back, which keeps the subagent working.
+         */
+        handback?: boolean
+        /**
+         * Work the agent started that was still running when it stopped: subagents by agent id,
+         * and how many background shell jobs. The working tree is not final while any run.
+         */
+        running?: { agents: string[]; shells: number }
       }
     | ({ kind: "shell-before" } & ShellCall)
     | ({ kind: "shell-after" } & ShellCall)
-    | { kind: "prompt" | "reset" | "start" }
+    | { kind: "prompt" | "reset" | "start" | "agent-start" }
   )
 
 /** `Omit` over each variant of a union, which plain `Omit` collapses into one. */
@@ -474,6 +493,11 @@ export interface Delivery {
    * as another agent's shell call running alongside its own. Printed first, so a cut never drops it.
    */
   agentNotices?: string[]
+  /**
+   * At a subagent's start: the project's convention docs, as paths from the agent's cwd, for the
+   * subagent to read. Paths only, never their content.
+   */
+  conventionDocs?: string[]
 }
 
 export interface AdapterInput {
@@ -483,6 +507,18 @@ export interface AdapterInput {
   event: Event | null
   /** Start detector warm-up (§13). */
   warmup: boolean
+  /**
+   * The agent type the payload names, when it names one: on a main-thread event, the type the
+   * session runs as (Claude Code's `--agent`); on a subagent's, that subagent's. Internal agents
+   * (compaction, say) report the session's type, which is how a subagent stop tells them apart.
+   */
+  agentType?: string
+  /**
+   * Directories the agent now works in, from its own tool calls (Claude Code: EnterWorktree,
+   * ExitWorktree): their projects become the agent's before it edits anything there. `event` is
+   * null; `session` says whose they are.
+   */
+  workDirs?: { dirs: string[]; session: { id: string; agentId?: string } }
 }
 
 export type InstallScope = "shared" | "personal"
@@ -491,9 +527,20 @@ export interface AdapterInstall {
   /** Paths whose presence means the project uses this agent (init); a trailing "/" means a directory. */
   markers: string[]
   /** Settings files, repo-relative, that hooks can be written to. */
-  scopes: { scope: InstallScope; file: string }[]
-  /** The command every hook entry runs. */
+  /**
+   * `at: "checkout"`: the agent reads this file at the top of the checkout a session starts in (a
+   * linked worktree's: the main checkout's top), not where the session starts.
+   */
+  scopes: { scope: InstallScope; file: string; at?: "checkout" }[]
+  /** The command every hook entry runs, unless `commandFor` says otherwise for a scope. */
   command: string
+  /**
+   * The command a settings file of `scope` runs when installed in `dir`: a personal file, never
+   * committed, may name this machine's paths. Absent: `command` everywhere.
+   */
+  commandFor?(scope: InstallScope, dir: string): string
+  /** The directory a command of `commandFor`'s names, or null: for a caller that plans without it. */
+  dirOf?(command: string): string | null
   /**
    * Files the hooks need beside the settings, relative to the settings' directory, with the content
    * install writes. Generated: one that differs is rewritten.
@@ -503,12 +550,14 @@ export interface AdapterInstall {
    * Adds the hooks. `updated` (optional, for adapters that can tell): the adapter's own hooks whose
    * command differed from `command` and were rewritten — an older install upgraded in place.
    * `upgradeOnly`: rewrite the hooks that are there and add none, for a second settings file.
+   * `guard`: whether a hook that refuses writes is wanted (a config they serve has a refuse_write
+   * rule); default true. False leaves it out, and removes one an older install wrote.
    */
   merge(
     settings: unknown,
     command: string,
     verifyMs: number,
-    options?: { upgradeOnly?: boolean },
+    options?: { upgradeOnly?: boolean; guard?: boolean },
   ): { settings: unknown; added: string[]; updated?: string[] }
   remove(settings: unknown): { settings: unknown; removed: string[] }
 }

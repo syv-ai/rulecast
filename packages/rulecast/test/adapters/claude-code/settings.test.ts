@@ -34,15 +34,21 @@ describe("Claude Code settings: mergeHooks", () => {
           PreToolUse: [
             { matcher: "Edit|Write", hooks: [hook(5)] },
             { matcher: "Bash", hooks: [hook(5)] },
+            { matcher: "SubagentHandback", hooks: [hook(70)] },
           ],
           PostToolUse: [
             { matcher: "Read", hooks: [hook(5)] },
-            { matcher: "Edit|Write", hooks: [hook(5)] },
+            { matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [hook(5)] },
+            { matcher: "Bash", hooks: [hook(5)] },
+            { matcher: "EnterWorktree|ExitWorktree", hooks: [hook(5)] },
+          ],
+          PostToolUseFailure: [
+            { matcher: "Read", hooks: [hook(5)] },
             { matcher: "Bash", hooks: [hook(5)] },
           ],
-          PostToolUseFailure: [{ matcher: "Bash", hooks: [hook(5)] }],
           Stop: [{ hooks: [hook(70)] }],
           SubagentStop: [{ hooks: [hook(70)] }],
+          SubagentStart: [{ hooks: [hook(5)] }],
           UserPromptSubmit: [{ hooks: [hook(5)] }],
           SessionStart: [
             { matcher: "startup|resume|compact", hooks: [hook(5)] },
@@ -53,17 +59,74 @@ describe("Claude Code settings: mergeHooks", () => {
       added: [
         "PreToolUse (Edit|Write)",
         "PostToolUse (Read)",
-        "PostToolUse (Edit|Write)",
+        "PostToolUseFailure (Read)",
+        "PostToolUse (Edit|Write|MultiEdit|NotebookEdit)",
         "PreToolUse (Bash)",
         "PostToolUse (Bash)",
         "PostToolUseFailure (Bash)",
+        "PreToolUse (SubagentHandback)",
+        "PostToolUse (EnterWorktree|ExitWorktree)",
         "Stop",
         "SubagentStop",
+        "SubagentStart",
         "UserPromptSubmit",
         "SessionStart (startup|resume|compact)",
         "SessionStart (clear|fork)",
       ],
       updated: [],
+    })
+  })
+
+  test("an install whose edit hook has the older Edit|Write matcher has it widened in place, not doubled", () => {
+    const once = mergeHooks({}, COMMAND, 60_000).settings
+    const hooks = structuredClone(once.hooks) as Record<string, { matcher?: string }[]>
+    const edits = hooks.PostToolUse!.find((group) => group.matcher === "Edit|Write|MultiEdit|NotebookEdit")!
+    edits.matcher = "Edit|Write"
+    const upgraded = mergeHooks({ hooks }, COMMAND, 60_000)
+    expect(upgraded.added).toEqual([])
+    expect(upgraded.updated).toEqual(["PostToolUse (Edit|Write|MultiEdit|NotebookEdit)"])
+    expect(upgraded.settings).toEqual(once)
+  })
+
+  test("an older Edit|Write group the user shares is left as it is; rulecast's hook moves to its own group", () => {
+    const own = { type: "command", command: "my-format" }
+    const once = mergeHooks({}, COMMAND, 60_000).settings
+    const hooks = structuredClone(once.hooks) as Record<string, { matcher?: string; hooks: unknown[] }[]>
+    const edits = hooks.PostToolUse!.find((group) => group.matcher === "Edit|Write|MultiEdit|NotebookEdit")!
+    edits.matcher = "Edit|Write"
+    edits.hooks.unshift(own)
+    const upgraded = mergeHooks({ hooks }, COMMAND, 60_000)
+    expect(upgraded.added).toEqual([])
+    expect(upgraded.updated).toEqual(["PostToolUse (Edit|Write|MultiEdit|NotebookEdit)"])
+    const post = (upgraded.settings.hooks as Record<string, unknown[]>).PostToolUse
+    expect(post).toContainEqual({ matcher: "Edit|Write", hooks: [own] })
+    expect(post).toContainEqual({ matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [hook(5)] })
+    expect(mergeHooks(upgraded.settings, COMMAND, 60_000).updated).toEqual([])
+  })
+
+  describe("the write guard (refuse_write)", () => {
+    test("without a refuse_write rule to serve, there is no PreToolUse Edit|Write hook", () => {
+      const { settings, added } = mergeHooks({}, COMMAND, 60_000, { guard: false })
+      expect(added).not.toContain("PreToolUse (Edit|Write)")
+      const pre = (settings.hooks as Record<string, { matcher?: string }[]>).PreToolUse!
+      expect(pre.map((group) => group.matcher)).toEqual(["Bash", "SubagentHandback"])
+    })
+
+    test("an installed guard no longer needed is removed, and a user's own hook in its group kept", () => {
+      const own = { type: "command", command: "my-edit-check" }
+      const installed = mergeHooks({}, COMMAND, 60_000).settings
+      const hooks = structuredClone(installed.hooks) as Record<string, { matcher?: string; hooks: unknown[] }[]>
+      hooks.PreToolUse!.find((group) => group.matcher === "Edit|Write")!.hooks.push(own)
+      const upgraded = mergeHooks({ hooks }, COMMAND, 60_000, { guard: false })
+      expect(upgraded.added).toEqual([])
+      expect(upgraded.updated).toEqual(["PreToolUse (Edit|Write) removed"])
+      const pre = (upgraded.settings.hooks as Record<string, unknown>).PreToolUse
+      expect(pre).toContainEqual({ matcher: "Edit|Write", hooks: [own] })
+      // Gone with its group when it was alone there.
+      const alone = mergeHooks(installed, COMMAND, 60_000, { guard: false }).settings
+      const groups = (alone.hooks as Record<string, { matcher?: string }[]>).PreToolUse!
+      expect(groups.map((group) => group.matcher)).toEqual(["Bash", "SubagentHandback"])
+      expect(mergeHooks(alone, COMMAND, 60_000, { guard: false }).updated).toEqual([])
     })
   })
 
@@ -83,8 +146,9 @@ describe("Claude Code settings: mergeHooks", () => {
     expect(hooks.PostToolUse).toEqual([
       existing.hooks.PostToolUse[0],
       { matcher: "Read", hooks: [hook(5)] },
-      { matcher: "Edit|Write", hooks: [hook(5)] },
+      { matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [hook(5)] },
       { matcher: "Bash", hooks: [hook(5)] },
+      { matcher: "EnterWorktree|ExitWorktree", hooks: [hook(5)] },
     ])
     expect(hooks.Stop).toEqual([existing.hooks.Stop[0], { hooks: [hook(30)] }])
   })
@@ -104,14 +168,21 @@ describe("Claude Code settings: mergeHooks", () => {
         ...hooks,
         PreToolUse: hooks.PreToolUse!.filter((group) => group.matcher !== "Bash"),
         PostToolUse: hooks.PostToolUse!.filter((group) => group.matcher !== "Bash"),
-        PostToolUseFailure: undefined,
+        PostToolUseFailure: hooks.PostToolUseFailure!.filter((group) => group.matcher !== "Bash"),
       },
     }
-    delete older.hooks.PostToolUseFailure
     const upgraded = mergeHooks(older, COMMAND, 60_000)
     expect(upgraded.added).toEqual(["PreToolUse (Bash)", "PostToolUse (Bash)", "PostToolUseFailure (Bash)"])
     expect(upgraded.updated).toEqual([])
-    expect(upgraded.settings).toEqual(once)
+    // The same groups as a fresh install, the added ones after the groups already there.
+    const byMatcher = (settings: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(settings.hooks as Record<string, { matcher?: string }[]>).map(([event, groups]) => [
+          event,
+          [...groups].sort((a, b) => String(a.matcher).localeCompare(String(b.matcher))),
+        ]),
+      )
+    expect(byMatcher(upgraded.settings)).toEqual(byMatcher(once))
   })
 
   test("the guard from before #29 is rewritten in place to HOOK_COMMAND", () => {
@@ -144,7 +215,7 @@ describe("Claude Code settings: mergeHooks", () => {
     const upgraded = mergeHooks(older, HOOK_COMMAND, 60_000)
     expect(upgraded.added).toEqual([])
     expect(upgraded.updated).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).added)
-    expect(upgraded.updated).toHaveLength(11)
+    expect(upgraded.updated).toHaveLength(15)
     expect(upgraded.settings).toEqual(mergeHooks({}, HOOK_COMMAND, 60_000).settings)
     expect(JSON.stringify(upgraded.settings)).not.toContain("P=$(cat)")
     expect(mergeHooks(upgraded.settings, HOOK_COMMAND, 60_000)).toEqual({
@@ -194,7 +265,7 @@ describe("Claude Code settings: hook timeouts", () => {
     const raised = mergeHooks(installed, HOOK_COMMAND, 300_000)
     expect(stopTimeouts(raised.settings)).toEqual([310, 310])
     expect(raised.added).toEqual([])
-    expect(raised.updated).toEqual(["Stop", "SubagentStop"])
+    expect(raised.updated).toEqual(["PreToolUse (SubagentHandback)", "Stop", "SubagentStop"])
   })
 
   test("a stop hook with no timeout, or one that is not a number, gets the one it needs", () => {
@@ -227,12 +298,16 @@ describe("Claude Code settings: removeHooks", () => {
       removed: [
         "PreToolUse (Edit|Write)",
         "PreToolUse (Bash)",
+        "PreToolUse (SubagentHandback)",
         "PostToolUse (Read)",
-        "PostToolUse (Edit|Write)",
+        "PostToolUse (Edit|Write|MultiEdit|NotebookEdit)",
         "PostToolUse (Bash)",
+        "PostToolUse (EnterWorktree|ExitWorktree)",
+        "PostToolUseFailure (Read)",
         "PostToolUseFailure (Bash)",
         "Stop",
         "SubagentStop",
+        "SubagentStart",
         "UserPromptSubmit",
         "SessionStart (startup|resume|compact)",
         "SessionStart (clear|fork)",

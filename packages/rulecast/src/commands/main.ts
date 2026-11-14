@@ -64,7 +64,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "init":
         return await initCommand(args, registry, io)
       case "install":
-        return await installCommand(args, io)
+        return await installCommand(args, registry, io)
       case "uninstall":
         return await uninstallCommand(args, io)
       case "run":

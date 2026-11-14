@@ -1,0 +1,22 @@
+{
+  "session_id": "af4ea9d7-34ed-4432-8447-e1d44affa982",
+  "transcript_path": "/home/user/.claude/projects/-project--claude-worktrees-wt2/af4ea9d7-34ed-4432-8447-e1d44affa982.jsonl",
+  "cwd": "/project/.claude/worktrees/wt2",
+  "prompt_id": "30592383-81a4-488e-9a76-5b652224bd48",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "EnterWorktree",
+  "tool_input": {
+    "name": "wt2"
+  },
+  "tool_response": {
+    "worktreePath": "/project/.claude/worktrees/wt2",
+    "worktreeBranch": "worktree-wt2",
+    "message": "Created worktree at “/project/.claude/worktrees/wt2” on branch “worktree-wt2”. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted."
+  },
+  "tool_use_id": "toolu_01HbtPgUWizZTeGwZsmxE3Ku",
+  "duration_ms": 466
+}

@@ -67,6 +67,27 @@ export interface HookPlan {
   } | null
 }
 
+export interface PlanOptions {
+  /** A config the hooks serve has a refuse_write rule (AdapterInstall.merge). Default true. */
+  guard?: boolean
+  /** The directory the settings are in, for a command that names it (AdapterInstall.commandFor). */
+  dir?: string
+  /**
+   * Only this scope's settings file is looked at and written: install's rule, under which a scope
+   * is never satisfied, upgraded or reported by the other scope's file. Absent: every scope's.
+   */
+  only?: InstallScope
+}
+
+/** Every hook command in settings. */
+export function commandsIn(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(commandsIn)
+  if (typeof value !== "object" || value === null) return []
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === "command" && typeof child === "string" ? [child] : commandsIn(child),
+  )
+}
+
 /** `value` with every string that is `command` replaced: what is left of rulecast's is on another command. */
 function withoutCommand(value: unknown, command: string): unknown {
   if (value === command) return ""
@@ -97,9 +118,25 @@ export async function planHooks(
   adapter: Adapter,
   scope: InstallScope,
   verifyMs: number,
+  options: PlanOptions = {},
 ): Promise<HookPlan> {
   const install = installOf(adapter)
+  const guard = options.guard ?? true
   const scopeOf = (file: string) => install.scopes.find((each) => each.file === file)?.scope
+  /**
+   * The command a settings file runs (AdapterInstall.commandFor). Without the directory, a command
+   * of that form already in the file stands, so a caller that plans through a reader alone never
+   * rewrites what install wrote.
+   */
+  const commandOf = (file: string, value: unknown): string => {
+    const scope = scopeOf(file)
+    if (install.commandFor === undefined || scope === undefined) return install.command
+    if (options.dir !== undefined) return install.commandFor(scope, options.dir)
+    const there = commandsIn(value)
+      .map((command) => install.dirOf?.(command) ?? null)
+      .find((dir) => dir !== null)
+    return there === undefined || there === null ? install.command : install.commandFor(scope, there)
+  }
   const readSettings = async (file: string): Promise<{ value: unknown } | null> => {
     const current = await read(file)
     return current === null ? null : { value: inFile(file, () => JSON.parse(current.text) as unknown) }
@@ -112,29 +149,39 @@ export async function planHooks(
     files.push({ file, content, created: current === null })
     problems.push({ file, problem: current === null ? "missing" : "differs" })
   }
-  const holding: { file: string; value: unknown; settings: unknown; added: string[]; updated: string[] }[] = []
+  const holding: {
+    file: string
+    value: unknown
+    command: string
+    settings: unknown
+    added: string[]
+    updated: string[]
+  }[] = []
   // Every scope, past the first complete file: the others can hold hooks that need upgrading as well.
-  for (const { file } of install.scopes) {
+  for (const { file } of install.scopes.filter((each) => options.only === undefined || each.scope === options.only)) {
     const current = await readSettings(file)
     if (current === null) continue
-    const merged = inFile(file, () => install.merge(current.value, install.command, verifyMs))
+    const command = commandOf(file, current.value)
+    const merged = inFile(file, () => install.merge(current.value, command, verifyMs, { guard }))
     const updated = merged.updated ?? []
     const ours = merged.added.length === 0 || inFile(file, () => install.remove(current.value)).removed.length > 0
-    if (ours) holding.push({ file, value: current.value, settings: merged.settings, added: merged.added, updated })
+    if (ours) {
+      holding.push({ file, value: current.value, command, settings: merged.settings, added: merged.added, updated })
+    }
   }
   const found = holding.find((each) => each.added.length === 0) ?? holding[0]
   if (found !== undefined) {
     const others = holding
       .filter((each) => each !== found)
-      .map(({ file, value }) => {
-        const merged = inFile(file, () => install.merge(value, install.command, verifyMs, { upgradeOnly: true }))
+      .map(({ file, value, command }) => {
+        const merged = inFile(file, () => install.merge(value, command, verifyMs, { upgradeOnly: true, guard }))
         return { file, settings: merged.settings, updated: merged.updated ?? [] }
       })
       .filter((each) => each.updated.length > 0)
     // Hooks still on an older command don't run the files yet: reported stale, and the write adds them.
     // Stale on a timeout alone, they do, and a missing script fails every one of them. So does any
     // other settings file's hook on the current command, since Claude Code runs every file's.
-    const runs = holding.some((each) => runsCommand(each.value, install.command))
+    const runs = holding.some((each) => runsCommand(each.value, each.command))
     const state: HookState = {
       file: found.file,
       stale: found.updated,
@@ -144,8 +191,8 @@ export async function planHooks(
       // A hook on the current command no longer looks like rulecast's once the command is hidden,
       // so remove() finds only those on an older one.
       allRun: holding.every(
-        ({ file, value }) =>
-          inFile(file, () => install.remove(withoutCommand(value, install.command))).removed.length === 0,
+        ({ file, value, command }) =>
+          inFile(file, () => install.remove(withoutCommand(value, command))).removed.length === 0,
       ),
     }
     const current = state.stale.length === 0 && state.missing.length === 0
@@ -157,7 +204,7 @@ export async function planHooks(
           : found.settings
         : (others.find((other) => other.file === file)?.settings ?? value)
     const sharedRuns = holding.some(
-      ({ file, value }) => scopeOf(file) === "shared" && runsCommand(after(file, value), install.command),
+      ({ file, value, command }) => scopeOf(file) === "shared" && runsCommand(after(file, value), command),
     )
     if (current && files.length === 0 && others.length === 0) return { state, sharedRuns, write: null }
     return {
@@ -177,7 +224,8 @@ export async function planHooks(
   const target = install.scopes.find((candidate) => candidate.scope === scope)
   if (!target) throw new ScopeError(`${adapter.name} has no ${scope} settings`)
   const current = await readSettings(target.file)
-  const merged = inFile(target.file, () => install.merge(current?.value ?? {}, install.command, verifyMs))
+  const command = commandOf(target.file, current?.value ?? {})
+  const merged = inFile(target.file, () => install.merge(current?.value ?? {}, command, verifyMs, { guard }))
   return {
     state: null,
     sharedRuns: target.scope === "shared",

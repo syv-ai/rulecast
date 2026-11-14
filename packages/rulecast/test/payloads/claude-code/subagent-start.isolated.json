@@ -1,0 +1,9 @@
+{
+  "session_id": "a14d2488-9582-4850-a7f0-1cba1de80cdb",
+  "transcript_path": "/home/user/.claude/projects/-project/a14d2488-9582-4850-a7f0-1cba1de80cdb.jsonl",
+  "cwd": "/project/.claude/worktrees/agent-a2bd60c5593ec0e01",
+  "prompt_id": "a1302ac2-b505-40da-80be-e4f5a21858b4",
+  "agent_id": "a2bd60c5593ec0e01",
+  "agent_type": "iso",
+  "hook_event_name": "SubagentStart"
+}
