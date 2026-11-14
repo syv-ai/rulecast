@@ -1,0 +1,16 @@
+{
+  "session_id": "6e96a3bd-c7fe-449e-a58e-435fd3abd024",
+  "transcript_path": "/home/user/.claude/projects/-project/6e96a3bd-c7fe-449e-a58e-435fd3abd024.jsonl",
+  "cwd": "/project",
+  "prompt_id": "04d23f9d-01b8-4fda-a8de-bc9970b9b4ec",
+  "permission_mode": "auto",
+  "agent_type": "reviewer",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "add",
+  "background_tasks": [],
+  "session_crons": []
+}

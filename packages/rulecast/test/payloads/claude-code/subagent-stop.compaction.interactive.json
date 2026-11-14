@@ -1,0 +1,19 @@
+{
+  "session_id": "7e00120e-86b2-4d46-997f-c3742e610ed2",
+  "transcript_path": "/home/user/.claude/projects/-project/7e00120e-86b2-4d46-997f-c3742e610ed2.jsonl",
+  "cwd": "/project",
+  "scratchpad_dir": "/tmp/claude-1000/-project/7e00120e-86b2-4d46-997f-c3742e610ed2/scratchpad",
+  "prompt_id": "e4300013-f61f-4a58-a04e-dc702fdae04b",
+  "permission_mode": "default",
+  "agent_id": "ab9ef6ed65e4cc1e7",
+  "agent_type": "",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/home/user/.claude/projects/-project/7e00120e-86b2-4d46-997f-c3742e610ed2/subagents/agent-ab9ef6ed65e4cc1e7.jsonl",
+  "last_assistant_message": "<analysis>\n…\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\n   The user asked me to read the file `a.txt` in the project working directory and reply with its content only. This is complete.\n…\n</summary>",
+  "background_tasks": [],
+  "session_crons": []
+}

@@ -1,0 +1,11 @@
+{
+  "session_id": "7e00120e-86b2-4d46-997f-c3742e610ed2",
+  "transcript_path": "/home/user/.claude/projects/-project/7e00120e-86b2-4d46-997f-c3742e610ed2.jsonl",
+  "cwd": "/project",
+  "scratchpad_dir": "/tmp/claude-1000/-project/7e00120e-86b2-4d46-997f-c3742e610ed2/scratchpad",
+  "prompt_id": "5b4ed7a4-55c4-476e-8cac-7cc9c21f7f0c",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Read a.txt and reply with its content only.",
+  "session_title": "main"
+}

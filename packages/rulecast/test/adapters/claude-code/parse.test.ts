@@ -21,6 +21,8 @@ describe("Claude Code adapter: parse", () => {
     ["stop", "verify", [], undefined],
     ["stop.after-block", "verify", [], undefined],
     ["user-prompt-submit", "prompt", [], undefined],
+    // Interactive, 2.1.325: no `source`, like every recorded prompt.
+    ["user-prompt-submit.interactive", "prompt", [], undefined],
     ["session-start.compact", "reset", [], undefined],
   ])("%s → %s", (name, kind, files, completeRead) => {
     const { payload, parsed } = parse(name)
@@ -140,6 +142,7 @@ describe("Claude Code adapter: parse", () => {
   test.each([
     "post-tool-use.agent",
     "subagent-stop.compaction",
+    "subagent-stop.compaction.interactive",
     "pre-compact.manual",
     "user-prompt-submit.task-notification",
     // Recorded on 2.1.325: a background shell job and an isolated subagent finishing.
@@ -183,9 +186,18 @@ describe("Claude Code adapter: parse", () => {
   })
 
   describe("agent types (--agent sessions)", () => {
-    test("a main-thread event names the type the session runs as; one without names none", () => {
-      const payload = { ...claudeCodePayload("stop"), agent_type: "reviewer" }
-      expect(parseClaudeCode(payload)?.agentType).toBe("reviewer")
+    test.each([
+      ["session-start.agent-flag", "start"],
+      ["post-tool-use.read.agent-flag", "touch"],
+      ["stop.agent-flag", "verify"],
+    ])("%s: a main-thread event names the type the session runs as, and is the main agent's", (name, kind) => {
+      const { parsed } = parse(name)
+      expect(parsed?.event?.kind).toBe(kind)
+      expect(parsed?.agentType).toBe("reviewer")
+      expect(parsed?.event?.session).not.toHaveProperty("agentId")
+    })
+
+    test("one without names none", () => {
       expect(parseClaudeCode(claudeCodePayload("stop"))).not.toHaveProperty("agentType")
     })
 

@@ -65,14 +65,25 @@ Recorded 2026-11-14 on Claude Code 2.1.325 (`claude -p`, `permission_mode: "auto
 | `post-tool-batch.json` | `PostToolBatch` | once per batch of tool calls; not used by rulecast |
 | `instructions-loaded.json` | `InstructionsLoaded` | the first hook of a run; not used by rulecast |
 
+Recorded 2026-11-14 on Claude Code 2.1.325, default permission mode:
+
+| File | Event | Notes |
+|---|---|---|
+| `session-start.agent-flag.json` | `SessionStart` | `claude -p --agent reviewer` (agent from `--agents`): `agent_type: "reviewer"`, no `agent_id` |
+| `post-tool-use.read.agent-flag.json` | `PostToolUse` Read | the same main thread: `agent_type`, no `agent_id` |
+| `stop.agent-flag.json` | `Stop` | the same: a main-thread `Stop` carries the session's `agent_type` |
+| `user-prompt-submit.interactive.json` | `UserPromptSubmit` | interactive session (`expect`): no `source`; `session_title`, `scratchpad_dir` |
+| `subagent-stop.compaction.interactive.json` | `SubagentStop` | `/compact` in that session: `agent_type: ""` with an `agent_id`; `last_assistant_message` (the summary) shortened |
+
 ## Findings
 
-- **No `MultiEdit` tool.** 2.1.273 offers `Read`, `Edit`, `Write`; the model reported `MultiEdit` unavailable. 2.1.325's bundle still lists it among the file-edit tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`), so its `PostToolUse` is handled (`tool_input.file_path`) though no payload of it was recorded.
+- **No `MultiEdit` tool.** 2.1.273 offers `Read`, `Edit`, `Write`; the model reported `MultiEdit` unavailable. 2.1.325 does not offer it either, even with `--allowedTools MultiEdit`: the name is left only in its permission-rule and display tables (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`), with no tool behind it. So there is no payload to record; its `PostToolUse` is still handled (`tool_input.file_path`) in case it returns.
 - **Paths.** `tool_input.file_path` is absolute. `tool_response.file.filePath` on Read is sometimes relative, so use `tool_input`.
 - **Complete read.** No 2,000-line cap: a 2,600-line file came back whole (`startLine: 1`, `numLines: 2601`, `totalLines: 2601`). A read is complete when `startLine === 1 && numLines === totalLines`. A file over 256 KB fails the read (`PostToolUseFailure`) instead of truncating.
 - **Subagents.** Subagent events share the parent's `session_id` and add `agent_id` and `agent_type`. Main-agent events have neither.
-- **Compaction runs a subagent.** `/compact` fires `PreCompact`, then `SubagentStop` with `agent_type: ""`, then `SessionStart` `compact`. It sends no `UserPromptSubmit` and no `Stop`. A `SubagentStop` block must skip `agent_type: ""`.
-- **Background tasks submit prompts.** When a background subagent finishes, Claude Code fires `UserPromptSubmit` with a `prompt` starting `<task-notification>`. In auto mode (2.1.325) a subagent's report arrives as one starting `<agent-message from="<agent_id>">` instead. Claude Code's docs name a `source` field for this (`user`, `sdk`, `system`, `loop_wakeup`, `schedule_wakeup`, `poll_event`), still rolling out: it was in none of the 2.1.325 `-p` payloads. On 2.1.273 `claude -p` ran a subagent in the foreground; on 2.1.325 subagents start in the background in `-p` too (`PostToolUse` Agent at launch, `Stop` listing it in `background_tasks`, then a last `Stop` once it finished).
+- **Compaction runs a subagent.** `/compact` fires `PreCompact`, then `SubagentStop` with `agent_type: ""`, then `SessionStart` `compact`. It sends no `UserPromptSubmit`, no `Stop` and no `SubagentStart` (checked interactively on 2.1.325): an internal agent is seen only at its stop. A `SubagentStop` block must skip `agent_type: ""`.
+- **`--agent`.** Under `claude --agent X` every main-thread event, `SessionStart` and `Stop` included, carries `agent_type: "X"` and no `agent_id`. Only `agent_id` marks a subagent.
+- **Background tasks submit prompts.** When a background subagent finishes, Claude Code fires `UserPromptSubmit` with a `prompt` starting `<task-notification>`. In auto mode (2.1.325) a subagent's report arrives as one starting `<agent-message from="<agent_id>">` instead. Claude Code's docs name a `source` field for this (`user`, `sdk`, `system`, `loop_wakeup`, `schedule_wakeup`, `poll_event`), still rolling out: it was in none of the 2.1.325 payloads, `-p` or interactive. The 2.1.325 bundle builds an ordinary prompt's payload with the field compiled out; only a polled event's prompt sets `source: "poll_event"`. On 2.1.273 `claude -p` ran a subagent in the foreground; on 2.1.325 subagents start in the background in `-p` too (`PostToolUse` Agent at launch, `Stop` listing it in `background_tasks`, then a last `Stop` once it finished).
 - **Session ids.** `resume` and `compact` keep the `session_id`; `clear` and `fork` start a new one.
 - **Stop block.** `{"decision":"block","reason":"…"}` on stdout, exit 0, works for both `Stop` and `SubagentStop`. The agent sees a user message `Stop hook feedback:\n<reason>` and continues; the next stop has `stop_hook_active: true`. The model complied but called the reason "instruction injection via tooling", so the reason should say it comes from the project's rulecast conventions.
 - **Stop context.** Checked on 2.1.325: `Stop` and `SubagentStop` also take `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"…"}}`, which continues the turn the same way, under the same `stop_hook_active` and the same cap, and reaches the model as `Stop hook additional context: …` with no error framing. It is capped at 10,000 chars like any additionalContext; a block's `reason` is not capped (50,000 chars arrived whole). rulecast gives attended findings this way, and keeps the unattended hold a block.
