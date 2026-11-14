@@ -28,8 +28,26 @@ export function hookCommand(): [string, ...string[]] {
   return PERF_BINARY === null ? [process.execPath, cli] : [PERF_BINARY]
 }
 
+/**
+ * One fresh directory for everything a run makes, removed when the process exits, failed or not.
+ * TMPDIR points into it, so the test helpers' fixtures and the hooks' own temp files land here too:
+ * a tool that lists its project's parent (oxlint looking for configs) then costs what it does in a
+ * real checkout, not what a shared temp directory full of other runs' leftovers makes it cost. Made
+ * under the platform's temp directory, so paths still go through macOS's /tmp → /private/tmp symlink.
+ */
+const RUN_DIR = mkdtempSync(path.join(tmpdir(), "rulecast-perf-"))
+process.env.TMPDIR = RUN_DIR
+process.once("exit", () => rmSync(RUN_DIR, { recursive: true, force: true }))
+// A signal ends the process without "exit"; leaving through it runs the removal above.
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+] as const) {
+  process.once(signal, () => process.exit(code))
+}
+
 /** Its own cache home, so a measurement never depends on, or disturbs, a real one. */
-const HOME = mkdtempSync(path.join(tmpdir(), "rulecast-perf-"))
+const HOME = mkdtempSync(path.join(RUN_DIR, "home-"))
 
 const FILE = "src/feature/orders.ts"
 const REGEX_RULES = 12
