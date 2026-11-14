@@ -49,6 +49,7 @@ export function parseFixArgs(args: string[]): FixArgs {
   if (run.toRef !== null) throw new UsageError("--to-ref does not apply to fix: fixes are written to the working tree")
   if (run.session !== null) throw new UsageError("--session does not apply to fix")
   if (run.summary) throw new UsageError("--summary does not apply to fix")
+  if (run.quiet) throw new UsageError("--quiet does not apply to fix")
   if (run.ref !== null) throw new UsageError("--ref only applies to try-repo")
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   if (run.files === null && !run.allFiles && run.fromRef === null) {

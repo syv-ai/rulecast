@@ -104,19 +104,20 @@ export async function generateDraftRules(): Promise<{ target: string; source: st
 }
 
 /** The git-hook commands' arguments, by where they appear. */
+/** Every one is --quiet: a commit or push that passes says nothing, and findings are said in full. */
 export const GIT_HOOK_ARGS = {
-  preCommit: "run",
-  prePush: 'run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"',
-  lefthookPush: 'run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD',
+  preCommit: "run --quiet",
+  prePush: 'run --quiet --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"',
+  lefthookPush: 'run --quiet --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD',
   /** pre-commit passes the message file as the hook's argument: the script's $1 (#79). */
-  commitMsg: 'run --commit-msg "$1"',
+  commitMsg: 'run --quiet --commit-msg "$1"',
   /**
    * lefthook puts a hook's first git argument, the message file, in place of {1}, unquoted. In a
    * linked worktree it is an absolute path, which can hold a space: hence the quotes.
    */
-  lefthookCommitMsg: 'run --commit-msg "{1}"',
+  lefthookCommitMsg: 'run --quiet --commit-msg "{1}"',
   /** hk puts the message file in place of {{commit_msg_file}}, unquoted too. */
-  hkCommitMsg: 'run --commit-msg "{{commit_msg_file}}"',
+  hkCommitMsg: 'run --quiet --commit-msg "{{commit_msg_file}}"',
 } as const
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

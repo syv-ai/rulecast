@@ -96,6 +96,7 @@ export const COMMANDS: CommandHelp[] = [
       ["--llm", "Include metered (llm) rules in a staged run, which skips them by default"],
       ["--no-llm", "Skip metered (llm) rules in any run"],
       ["--commit-msg FILE", "Judge the commit message in FILE with the stages: [commit-msg] rules, and nothing else"],
+      ["--quiet", "Print nothing when the run is clean (the git hooks pass it); findings print as usual"],
     ],
     notes: [
       "With --all-files or --files, findings listed in a committed .rulecast/baseline.json are",

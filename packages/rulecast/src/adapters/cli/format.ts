@@ -373,3 +373,15 @@ export function exitCodeFor(delivery: Delivery, complete: boolean): number {
   if (!complete) return EXIT.incomplete
   return delivery.findings.some((finding) => finding.severity === "error") ? EXIT.violations : EXIT.clean
 }
+
+/**
+ * Whether `--quiet` keeps a run silent: it exited 0 with no finding, warning-severity ones included,
+ * and nothing to warn about. A commit that passes says nothing; anything else is said in full.
+ */
+export function quietly(quiet: boolean, code: number, deliveries: readonly Delivery[]): boolean {
+  return (
+    quiet &&
+    code === EXIT.clean &&
+    deliveries.every((delivery) => delivery.findings.length === 0 && delivery.warnings.length === 0)
+  )
+}

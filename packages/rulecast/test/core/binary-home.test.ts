@@ -50,9 +50,9 @@ describe("gitHookCommand", () => {
       entry: string
     }[]
     expect(Object.fromEntries(hooks.map((hook) => [hook.id, hook.entry]))).toEqual({
-      rulecast: gitHookCommand("run"),
-      "rulecast-push": gitHookCommand('run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"'),
-      "rulecast-commit-msg": gitHookCommand('run --commit-msg "$1"'),
+      rulecast: gitHookCommand("run --quiet"),
+      "rulecast-push": gitHookCommand('run --quiet --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"'),
+      "rulecast-commit-msg": gitHookCommand('run --quiet --commit-msg "$1"'),
     })
   })
 
@@ -183,7 +183,7 @@ describe("the commit-msg hook entries (#79)", () => {
     const judged = path.join(worktree, "judged")
     const stub = path.join(worktree, "node_modules", ".bin", "rulecast")
     mkdirSync(path.dirname(stub), { recursive: true })
-    writeFileSync(stub, `#!/bin/sh\n[ "$#" = 3 ] && [ -f "$3" ] || exit 9\necho "$3" >> "${judged}"\n`)
+    writeFileSync(stub, `#!/bin/sh\n[ "$#" = 4 ] && [ -f "$4" ] || exit 9\necho "$4" >> "${judged}"\n`)
     chmodSync(stub, 0o755)
     const env = { PATH: `${path.dirname(process.execPath)}:${BASE_PATH}`, HOME: parent }
     const sh = (args: string[]) => spawnSync("/bin/sh", args, { cwd: worktree, env, encoding: "utf8" })

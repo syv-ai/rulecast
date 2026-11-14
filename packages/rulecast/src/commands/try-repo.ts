@@ -39,6 +39,7 @@ export async function tryRepoCommand(
   const run = parseRunArgs(args)
   const [repo, ruleId, ...extra] = run.leading
   if (repo === undefined) throw new UsageError("try-repo needs a repository path or URL")
+  if (run.quiet) throw new UsageError("--quiet does not apply to try-repo")
   if (extra.length > 0) throw new UsageError(`unexpected arguments: ${extra.join(" ")}`)
 
   const local = path.resolve(io.cwd, repo)

@@ -7,6 +7,7 @@ import {
   type CliFormat,
   exitCodeFor,
   formatDelivery,
+  quietly,
   type RuleMetadata,
 } from "../adapters/cli/format"
 import {
@@ -72,6 +73,8 @@ export interface RunArgs {
   ref: string | null
   /** --commit-msg FILE: judge the commit message in FILE with the commit-msg rules, and nothing else. */
   commitMsg: string | null
+  /** --quiet: print nothing for a clean run, as the git hooks run it (`quietly`). */
+  quiet: boolean
 }
 
 /** Parses run's flags. Positionals after `--files` are files, like pre-commit's `--files F…`. */
@@ -92,6 +95,7 @@ export function parseRunArgs(args: string[]): RunArgs {
       llm: { type: "boolean", default: false },
       ref: { type: "string" },
       "commit-msg": { type: "string" },
+      quiet: { type: "boolean", default: false },
     },
   })
   const format = values.format as CliFormat
@@ -120,6 +124,9 @@ export function parseRunArgs(args: string[]): RunArgs {
   // trusting a tool's output.
   if (values.summary && format === "sarif") throw new UsageError("--summary cannot be combined with --format sarif")
   if (values.llm && values["no-llm"]) throw new UsageError("--llm and --no-llm cannot be combined")
+  // A machine format that is sometimes empty is one its reader cannot parse.
+  if (values.quiet && format !== "terminal" && format !== "agent")
+    throw new UsageError("--quiet is for the terminal and agent formats")
   if (fromRef !== null && (values.files || values["all-files"])) {
     throw new UsageError("--from-ref cannot be combined with --all-files or --files")
   }
@@ -136,6 +143,7 @@ export function parseRunArgs(args: string[]): RunArgs {
     llm: values.llm,
     ref: values.ref ?? null,
     commitMsg: values["commit-msg"] ?? null,
+    quiet: values.quiet,
   }
 }
 
@@ -541,7 +549,7 @@ export async function runCommand(root: string, args: string[], registry: Detecto
     const flag = run.llm ? "--llm" : run.noLlm ? "--no-llm" : run.session !== null ? "--session" : null
     if (flag !== null) throw new UsageError(`${flag} does not apply to --commit-msg`)
     if (run.format === "sarif") throw new UsageError("--commit-msg has no SARIF output: use terminal, agent or json")
-    return commitMsgRun(run.commitMsg, run.format, registry, io)
+    return commitMsgRun(run.commitMsg, run.format, registry, io, run.quiet)
   }
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   const ruleId = run.leading[0] ?? null
@@ -570,6 +578,8 @@ export async function runCommand(root: string, args: string[], registry: Detecto
     })),
   )
   const text = await formatRun(run, checks, displayFrom)
-  if (text) io.stdout(`${text}\n`)
-  return exitCodeForChecks(checks)
+  const code = exitCodeForChecks(checks)
+  const deliveries = checks.map(({ check }) => check.result.delivery)
+  if (text && !quietly(run.quiet, code, deliveries)) io.stdout(`${text}\n`)
+  return code
 }

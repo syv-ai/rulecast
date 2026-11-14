@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { type CliFormat, exitCodeFor, formatDelivery } from "../adapters/cli/format"
+import { type CliFormat, exitCodeFor, formatDelivery, quietly } from "../adapters/cli/format"
 import { type CompiledProject, compile, diagnosticText } from "../core/compile/project"
 import { isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
@@ -151,6 +151,7 @@ export async function commitMsgRun(
   format: CliFormat,
   registry: DetectorRegistry,
   io: CliIo,
+  quiet = false,
 ): Promise<number> {
   const cwd = path.resolve(io.cwd)
   const roots = await messageRoots(cwd)
@@ -180,6 +181,7 @@ export async function commitMsgRun(
     checked: { files: parts.some((part) => part.rules > 0) ? 1 : 0, selection: "files" },
     complete,
   })
-  if (printed) io.stdout(`${printed}\n`)
-  return exitCodeFor(delivery, complete)
+  const code = exitCodeFor(delivery, complete)
+  if (printed && !quietly(quiet, code, [delivery])) io.stdout(`${printed}\n`)
+  return code
 }
