@@ -38,7 +38,7 @@ Touch rules go one per area, not one per section: a single rule whose `files` is
 
    ```yaml
    - repo: https://github.com/syv-ai/rulecast
-     rev: v0.14.0   # unchanged: keep the entry as init wrote it
+     rev: v0.15.0   # unchanged: keep the entry as init wrote it
      rules:
        - id: python/no-silent-except
          context:
