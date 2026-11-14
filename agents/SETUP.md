@@ -25,9 +25,9 @@ It writes nothing in the project. It fetches the catalog's rule data into ruleca
 - A hook that runs one of the linters has `sameAs: "linter/<tool>"`.
 - `ci` lists every CI config found, each with its `system` (`github-actions`, `azure-pipelines`, `gitlab-ci`, `circleci`, `bitbucket-pipelines`, `jenkins`) and the coding `agent` it runs, or `null`.
 - `linters.unoffered` lists linters the project configures that are not offered, each with its `config` and `reason`: one rulecast doesn't support (a `command` rule can run it, [reference/tool-recipes.md](reference/tool-recipes.md)), or a supported one that isn't installed. Name them on the page, so a gap is seen, not silent.
-- A hook that exits 0 whatever it finds has `neverFails`, the part of its command that makes it so (`"|| true"`, `"; exit 0"`, `"set +e"`). A rule on it would never fire.
-- A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's or hk step's stage is the hook it sits under.
-- hk's steps are offered only when hk is installed, since only hk can read `hk.pkl`. Without it, `hooks.skipped` says so: ask the developer to install hk, or leave its steps out.
+- A hook that exits 0 whatever it finds has `neverFails`, the part at the end of its command that makes it so (`"|| true"`, `"; exit 0"`, `"| tee"`). A rule on it would never fire.
+- A hook whose config names its git stages has `stages` (`["commit-msg"]`, `["manual"]`, `["pre-push"]`). A lefthook job's stage is the hook it sits under; an hk step's are the hooks it is in.
+- hk's steps are offered only when hk is installed, since only hk can read `hk.pkl`, and only when reading them needs no network: hk's Pkl package already in its cache. pre-push steps are never read, since hk asks the git remote for them. `hooks.skipped` says when steps were not read and which hk command lists them: show the developer, who can run it and then init again, or leave those steps out.
 - Each linter is an entry of `linters.offered`, with its `errorRules` (null when they could not be listed), `warningRules` (how many rules its config sets to warn; null whenever `errorRules` is) and `candidates`, the doc sections that name one of its error rules (step 7).
 
 Then read what needs judgement:
@@ -65,7 +65,7 @@ The weekly stats summary row's `why` says what turning it on keeps, as the examp
 
 A linter rule delivers only errors: to have a warning delivered, the developer makes it an error in the linter's config. Each finding carries the linter's own page for its lint rule as a link, until a doc section is mapped to that rule after setup (step 7).
 
-A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off. After writing the config, `rulecast doctor --time` runs each such rule once over all its files and says whether it fits; it can take minutes, so say so before running it. Show the developer any rule it reports over the timeout.
+A hook rule runs when the agent stops, not after every edit, so a whole-project type checker is fine; only one slower than the stop check's timeout (`timeouts.verify_ms`, 60 s by default) is worth leaving off. After writing the config, `rulecast doctor --time` runs each such rule once over all its files, then all the rules together as a stop runs them, and says whether each fits; it can take minutes, so say so before running it. Show the developer any line it reports over the timeout, with its two ways out: a larger `timeouts.verify_ms`, or the rule switched off and the tool run from a git hook or CI job of its own.
 
 Stated conventions become candidates only when a pattern in the code can show them, at most five. One that names a generated path is not a candidate of its own: it joins that path's item, with a note that `AGENTS.md` says so too.
 
@@ -84,7 +84,7 @@ Fill [setup-page.html](setup-page.html) to publish the page as an artifact (it i
 
 If you have a tool that publishes private artifacts, publish the page there. Otherwise write it outside the repository, open it in the browser if you can, and tell the developer where it is.
 
-In the same turn, ask every question on the page with your question tool, and add one last question: "Everything else on the page: go ahead as shown / I'll name what to change". A question tool may cap how many questions one call takes (Claude Code's takes 4), and the go-ahead counts toward that cap. Then split the questions over two calls in the turn, the go-ahead last in the second. If they still do not fit, ask the rest in the next turn and the go-ahead after them. When the developer answers every question and picks go ahead, that is approval.
+In the same turn, ask every question on the page with your question tool, and add one last question: "Everything else on the page: go ahead as shown / I'll name what to change". A question tool may cap how many questions one call takes (Claude Code's takes 4), and the go-ahead counts toward that cap. When they don't all fit in one call, split them over two calls in the turn, with the go-ahead last in the second. When they don't fit in two, ask the rest in the next turn, and the go-ahead last of all. When the developer answers every question and picks go ahead, that is approval.
 
 ## 5. The reply
 

@@ -78,6 +78,38 @@
    quiet ledger under it. Sand = found in the repository, blue = the developer's word, green = where
    sessions start. */
 :root {
+  --bg: #f6f5f1;
+  --tone-1: #eeece6;
+  --tone-2: #e6e3db;
+  --tone-3: #dcd8ce;
+  --ink: #1b2129;
+  --muted: #59636f;
+  --faint: #8b939e;
+  --said: #2a64a8;
+  --found: #94661c;
+  --session: #2c7a4b;
+  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+/* Dark for a viewer whose system is dark, unless the artifact host says the app is light; and
+   whenever the host says the app is dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #080b10;
+    --tone-1: #0e131a;
+    --tone-2: #141a23;
+    --tone-3: #1b232e;
+    --ink: #e6eaf0;
+    --muted: #8b95a4;
+    --faint: #566070;
+    --said: #9cc2ee;
+    --found: #d9bd8f;
+    --session: #9fd6b4;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
   --bg: #080b10;
   --tone-1: #0e131a;
   --tone-2: #141a23;
@@ -88,25 +120,7 @@
   --said: #9cc2ee;
   --found: #d9bd8f;
   --session: #9fd6b4;
-  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
-}
-/* The same tones on paper, for a viewer in a light theme. */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f5f1;
-    --tone-1: #eeece6;
-    --tone-2: #e6e3db;
-    --tone-3: #dcd8ce;
-    --ink: #1b2129;
-    --muted: #59636f;
-    --faint: #8b939e;
-    --said: #2a64a8;
-    --found: #94661c;
-    --session: #2c7a4b;
-    color-scheme: light;
-  }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }

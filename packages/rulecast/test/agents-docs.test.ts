@@ -113,9 +113,14 @@ describe("agent docs", () => {
     expect(checked).toBeGreaterThan(0)
   })
 
-  test("SETUP.md and the setup page tell the agent to write < as the literal escape \\u003c", async () => {
+  test("SETUP.md, CONVENTIONS.md and both pages tell the agent to write < as the literal escape \\u003c", async () => {
     // An edit that decodes the escape leaves "write every < as <", which tells the agent nothing.
-    for (const file of ["agents/SETUP.md", "agents/setup-page.html", "agents/CONVENTIONS.md"]) {
+    for (const file of [
+      "agents/SETUP.md",
+      "agents/setup-page.html",
+      "agents/CONVENTIONS.md",
+      "agents/conventions-review.html",
+    ]) {
       const text = await readFile(path.join(repoRoot, file), "utf8")
       expect(text, file).toContain("\\u003c")
     }

@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, test } from "vitest"
 
 import { setupPageDocument } from "../../scripts/sync-version"
 import { REPO_ROOT } from "../helpers/catalog"
+import { themeBlocks } from "./theme"
 
 /** agents/setup-page.html, run without a browser: its render(data) is a pure function of the data. */
 let page: string
@@ -164,11 +165,13 @@ describe("setup page", () => {
     expect(new Set(urls)).toEqual(new Set(["fonts.googleapis.com", "fonts.gstatic.com"]))
   })
 
-  test("the page is a fragment an artifact publisher can wrap, with a light theme beside the dark (#81)", () => {
+  test("the page is a fragment an artifact publisher can wrap, in the viewer's theme (#81)", () => {
     expect(page).not.toMatch(/<!DOCTYPE|<html[\s>]|<head>|<body>|<meta /i)
     expect(page.indexOf("<title>")).toBeLessThan(page.indexOf("<style>"))
     expect(page.indexOf("</style>")).toBeLessThan(page.indexOf('<main class="page" id="app">'))
-    expect(page).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{/)
+    // The host's data-theme wins over the system's preference: the viewer's app theme can differ.
+    const { light, dark } = themeBlocks(page)
+    expect(light.get("--bg")).not.toBe(dark.get("--bg"))
   })
 
   test("the local copy is the fragment as a whole document", async () => {

@@ -13,18 +13,22 @@
 
   Where decisions are kept:
   - Published as an artifact with capabilities {db: {}, user: {}}: one document per decision in the
-    collection "decisions", id = the candidate's or conflict's id. Read them back with the artifact
-    data tool (list "decisions"). Each is {kind, choice, words, note, at}.
+    collection "decisions". Read them back with the artifact data tool (list "decisions"). Each is
+    {id, kind, choice, words, note, at}, where `id` is the candidate's or conflict's id. The
+    document's own id is the same with any character other than letters, digits and _ . : @ + -
+    written as ~ and its hex bytes ("python/imports" is "python~2Fimports").
   - Anywhere else (a local file): the viewer's browser. The Finish step shows the decisions as JSON
-    with a button to copy them, which the developer pastes into the conversation.
+    with a button to copy them, which the developer pastes into the conversation. It does the same
+    for a published page when the store refused a write, or stopped answering; the bar says so.
 
   Data (every string is text; `backticks` become code, nothing else is markup). Write every "<"
-  inside a string as <, so text such as a closing script tag cannot end the data block early.
+  inside a string as \u003c, so text such as a closing script tag cannot end the data block early;
+  the page shows it as "<".
   {
     "project": "tidewater",                     the repository's name, in the title
     "lead":    "One or two sentences: where the candidates came from and what to do.",
     "conflicts": [                               two sources disagree: decided first
-      { "id": "commit-owner",                    unique across conflicts and candidates
+      { "id": "commit-owner",                    short and unique across conflicts and candidates
         "question": "Who commits the transaction?",
         "options": [ { "label": "The service", "means": "What choosing it means." } ],
         "recommend": "The service",              one option's label, or null
@@ -61,6 +65,40 @@
 /* The setup page's surfaces and ink. One column: a sticky bar of steps, then cards that close as
    they are decided and open the next undecided one. Green kept, blue reworded, red declined. */
 :root {
+  --bg: #f6f5f1;
+  --tone-1: #eeece6;
+  --tone-2: #e6e3db;
+  --tone-3: #dcd8ce;
+  --ink: #1b2129;
+  --muted: #59636f;
+  --faint: #8b939e;
+  --said: #2a64a8;
+  --found: #94661c;
+  --keep: #2c7a4b;
+  --decline: #b23a3a;
+  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+/* Dark for a viewer whose system is dark, unless the artifact host says the app is light; and
+   whenever the host says the app is dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #080b10;
+    --tone-1: #0e131a;
+    --tone-2: #141a23;
+    --tone-3: #1b232e;
+    --ink: #e6eaf0;
+    --muted: #8b95a4;
+    --faint: #566070;
+    --said: #9cc2ee;
+    --found: #d9bd8f;
+    --keep: #9fd6b4;
+    --decline: #ec9a9a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
   --bg: #080b10;
   --tone-1: #0e131a;
   --tone-2: #141a23;
@@ -72,25 +110,7 @@
   --found: #d9bd8f;
   --keep: #9fd6b4;
   --decline: #ec9a9a;
-  --display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f5f1;
-    --tone-1: #eeece6;
-    --tone-2: #e6e3db;
-    --tone-3: #dcd8ce;
-    --ink: #1b2129;
-    --muted: #59636f;
-    --faint: #8b939e;
-    --said: #2a64a8;
-    --found: #94661c;
-    --keep: #2c7a4b;
-    --decline: #b23a3a;
-    color-scheme: light;
-  }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -310,9 +330,44 @@ function stepsOf(data) {
 /** A decision is complete when it says what the page asks for: words to reword, a reason to decline. */
 function complete(decision) {
   if (!decision?.choice) return false
+  if (decision.kind === "candidate" && !(decision.choice in DONE_LABEL)) return false
   if (decision.kind === "candidate" && decision.choice === "reword") return (decision.words ?? "").trim() !== ""
   if (decision.kind === "candidate" && decision.choice === "decline") return (decision.note ?? "").trim() !== ""
   return true
+}
+
+/**
+ * A decision as the page keeps it, from whatever a store or the browser held: the kind from the
+ * data, a choice only when the page offers it, and text fields as text. Another viewer can write
+ * anything into a shared store.
+ */
+function cleanDecision(data, id, body) {
+  const conflict = (data.conflicts ?? []).find((one) => one.id === id)
+  const offered = conflict ? (conflict.options ?? []).map((option) => option.label) : CHOICES.map(([value]) => value)
+  const text = (value) => (typeof value === "string" ? value : "")
+  return {
+    kind: conflict ? "conflict" : "candidate",
+    choice: offered.includes(body?.choice) ? body.choice : null,
+    words: text(body?.words),
+    note: text(body?.note),
+    at: text(body?.at),
+  }
+}
+
+/**
+ * The store's document id for a candidate's or conflict's id. A document id holds letters, digits
+ * and _ . : @ + - only; any other character is written as ~ and its UTF-8 bytes in hex, so
+ * "python/imports" is "python~2Fimports". The document's body keeps the id as written.
+ */
+function docId(id) {
+  const encoded = Array.from(String(id), (char) =>
+    /[A-Za-z0-9_.:@+-]/.test(char)
+      ? char
+      : encodeURIComponent(char)
+          .replace(/[!'()*~]/g, (mark) => `%${mark.charCodeAt(0).toString(16).toUpperCase()}`)
+          .replaceAll("%", "~"),
+  ).join("")
+  return encoded === "." || encoded === ".." ? encoded.replaceAll(".", "~2E") : encoded
 }
 
 function allIds(data) {
@@ -335,10 +390,13 @@ function barHtml(data, decisions, view) {
     })
     .join("")
   const width = ids.length === 0 ? 0 : Math.round((done / ids.length) * 100)
+  const unsaved = view.unsaved ?? 0
   const where =
-    view.store === "db"
-      ? '<span class="where">Saved with the page: your agent reads it back.</span>'
-      : '<span class="where local">Saved in this browser only: copy your decisions from Finish.</span>'
+    view.store === "db" && unsaved > 0
+      ? `<span class="where local" role="status">${unsaved} not saved with the page${view.problem ? ` (${asText(view.problem)})` : ""}. They are kept in this browser: copy your decisions from Finish.</span>`
+      : view.store === "db"
+        ? '<span class="where">Saved with the page: your agent reads it back.</span>'
+        : `<span class="where local"${view.problem ? ' role="status"' : ""}>${view.problem ? `${asText(view.problem)}. ` : ""}Saved in this browser only: copy your decisions from Finish.</span>`
   return (
     `<nav class="bar" aria-label="Review steps"><div class="steps">${steps}</div>` +
     `<div class="progress" aria-hidden="true"><div style="width:${width}%"></div></div>` +
@@ -422,6 +480,18 @@ function conflictHtml(conflict, decision, open) {
   )
 }
 
+/**
+ * A box lost focus. A snapshot that arrived while it had focus was held back ("deferred"): draw it
+ * now ("draw"); after the click that took the focus ("click"), since drawing first would replace
+ * the button under the pointer; or "wait" when nothing is held back, the box still has focus (the
+ * window lost it), or focus moved to something else on the page, which a click or the next pause in
+ * typing draws.
+ */
+function afterBlur({ deferred, stillTyping, toElementInPage, pointerDown }) {
+  if (!deferred || stillTyping || toElementInPage) return "wait"
+  return pointerDown ? "click" : "draw"
+}
+
 /** The decisions as the agent reads them: one entry per id, in the page's order. */
 function decisionsJson(data, decisions) {
   const out = {}
@@ -443,10 +513,13 @@ function finishHtml(data, decisions, view) {
     `<div class="tally"><span><b>${counts.keep}</b>kept</span><span><b>${counts.reword}</b>reworded</span><span><b>${counts.decline}</b>declined</span>` +
     `${(data.conflicts ?? []).length > 0 ? `<span><b>${settled}</b>of ${(data.conflicts ?? []).length} conflicts settled</span>` : ""}</div>`
   const outstanding = left > 0 ? `<p class="outstanding">${left} still undecided. Your agent writes only what you decided.</p>` : ""
+  const copy = `<div class="actions"><button class="btn" data-copy>Copy decisions</button><span class="hint" data-copied></span></div>`
   const hand =
-    view.store === "db"
+    view.store === "db" && (view.unsaved ?? 0) === 0
       ? "<p>Your decisions are saved with this page. Tell your agent you're done; it reads them from here.</p>"
-      : `<p>This page keeps your decisions in this browser only. Copy them and paste them into the conversation.</p><div class="actions"><button class="btn" data-copy>Copy decisions</button><span class="hint" data-copied></span></div>`
+      : view.store === "db"
+        ? `<p>${view.unsaved} of your decisions could not be saved with this page. Copy them all and paste them into the conversation.</p>${copy}`
+        : `<p>This page keeps your decisions in this browser only. Copy them and paste them into the conversation.</p>${copy}`
   return `${tally}${outstanding}${hand}<pre class="out" data-out>${asText(decisionsJson(data, decisions))}</pre>`
 }
 
@@ -456,7 +529,7 @@ function finishHtml(data, decisions, view) {
  */
 function render(data, decisions = {}, view = {}) {
   const steps = stepsOf(data)
-  const current = { step: steps[0].id, open: null, undecidedOnly: false, store: "local", ...view }
+  const current = { step: steps[0].id, open: null, undecidedOnly: false, store: "local", unsaved: 0, problem: null, ...view }
   const step = steps.find((one) => one.id === current.step) ?? steps[0]
   const header =
     `<header><h1>Conventions for <b>${asText(data.project)}</b></h1>` +
@@ -466,7 +539,8 @@ function render(data, decisions = {}, view = {}) {
     panel = `<section class="panel"><div class="panel-head"><h2>Finish</h2></div>${finishHtml(data, decisions, current)}</section>`
   } else {
     const firstOpen = current.open ?? step.items.find((id) => !complete(decisions[id])) ?? null
-    const shown = (id) => !current.undecidedOnly || !complete(decisions[id])
+    // The open card stays while it is decided, so a card typed in doesn't vanish under the filter.
+    const shown = (id) => !current.undecidedOnly || !complete(decisions[id]) || id === current.open
     let cards
     let head
     if (step.id === "conflicts") {
@@ -490,52 +564,259 @@ function render(data, decisions = {}, view = {}) {
   return `${header}${barHtml(data, decisions, current)}${panel}`
 }
 </script>
+<script id="review">
+/**
+ * The developer's decisions and where they are kept, apart from the page's elements: clicks, typing
+ * and the store's snapshots go in, and `onChange` says when to draw. Published with the db
+ * capability, each decision is a document in "decisions"; the browser keeps a copy (`persist`)
+ * either way. Viewers share the store, so:
+ * - a field changed here is held until its write lands, and a snapshot never overwrites it;
+ * - once a decision's document exists, a write sends only the fields changed here, so it doesn't
+ *   undo what another viewer changed in the others;
+ * - a decision made while the store can't be written (not reached yet, refused, or stopped
+ *   answering) is unsaved: kept here, left alone by snapshots, and kept as unsaved in the browser
+ *   across visits. When the store answers, each unsaved decision is written, unless the store's
+ *   copy is newer, which then wins;
+ * - the store's answer, not a stale copy, says which documents exist; one deleted elsewhere leaves
+ *   the page, unless it is unsaved or being typed in.
+ */
+function createReview(data, { saved, persist = () => {}, onChange = () => {}, wait } = {}) {
+  const ids = allIds(data)
+  const byDocId = new Map(ids.map((id) => [docId(id), id]))
+  const pauseFor = wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+  let decisions = {}
+  for (const id of ids) if (saved?.decisions?.[id]) decisions[id] = cleanDecision(data, id, saved.decisions[id])
+  const unsaved = new Set((saved?.unsaved ?? []).filter((id) => decisions[id]))
+  /** id to (field to the edit that changed it last), for fields whose write has not landed. */
+  const held = new Map()
+  /** Ids the store had a document for in its last answer: a write updates it instead of replacing it. */
+  const stored = new Set()
+  const writes = new Map()
+  let db = null
+  /** The store has answered since this view connected: writes go to it. */
+  let live = false
+  let problem = null
+  let edits = 0
+  let drawnComplete = new Set()
+
+  const keep = () => persist({ decisions, unsaved: [...unsaved] })
+
+  function edit(id, patch) {
+    decisions = { ...decisions, [id]: { ...cleanDecision(data, id, decisions[id]), ...patch, at: new Date().toISOString() } }
+    const fields = held.get(id) ?? new Map()
+    for (const field of [...Object.keys(patch), "at"]) fields.set(field, ++edits)
+    held.set(id, fields)
+    if (!live) unsaved.add(id)
+    keep()
+  }
+
+  /** Thrown when the store stopped answering before a call could be made. */
+  const LOST = { code: "lost" }
+
+  /**
+   * A store call, tried once more after a short random pause when it meets `unavailable`, unless
+   * the store stopped answering during the pause.
+   */
+  async function attempt(call) {
+    try {
+      return await call()
+    } catch (error) {
+      if (error?.code !== "unavailable") throw error
+      await pauseFor(200 + Math.random() * 400)
+      if (!live) throw LOST
+      return call()
+    }
+  }
+
+  /** One write at a time per decision, of what changed here since the last one. */
+  function save(id) {
+    const run = async () => {
+      const fields = held.get(id)
+      if (!fields) return
+      if (!live) {
+        // Not written: the next visit writes it once the store answers.
+        held.delete(id)
+        unsaved.add(id)
+        keep()
+        return
+      }
+      const sent = new Map(fields)
+      const decision = decisions[id]
+      const ref = () => {
+        if (!live) throw LOST
+        return db.collection("decisions").doc(docId(id))
+      }
+      const whole = () => attempt(() => ref().set({ id, ...decision }))
+      // An unsaved decision is sent whole: the store has none of it, or an older copy.
+      const keys = unsaved.has(id) ? Object.keys(decision) : [...sent.keys()]
+      try {
+        if (!stored.has(id)) await whole()
+        else {
+          try {
+            await attempt(() => ref().update(Object.fromEntries(keys.map((key) => [key, decision[key]]))))
+          } catch (error) {
+            // The document was deleted since the store's last answer: write it whole.
+            if (error?.code !== "invalid_argument") throw error
+            await whole()
+          }
+        }
+        stored.add(id)
+        for (const [field, at] of sent) if (fields.get(field) === at) fields.delete(field)
+        // Saved only when nothing changed here after what was sent, and the store still answers:
+        // an edit made since is written by the next write, or on the next visit.
+        if (fields.size === 0 && live) unsaved.delete(id)
+        if (unsaved.size === 0 && live) problem = null
+      } catch (error) {
+        unsaved.add(id)
+        for (const [field, at] of sent) if (fields.get(field) === at) fields.delete(field)
+        // When the store stopped answering, the bar already says so.
+        if (live) {
+          problem =
+            error?.code === "invalid_argument" ? "the page's store refused the write" : String(error?.message || error?.code || error)
+        }
+      }
+      if (fields.size === 0 && held.get(id) === fields) held.delete(id)
+      keep()
+      onChange("saved")
+    }
+    const next = (writes.get(id) ?? Promise.resolve()).then(run)
+    writes.set(id, next)
+    return next
+  }
+
+  function receive(snap) {
+    const answer = !snap.metadata?.fromCache
+    const theirs = new Map()
+    for (const doc of snap.docs) {
+      const id = byDocId.get(doc.id)
+      if (id && doc.exists) theirs.set(id, cleanDecision(data, id, doc.data()))
+    }
+    if (answer) {
+      stored.clear()
+      for (const id of theirs.keys()) stored.add(id)
+    }
+    const next = { ...decisions }
+    for (const [id, body] of theirs) {
+      if (unsaved.has(id)) continue
+      const mine = held.get(id)
+      next[id] = mine ? { ...body, ...Object.fromEntries([...mine.keys()].map((field) => [field, decisions[id][field]])) } : body
+    }
+    if (answer) for (const id of Object.keys(next)) if (!theirs.has(id) && !unsaved.has(id) && !held.has(id)) delete next[id]
+    decisions = next
+    if (answer && db !== null && !live) {
+      live = true
+      // What was decided here while the store couldn't be written: written now, unless newer there.
+      for (const id of [...unsaved]) {
+        const body = theirs.get(id)
+        if (body && body.at > (decisions[id]?.at ?? "")) {
+          decisions = { ...decisions, [id]: body }
+          unsaved.delete(id)
+        } else {
+          held.set(id, new Map(Object.keys(decisions[id]).map((field) => [field, ++edits])))
+          save(id)
+        }
+      }
+    }
+    keep()
+    onChange("store")
+  }
+
+  return {
+    decisions: () => decisions,
+    status: () => ({ store: db === null ? "local" : "db", unsaved: unsaved.size, problem }),
+    /** A choice clicked: kept at once, then written. */
+    choose(id, value) {
+      edit(id, { choice: value })
+      return save(id)
+    },
+    /** A keystroke in a decision's words or note: kept, and written at the next pause. */
+    type(id, field, value) {
+      edit(id, { [field]: value })
+    },
+    /** Typing paused: write it, and redraw when that decided the card or undid its decision. */
+    pause(id) {
+      const redraw = complete(decisions[id]) !== drawnComplete.has(id)
+      return { redraw, saved: save(id) }
+    },
+    /** The page drew the decisions as they are now. */
+    drawn() {
+      drawnComplete = new Set(ids.filter((id) => complete(decisions[id])))
+    },
+    connect(namespace) {
+      db = namespace
+      live = false
+      db.collection("decisions").onSnapshot(receive, () => {
+        // The listener is dead: stop writing to the store, and keep decisions in the browser.
+        db = null
+        live = false
+        problem = "The decisions saved with the page can't be reached any more"
+        onChange("lost")
+      })
+      onChange("connected")
+    },
+  }
+}
+</script>
 <script>
 const data = JSON.parse(document.getElementById("review-data").textContent)
 document.title = `rulecast conventions for ${data.project}`
 const app = document.getElementById("app")
 const LOCAL_KEY = `rulecast-conventions:${data.project}`
-const kindOf = (id) => ((data.conflicts ?? []).some((conflict) => conflict.id === id) ? "conflict" : "candidate")
-let decisions = {}
-const view = { step: stepsOf(data)[0].id, open: null, undecidedOnly: false, store: "local" }
-let db = null
+const view = { step: stepsOf(data)[0].id, open: null, undecidedOnly: false }
+/** A snapshot arrived while a box had focus: the cards are drawn again at the next pause. */
+let deferred = false
 
 const readLocal = () => {
   try {
-    return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? "{}")
+    return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? "null") ?? undefined
   } catch {
-    return {}
+    return undefined
   }
 }
-const writeLocal = () => {
-  try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(decisions))
-  } catch {}
-}
+const review = createReview(data, {
+  saved: readLocal(),
+  persist: (state) => {
+    try {
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(state))
+    } catch {}
+  },
+  onChange: () => drawUnlessTyping(),
+})
+
+const current = () => ({ open: null, ...view, ...review.status() })
+const typing = () => document.activeElement?.tagName === "TEXTAREA" && app.contains(document.activeElement)
 
 function draw() {
-  app.innerHTML = render(data, decisions, view)
+  app.innerHTML = render(data, review.decisions(), current())
+  review.drawn()
+  deferred = false
 }
 
-/** One write per decision change, awaited per document, as the store asks. */
-const pending = new Map()
-async function save(id) {
-  writeLocal()
-  if (db === null) return
-  const previous = pending.get(id) ?? Promise.resolve()
-  const next = previous.then(() => db.collection("decisions").doc(id).set({ ...decisions[id] })).catch(() => {})
-  pending.set(id, next)
-  await next
+/** While a box has focus only the bar is drawn again, so what is being typed keeps its place. */
+function drawUnlessTyping() {
+  if (!typing()) return draw()
+  deferred = true
+  const bar = app.querySelector("nav.bar")
+  if (bar) bar.outerHTML = barHtml(data, review.decisions(), current())
 }
 
-function decide(id, patch) {
-  decisions[id] = { kind: kindOf(id), choice: null, words: "", note: "", ...decisions[id], ...patch, at: new Date().toISOString() }
-  return save(id)
+/** Draws again with the box being typed in focused, its selection and scroll as they were. */
+function drawKeepingFocus() {
+  const field = typing() ? document.activeElement : null
+  const was = field && { id: field.id, start: field.selectionStart, end: field.selectionEnd, scroll: field.scrollTop }
+  draw()
+  const again = was ? document.getElementById(was.id) : null
+  if (again) {
+    again.focus()
+    again.setSelectionRange(was.start, was.end)
+    again.scrollTop = was.scroll
+  }
 }
 
 /** After a decision is complete, open the next undecided card in this step. */
 function advance(id) {
   const step = stepsOf(data).find((one) => one.id === view.step)
+  const decisions = review.decisions()
   if (!step || !complete(decisions[id])) {
     view.open = id
     return
@@ -554,11 +835,12 @@ app.addEventListener("click", async (event) => {
   } else if (target.dataset.choose) {
     event.preventDefault()
     const id = target.dataset.choose
-    await decide(id, { choice: target.dataset.value })
+    const saved = review.choose(id, target.dataset.value)
     advance(id)
     draw()
+    await saved
   } else if (target.dataset.copy !== undefined) {
-    const text = decisionsJson(data, decisions)
+    const text = decisionsJson(data, review.decisions())
     try {
       await navigator.clipboard.writeText(text)
       app.querySelector("[data-copied]").textContent = "Copied."
@@ -572,34 +854,48 @@ app.addEventListener("click", async (event) => {
   }
 })
 
-// Typing saves once the developer pauses, and only redraws when the decision becomes complete.
+// Typing is kept at once and written once the developer pauses. The card typed in stays open, and
+// is drawn again only when the pause decided it, or undid its decision, or a snapshot waited.
 const timers = new Map()
 app.addEventListener("input", (event) => {
   const field = event.target
   const id = field.dataset.words ?? field.dataset.note
   if (!id) return
-  const was = complete(decisions[id])
-  decisions[id] = { ...decisions[id], [field.dataset.words ? "words" : "note"]: field.value }
+  view.open = id
+  review.type(id, field.dataset.words ? "words" : "note", field.value)
   clearTimeout(timers.get(id))
   timers.set(
     id,
-    setTimeout(async () => {
-      await decide(id, {})
-      if (complete(decisions[id]) !== was) {
-        const focused = document.activeElement?.id
-        const at = document.activeElement?.selectionStart
-        draw()
-        const again = focused ? document.getElementById(focused) : null
-        if (again) {
-          again.focus()
-          if (at !== undefined) again.setSelectionRange(at, at)
-        }
-      }
+    setTimeout(() => {
+      timers.delete(id)
+      const { redraw } = review.pause(id)
+      if (redraw || deferred) drawKeepingFocus()
     }, 600),
   )
 })
 
-decisions = readLocal()
+// A snapshot held back while a box had focus is drawn once the focus leaves it (afterBlur).
+let pointerDown = false
+app.addEventListener("pointerdown", () => {
+  pointerDown = true
+})
+document.addEventListener("pointercancel", () => {
+  pointerDown = false
+})
+app.addEventListener("focusout", (event) => {
+  if (!event.target.matches?.("textarea")) return
+  const toElementInPage = app.contains(event.relatedTarget)
+  // Focus has settled by the next task.
+  setTimeout(() => {
+    if (afterBlur({ deferred, stillTyping: typing(), toElementInPage, pointerDown }) === "draw") draw()
+  }, 0)
+})
+// After the page's own click handling, which may have drawn already.
+document.addEventListener("click", () => {
+  pointerDown = false
+  if (deferred && !typing()) draw()
+})
+
 draw()
 
 // Published as an artifact with the db capability: decisions live with the page, and the agent
@@ -607,24 +903,8 @@ draw()
 ;(async () => {
   const use = globalThis.claude?.use
   if (typeof use !== "function") return
-  const store = await use("db").catch(() => null)
-  if (!store) return
-  db = store
-  view.store = "db"
-  draw()
-  db.collection("decisions").onSnapshot(
-    (snap) => {
-      const saved = {}
-      for (const doc of snap.docs) if (doc.exists) saved[doc.id] = doc.data()
-      // A decision being typed here wins over an older copy from the store.
-      decisions = { ...saved, ...Object.fromEntries([...timers.keys()].filter((id) => decisions[id]).map((id) => [id, decisions[id]])) }
-      if (!app.contains(document.activeElement) || document.activeElement === document.body) draw()
-    },
-    () => {
-      view.store = "local"
-      draw()
-    },
-  )
+  const db = await use("db").catch(() => null)
+  if (db) review.connect(db)
 })()
 </script>
 </body>
