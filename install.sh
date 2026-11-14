@@ -18,7 +18,7 @@
 # Linux and macOS, x64 and arm64. Anywhere else: npm install -g @syv-ai/rulecast.
 set -u
 
-VERSION="0.13.0"
+VERSION="0.14.0"
 
 say() { printf 'rulecast: %s\n' "$*"; }
 fail() {

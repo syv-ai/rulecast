@@ -1,8 +1,0 @@
----
-"@syv-ai/rulecast": minor
----
-
-`rulecast init` now flags hooks that can never fail, and says at which git stage each hook runs (#77, #78).
-
-- **Hooks that can never fail.** An offered hook whose command exits 0 whatever it finds now has `neverFails` in the dry-run JSON. Only how the command ends counts: it ends in `|| true`, `|| :`, `|| exit 0` or `|| echo …`, ends with `exit 0` or `true` on its own (after `;` or on its last line), or pipes into `tee` without `pipefail`. The value is that part, found in the hook's entry, or inside a `bash -c '…'` that is its last command (`sh -c 'mypy .' || true` is judged by the outer `|| true`) or in the package script its last command runs (in `npm run prep && npm run lint`, lint's). A bare `exit 0` or `true` at the end counts only when nothing could stop the script first: not under `set -e`, `set -o errexit` or `sh -ec`, and not after an `exit 1` or `exit $?`. A guarded setup line (`rm -f x || true; mypy .`), a `$(… || true)`, text in quotes, a comment, and `set +e … exit $status` are not flagged. The text output says `(never fails: || true)`. A rule built on such a hook never fires, so `SETUP.md` now has the agent leave it off and tell the developer, who may believe it is a gate.
-- **Stages.** An offered hook has `stages` when its config names them: the hook's own pre-commit `stages`, the config's `default_stages`, or for lefthook the hook it sits under. `commit-msg` hooks check the commit message, not the code, and `manual` hooks run only when asked for and may be slow. `SETUP.md` has the agent leave both off by default, and the text output says why.

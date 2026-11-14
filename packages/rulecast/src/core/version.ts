@@ -1,7 +1,7 @@
 import { installLabel } from "./self"
 
 /** The running rulecast version. test/core/version.test.ts keeps it equal to package.json. */
-export const VERSION = "0.13.0"
+export const VERSION = "0.14.0"
 
 export function parseVersion(text: string): [number, number, number] | null {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(text)
