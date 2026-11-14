@@ -172,10 +172,15 @@ export async function compileRule(
     const readsText = implementation?.guards === true || implementation?.takesContent?.(detector?.config) === true
     // A whole-file detector (path) judges where a file is, and a message is nowhere.
     if (!detector || !readsText || implementation?.wholeFile === true) {
-      return "stages [commit-msg] need a detector that judges the text it is given, such as regex or llm"
+      return "stages [commit-msg] need a detector that judges the text it is given, such as regex or ast-grep"
     }
-    if (data.files !== undefined || data.exclude !== undefined)
-      return "a commit-msg rule judges the message: leave out files and exclude"
+    // The commit-msg hook runs on every commit of every teammate: a commit should not cost money.
+    if (implementation?.metered === true)
+      return `stages [commit-msg] cannot use ${detector.kind}, which costs money on every commit`
+    const fileKeys = [data.files, data.exclude, data.types, data.types_or, data.exclude_types]
+    if (fileKeys.some((value) => value !== undefined))
+      return "a commit-msg rule judges the message: leave out files, exclude and the type tags"
+    if (hasFix) return "fix does not apply to a commit message: rulecast fix rewrites files"
     if (data.refuse_write) return "refuse_write does not apply to a commit message"
     if (data.scope !== undefined) return "scope does not apply to a commit message: it is judged whole"
   }

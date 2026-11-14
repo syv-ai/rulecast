@@ -110,10 +110,13 @@ export const GIT_HOOK_ARGS = {
   lefthookPush: 'run --from-ref "$(git merge-base origin/HEAD HEAD)" --to-ref HEAD',
   /** pre-commit passes the message file as the hook's argument: the script's $1 (#79). */
   commitMsg: 'run --commit-msg "$1"',
-  /** lefthook puts a hook's first git argument, the message file, in place of {1}. */
-  lefthookCommitMsg: "run --commit-msg {1}",
-  /** hk puts the message file in place of {{commit_msg_file}}. */
-  hkCommitMsg: "run --commit-msg {{commit_msg_file}}",
+  /**
+   * lefthook puts a hook's first git argument, the message file, in place of {1}, unquoted. In a
+   * linked worktree it is an absolute path, which can hold a space: hence the quotes.
+   */
+  lefthookCommitMsg: 'run --commit-msg "{1}"',
+  /** hk puts the message file in place of {{commit_msg_file}}, unquoted too. */
+  hkCommitMsg: 'run --commit-msg "{{commit_msg_file}}"',
 } as const
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -160,7 +163,7 @@ export function withLefthookCommands(source: string): string {
   )
 }
 
-/** .pre-commit-hooks.yaml's two entries are gitHookCommand. */
+/** .pre-commit-hooks.yaml's three entries are gitHookCommand. */
 export async function generatePreCommitHooks(): Promise<{ target: string; source: string }> {
   const target = path.join(repoRoot, ".pre-commit-hooks.yaml")
   const commands = [

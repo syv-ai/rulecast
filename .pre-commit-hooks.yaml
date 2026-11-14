@@ -6,30 +6,36 @@
 # install.sh's in its directory.
 # The entries are gitHookCommand() in packages/rulecast/src/core/binary-home.ts, and a test holds
 # them to it. A mirror repository that lets pre-commit install rulecast itself is issue #61.
+#
+# verbose: pre-commit hides a passing hook's output, and a hook that finds no rulecast passes with a
+# warning that must be seen (#84).
 - id: rulecast
   name: rulecast
   description: Check staged files against the project's rulecast rules.
-  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run; if command -v rulecast >/dev/null 2>&1; then rulecast run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
+  entry: sh -c 'skipped=; if [ -x ./node_modules/.bin/rulecast ]; then ./node_modules/.bin/rulecast run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; skipped="exit $status"; fi; if command -v rulecast >/dev/null 2>&1; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $(command -v rulecast) instead" >&2; rulecast run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $installed instead" >&2; "$installed" run; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
   language: system
   pass_filenames: false
   always_run: true
+  verbose: true
   stages: [pre-commit]
 - id: rulecast-push
   name: rulecast (pushed commits)
   description: Check the commits being pushed.
   # pre-commit sets PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF for pre-push, including a usable
   # from-ref on a branch's first push, which @{upstream} does not have.
-  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; if command -v rulecast >/dev/null 2>&1; then rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
+  entry: sh -c 'skipped=; if [ -x ./node_modules/.bin/rulecast ]; then ./node_modules/.bin/rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; skipped="exit $status"; fi; if command -v rulecast >/dev/null 2>&1; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $(command -v rulecast) instead" >&2; rulecast run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $installed instead" >&2; "$installed" run --from-ref "$PRE_COMMIT_FROM_REF" --to-ref "$PRE_COMMIT_TO_REF"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
   language: system
   pass_filenames: false
   always_run: true
+  verbose: true
   stages: [pre-push]
 - id: rulecast-commit-msg
   name: rulecast (commit message)
   description: Check the commit message against the project's commit-msg rules.
   # pre-commit hands a commit-msg hook the message file, which the script reads as $1.
-  entry: sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast run --commit-msg "$1"; if command -v rulecast >/dev/null 2>&1; then rulecast run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then "$installed" run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
+  entry: sh -c 'skipped=; if [ -x ./node_modules/.bin/rulecast ]; then ./node_modules/.bin/rulecast run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; skipped="exit $status"; fi; if command -v rulecast >/dev/null 2>&1; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $(command -v rulecast) instead" >&2; rulecast run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; installed="${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}/rulecast"; if [ -x "$installed" ]; then [ -n "$skipped" ] && echo "./node_modules/.bin/rulecast could not run ($skipped), so this hook runs $installed instead" >&2; "$installed" run --commit-msg "$1"; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; echo "rulecast is not installed, so this hook checked nothing. To install it, run curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh" >&2; exit 0' --
   language: system
   pass_filenames: true
   always_run: true
+  verbose: true
   stages: [commit-msg]

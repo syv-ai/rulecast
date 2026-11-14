@@ -42,6 +42,12 @@ export interface Diagnostic {
    * `rulecast run RULE_ID` counts such an entry only when it names that rule.
    */
   rules?: string[]
+  /**
+   * A rule's stages as written: its own, else the config's default_stages, else none (no detector's
+   * own defaults name commit-msg). Absent when unknown. `run --commit-msg` counts a rule's error only
+   * when these include commit-msg or are unknown.
+   */
+  stages?: readonly string[]
 }
 
 /** A diagnostic as people read it: the source, the rule it belongs to, and what is wrong. */
@@ -121,7 +127,7 @@ function uniqueRules(compiled: Compiled[], diagnostics: Diagnostic[], message: (
   const rules: CompiledRule[] = []
   for (const { rule, source } of compiled) {
     if (counts.get(rule.id) === 1) rules.push(rule)
-    else diagnostics.push({ source, rule: rule.id, message: message(rule.id), level: "error" })
+    else diagnostics.push({ source, rule: rule.id, message: message(rule.id), level: "error", stages: rule.stages })
   }
   return rules
 }
@@ -172,7 +178,14 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   const compiled: Compiled[] = []
   const context: RuleContext = { config, registry: options.registry, global, read: createReader(), mode: mode.mode }
   const project: ReferenceRoot = { dir: root, label: null }
-  const error = (source: string, rule: string | null, message: string, hint?: string, rules?: string[]) =>
+  const error = (
+    source: string,
+    rule: string | null,
+    message: string,
+    hint?: string,
+    rules?: string[],
+    stages?: readonly string[],
+  ) =>
     diagnostics.push({
       source,
       rule,
@@ -180,11 +193,23 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
       level: "error",
       ...(hint === undefined ? {} : { hint }),
       ...(rules === undefined ? {} : { rules }),
+      ...(stages === undefined ? {} : { stages }),
     })
+  /** The stages the first of `raws` that names any writes, else default_stages; undefined when not a list. */
+  const writtenStages = (...raws: unknown[]): readonly string[] | undefined => {
+    for (const raw of raws) {
+      const stages = (raw as { stages?: unknown } | null)?.stages
+      if (stages === undefined) continue
+      return Array.isArray(stages) && stages.every((stage) => typeof stage === "string") ? stages : undefined
+    }
+    return config.defaultStages ?? []
+  }
+  const ruleError = (source: string, rule: string | null, message: string, ...raws: unknown[]) =>
+    error(source, rule, message, undefined, undefined, writtenStages(...raws))
   const add = async (input: RuleInput, source: string) => {
     const result = await compileRule(input, context)
     if (typeof result === "string") {
-      error(source, input.data.alias ?? input.data.id, result)
+      ruleError(source, input.data.alias ?? input.data.id, result, input.data)
       return
     }
     compiled.push({ rule: result.rule, source })
@@ -212,11 +237,11 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
       for (const raw of entry.rules) {
         const tooNew = requiresNewer(raw)
         if (tooNew !== null) {
-          error(CONFIG_FILE, idOf(raw), tooNew)
+          ruleError(CONFIG_FILE, idOf(raw), tooNew, raw)
           continue
         }
         const rule = parseReported(ruleSchema, raw)
-        if (!rule.success) error(CONFIG_FILE, idOf(raw), rule.message)
+        if (!rule.success) ruleError(CONFIG_FILE, idOf(raw), rule.message, raw)
         else await add({ data: rule.data, source: "local", contextRoot: project }, CONFIG_FILE)
       }
       continue
@@ -257,23 +282,24 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     for (const raw of entry.rules) {
       const override = parseReported(overrideSchema, raw)
       if (!override.success) {
-        error(CONFIG_FILE, idOf(raw), override.message)
+        ruleError(CONFIG_FILE, idOf(raw), override.message, raw, ...(byId.get(idOf(raw) ?? "") ?? []))
         continue
       }
       const { id } = override.data
       const candidates = byId.get(id) ?? []
       if (candidates.length !== 1) {
-        error(source, id, candidates.length === 0 ? "not in the manifest" : "defined more than once in the manifest")
+        const problem = candidates.length === 0 ? "not in the manifest" : "defined more than once in the manifest"
+        ruleError(source, id, problem, raw, ...candidates)
         continue
       }
       const tooNew = requiresNewer(candidates[0])
       if (tooNew !== null) {
-        error(source, id, tooNew)
+        ruleError(source, id, tooNew, raw, candidates[0])
         continue
       }
       const base = parseReported(ruleSchema, candidates[0], "manifest")
       if (!base.success) {
-        error(source, id, base.message)
+        ruleError(source, id, base.message, raw, candidates[0])
         continue
       }
       // Shallow merge (spec §4); an overridden context is written in the project, so it resolves there.
@@ -296,7 +322,7 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
     const problem = options.registry.get(rule.detector.kind)?.settingsProblem?.(rule.detector.config, settings) ?? null
     if (problem === null) return true
     const source = compiled.find((entry) => entry.rule === rule)?.source ?? CONFIG_FILE
-    diagnostics.push({ source, rule: rule.id, message: problem, level: "error" })
+    diagnostics.push({ source, rule: rule.id, message: problem, level: "error", stages: rule.stages })
     return false
   })
   // Said in every mode, so `rulecast validate` catches a typo before the unattended run that needs it.

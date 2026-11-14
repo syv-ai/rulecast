@@ -537,8 +537,11 @@ export async function runCommand(root: string, args: string[], registry: Detecto
     const other = run.leading.length > 0 || run.files !== null || run.allFiles || run.fromRef !== null || run.summary
     if (other)
       throw new UsageError("--commit-msg judges a commit message: it takes no files, refs, rule id or --summary")
+    // A commit-msg rule never runs a metered detector (compileRule), and a message is no session's work.
+    const flag = run.llm ? "--llm" : run.noLlm ? "--no-llm" : run.session !== null ? "--session" : null
+    if (flag !== null) throw new UsageError(`${flag} does not apply to --commit-msg`)
     if (run.format === "sarif") throw new UsageError("--commit-msg has no SARIF output: use terminal, agent or json")
-    return commitMsgRun(root, run.commitMsg, run.format, registry, io)
+    return commitMsgRun(run.commitMsg, run.format, registry, io)
   }
   if (run.leading.length > 1) throw new UsageError(`unexpected arguments: ${run.leading.slice(1).join(" ")}`)
   const ruleId = run.leading[0] ?? null

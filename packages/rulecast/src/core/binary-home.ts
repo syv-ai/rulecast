@@ -56,21 +56,28 @@ export const INSTALLED_SH = '"${RULECAST_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.loc
 
 /**
  * The git hooks' command: the project's own rulecast, else the PATH's, else install.sh's in its
- * directory, the order the agent hooks use. With none that can run, it warns and exits 0. Git hooks run from the repository's root. The PATH's is
- * run rather than exec'd so that one the shell cannot run (126 or 127: a binary for another
- * machine, a shim with nothing behind it) counts as none and the lookup goes on, as in the hook
- * script; it has read no input when it could not run.
+ * directory, the order the agent hooks use. Git hooks run from the repository's root. Each is run
+ * rather than exec'd so that one the shell cannot run (126 or 127: a binary for another machine, a
+ * shim with nothing behind it, a node_modules shim when a GUI git client's PATH has no node) counts
+ * as none and the lookup goes on, as in the hook script; it has read no input when it could not
+ * run. With none that can run, it warns and exits 0.
  */
 export function gitHookCommand(args: string): string {
+  const attempt = (command: string) =>
+    `${command} ${args}; status=$?; [ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"`
+  // Said only when the project's own rulecast could not run, before the one that runs instead.
+  const note = (shown: string) =>
+    `[ -n "$skipped" ] && echo "${PROJECT_SKIPPED} ($skipped), so this hook runs ${shown} instead" >&2; `
   return (
-    `sh -c '[ -x ./node_modules/.bin/rulecast ] && exec ./node_modules/.bin/rulecast ${args}; ` +
-    `if command -v rulecast >/dev/null 2>&1; then rulecast ${args}; status=$?; ` +
-    `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
-    `installed=${INSTALLED_SH}; if [ -x "$installed" ]; then "$installed" ${args}; status=$?; ` +
-    `[ "$status" -ne 126 ] && [ "$status" -ne 127 ] && exit "$status"; fi; ` +
+    `sh -c 'skipped=; if [ -x ./node_modules/.bin/rulecast ]; then ${attempt("./node_modules/.bin/rulecast")}; skipped="exit $status"; fi; ` +
+    `if command -v rulecast >/dev/null 2>&1; then ${note("$(command -v rulecast)")}${attempt("rulecast")}; fi; ` +
+    `installed=${INSTALLED_SH}; if [ -x "$installed" ]; then ${note("$installed")}${attempt('"$installed"')}; fi; ` +
     `echo "${GIT_HOOK_MISSING}" >&2; exit 0' --`
   )
 }
+
+/** The start of the line a git hook says when the project's own rulecast could not run. No ": " (YAML). */
+const PROJECT_SKIPPED = "./node_modules/.bin/rulecast could not run"
 
 /**
  * What the git hook says when it finds no rulecast to run, before it lets the commit or push

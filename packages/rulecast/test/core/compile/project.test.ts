@@ -162,7 +162,13 @@ describe("compile: local rules", () => {
     expect(project.rules.map((rule) => rule.id)).toEqual(["ok"])
     expect(project.rules[0]!.detector).toBeNull()
     expect(project.diagnostics).toEqual([
-      { source: ".rulecast-config.yaml", rule: "bad", message: "rules without detect need context", level: "error" },
+      {
+        source: ".rulecast-config.yaml",
+        rule: "bad",
+        message: "rules without detect need context",
+        level: "error",
+        stages: ["touch"],
+      },
     ])
   })
 
