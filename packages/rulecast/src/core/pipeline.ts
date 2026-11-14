@@ -45,7 +45,7 @@ import {
   type WorkRecord,
   type WorkState,
 } from "./session/state"
-import { isGone, type TreeState, treeChanges, treeState } from "./session/tree"
+import { onDisk, type TreeState, treeChanges, treeState } from "./session/tree"
 import { appendFindingsLog, findingsRecord, type WriteOutcome } from "./stats/log"
 import type { IgnoredFinding } from "./suppress"
 import { type Delivery, type Event, emptyDelivery } from "./types"
@@ -275,7 +275,7 @@ async function shellBefore(run: Run, event: Extract<Event, { kind: "shell-before
   }
   const { work } = await openSession(session.dir, session.agent)
   const gap = between(run, work, session.agent, now)
-  const swept = gap.files.filter((file) => !isGone(now, file))
+  const swept = gap.files.filter((file) => onDisk(run.root, file))
   const id = event.toolUseId === undefined ? {} : { toolUseId: event.toolUseId }
   await appendWork(session.dir, [
     ...swept.map((file) => ({ t: "swept" as const, file, agent: session.agent })),
@@ -325,7 +325,7 @@ async function shellAfter(
   const files =
     call === null || call.gitOperation
       ? []
-      : run.relevant(call.files.filter((file) => !isGone(now, file) && !others.edits.has(file)))
+      : run.relevant(call.files.filter((file) => onDisk(run.root, file) && !others.edits.has(file)))
   // Another agent's shell call ran during this one, and this one is held to files: those may be the
   // other's writes (README, Agents). With no files there is nothing to misattribute. Told once per agent.
   const sharedCall = files.length > 0 && (others.sharedShell || sharedShell(view.work, session.agent, event.toolUseId))
@@ -347,7 +347,11 @@ async function shellAfter(
  * this agent's swept (every agent's, at the main agent's stop). A git operation in between sweeps
  * nothing.
  */
-async function sweep(run: Run, view: SessionView, session: { dir: string; agent: string }): Promise<string[]> {
+async function sweep(
+  run: Run,
+  view: SessionView,
+  session: { dir: string; agent: string },
+): Promise<{ files: string[]; gone: string[] }> {
   const now = await treeState(run.root)
   const work = view.work
   let found: string[] = []
@@ -364,7 +368,8 @@ async function sweep(run: Run, view: SessionView, session: { dir: string; agent:
   const all = [...new Set([...run.relevant(sweptFor(work, session.agent)), ...found])].filter(
     (file) => !edited.has(file),
   )
-  return now === null ? all : all.filter((file) => !isGone(now, file))
+  const exists = new Map(all.map((file) => [file, onDisk(run.root, file)]))
+  return { files: all.filter((file) => exists.get(file)), gone: all.filter((file) => !exists.get(file)) }
 }
 
 /** The context budget this pipeline applies: its share, when it shares one (PipelineOptions.shareBudget). */
@@ -453,7 +458,7 @@ interface Outcome {
   via: "shell" | undefined
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   swept: string[]
-  /** At a session's stop: the files its agent edited that no longer exist (DecideInput.stopGone). */
+  /** At a session's stop: the files it would have checked that no longer exist (part of DecideInput.stopCleared). */
   stopGone: string[]
   detected: Detected | null
   /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
@@ -807,7 +812,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // A file edited and then deleted has nothing left to check: a tool given its path would only
       // report that it is missing (ruff's E902), at every stop, and nothing the agent does fixes that.
       const edited = run.relevant(editedBy(view.work, session.agent))
-      const exists = new Map(edited.map((file) => [file, existsSync(path.join(root, file))]))
+      const exists = new Map(edited.map((file) => [file, onDisk(root, file)]))
       requested = edited.filter((file) => exists.get(file))
       stopGone = edited.filter((file) => !exists.get(file))
       // A subagent the agent started still runs here: its files are its own until it finishes, and
@@ -820,7 +825,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         if (options.stopGate === true && hasOwnTree(view.work, session.agent)) deferredSweep = true
       }
       if (options.stopGate === true && running.length === 0) {
-        swept = await sweep(run, view, session)
+        const sweeping = await sweep(run, view, session)
+        swept = sweeping.files
+        stopGone = [...stopGone, ...sweeping.gone]
         requested = [...requested, ...swept]
       }
     }

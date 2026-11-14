@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { statSync } from "node:fs"
 import { lstat, readFile } from "node:fs/promises"
 import path from "node:path"
 
@@ -36,10 +37,23 @@ const HASHED_MAX_BYTES = 1024 * 1024
 /** The size of a listed path that no longer exists. */
 const GONE = -1
 
-/** Listed as deleted: there is nothing left to check. A file absent from the map is clean, and exists. */
-export function isGone(state: TreeState, file: string): boolean {
-  return state.entries[file]?.[1] === GONE
+/**
+ * Whether a changed file is still there to check. Asked of the disk, not of a tree state: a file never
+ * tracked and since removed is in no `git status`, so a state has no entry for it, which reads as
+ * clean and present (AKA lead, 0.16.0: ruff's E902 on such a file at every stop). Followed through a
+ * symlink, since a tool reads what it points at. A path no tool could open is gone: missing, through
+ * a file, or a loop of links. A file this process may not look at is still there.
+ */
+export function onDisk(root: string, file: string): boolean {
+  try {
+    return statSync(path.join(root, file), { throwIfNoEntry: false }) !== undefined
+  } catch (error) {
+    return !UNOPENABLE.has((error as NodeJS.ErrnoException).code ?? "")
+  }
 }
+
+/** Errors that mean no file is there to open, beyond ENOENT, which `throwIfNoEntry` already answers. */
+const UNOPENABLE = new Set(["ENOTDIR", "ELOOP", "ENAMETOOLONG"])
 
 /**
  * Paths from `git status --porcelain=v2 -z`, and `HEAD` from its `--branch` header. Version 2

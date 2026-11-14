@@ -382,20 +382,21 @@ describe("the Stop sweep", () => {
   })
 
   // AKA lead, 0.15.0: ruff's E902 on a test file a subagent wrote and then removed, at every stop.
-  test("a file the agent wrote and then deleted is not checked at Stop", async () => {
-    // A tool given a path that does not exist reports it, as ruff does (E902).
-    const seen = {
-      id: "tool/seen",
-      name: "A tool that reports every path it is given",
-      files: "\\.py$",
-      detect: {
-        command: {
-          run: ["sh", "-c", 'for f; do echo "$f:1: error: given"; done', "sh"],
-          output: { lines: "gcc-nocol" },
-        },
+  // A tool given a path that does not exist reports it, as ruff does (E902).
+  const seen = {
+    id: "tool/seen",
+    name: "A tool that reports every path it is given",
+    files: "\\.py$",
+    detect: {
+      command: {
+        run: ["sh", "-c", 'for f; do echo "$f:1: error: given"; done', "sh"],
+        output: { lines: "gcc-nocol" },
       },
-      message: "{{file}}:{{line}} {{message}}",
-    }
+    },
+    message: "{{file}}:{{line}} {{message}}",
+  }
+
+  test("a file the agent wrote and then deleted is not checked at Stop", async () => {
     const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig([...fixtureRules, seen]) })
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
@@ -408,6 +409,52 @@ describe("the Stop sweep", () => {
       expect(stop.stop).toBe("allow")
       expect(lines(stop)).toEqual([])
     }
+  })
+
+  // AKA lead, 0.16.0: an untracked file a subagent's shell created and removed, swept between calls,
+  // was checked at every stop. Gone and never tracked, `git status` does not list it at all.
+  test("a swept file deleted since is not checked at Stop", async () => {
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig([...fixtureRules, seen]) })
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {})
+    const temp = "app/services/tmp.py"
+    await session.write(temp, "x = 1\n")
+    await session.shell(async () => {})
+    expect((await session.work()).swept).toEqual([temp])
+    await rm(path.join(root, temp))
+    for (const agentId of [undefined, "sub1"]) {
+      const stop = await session.send({ kind: "verify", files: [], agentId })
+      expect(stop.stop).toBe("allow")
+      expect(lines(stop)).toEqual([])
+    }
+  })
+
+  test("a subagent's own swept file deleted since is not checked at its stop", async () => {
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig([...fixtureRules, seen]) })
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {}, { agentId: "sub1" })
+    const temp = "app/services/tmp.py"
+    await session.write(temp, "x = 1\n")
+    await session.shell(async () => {}, { agentId: "sub1" })
+    expect((await session.work()).swept).toEqual([temp])
+    await rm(path.join(root, temp))
+    const stop = await session.send({ kind: "verify", files: [], agentId: "sub1" })
+    expect(stop.stop).toBe("allow")
+    expect(lines(stop)).toEqual([])
+  })
+
+  test("an untracked file one shell call created and the next removed: not checked as that call's edit", async () => {
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig([...fixtureRules, seen]) })
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const temp = "app/services/tmp.py"
+    await session.shell(() => session.write(temp, "x = 1\n"))
+    const removed = await session.shell(() => rm(path.join(root, temp)))
+    expect(lines(removed)).toEqual([])
+    expect(await session.work()).toMatchObject({ swept: [] })
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("allow")
   })
 
   test("no tree (outside git): Stop verifies the edited files as before", async () => {

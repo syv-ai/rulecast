@@ -1,10 +1,10 @@
-import { mkdir, rename, rm, utimes, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
 import { describe, expect, test } from "vitest"
 
-import { type TreeState, treeChanges, treeState } from "../../../src/core/session/tree"
+import { onDisk, type TreeState, treeChanges, treeState } from "../../../src/core/session/tree"
 import { createRepo, git } from "../../helpers/git"
 
 async function stateOf(root: string): Promise<TreeState> {
@@ -161,4 +161,38 @@ describe("treeChanges", () => {
     await writeFile(path.join(root, "src/a.ts"), "export const a = 2\n")
     expect(await changedBy(root, async () => {})).toEqual({ gitOperation: false, files: [] })
   })
+})
+
+describe("onDisk: whether a changed file is still there to check", () => {
+  test("a file is; a removed one, a dangling symlink, a loop of links and a path through a file are not", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "rulecast-ondisk-"))
+    try {
+      await writeFile(path.join(dir, "a.py"), "x = 1\n")
+      await symlink(path.join(dir, "nowhere.py"), path.join(dir, "link.py"))
+      await symlink(path.join(dir, "loop.py"), path.join(dir, "loop.py"))
+      expect(onDisk(dir, "a.py")).toBe(true)
+      expect(onDisk(dir, "gone.py")).toBe(false)
+      expect(onDisk(dir, "link.py")).toBe(false)
+      expect(onDisk(dir, "loop.py")).toBe(false)
+      expect(onDisk(dir, "a.py/b.py")).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a file it may not look at counts as there: only a missing one is gone",
+    async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), "rulecast-ondisk-"))
+      await mkdir(path.join(dir, "locked"))
+      await writeFile(path.join(dir, "locked", "a.py"), "x = 1\n")
+      await chmod(path.join(dir, "locked"), 0o000)
+      try {
+        expect(onDisk(dir, "locked/a.py")).toBe(true)
+      } finally {
+        await chmod(path.join(dir, "locked"), 0o755)
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
 })
