@@ -866,6 +866,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     },
     failedAtStart || detected?.failed === true,
   )
-  if (deferredSweep) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
+  // Said once when the deferral starts, not at every stop while a subagent runs (#90): again only
+  // after a stop that was not deferred.
+  if (event.kind === "verify" && options.stopGate === true && session) {
+    const was = view.work.deferred.has(session.agent)
+    if (deferredSweep && !was) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
+    if (deferredSweep !== was) {
+      await appendWork(session.dir, [{ t: "deferral", agent: session.agent, on: deferredSweep }])
+    }
+  }
   return finished
 }

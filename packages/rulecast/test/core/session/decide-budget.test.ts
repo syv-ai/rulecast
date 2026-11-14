@@ -165,7 +165,9 @@ describe("decide: warnings are charged after the floor", () => {
       input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
     )
     expect(delivery.warnings.length).toBeLessThan(80)
-    expect(delivery.warnings.at(-1)).toMatch(/^…and \d+ more \(run rulecast validate\)$/)
+    // Detector failures, not compile problems: validate has nothing to say about them (#90).
+    expect(delivery.warnings.at(-1)).toMatch(/^…and \d+ more(: |$)/)
+    expect(delivery.warnings.at(-1)).not.toContain("validate")
     const chars = delivery.warnings.reduce((sum, text) => sum + text.length, 0)
     expect(chars).toBeLessThanOrEqual(9000 * 0.15)
   })

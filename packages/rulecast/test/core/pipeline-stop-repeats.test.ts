@@ -39,7 +39,7 @@ const findingLines = (delivery: { findings: { file: string; line: number }[] }) 
   delivery.findings.map((finding) => `${finding.file}:${finding.line}`)
 
 describe("a Stop sends each finding once", () => {
-  test("an unchanged finding sent at an earlier stop is a repeat: listed, not blocking, in any prompt", async () => {
+  test("an unchanged finding sent at an earlier stop is a repeat: not blocking, in any prompt", async () => {
     const { send, write, stop } = await scenario()
     await write(USERS, VIOLATION)
     await send({ kind: "edit", files: [USERS] })
@@ -53,10 +53,11 @@ describe("a Stop sends each finding once", () => {
     expect(second.findings).toEqual([])
     expect(second.repeated).toEqual([{ rule: "backend/no-httpexception", file: USERS }])
 
-    // Within one prompt too: past the cap the stop is allowed, not capReached.
+    // Within one prompt too: past the cap the stop is allowed, not capReached. Listed once, then
+    // counted (#90).
     const sameprompt = await send({ kind: "verify", files: [] })
     expect(sameprompt.stop).toBe("allow")
-    expect(sameprompt.repeated).toEqual([{ rule: "backend/no-httpexception", file: USERS }])
+    expect(sameprompt.repeatedCount).toEqual({ count: 1, rules: ["backend/no-httpexception"] })
   })
 
   test("a block sends only what is new; earlier findings, warnings too, ride as one line", async () => {

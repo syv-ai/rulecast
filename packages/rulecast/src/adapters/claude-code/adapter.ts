@@ -166,7 +166,7 @@ export const claudeCodeAdapter: Adapter = {
     }
     const userOnly = event.kind === "guard" ? NONE : json({ systemMessage: notices })
     // A stop with only repeats has no agent text, and still tells the user (below).
-    if (text === "" && !(event.kind === "verify" && repeatedLine(delivery) !== null)) {
+    if (text === "" && !(event.kind === "verify" && repeatedLine(delivery, true) !== null)) {
       return notices === "" ? NONE : userOnly
     }
     const withNotices = (value: Record<string, unknown>) =>
@@ -252,7 +252,7 @@ export const claudeCodeAdapter: Adapter = {
         }
         // A stop let through: what is still there from earlier stops is the user's to know, not a turn
         // of the agent's (session/decide.ts `repeats`).
-        const repeats = repeatedLine(delivery)
+        const repeats = repeatedLine(delivery, true)
         const outside = sweptMessage(delivery, event, options)
         const told = [notices, outside, repeats === null ? null : `rulecast: ${repeats}`].filter(
           (part) => part !== null && part !== "",

@@ -194,19 +194,41 @@ describe("decide: stop gate", () => {
     expect(decision.work).toEqual([])
   })
 
-  test("only a blocking stop records context", async () => {
+  // A warning goes to the user whatever the gate decides, so every stop records it as said (#90);
+  // the rest of the delivery reaches the agent only at a block.
+  test("only a blocking stop records context, but every stop records its warnings", async () => {
     const warnings = [{ key: "w", text: "problem" }]
     const allow = await decide(input({ stopGate: true, findings: [newWarning], warnings }))
     expect(allow.delivery.warnings).toEqual(["problem"])
-    expect(allow.context).toEqual([])
+    expect(allow.context).toEqual([{ t: "warned", key: "w" }])
 
     const work = emptyWork()
     work.stopBlocks.set("main", 3)
     const capped = await decide(input({ stopGate: true, work, findings: [newError], warnings }))
-    expect(capped.context).toEqual([])
+    expect(capped.context).toEqual([{ t: "warned", key: "w" }])
 
     const block = await decide(input({ stopGate: true, findings: [newError], warnings }))
     expect(block.context).toEqual([{ t: "warned", key: "w" }])
+  })
+
+  // #90: "…and 1 more (run rulecast validate)" sent the user to validate when validate found
+  // nothing wrong. The line names what it cut, and points at validate only for a compile problem.
+  test("the warnings past their share are named, and only a compile problem points at validate", async () => {
+    const long = (n: number) => ({
+      key: `detector:x:r${n}:m`,
+      text: `regex detector failed for r${n}: ${"x".repeat(80)}`,
+    })
+    const cut = async (last: { key: string; text: string }) => {
+      const warnings = [long(1), long(2), long(3), last]
+      const { delivery } = await decide(input({ warnings, maxContextChars: 3000 }))
+      return delivery.warnings.at(-1)!
+    }
+    const paths = "app/a.py, app/b.py, app/c.py, app/d.py, app/e.py, app/f.py, app/g.py, app/h.py, app/i.py"
+    const budget = await cut({ key: "llm-budget", text: `llm rules checked 10 files; 4 were not checked: ${paths}` })
+    expect(budget).toMatch(/^…and 1 more: llm rules checked 10 files; 4 were not checked: app\/a\.py.*…$/)
+    expect(budget).not.toContain("validate")
+    const broken = await cut({ key: "diagnostic:config:r9:bad", text: `r9: files: invalid regex in ${paths}` })
+    expect(broken).toMatch(/^…and 1 more.*\(run rulecast validate\)$/)
   })
 
   // The gate asks what was found, not what fitted. Before this, the budget filtered

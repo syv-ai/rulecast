@@ -493,6 +493,13 @@ export interface Delivery {
   repeated?: { rule: string; file: string }[]
   repeatedMore?: number
   /**
+   * The same findings when the set is the one an earlier stop already listed (#90): how many, and
+   * their rules. Said to the agent at a block, never to the user.
+   */
+  repeatedCount?: { count: number; rules: string[] }
+  /** How many of the findings an earlier stop listed as still there are fixed since: said once. */
+  repeatedFixed?: { fixed: number; of: number }
+  /**
    * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.
    */

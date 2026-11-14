@@ -26,6 +26,10 @@ export type WorkRecord =
    * set, so a file with many findings does not rewrite all of them at every stop.
    */
   | { t: "stopSent"; agent: string; add?: SentFinding[]; drop?: string[] }
+  /** The repeats (by finding key) a stop last said to this agent, as a list or a count (#90). */
+  | { t: "repeatsSaid"; agent: string; keys: string[] }
+  /** A stop of this agent's deferred its sweep for a running subagent (`on`), or the first stop after did not. */
+  | { t: "deferral"; agent: string; on: boolean }
   /** Unattended mode: the stop that told the agent to record what is left as unresolved, once per prompt. */
   | { t: "stopReport"; agent: string }
   /** Unattended mode: the stop that told the agent some rules did not run, once per prompt (#29). */
@@ -88,6 +92,10 @@ export interface WorkState {
    * `stopSent`). Never reset by a prompt: a stop says each finding once (session/decide.ts `repeats`).
    */
   stopSent: Map<string, Map<string, Sent>>
+  /** The repeats a stop last said to each agent (`repeatsSaid`). */
+  repeatsSaid: Map<string, Set<string>>
+  /** Agents whose last stop deferred its sweep, and were told so (core/pipeline.ts). */
+  deferred: Set<string>
   /** Agents told to record their unresolved findings since their last prompt. */
   stopReports: Set<string>
   /** Agents told since their last prompt that configured rules did not run. */
@@ -157,6 +165,8 @@ export function emptyWork(): WorkState {
     stopBlocks: new Map(),
     blockedFindings: new Map(),
     stopSent: new Map(),
+    deferred: new Set(),
+    repeatsSaid: new Map(),
     stopReports: new Set(),
     incompleteReports: new Set(),
     refusals: new Map(),
@@ -258,6 +268,13 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
         for (const [key, rule, file, hash] of record.add ?? []) sent.set(key, { rule, file, hash })
         break
       }
+      case "repeatsSaid":
+        state.repeatsSaid.set(record.agent, new Set(record.keys))
+        break
+      case "deferral":
+        if (record.on) state.deferred.add(record.agent)
+        else state.deferred.delete(record.agent)
+        break
       case "stopReport":
         state.stopReports.add(record.agent)
         break

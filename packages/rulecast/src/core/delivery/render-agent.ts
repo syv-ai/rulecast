@@ -346,10 +346,10 @@ export const deliveryCost = {
 }
 
 /**
- * Findings an earlier stop already sent, in one line: the ones `repeated` names, then how many more,
- * with no rule text and nothing to do (session/decide.ts `repeats`). Null when there are none.
+ * Findings an earlier stop already sent, listed: the ones `repeated` names, then how many more, with
+ * no rule text and nothing to do (session/decide.ts `repeats`). Null when none are listed.
  */
-export function repeatedLine(delivery: Pick<Delivery, "repeated" | "repeatedMore">): string | null {
+export function repeatedListLine(delivery: Pick<Delivery, "repeated" | "repeatedMore">): string | null {
   const named = (delivery.repeated ?? []).map(({ rule, file }) => `${rule} (${file})`)
   const more = delivery.repeatedMore ?? 0
   if (named.length === 0 && more === 0) return null
@@ -360,6 +360,29 @@ export function repeatedLine(delivery: Pick<Delivery, "repeated" | "repeatedMore
         ? `${named.join(", ")} and ${plural(more, "more finding")}`
         : named.join(", ")
   return `Still there from earlier stops, not repeated here: ${list}.`
+}
+
+type Repeats = Pick<Delivery, "repeated" | "repeatedMore" | "repeatedCount" | "repeatedFixed">
+
+/**
+ * What a stop says of the findings earlier stops sent (#90): the list when the set changed, else at
+ * a block a count naming their rules, and once how many of them were fixed. `forUser`: a stop that
+ * let the agent go, whose words go to the user, who has no use for the count. Null: nothing to say.
+ */
+export function repeatedLine(delivery: Repeats, forUser = false): string | null {
+  const parts: string[] = []
+  const list = repeatedListLine(delivery)
+  const count = delivery.repeatedCount
+  if (list !== null) parts.push(list)
+  else if (!forUser && count !== undefined) {
+    const are = count.count === 1 ? "is" : "are"
+    parts.push(`${plural(count.count, "finding")} from earlier stops ${are} still there (${count.rules.join(", ")}).`)
+  }
+  const fixed = delivery.repeatedFixed
+  if (fixed !== undefined) {
+    parts.push(`${fixed.fixed} of the ${fixed.of} earlier findings ${fixed.fixed === 1 ? "is" : "are"} fixed.`)
+  }
+  return parts.length === 0 ? null : parts.join(" ")
 }
 
 export function renderAgentText(delivery: Delivery, options: RenderOptions): string {

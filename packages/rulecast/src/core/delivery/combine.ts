@@ -17,7 +17,7 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  *
  * - One part is returned as it is.
  * - `findings`, `preexisting`, `preexistingSummary`, `touches`, `refused`, `swept`, `repeated`,
- *   `overflowPaths` and `disabled`: concatenated in part order. `repeatedMore`: summed.
+ *   `overflowPaths` and `disabled`: concatenated in part order. `repeatedMore`, `repeatedCount` and `repeatedFixed`: summed.
  * - `references`: one per `(ref, location)`, the most complete state kept (REFERENCE_STATES), at the
  *   place it first appeared.
  * - A rule id two parts both deliver with different `templates`: the later part's findings, template
@@ -87,6 +87,18 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     if (delivery.repeated !== undefined) combined.repeated = [...(combined.repeated ?? []), ...delivery.repeated]
     if (delivery.repeatedMore !== undefined)
       combined.repeatedMore = (combined.repeatedMore ?? 0) + delivery.repeatedMore
+    if (delivery.repeatedCount !== undefined) {
+      const was = combined.repeatedCount ?? { count: 0, rules: [] }
+      const rules = [...new Set([...was.rules, ...delivery.repeatedCount.rules])].sort()
+      combined.repeatedCount = { count: was.count + delivery.repeatedCount.count, rules }
+    }
+    if (delivery.repeatedFixed !== undefined) {
+      const was = combined.repeatedFixed ?? { fixed: 0, of: 0 }
+      combined.repeatedFixed = {
+        fixed: was.fixed + delivery.repeatedFixed.fixed,
+        of: was.of + delivery.repeatedFixed.of,
+      }
+    }
     if (delivery.disabled !== undefined) combined.disabled = [...(combined.disabled ?? []), ...delivery.disabled]
     combined.overflowPaths.push(...delivery.overflowPaths)
 

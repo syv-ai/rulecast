@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { type CompiledRule, findingDocs, ruleContextFor } from "../compile/rule"
 import type { Mode } from "../config/schema"
-import { deliveryCost, measureRuleBlock, repeatedLine, SWEPT_BLOCK } from "../delivery/render-agent"
+import { deliveryCost, measureRuleBlock, repeatedLine, repeatedListLine, SWEPT_BLOCK } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { DisabledGroup } from "../disabled"
 import type { ReferenceSpec } from "../references"
@@ -102,8 +102,30 @@ export interface Decision {
  */
 const WARNING_SHARE = 0.15
 
-/** What replaces the warnings the share could not hold. */
-const moreWarnings = (count: number) => `…and ${count} more (run rulecast validate)`
+/**
+ * What replaces the warnings the share could not hold: how many, then as many of them as `room`
+ * holds, each by its first words (#90), and the command that lists compile problems only when one
+ * of them is one; validate has nothing to say about the rest.
+ */
+function moreWarnings(cut: readonly { key: string; text: string }[], room = 0): string {
+  const validate = cut.some(({ key }) => key.startsWith("diagnostic")) ? " (run rulecast validate)" : ""
+  const counted = `…and ${cut.length} more${validate}`
+  const named: string[] = []
+  for (const { text } of cut) {
+    const words = text.split("\n")[0]!
+    const brief = words.length > BRIEF_WARNING ? `${words.slice(0, BRIEF_WARNING - 1)}…` : words
+    const left = cut.length - named.length - 1
+    const line = `…and ${cut.length} more: ${[...named, brief].join("; ")}${left > 0 ? `; and ${left} other${left === 1 ? "" : "s"}` : ""}${validate}`
+    if (deliveryCost.warning(line) > room) break
+    named.push(brief)
+  }
+  if (named.length === 0) return counted
+  const left = cut.length - named.length
+  return `…and ${cut.length} more: ${named.join("; ")}${left > 0 ? `; and ${left} other${left === 1 ? "" : "s"}` : ""}${validate}`
+}
+
+/** How much of each cut warning `moreWarnings` names. */
+const BRIEF_WARNING = 60
 
 /**
  * What a reference is called in a delivery. A project reference names a file in the project, so it
@@ -655,17 +677,18 @@ export function trim(
     // The line standing in for the rest costs what a warning does, and the warnings it replaces pay
     // for it: dropping one raises the count it carries, which is why this is a loop.
     if (held < unwarned.length) {
-      while (held > 0 && spent + warningCost(moreWarnings(unwarned.length - held)) > ceiling) {
+      while (held > 0 && spent + warningCost(moreWarnings(unwarned.slice(held))) > ceiling) {
         held--
         spent -= warningCost(unwarned[held]!.text)
       }
     }
     delivery.warnings = unwarned.slice(0, held).map((warning) => warning.text)
     for (const warning of unwarned.slice(0, held)) context.push({ t: "warned", key: warning.key })
-    const cut = unwarned.length - held
-    if (cut > 0 && spent + warningCost(moreWarnings(cut)) <= ceiling) {
-      spent += warningCost(moreWarnings(cut))
-      delivery.warnings.push(moreWarnings(cut))
+    const cut = unwarned.slice(held)
+    if (cut.length > 0 && spent + warningCost(moreWarnings(cut)) <= ceiling) {
+      const more = moreWarnings(cut, ceiling - spent)
+      spent += warningCost(more)
+      delivery.warnings.push(more)
     }
     // Nothing printed, so the heading never prints either.
     used += delivery.warnings.length > 0 ? spent : 0
@@ -1023,7 +1046,7 @@ function repeatedOf(
   const room = maxContextChars === null ? Number.POSITIVE_INFINITY : Math.floor(maxContextChars * REPEATED_SHARE)
   let named = 0
   while (named < Math.min(all.length, REPEATED_NAMED)) {
-    const line = repeatedLine({ repeated: pairs(named + 1), repeatedMore: rest(named + 1) })
+    const line = repeatedListLine({ repeated: pairs(named + 1), repeatedMore: rest(named + 1) })
     if (line === null || line.length > room) break
     named++
   }
@@ -1040,6 +1063,34 @@ export function withoutRepeats(input: DecideInput): DecideInput {
   return saysOnce(input) ? { ...input, findings: repeats(input).findings } : input
 }
 
+/**
+ * What this stop says of its repeats (#90), and what to record as said. The whole set is listed when
+ * it has a finding the last stop did not say; otherwise it is a count, which only a block says.
+ * Findings the last stop said that are neither repeats nor found again in a changed file are fixed,
+ * which is said once. Nothing new and nothing fixed: nothing beyond the count.
+ */
+function saidOf(
+  input: DecideInput,
+  split: { findings: ClassifiedFinding[]; repeated: ClassifiedFinding[] },
+): { delivery: Partial<Delivery>; record: WorkRecord | null } {
+  const before = input.work.repeatsSaid.get(input.agent) ?? new Set<string>()
+  const now = new Set(split.repeated.map(findingKey))
+  const again = new Set(split.findings.map(findingKey))
+  const delivery: Partial<Delivery> = {}
+  if ([...now].some((key) => !before.has(key))) {
+    const named = repeatedOf(split.repeated, input.display ?? ((file) => file), input.maxContextChars)
+    if (named.repeated !== undefined && named.repeated.length > 0) delivery.repeated = named.repeated
+    if (named.repeatedMore !== undefined) delivery.repeatedMore = named.repeatedMore
+  } else if (now.size > 0) {
+    const rules = [...new Set(split.repeated.map(({ rule }) => rule.id))].sort()
+    delivery.repeatedCount = { count: split.repeated.length, rules }
+  }
+  const fixed = [...before].filter((key) => !now.has(key) && !again.has(key)).length
+  if (fixed > 0) delivery.repeatedFixed = { fixed, of: before.size }
+  const same = now.size === before.size && [...now].every((key) => before.has(key))
+  return { delivery, record: same ? null : { t: "repeatsSaid", agent: input.agent, keys: [...now] } }
+}
+
 /** Assemble, trim, and — on a stop — gate. */
 export async function decide(input: DecideInput): Promise<Decision> {
   const split = saysOnce(input) ? repeats(input) : null
@@ -1047,17 +1098,14 @@ export async function decide(input: DecideInput): Promise<Decision> {
     const { sent: _, ...decided } = await decideFindings(input)
     return decided
   }
-  const named =
-    split.repeated.length === 0
-      ? {}
-      : repeatedOf(split.repeated, input.display ?? ((file) => file), input.maxContextChars)
+  const said = saidOf(input, split)
   // The line, and the blank line before it, come out of the budget the rest is trimmed to.
-  const line = repeatedLine(named)
+  const line = repeatedLine(said.delivery)
   const reserve = line === null ? 0 : line.length + 2
   const maxContextChars = input.maxContextChars === null ? null : Math.max(0, input.maxContextChars - reserve)
   const { sent, ...decided } = await decideFindings({ ...input, findings: split.findings, maxContextChars })
-  if (named.repeated !== undefined && named.repeated.length > 0) decided.delivery.repeated = named.repeated
-  if (named.repeatedMore !== undefined) decided.delivery.repeatedMore = named.repeatedMore
+  Object.assign(decided.delivery, said.delivery)
+  if (said.record !== null) decided.work = [...decided.work, said.record]
   // Only a block or a report puts the findings before the agent (see the returns of decideFindings).
   const delivered = decided.delivery.stop === "block" || decided.delivery.stop === "report"
   const record = sentRecord(input, input.findings, delivered ? sent : [])
@@ -1104,13 +1152,18 @@ async function decideFindings(input: DecideInput): Promise<Decision & { sent: Cl
     stop: gated.stop,
     ...(mode === "unattended" ? { unattended: true as const } : {}),
   }
+  // Warnings go to the user at every stop, whatever the gate decides (adapters print them as a
+  // system message), so they are recorded as said at every stop: once said, not again (#90).
+  const warned = context.filter((record) => record.t === "warned")
   // An incomplete stop carries no findings: none of the delivery is context the agent was given.
-  if (gated.stop === "incomplete") return { delivery, overflow: null, work: gated.work, context: [], sent }
+  if (gated.stop === "incomplete") return { delivery, overflow: null, work: gated.work, context: warned, sent }
   // Only a block or a report reaches the agent as context; anything else must not count as
   // delivered. A capReached still prints its delivery as a system message, so it keeps the overflow
   // file — the message says rules did not fit, and the file is where they went.
-  if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: [], sent }
-  if (gated.stop === "capReached") return { delivery, overflow: trimmed.overflow, work: gated.work, context: [], sent }
+  if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: warned, sent }
+  if (gated.stop === "capReached") {
+    return { delivery, overflow: trimmed.overflow, work: gated.work, context: warned, sent }
+  }
   return {
     delivery,
     overflow: trimmed.overflow,

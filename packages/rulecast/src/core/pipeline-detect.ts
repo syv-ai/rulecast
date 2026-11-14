@@ -337,7 +337,8 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
   // failure, so it must not change the exit code.
   for (const { kind, max, setting, skipped } of overBudget) {
     warnings.push({
-      key: `${kind}-budget:${skipped.join(",")}`,
+      // Said once a session, whichever files a later stop leaves out (#90): it is about the setting.
+      key: `${kind}-budget`,
       text: `${kind} rules checked ${max} files; ${skipped.length} were not checked: ${skipped.map(run.shown).join(", ")}. Raise ${setting}, or run rulecast run --files on them.`,
     })
   }
