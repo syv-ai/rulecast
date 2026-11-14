@@ -16,7 +16,7 @@ import {
   sessionRoots,
 } from "../core/projects"
 import { cachedRepos } from "../core/repos/provider"
-import { elsewhereNotice, uncheckedCheckouts, untold } from "../core/session/elsewhere"
+import { elsewhereNotice, uncheckedCheckouts, untold, wasTold } from "../core/session/elsewhere"
 import { MAIN_AGENT } from "../core/session/state"
 import type { Adapter, AdapterInput, Delivery, Event } from "../core/types"
 import type { CliIo } from "./main"
@@ -46,7 +46,8 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     const event: Event | null = parsed.event ? { ...parsed.event, launchDir } : null
     const home = cacheHome(io.env)
     const projects = await projectsFor(parsed, event, launchDir, home)
-    if (projects.size === 0) return 0
+    // A shell call under no config may still work in a checkout that has one (elsewhere, below).
+    if (projects.size === 0 && event?.kind !== "shell-after") return 0
     const routed = {
       parsed,
       event,
@@ -57,27 +58,41 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       seat: budgetSeats(adapter.maxContextChars, projects.size),
     }
     const session = event?.session
-    const [, ...runs] = await Promise.all([
-      // An event without files recorded its roots while finding them (projectsForEvent).
-      session === undefined || event === null || event.files.length === 0
+    const agent = session?.agentId ?? MAIN_AGENT
+    const record = (roots: string[]) =>
+      session === undefined || roots.length === 0
         ? undefined
-        : recordRoots(home, session.id, session.agentId ?? MAIN_AGENT, [...projects.keys()]).catch((error: unknown) =>
+        : recordRoots(home, session.id, agent, roots).catch((error: unknown) =>
             io.stderr(`rulecast: ${errorMessage(error)}\n`),
-          ),
+          )
+    const [, ...runs] = await Promise.all([
+      // An edit records the projects of its files; a Read or a guard is not work there.
+      event?.kind === "edit" ? record([...projects.keys()]) : undefined,
       ...[...projects].map(([root, routing]) => runProject(root, routing, routed)),
     ])
     const parts = runs.filter((run): run is ProjectRun => run !== null)
-    if (event === null || parts.length === 0) return 0
-    const delivery = combineDeliveries(parts, parsed.cwd)
-    // A command that works in another checkout this call does not check: told once per checkout (#71).
-    if (event.kind === "shell-after" && event.command !== undefined && session !== undefined) {
-      const trees = await uncheckedCheckouts(event.command, parsed.cwd, [...projects.keys()])
-      const fresh = await untold(home, session.id, session.agentId ?? MAIN_AGENT, trees)
-      if (fresh.length > 0)
-        delivery.agentNotices = [...(delivery.agentNotices ?? []), elsewhereNotice(fresh, parsed.cwd)]
+    if (event === null) return 0
+    // A shell call records the agent's projects where it changed files, but never one only its subagents ran.
+    if (event.kind === "shell-after") {
+      await record(parts.filter((part) => part.changedByShell && !part.subagents).map((part) => part.root))
     }
-    // The nearest project's setting: the first part is the config nearest the agent or the file.
-    const output = adapter.format(delivery, event, { maxMatchesPerRule: parts[0]!.maxMatchesPerRule })
+    // A command that works in another checkout this call does not check: told once per checkout (#71).
+    let elsewhere: string | null = null
+    if (event.kind === "shell-after" && event.command !== undefined && session !== undefined) {
+      const told = (tree: string) => wasTold(home, session.id, agent, tree)
+      const checked = parts.map((part) => part.root)
+      const trees = await uncheckedCheckouts(event.command, parsed.cwd, checked, told)
+      const fresh = await untold(home, session.id, agent, trees)
+      if (fresh.length > 0) elsewhere = elsewhereNotice(fresh, parsed.cwd)
+    }
+    if (parts.length === 0 && elsewhere === null) return 0
+    const delivery = combineDeliveries(parts, parsed.cwd)
+    if (elsewhere !== null) delivery.agentNotices = [...(delivery.agentNotices ?? []), elsewhere]
+    // The nearest project's setting: the first part is the config nearest the agent or the file. With
+    // no part, the delivery holds only the notice, and no matches to cap.
+    const output = adapter.format(delivery, event, {
+      maxMatchesPerRule: parts[0]?.maxMatchesPerRule ?? Number.POSITIVE_INFINITY,
+    })
     if (output.stdout !== "") io.stdout(output.stdout)
   } catch (error) {
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
@@ -191,6 +206,10 @@ interface ProjectRun {
   root: string
   delivery: Delivery
   maxMatchesPerRule: number
+  /** Only the main agent's subagents ran this project (Routing.subagents). */
+  subagents: boolean
+  /** A shell call changed files this project's rules judge (the delivery is `via: "shell"`). */
+  changedByShell: boolean
 }
 
 /**
@@ -238,7 +257,13 @@ async function runProject(root: string, routing: Routing, routed: Routed): Promi
     })
     const missed = result.deadlineMissed.filter((kind) => registry.get(kind)?.warm !== undefined)
     if (missed.length > 0) io.startWarm(root, missed)
-    return { root, delivery: result.delivery, maxMatchesPerRule: project.config.maxMatchesPerRule }
+    return {
+      root,
+      delivery: result.delivery,
+      maxMatchesPerRule: project.config.maxMatchesPerRule,
+      subagents: routing.subagents,
+      changedByShell: result.delivery.via === "shell",
+    }
   } catch (error) {
     log?.(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
     io.stderr(`rulecast: ${errorMessage(error)}\n`)

@@ -1,9 +1,9 @@
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 
 import { CONFIG_FILE } from "./config/load"
-import { git } from "./git"
+import { checkoutOf, git } from "./git"
 import { appendRecords, readRecords } from "./jsonl"
 import { MAIN_AGENT } from "./session/state"
 import type { EventKind } from "./types"
@@ -16,22 +16,83 @@ import type { EventKind } from "./types"
 /**
  * Every ancestor of `dir`, and `dir` itself, that holds CONFIG_FILE, nearest first. A config in the
  * home directory counts only when `dir` is the home directory: below it, every repository without its
- * own config would otherwise become part of one project rooted at `~`.
+ * own config would otherwise become part of one project rooted at `~`. Nor does a config in another
+ * checkout of the same repository above `dir`'s own: from a worktree at `<repo>/.claude/worktrees/x`,
+ * `<repo>` is the main checkout's project, not this one's. A bare repository's directory is no
+ * checkout (bareContainer): its config applies to the worktrees below it. Above a different repository (a submodule's
+ * superproject, a home directory kept in git) configs still count.
  */
 export function configRootsAbove(dir: string, home: string = homedir()): string[] {
   const start = path.resolve(dir)
   const homeDir = path.resolve(home)
-  const roots: string[] = []
+  const chain: string[] = []
   for (let current = start; ; current = path.dirname(current)) {
+    chain.push(current)
+    if (path.dirname(current) === current) break
+  }
+  // owner[i]: the index of the checkout top chain[i] is in (the nearest ancestor holding .git), -1 outside git.
+  const owner: number[] = []
+  for (let i = chain.length - 1, next = -1; i >= 0; i--) {
+    if (existsSync(path.join(chain[i]!, ".git"))) next = i
+    owner[i] = next
+  }
+  const own = owner[0]!
+  // Read only when a second checkout is above `dir`: a worktree's .git file, no git process.
+  const repos = new Map<number, string | null>()
+  const repoOf = (top: number) => {
+    if (!repos.has(top)) repos.set(top, checkoutOf(chain[top]!)?.commonDir ?? null)
+    return repos.get(top)!
+  }
+  const sameRepository = (top: number) =>
+    top !== own &&
+    top !== -1 &&
+    own !== -1 &&
+    repoOf(own) !== null &&
+    repoOf(top) === repoOf(own) &&
+    !bareContainer(chain[top]!)
+  const roots: string[] = []
+  chain.forEach((current, i) => {
+    if (sameRepository(owner[i]!)) return
     if (existsSync(path.join(current, CONFIG_FILE)) && (current !== homeDir || current === start)) roots.push(current)
-    if (path.dirname(current) === current) return roots
+  })
+  return roots
+}
+
+/**
+ * Whether `top` holds a `.git` file naming a bare repository's own git directory, as in the "bare
+ * repository plus worktrees" layout (`proj/.git` is `gitdir: ./.bare`, worktrees at `proj/w1`). Such a
+ * directory is not a work tree, so it is no checkout boundary. Read from files, without git.
+ */
+function bareContainer(top: string): boolean {
+  try {
+    const dotGit = path.join(top, ".git")
+    if (!statSync(dotGit).isFile()) return false
+    const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))
+    if (pointer === null) return false
+    const gitDir = path.resolve(top, pointer[1]!.trim())
+    // A linked worktree's git directory names the common one; a bare repository's is the common one.
+    if (existsSync(path.join(gitDir, "commondir"))) return false
+    return /^\s*bare\s*=\s*true\s*$/im.test(readFileSync(path.join(gitDir, "config"), "utf8"))
+  } catch {
+    return false
   }
 }
 
 /**
+ * Whether `dir` is in another checkout of `from`'s repository: a worktree nested in its own
+ * repository, seen from either side. Another repository (a submodule, say) is not.
+ */
+export function inOtherCheckout(dir: string, from: string): boolean {
+  const there = checkoutOf(dir)
+  const here = checkoutOf(from)
+  return there !== null && here !== null && there.top !== here.top && there.commonDir === here.commonDir
+}
+
+/**
  * Config directories strictly below `dir` in its git work tree, tracked or untracked but not ignored,
- * sorted by path. Lists untracked files, so it is slow on a large repository: only session
- * start, install, init and doctor call it. Outside a git repository it is empty.
+ * sorted by path. Lists untracked files, so it is slow on a large repository: session start,
+ * install, init and doctor call it, and `run --commit-msg` on every commit, where git has just
+ * listed the work tree for the message template too. Outside a git repository it is empty.
  */
 export async function configRootsBelow(dir: string): Promise<string[]> {
   const start = path.resolve(dir)
@@ -88,10 +149,14 @@ function sessionRootsFile(cache: string, sessionId: string): string {
   return path.join(cache, "sessions", `${safeSegment(sessionId)}.roots`)
 }
 
-/** A root an agent of the session ran: `a` is the agent id, MAIN_AGENT for the main agent. */
+/**
+ * A root an agent of the session ran: `a` is the agent id, MAIN_AGENT for the main agent. `s` marks
+ * the roots a session start found, above and below the launch directory.
+ */
 interface RootRecord {
   r: string
   a: string
+  s?: true
 }
 
 const isRootRecord = (record: unknown): record is RootRecord =>
@@ -106,10 +171,11 @@ export async function recordSessionRoots(
   sessionId: string,
   agent: string,
   roots: readonly string[],
+  start = false,
 ): Promise<void> {
   await appendRecords(
     sessionRootsFile(cache, sessionId),
-    roots.map((root): RootRecord => ({ r: path.resolve(root), a: agent })),
+    roots.map((root): RootRecord => ({ r: path.resolve(root), a: agent, ...(start ? { s: true as const } : {}) })),
   )
 }
 
@@ -152,12 +218,14 @@ const CHECKS: ReadonlySet<EventKind> = new Set(["shell-before", "shell-after", "
 
 /**
  * The projects an event without files belongs to. A session start: every config above and below the
- * launch directory. A shell call or a stop: the configs above cwd (and, for the main agent, above the
- * launch directory), then those the agent ran before; for the main agent, the ones only its
- * subagents ran come after, in `subagents`. A subagent's never reaches another agent's projects: a
- * sibling's worktree is not its work. A prompt or reset only resets bookkeeping, so it reaches every
- * project the session ran. What is above cwd and the launch directory is recorded as the agent's.
- * Deduplicated by real path, keeping the first seen.
+ * launch directory, recorded as the main agent's. A shell call or a stop: the configs above cwd
+ * (and, for the main agent, above the launch directory), then those the agent ran before; a
+ * subagent's also reaches the configs the start found below its cwd in its own checkout, and for the
+ * main agent the ones only its subagents ran come after, in `subagents`. Neither crosses into
+ * another checkout of the repository above or below cwd (configRootsAbove, inOtherCheckout): a sibling's or the lead's
+ * worktree is not a subagent's work. A prompt or reset only resets bookkeeping, so it reaches every
+ * project the session ran. Only a start records roots here; edits and shell calls that changed
+ * files record theirs (commands/hook.ts). Deduplicated by real path, keeping the first seen.
  *
  * `cache` is the rulecast cache home (core/home.ts `cacheHome`); `home` the user's home directory.
  */
@@ -169,21 +237,25 @@ export async function projectsForEvent(
   const main = event.agent === MAIN_AGENT
   if (event.kind === "start") {
     const roots = dedupe([...configRootsAbove(event.launchDir, home), ...(await configRootsBelow(event.launchDir))])
-    await recordSessionRoots(cache, event.sessionId, event.agent, roots)
+    await recordSessionRoots(cache, event.sessionId, event.agent, roots, true)
     return { own: roots, subagents: [] }
   }
   const here = dedupe([...configRootsAbove(event.cwd, home), ...(main ? configRootsAbove(event.launchDir, home) : [])])
   const records = (await rootRecords(cache, event.sessionId)).filter((record) =>
     existsSync(path.join(record.r, CONFIG_FILE)),
   )
-  const known = new Set(records.filter((record) => record.a === event.agent).map((record) => record.r))
-  const fresh = here.filter((root) => !known.has(path.resolve(root)))
-  if (fresh.length > 0) await recordSessionRoots(cache, event.sessionId, event.agent, fresh)
   const recorded = (mine: boolean) =>
     records.filter((record) => (record.a === event.agent) === mine).map((record) => record.r)
   if (!CHECKS.has(event.kind)) return { own: dedupe([...here, ...records.map((record) => record.r)]), subagents: [] }
+  if (!main) {
+    const cwd = path.resolve(event.cwd)
+    const below = records
+      .filter((record) => record.s === true && record.r.startsWith(`${cwd}${path.sep}`))
+      .map((record) => record.r)
+      .filter((root) => !inOtherCheckout(root, cwd))
+    return { own: dedupe([...here, ...below, ...recorded(true)]), subagents: [] }
+  }
   const own = dedupe([...here, ...recorded(true)])
-  if (!main) return { own, subagents: [] }
   const ownReal = new Set(own.map(realPath))
   return { own, subagents: dedupe(recorded(false)).filter((root) => !ownReal.has(realPath(root))) }
 }

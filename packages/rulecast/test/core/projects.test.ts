@@ -12,7 +12,7 @@ import {
   recordSessionRoots,
   sessionRoots,
 } from "../../src/core/projects"
-import { createRepo } from "../helpers/git"
+import { createRepo, git } from "../helpers/git"
 import { TEST_HOME } from "../helpers/home"
 import { createProject } from "../helpers/project"
 
@@ -26,6 +26,47 @@ describe("configRootsAbove", () => {
     const root = await createProject({ [CONFIG]: config, [`pkg/${CONFIG}`]: config, "pkg/src/x.py": "" })
     expect(configRootsAbove(path.join(root, "pkg/src"), NO_HOME)).toEqual([path.join(root, "pkg"), root])
     expect(configRootsAbove(root, NO_HOME)).toEqual([root])
+  })
+
+  test("stops above a worktree only at another checkout of the same repository", async () => {
+    const repo = await createRepo({ [CONFIG]: config })
+    // A worktree nested in its own repository, as Claude Code makes them.
+    const worktree = path.join(repo, ".claude/worktrees/x")
+    await git(repo, "worktree", "add", "-q", "-b", "x", worktree)
+    expect(configRootsAbove(path.join(worktree, "src"), NO_HOME)).toEqual([worktree])
+    expect(configRootsAbove(repo, NO_HOME)).toEqual([repo])
+  })
+
+  test("a bare repository's directory is no checkout: its config applies to the worktrees below it", async () => {
+    const source = await createRepo({ "a.py": "" })
+    // The "bare repo plus worktrees" layout: proj/.bare, proj/.git naming it, a worktree per branch.
+    const proj = await createProject({ [CONFIG]: config })
+    await git(proj, "clone", "-q", "--bare", source, ".bare")
+    await writeFile(path.join(proj, ".git"), "gitdir: ./.bare\n")
+    await git(proj, "worktree", "add", "-q", "w1", "main")
+    const w1 = path.join(proj, "w1")
+    expect(configRootsAbove(w1, NO_HOME)).toEqual([proj])
+    // A worktree nested in one of them is still its own checkout: w1's config does not reach it.
+    await writeFile(path.join(w1, CONFIG), config)
+    const nested = path.join(w1, ".claude/worktrees/x")
+    await git(w1, "worktree", "add", "-q", "-b", "x", nested)
+    expect(configRootsAbove(nested, NO_HOME)).toEqual([proj])
+    expect(configRootsAbove(w1, NO_HOME)).toEqual([w1, proj])
+  })
+
+  test("a nested repository and a submodule keep the configs above them", async () => {
+    // A home directory kept in git for its dotfiles, with a config and a repository under it.
+    const home = await createRepo({ [`work/${CONFIG}`]: config, ".bashrc": "" })
+    const project = path.join(home, "work/project")
+    await mkdir(project, { recursive: true })
+    await git(project, "init", "-q")
+    expect(configRootsAbove(project, NO_HOME)).toEqual([path.join(home, "work")])
+    // A submodule's .git names a git directory of its own inside the superproject's.
+    const superproject = await createRepo({ [CONFIG]: config })
+    const submodule = path.join(superproject, "vendor/lib")
+    await mkdir(path.join(superproject, ".git/modules"), { recursive: true })
+    await git(superproject, "init", "-q", "--separate-git-dir", path.join(superproject, ".git/modules/lib"), submodule)
+    expect(configRootsAbove(submodule, NO_HOME)).toEqual([superproject])
   })
 
   test("a config in the home directory counts only from the home directory", async () => {
@@ -125,7 +166,7 @@ describe("projectsForEvent", () => {
     })
   })
 
-  test("other events add the configs above cwd after a cd, deduplicated, and record them", async () => {
+  test("other events add the configs above cwd after a cd, deduplicated, and record nothing", async () => {
     const root = await createProject({ [CONFIG]: config, [`pkg/${CONFIG}`]: config })
     const event = {
       cwd: path.join(root, "pkg"),
@@ -135,7 +176,24 @@ describe("projectsForEvent", () => {
       kind: "prompt" as const,
     }
     expect((await projectsForEvent(event, TEST_HOME, NO_HOME)).own).toEqual([path.join(root, "pkg"), root])
-    expect(await sessionRoots(TEST_HOME, "cd-1", "main")).toEqual([path.join(root, "pkg"), root])
+    expect(await projectsForEvent({ ...event, kind: "shell-after" }, TEST_HOME, NO_HOME)).toEqual({
+      own: [path.join(root, "pkg"), root],
+      subagents: [],
+    })
+    // Roots are recorded from edits and from shell calls that changed files (commands/hook.ts), not here.
+    expect(await sessionRoots(TEST_HOME, "cd-1")).toEqual([])
+  })
+
+  test("a subagent in the session's tree reaches the configs the start found below its cwd, not beyond", async () => {
+    const root = await createRepo({ [`packages/a/${CONFIG}`]: config, [`packages/b/${CONFIG}`]: config })
+    const of = (agent: string, cwd: string, kind: "start" | "shell-after" | "verify") =>
+      projectsForEvent({ cwd, launchDir: root, sessionId: "below-1", agent, kind }, TEST_HOME, NO_HOME)
+    await of("main", root, "start")
+    const packages = [path.join(root, "packages/a"), path.join(root, "packages/b")]
+    for (const kind of ["shell-after", "verify"] as const) {
+      expect(await of("sub1", root, kind)).toEqual({ own: packages, subagents: [] })
+      expect(await of("sub1", path.join(root, "packages/a"), kind)).toEqual({ own: [packages[0]], subagents: [] })
+    }
   })
 
   test("the main agent's shell calls and stop list its subagents' worktrees apart; a subagent's never reach another's", async () => {

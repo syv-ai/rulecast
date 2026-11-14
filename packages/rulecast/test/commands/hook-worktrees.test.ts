@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { writeFile } from "node:fs/promises"
+import { realpath, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, test } from "vitest"
 
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
-import { createRepo } from "../helpers/git"
+import { createRepo, git } from "../helpers/git"
 import { testEnv } from "../helpers/home"
 import { claudeCodePayload } from "../helpers/payloads"
 
@@ -117,7 +117,129 @@ describe("rulecast hook claude-code: subagents in their own worktrees", () => {
   })
 })
 
+/** One hook call in `sessionId`, by the main agent or the subagent `agentId`; a Bash call's `command` when given. */
+function hookIn(sessionId: string, launchDir: string) {
+  const env = { ...testEnv, CLAUDE_PROJECT_DIR: launchDir }
+  return async (
+    name: string,
+    cwd: string,
+    opts: { agentId?: string; file?: string; toolUseId?: string; command?: string } = {},
+  ): Promise<string> => {
+    const payload = claudeCodePayload(name, { root: cwd, file: opts.file, sessionId })
+    if (opts.agentId === undefined) delete payload.agent_id
+    else payload.agent_id = opts.agentId
+    if (opts.toolUseId !== undefined) payload.tool_use_id = opts.toolUseId
+    if (opts.command !== undefined) (payload as { tool_input?: unknown }).tool_input = { command: opts.command }
+    const { stdout } = await runCli(cwd, ["hook", "claude-code"], JSON.stringify(payload), env)
+    if (stdout === "") return ""
+    const output = JSON.parse(stdout)
+    return output.hookSpecificOutput?.additionalContext ?? output.reason ?? ""
+  }
+}
+
+describe("rulecast hook claude-code: which projects a subagent's shell calls and stop reach", () => {
+  test("a subagent in a worktree inside the repository is not held to the lead's checkout", async () => {
+    const lead = await createRepo({
+      ".rulecast-config.yaml": localConfig(RULES),
+      ".gitignore": ".claude/\n",
+      "a.py": "a = 1\n",
+      "b.py": "b = 1\n",
+    })
+    const sub = path.join(lead, ".claude", "worktrees", "w1")
+    await git(lead, "worktree", "add", "-q", "-b", "w1", sub)
+    const hook = hookIn(randomUUID(), lead)
+    await hook("session-start.startup", lead)
+    await writeFile(path.join(sub, "b.py"), "b = 2\n")
+    await hook("post-tool-use.edit.subagent", sub, { agentId: "sub1", file: "b.py" })
+    await hook("pre-tool-use.bash", sub, { agentId: "sub1", toolUseId: "toolu_s" })
+    await writeFile(path.join(lead, "a.py"), "print(3)\n")
+    expect(await hook("post-tool-use.bash", sub, { agentId: "sub1", toolUseId: "toolu_s" })).toBe("")
+    expect(await hook("subagent-stop", sub, { agentId: "sub1" })).toBe("")
+  })
+
+  test("a subagent in the lead's tree is checked in the packages the start found below it", async () => {
+    const root = await createRepo({
+      "packages/a/.rulecast-config.yaml": localConfig(RULES),
+      "packages/b/.rulecast-config.yaml": localConfig(RULES),
+      "packages/b/y.py": "y = 1\n",
+    })
+    const hook = hookIn(randomUUID(), root)
+    await hook("session-start.startup", root)
+    await hook("pre-tool-use.bash", root, { agentId: "sub1", toolUseId: "toolu_b" })
+    await writeFile(path.join(root, "packages/b/y.py"), "print(1)\n")
+    expect(await hook("post-tool-use.bash", root, { agentId: "sub1", toolUseId: "toolu_b" })).toContain(
+      "packages/b/y.py:1 prints.",
+    )
+    expect(await hook("subagent-stop", root, { agentId: "sub1" })).toContain("packages/b/y.py:1 prints.")
+  })
+
+  test("the lead reading a file in a subagent's worktree does not make that worktree its own", async () => {
+    const { lead, sub, hook, stopOf, subEdits } = await worktrees({ subagent_projects: "exclude" })
+    await subEdits("print(1)\n")
+    await hook("post-tool-use.read.complete", lead, { file: path.relative(lead, path.join(sub, "b.py")) })
+    expect((await stopOf("stop", lead)).decision).toBeUndefined()
+  })
+})
+
 describe("rulecast hook claude-code: a command that works in another checkout (#71)", () => {
+  /** A repository whose config sits in `configDir`, with a second checkout `w1` next to it. */
+  async function checkouts(configDir = ".", settings: Record<string, unknown> = {}) {
+    const lead = await createRepo({
+      [path.join(configDir, ".rulecast-config.yaml")]: localConfig(RULES, settings),
+      [path.join(configDir, "a.py")]: "a = 1\n",
+    })
+    const other = path.join(await realpath(path.dirname(lead)), `${path.basename(lead)}-w1`)
+    await git(lead, "worktree", "add", "-q", "-b", "w1", other)
+    return { lead, other, hook: hookIn(randomUUID(), lead) }
+  }
+  const shellIn = (hook: ReturnType<typeof hookIn>, cwd: string, command: string, agentId?: string) => {
+    const toolUseId = `toolu_${randomUUID()}`
+    return hook("pre-tool-use.bash", cwd, { agentId, toolUseId, command }).then(() =>
+      hook("post-tool-use.bash", cwd, { agentId, toolUseId, command }),
+    )
+  }
+
+  test("told when the checkout's config is in a package below the named directory", async () => {
+    const { lead, other, hook } = await checkouts("packages/b")
+    expect(await shellIn(hook, lead, `cd ${other} && echo 'x = 1' >> packages/b/a.py`)).toContain(
+      "another checkout of this repository",
+    )
+  })
+
+  test("told even when the agent's own directory has no config", async () => {
+    const { lead, other, hook } = await checkouts("packages/b")
+    expect(await shellIn(hook, lead, `sed -i.bak s/a/b/ ../${path.basename(other)}/packages/b/a.py`)).toContain(
+      "another checkout of this repository",
+    )
+  })
+
+  test("told when the checkout is a subagent's project its config leaves out of the main agent's calls", async () => {
+    const { lead, other, hook } = await checkouts(".", { subagent_projects: "exclude" })
+    await writeFile(path.join(other, "a.py"), "a = 2\n")
+    await hook("post-tool-use.edit.subagent", other, { agentId: "sub1", file: "a.py" })
+    expect(await shellIn(hook, lead, `cd ${other} && echo 'print(1)' >> a.py`)).toContain(
+      "another checkout of this repository",
+    )
+  })
+
+  test("a subagent in a worktree inside the repository is told when it works in the main checkout", async () => {
+    const lead = await createRepo({
+      ".rulecast-config.yaml": localConfig(RULES),
+      ".gitignore": ".claude/\n",
+      "a.py": "a = 1\n",
+    })
+    const sub = path.join(lead, ".claude", "worktrees", "w1")
+    await git(lead, "worktree", "add", "-q", "-b", "w1", sub)
+    const hook = hookIn(randomUUID(), lead)
+    expect(await shellIn(hook, sub, `cd ${lead} && echo 'x = 2' >> a.py`, "sub1")).toContain(
+      "another checkout of this repository",
+    )
+    // And the lead, in turn, when it works in the subagent's worktree by a relative path.
+    expect(await shellIn(hook, lead, "echo 'x = 2' >> .claude/worktrees/w1/a.py")).toContain(
+      "another checkout of this repository",
+    )
+  })
+
   test("the agent is told once per checkout that shell edits there are not checked", async () => {
     const root = await createRepo({ ".rulecast-config.yaml": localConfig(RULES), "a.py": "a = 1\n" })
     const builder = path.join(root, ".claude", "worktrees", "w1")
