@@ -24,6 +24,8 @@ function run(
     })
     child.on("error", reject)
     child.on("close", (status) => resolve({ status, out }))
+    // A command that exits without reading stdin (git init) closes the pipe first: EPIPE, not a failure.
+    child.stdin.on("error", () => {})
     child.stdin.end(input)
   })
 }
