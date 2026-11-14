@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { statSync } from "node:fs"
 import path from "node:path"
 
 import { readOutput, type ToolFinding } from "../../core/detection/outputs"
@@ -161,12 +161,11 @@ async function runHk(spec: string, files: string[], input: DetectorRun<HookConfi
 const CANT_RUN =
   /Failed to spawn|command not found|: not found$|Executable `[^`]+` not found|bad interpreter|No such file or directory \(os error 2\)/m
 
-/** The hook failed because its tool could not start: exit 126 or 127, or it said so. */
-const couldNotRun = (ran: HookRun) =>
-  ran.failed && (ran.exitCode === 126 || ran.exitCode === 127 || CANT_RUN.test(ran.output))
-
-/** `path:line` anywhere on a line, as tools print it outside their main format (ty's ` --> a.py:3:5`). */
-const LOCATION = String.raw`(?:^|[\s(<>'"])(?<file>[\w@+.-]*(?:/[\w@+.-]+)*\.[A-Za-z0-9]+):(?<line>\d+)(?::\d+)?(?<message>)`
+/**
+ * `path:line` anywhere on a line, as tools print it outside their main format (ty's ` --> a.py:3:5`,
+ * `./a.py:3`, `Dockerfile:12`). Only a file that exists counts, so a word before a colon is no path.
+ */
+const LOCATION = String.raw`(?:^|[\s(<>'"])(?<file>/?[\w@+.-]+(?:/[\w@+.-]+)*):(?<line>\d+)(?::\d+)?(?<message>)`
 
 /**
  * The files and lines a failed hook's output names, project-relative: what its format read, and
@@ -176,13 +175,23 @@ function namedLocations(findings: ToolFinding[], ran: HookRun, cwd: string): { f
   const scanned = readOutput({ lines: { pattern: LOCATION } }, ran.output, ran.dir, cwd)
   const seen = new Set<string>()
   const out: { file: string; line: number }[] = []
-  for (const { file, line } of [...findings, ...scanned]) {
-    const key = `${file}:${line}`
-    if (seen.has(key) || !existsSync(path.join(cwd, file))) continue
+  for (const found of [...findings, ...scanned]) {
+    // `./a.py` is a.py.
+    const file = path.posix.normalize(found.file)
+    const key = `${file}:${found.line}`
+    if (seen.has(key) || !isFile(path.join(cwd, file))) continue
     seen.add(key)
-    out.push({ file, line })
+    out.push({ file, line: found.line })
   }
   return out
+}
+
+const isFile = (file: string) => {
+  try {
+    return statSync(file).isFile()
+  } catch {
+    return false
+  }
 }
 
 /** A finding at the line a failed hook's output named. */
@@ -290,21 +299,33 @@ export const hookDetector: Detector<HookConfig> = {
           throw new Error(toolFailure(name, { stdout: ran.output, stderr: "", exitCode: ran.exitCode }))
         }
         const said = ran.output.trim().split(/\r?\n/).slice(0, OUTPUT_LINES).join("\n")
-        // A tool that could not start found nothing: that is the rule's error, not a finding.
-        if (couldNotRun(ran)) throw new Error(`${name} could not run, so it checked nothing: ${said}`)
-        const findings = readOutput(config.output, ran.output, ran.dir, input.cwd)
+        // A tool that could not start found nothing: that is the rule's error, not a finding. Exit
+        // 126 or 127 always says so; its words only when nothing else it printed is a finding or a
+        // place, since a snippet or a message may quote them.
+        const cantRun = new Error(`${name} could not run, so it checked nothing: ${said}`)
+        if (ran.failed && (ran.exitCode === 126 || ran.exitCode === 127)) throw cantRun
+        let findings: ToolFinding[]
+        try {
+          findings = readOutput(config.output, ran.output, ran.dir, input.cwd)
+        } catch (error) {
+          if (ran.failed && CANT_RUN.test(ran.output)) throw cantRun
+          throw error
+        }
+        const named = ran.failed ? namedLocations(findings, ran, input.cwd) : []
+        if (ran.failed && findings.length === 0 && named.length === 0 && CANT_RUN.test(ran.output)) throw cantRun
         await distribute(findings, rules, input.read, result)
         if (ran.failed && changed.length === 0) {
           // The hook failed and nothing it said reached a rule: no format reads it, or it is about
           // files the rule did not give it (a whole-project, always_run hook). The agent still hears
           // it, but never on a file the hook did not name.
-          const named = namedLocations(findings, ran, input.cwd)
           const told = new Set(result.findings.map((finding) => finding.rule))
           for (const rule of forHook(rules, name).filter((rule) => !told.has(rule.id))) {
             const own = named.filter((location) => rule.files.includes(location.file))
             if (own.length > 0) {
               const at = own.map((location) => lineFinding(location, name, `${name} failed: ${said}`))
               await distribute(at, [rule], input.read, result)
+            } else if (named.some((location) => files.includes(location.file))) {
+              // It failed over another rule's files in this run: that rule hears it, this one has nothing.
             } else if (named.length > 0) {
               const where = named.slice(0, 3).map((location) => `${location.file}:${location.line}`)
               const message = `${name} failed over files this run did not give it (${where.join(", ")}), not over its own: ${said}`

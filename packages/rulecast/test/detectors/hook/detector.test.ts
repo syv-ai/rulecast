@@ -227,6 +227,52 @@ describe("hook detector: pre-commit hooks", () => {
     ])
   })
 
+  test("a finding is kept when the snippet under it mentions a command that was not found", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\ny\n" })
+    await stubRunner(
+      root,
+      "prek",
+      failing(["a.py:2:1: error: shell call fails", "    run('foo') # sh: foo: command not found"]),
+    )
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => [f.match.file, f.match.line])).toEqual([["a.py", 2]])
+  })
+
+  test("a finding whose message ends in ': not found' is a finding", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n" })
+    await stubRunner(root, "prek", failing(["a.py:1:1: error: module named 'x': not found"]))
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => f.match.captures.message)).toEqual(["module named 'x': not found"])
+  })
+
+  test("two rules on one hook: the rule whose files the hook did not fail over gets nothing", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n", "b.py": "y\n" })
+    await stubRunner(root, "prek", failing(["error[x]: bad", " --> a.py:1:1"]))
+    const result = await run(root, [
+      ruleFor("A", { "pre-commit": "licence" }, ["a.py"]),
+      ruleFor("B", { "pre-commit": "licence" }, ["b.py"]),
+    ])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => [f.rule, f.match.file])).toEqual([["A", "a.py"]])
+  })
+
+  test.each([
+    ["./a.py:2", "a.py", 2],
+    ["Dockerfile:3", "Dockerfile", 3],
+  ])("a hook naming %s names a file it was given", async (named, file, line) => {
+    const root = await createProject({
+      ".pre-commit-config.yaml": CONFIG,
+      "a.py": "x\ny\n",
+      Dockerfile: "FROM x\n\nRUN y\n",
+    })
+    await stubRunner(root, "prek", failing(["problem found", `  at ${named}`]))
+    const result = await run(root, [ruleFor("licence", { "pre-commit": "licence" }, ["a.py", "Dockerfile"])])
+    expect(result.errors).toEqual([])
+    expect(result.findings.map((f) => [f.match.file, f.match.line])).toEqual([[file, line]])
+  })
+
   test("a hook given exactly one file that fails naming no file is a finding on that file", async () => {
     const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "a.py": "x\n" })
     await stubRunner(root, "prek", failing(["missing licence header"]))

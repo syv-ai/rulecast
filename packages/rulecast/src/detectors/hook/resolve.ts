@@ -76,9 +76,66 @@ export async function findPreCommitHook(
       const stages = strings(hook.stages) ?? defaults
       // "commit" is the pre-3.2 name of the pre-commit stage.
       const runsAtCommit = stages === null || stages.includes("pre-commit") || stages.includes("commit")
-      // always_run and pass_filenames: false run the hook over the project, not the files given.
-      const givenFiles = hook.always_run !== true && hook.pass_filenames !== false
+      const givenFiles = await getsItsFiles(repo, hook)
       return { id, stage: runsAtCommit ? "pre-commit" : stages[0]!, givenFiles }
+    }
+  }
+  return null
+}
+
+/**
+ * Whether a hook gets the files it is run on: always_run and pass_filenames: false run it over the
+ * project instead. The config's own values win; a remote hook's defaults are in its repository's
+ * .pre-commit-hooks.yaml, read from the clone pre-commit or prek already made at that rev. Unknown,
+ * with no clone, counts as not given.
+ */
+async function getsItsFiles(repo: JsonObject, hook: JsonObject): Promise<boolean> {
+  const own = (field: "always_run" | "pass_filenames") =>
+    typeof hook[field] === "boolean" ? (hook[field] as boolean) : undefined
+  if (own("always_run") === true || own("pass_filenames") === false) return false
+  if (own("always_run") === false && own("pass_filenames") === true) return true
+  // A local hook is all in the config: pre-commit's defaults, always_run false and pass_filenames true.
+  if (typeof repo.repo !== "string" || repo.repo === "local" || repo.repo === "meta") return true
+  if (typeof repo.rev !== "string") return false
+  const manifest = await cachedManifest(repo.repo, repo.rev)
+  const entry = manifest?.find((one) => isObject(one) && one.id === hook.id)
+  if (!isObject(entry)) return false
+  const always = own("always_run") ?? entry.always_run === true
+  const names = own("pass_filenames") ?? entry.pass_filenames !== false
+  return !always && names
+}
+
+/**
+ * A remote hook repository's .pre-commit-hooks.yaml at `rev`, from the clone pre-commit
+ * (`<PRE_COMMIT_HOME>/repo*`, its .git/FETCH_HEAD naming rev and url) or prek
+ * (`<PREK_HOME>/repos/*`, its .prek-repo.json) already made. Null when neither has one: never fetched.
+ */
+async function cachedManifest(url: string, rev: string): Promise<unknown[] | null> {
+  const env = process.env
+  const cache = env.XDG_CACHE_HOME || path.join(env.HOME || os.homedir(), ".cache")
+  const clones: string[] = []
+  const preCommit = env.PRE_COMMIT_HOME || path.join(cache, "pre-commit")
+  for (const name of await readdir(preCommit).catch(() => [] as string[])) {
+    if (!name.startsWith("repo")) continue
+    const fetched = await readFile(path.join(preCommit, name, ".git", "FETCH_HEAD"), "utf8").catch(() => "")
+    if (fetched.split("\n")[0]!.endsWith(`'${rev}' of ${url}`)) clones.push(path.join(preCommit, name))
+  }
+  const prek = path.join(env.PREK_HOME || path.join(cache, "prek"), "repos")
+  for (const name of await readdir(prek).catch(() => [] as string[])) {
+    const meta = await readFile(path.join(prek, name, ".prek-repo.json"), "utf8").catch(() => "")
+    try {
+      const repo: unknown = JSON.parse(meta)
+      if (isObject(repo) && repo.repo === url && repo.rev === rev) clones.push(path.join(prek, name))
+    } catch {
+      // Not a clone prek finished.
+    }
+  }
+  for (const clone of clones) {
+    try {
+      const manifest: unknown = parse(await readFile(path.join(clone, ".pre-commit-hooks.yaml"), "utf8"))
+      if (Array.isArray(manifest)) return manifest
+    } catch {
+      // No manifest in that clone: try the next.
     }
   }
   return null

@@ -1,4 +1,7 @@
-import { describe, expect, test } from "vitest"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import { findLefthookJob, findPreCommitHook, substituteFiles } from "../../../src/detectors/hook/resolve"
 import { createProject } from "../../helpers/project"
@@ -27,7 +30,8 @@ repos:
 describe("findPreCommitHook", () => {
   test("finds a hook id in any repo, with the stage it runs at", async () => {
     const root = await createProject({ ".pre-commit-config.yaml": CONFIG })
-    expect(await findPreCommitHook(root, "mypy")).toEqual({ id: "mypy", stage: "pre-commit", givenFiles: true })
+    // mirrors-mypy is not in any cache here: whether it gets its files is unknown, so taken as not.
+    expect(await findPreCommitHook(root, "mypy")).toEqual({ id: "mypy", stage: "pre-commit", givenFiles: false })
     expect(await findPreCommitHook(root, "slow-check")).toEqual({
       id: "slow-check",
       stage: "pre-push",
@@ -83,5 +87,67 @@ describe("substituteFiles", () => {
 
   test("a command without a template is run as it is", () => {
     expect(substituteFiles("pnpm typecheck", ["a.ts"])).toBe("pnpm typecheck")
+  })
+})
+
+describe("findPreCommitHook: whether a remote hook gets its files, from its manifest", () => {
+  const GITLEAKS = "https://github.com/gitleaks/gitleaks"
+  const config = (hook: string) => `repos:
+  - repo: ${GITLEAKS}
+    rev: v8.28.0
+    hooks:
+${hook}
+`
+  const MANIFEST =
+    "- id: gitleaks\n  entry: gitleaks git --pre-commit\n  pass_filenames: false\n- id: plain\n  entry: plain\n"
+  let home = ""
+
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(tmpdir(), "rulecast-precommit-home-"))
+    vi.stubEnv("XDG_CACHE_HOME", home)
+    vi.stubEnv("PRE_COMMIT_HOME", "")
+    vi.stubEnv("PREK_HOME", "")
+    return () => vi.unstubAllEnvs()
+  })
+
+  /** pre-commit's clone of the repo at a rev: its FETCH_HEAD names both. */
+  async function preCommitClone(rev: string): Promise<void> {
+    const dir = path.join(home, "pre-commit", "repoabc123")
+    await mkdir(path.join(dir, ".git"), { recursive: true })
+    await writeFile(path.join(dir, ".git", "FETCH_HEAD"), `0123abcd\t\ttag '${rev}' of ${GITLEAKS}\n`)
+    await writeFile(path.join(dir, ".pre-commit-hooks.yaml"), MANIFEST)
+  }
+
+  test("pre-commit's clone at the config's rev says the hook takes no file names", async () => {
+    await preCommitClone("v8.28.0")
+    const root = await createProject({ ".pre-commit-config.yaml": config("      - id: gitleaks\n      - id: plain") })
+    expect((await findPreCommitHook(root, "gitleaks"))?.givenFiles).toBe(false)
+    expect((await findPreCommitHook(root, "plain"))?.givenFiles).toBe(true)
+  })
+
+  test("prek's clone counts too", async () => {
+    const dir = path.join(home, "prek", "repos", "0321a11f464e05f4")
+    await mkdir(dir, { recursive: true })
+    await writeFile(path.join(dir, ".prek-repo.json"), JSON.stringify({ repo: GITLEAKS, rev: "v8.28.0" }))
+    await writeFile(path.join(dir, ".pre-commit-hooks.yaml"), MANIFEST)
+    const root = await createProject({ ".pre-commit-config.yaml": config("      - id: gitleaks\n      - id: plain") })
+    expect((await findPreCommitHook(root, "gitleaks"))?.givenFiles).toBe(false)
+    expect((await findPreCommitHook(root, "plain"))?.givenFiles).toBe(true)
+  })
+
+  test("a clone at another rev, or none, leaves it unknown: not given", async () => {
+    await preCommitClone("v8.0.0")
+    const root = await createProject({ ".pre-commit-config.yaml": config("      - id: plain") })
+    expect((await findPreCommitHook(root, "plain"))?.givenFiles).toBe(false)
+  })
+
+  test("the config's own pass_filenames and always_run decide without a manifest", async () => {
+    const root = await createProject({
+      ".pre-commit-config.yaml": config(
+        "      - id: plain\n        pass_filenames: true\n        always_run: false\n      - id: gitleaks\n        always_run: true",
+      ),
+    })
+    expect((await findPreCommitHook(root, "plain"))?.givenFiles).toBe(true)
+    expect((await findPreCommitHook(root, "gitleaks"))?.givenFiles).toBe(false)
   })
 })
