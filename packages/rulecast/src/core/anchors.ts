@@ -76,12 +76,26 @@ export function scanHeadings(markdown: string): Heading[] {
 }
 
 export function sectionRange(markdown: string, slug: string): Section | null {
+  return sectionRanges(markdown).get(slug) ?? null
+}
+
+/** Every section of a file by slug, from one scan: for callers that look up many anchors in one file. */
+export function sectionRanges(markdown: string): Map<string, Section> {
   const headings = scanHeadings(markdown)
-  const index = headings.findIndex((heading) => heading.slug === slug)
-  if (index === -1) return null
-  const heading = headings[index]!
-  const next = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level)
-  return { slug, start: heading.line, end: next ? next.line - 1 : linesOf(markdown).length }
+  const lineCount = linesOf(markdown).length
+  const ranges = new Map<string, Section>()
+  // A section ends before the next heading at its level or above: walked from the end with a stack
+  // of the headings still open, so the whole file is one pass.
+  const open: { heading: Heading; index: number }[] = []
+  const ends: number[] = new Array(headings.length).fill(lineCount)
+  for (const [index, heading] of headings.entries()) {
+    while (open.length > 0 && open.at(-1)!.heading.level >= heading.level) ends[open.pop()!.index] = heading.line - 1
+    open.push({ heading, index })
+  }
+  for (const [index, heading] of headings.entries())
+    if (!ranges.has(heading.slug))
+      ranges.set(heading.slug, { slug: heading.slug, start: heading.line, end: ends[index]! })
+  return ranges
 }
 
 export function sectionText(markdown: string, section: Section): string {
@@ -92,8 +106,12 @@ export function sectionText(markdown: string, section: Section): string {
 }
 
 export function sectionContains(markdown: string, parentSlug: string, childSlug: string): boolean {
-  const parent = sectionRange(markdown, parentSlug)
-  const child = sectionRange(markdown, childSlug)
+  const ranges = sectionRanges(markdown)
+  return rangeContains(ranges.get(parentSlug), ranges.get(childSlug))
+}
+
+/** Whether section `child` lies inside section `parent`; false when either does not exist. */
+export function rangeContains(parent: Section | undefined, child: Section | undefined): boolean {
   if (!parent || !child) return false
   return child.start >= parent.start && child.end <= parent.end
 }

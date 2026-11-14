@@ -1,4 +1,4 @@
-import { sectionContains, sectionRange, sectionText } from "../anchors"
+import { rangeContains, type Section, sectionRanges, sectionText } from "../anchors"
 import { fnv1a } from "../baseline/hash"
 import { readSourceFile } from "../detection/per-rule"
 import type { ReferenceSpec } from "../references"
@@ -44,11 +44,23 @@ export function createReferenceResolver(root: string): ReferenceResolver {
     return text
   }
 
+  // A file's sections, scanned once: assemble asks about every two sections cited from one file,
+  // and scanning per question made 100 sections of a 62 KB file take seconds.
+  const sections = new Map<string, Map<string, Section>>()
+  const sectionsOf = (path: string, text: string) => {
+    let ranges = sections.get(path)
+    if (ranges === undefined) {
+      ranges = sectionRanges(text)
+      sections.set(path, ranges)
+    }
+    return ranges
+  }
+
   const contentOf = async (path: string, anchor: string | null): Promise<string | null> => {
     const text = await read(path)
     if (text === null) return null
     if (anchor === null) return text.trimEnd()
-    const section = sectionRange(text, anchor)
+    const section = sectionsOf(path, text).get(anchor)
     return section ? sectionText(text, section) : null
   }
 
@@ -66,7 +78,9 @@ export function createReferenceResolver(root: string): ReferenceResolver {
       if (parent === null) return true
       if (child === null) return false
       const text = await read(path)
-      return text !== null && sectionContains(text, parent, child)
+      if (text === null) return false
+      const ranges = sectionsOf(path, text)
+      return rangeContains(ranges.get(parent), ranges.get(child))
     },
   }
 }

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "vitest"
 
 import { renderAgentText } from "../../../src/core/delivery/render-agent"
+import { createReferenceResolver } from "../../../src/core/delivery/resolve"
+import { parseReference } from "../../../src/core/references"
 import { type DecideInput, decide } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork } from "../../../src/core/session/state"
 import type { Match } from "../../../src/core/types"
+import { createProject } from "../../helpers/project"
 import { fakeResolver } from "../../helpers/resolver"
 import { rule } from "../../helpers/rules"
 
@@ -127,5 +130,44 @@ describe("decide: one rule with very many matches", () => {
 
     expect(text).toContain("scale/compute")
     expect(elapsed).toBeLessThan(4_000)
+  })
+})
+
+describe("decide: many sections of one file", () => {
+  test("which cited sections contain which is found without re-reading the file per pair", {
+    timeout: 60_000,
+  }, async () => {
+    // assemble asks the resolver, for every two candidates from one file, whether one contains the
+    // other. Each answer used to scan the file's headings again: 100 sections of a 62 KB file took
+    // 6.6 s. With the headings scanned once per file it is milliseconds.
+    let doc = "# Doc\n"
+    for (let section = 0; section < 60; section++) {
+      doc += `## Section ${section}\n${"word ".repeat(100)}\n`
+      for (const sub of [0, 1]) doc += `### Sub ${section} ${sub}\n${"word ".repeat(50)}\n`
+    }
+    const root = await createProject({ "docs/a.md": doc })
+    const refs = [
+      "@docs/a.md",
+      ...Array.from({ length: 33 }, (_, section) => [
+        `@docs/a.md#section-${section}`,
+        `@docs/a.md#sub-${section}-0`,
+        `@docs/a.md#sub-${section}-1`,
+      ]).flat(),
+    ]
+    const touches = [
+      rule({
+        id: "touch/everything",
+        detector: null,
+        context: refs.map((one) => parseReference(one, "inject", { dir: root, label: null })),
+      }),
+    ]
+    const started = performance.now()
+    const { delivery } = await decide(
+      input(0, { resolver: createReferenceResolver(root), maxBytes: 1_000_000, touches }),
+    )
+    const elapsed = performance.now() - started
+
+    expect(delivery.references.length).toBeGreaterThan(0)
+    expect(elapsed).toBeLessThan(1_500)
   })
 })

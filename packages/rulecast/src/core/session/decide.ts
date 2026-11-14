@@ -383,9 +383,31 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   }
   const ruleRefs = new Map<string, ReferenceSpec[]>()
   for (const [id, { rule, matches }] of matchesByRule) ruleRefs.set(id, ruleContextFor(rule, matches))
-  // Narrow touch rules first, by how few items they cite: what fits in full when not all of it does
-  // is the most specific part, and a broad rule's whole file is the one most likely read already.
-  const narrowFirst = [...touches].sort((a, b) => a.context.length - b.context.length)
+  // Narrow touch rules first: by the size of all they cite, then by how many items, then in config
+  // order (the sort is stable). What fits in full when not all of it does is the most specific
+  // part, and a rule citing a whole file, the one most likely read already, usually sorts after one
+  // citing a few sections. Each reference is resolved once, here or below.
+  const resolvedByRef = new Map<string, ResolvedRef>()
+  const resolve = async (spec: ReferenceSpec) => {
+    let resolved = resolvedByRef.get(spec.ref)
+    if (resolved === undefined) {
+      resolved = await input.resolver.resolve(spec)
+      resolvedByRef.set(spec.ref, resolved)
+    }
+    return resolved
+  }
+  const citedSize = new Map<string, number>()
+  for (const rule of touches) {
+    let bytes = 0
+    for (const spec of rule.context) {
+      const resolved = await resolve(spec)
+      if (resolved.found) bytes += resolved.bytes
+    }
+    citedSize.set(rule.id, bytes)
+  }
+  const narrowFirst = [...touches].sort(
+    (a, b) => citedSize.get(a.id)! - citedSize.get(b.id)! || a.context.length - b.context.length,
+  )
   for (const rule of narrowFirst) if (!ruleRefs.has(rule.id)) ruleRefs.set(rule.id, rule.context)
   const candidates: Assembled["candidates"] = []
   const refLabels = new Map<string, string>()
@@ -395,7 +417,7 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     seenRefs.add(spec.ref)
     const ref = shownRef(spec, display)
     if (ref !== spec.ref) refLabels.set(spec.ref, ref)
-    const resolved = await input.resolver.resolve(spec)
+    const resolved = await resolve(spec)
     if (!resolved.found) {
       delivery.references.push({ ref, state: "missing" })
     } else if (await isCovered(spec, delivered, input.resolver)) {
@@ -481,13 +503,18 @@ export function trim(
   // An adapter's own wrapping is not in it: the adapter keeps slack for that (claude-code: 9,000 of
   // a 10,000 character limit).
   const conventions = delivery.references.length > 0 || delivery.preexistingSummary.length > 0
-  let used =
+  const headerCost = (conventionsTitle: boolean) =>
     deliveryCost.header(
       byRule.size,
       new Set(delivery.findings.map((finding) => finding.file)),
-      conventions,
+      conventionsTitle,
       delivery.via,
-    ) +
+    )
+  // The title is charged at the longer of its two forms: the floor might cut every rule, and then
+  // the conventions title prints. Once it keeps one, the rest of that charge is room.
+  const titleSlack = headerCost(conventions) - headerCost(false)
+  let used =
+    headerCost(conventions) +
     (delivery.references.length > 0 ? deliveryCost.referencesEnd : 0) +
     (swept.size > 0 ? deliveryCost.sweptFrame : 0) +
     // Never cut: what to undo is the one thing the agent must not miss.
@@ -541,7 +568,8 @@ export function trim(
       const size =
         measureRuleBlock(ruleOf(id), [findings[0]!], findings, delivery.templates[ruleOf(id)], render) +
         refs.reduce((sum, ref) => sum + lineCost(ref), 0)
-      if (used + spent.chars + size > cap) {
+      // Kept, the block takes the rule title's form, so the slack is room for it.
+      if (used - titleSlack + spent.chars + size > cap) {
         spent.dropped.add(id)
         continue
       }
@@ -561,6 +589,7 @@ export function trim(
     const notice = deliveryCost.overflowNotice(byRule.size)
     if (floor.dropped.size > 0) floor = floorWithin(limit - notice)
     used += floor.chars + (floor.dropped.size > 0 ? notice : 0)
+    if (floor.kept.size > 0) used -= titleSlack
     // Rules, not blocks: a rule whose own block was kept and whose swept block was cut is still shown.
     const keptRules = new Set([...floor.kept.keys()].map(ruleOf))
     droppedBlocks = floor.dropped.size
@@ -606,23 +635,35 @@ export function trim(
   }
 
   // A reference whose text one sent in full already includes is left out, and a container sent
-  // after the parts of it that went first replaces them, getting back what they cost: each text is
-  // printed once (#69). Indices in `delivery.references`, removed at the end so they stay valid.
+  // replaces every part of it: those sent before it give back their content, and every part gives
+  // back its line, whether it came before the container or would come after. Each text is printed
+  // once (#69). Positions in `candidates`; the references go at the end, so indices stay valid.
   const sentSize = new Map<number, number>()
   const retracted = new Set<number>()
-  const sentContainer = (position: number) =>
-    [...sentSize.keys()].some((sent) => candidates[sent]!.contains.includes(position))
-  for (const [position, { index, resolved, contains }] of candidates.entries()) {
-    // Its line is already paid for at the floor; this is what printing it in full adds.
-    const ref = shown(resolved.spec.ref)
-    const size = deliveryCost.referenceContent(ref, resolved.content, locationOf(resolved.spec).location)
-    if (orphaned.has(ref)) continue
-    if (sentContainer(position)) {
-      retracted.add(index)
-      continue
+  // Named for the budget: tried again when room is freed (retryNamed).
+  const named = new Set<number>()
+  const refOf = (position: number) => shown(candidates[position]!.resolved.spec.ref)
+  // Its line was charged at the floor, or with the repeat that brought it, and is not printed now.
+  // An orphaned part's line was never charged, and it is left out at the end anyway.
+  const retract = (position: number) => {
+    retracted.add(position)
+    named.delete(position)
+    used -= lineCost(refOf(position)) + (sentSize.get(position) ?? 0)
+    sentSize.delete(position)
+  }
+  /** Gives a candidate its content when it fits, else names it for the agent to read. */
+  const send = (position: number) => {
+    if (retracted.has(position)) return
+    const { index, resolved, contains } = candidates[position]!
+    if ([...sentSize.keys()].some((sent) => candidates[sent]!.contains.includes(position))) {
+      retract(position)
+      return
     }
-    const parts = contains.filter((part) => sentSize.has(part))
-    const refund = parts.reduce((sum, part) => sum + sentSize.get(part)!, 0)
+    // Its line is already paid for; this is what printing it in full adds.
+    const ref = refOf(position)
+    const size = deliveryCost.referenceContent(ref, resolved.content, locationOf(resolved.spec).location)
+    const parts = contains.filter((part) => !retracted.has(part) && !orphaned.has(refOf(part)))
+    const refund = parts.reduce((sum, part) => sum + lineCost(refOf(part)) + (sentSize.get(part) ?? 0), 0)
     if (!fits(size - refund)) {
       delivery.references[index] = {
         ref,
@@ -630,16 +671,28 @@ export function trim(
         reason: "budget",
         ...locationOf(resolved.spec),
       } satisfies DeliveredReference
-      continue
+      named.add(position)
+      return
     }
-    used += size - refund
-    for (const part of parts) {
-      sentSize.delete(part)
-      retracted.add(candidates[part]!.index)
-    }
+    used += size
+    for (const part of parts) retract(part)
+    if (named.delete(position)) delivery.references[index] = assembled.delivery.references[index]!
     sentSize.set(position, size)
     context.push({ t: "delivered", path: resolved.spec.path, anchor: resolved.spec.anchor, hash: resolved.hash })
   }
+  // A part given back, or a section that costs less sent than named, frees room after the
+  // candidates before it were named: they are tried again, in order, until none more fits.
+  const retryNamed = () => {
+    for (let freed = true; freed; ) {
+      freed = false
+      for (const position of [...named].sort((a, b) => a - b)) {
+        send(position)
+        if (!named.has(position)) freed = true
+      }
+    }
+  }
+  for (const position of candidates.keys()) if (!orphaned.has(refOf(position))) send(position)
+  retryNamed()
 
   // The heading and the "see all of it" line print whenever anything in this block does — including
   // when every summary was cut and only the count remains — so they are charged once, up front. A
@@ -667,28 +720,13 @@ export function trim(
 
   // A section the floor left out, brought by a repeat that shows its lint rule's finding: its line
   // comes with that finding, and its content when there is still room.
-  const candidateOf = new Map(
-    candidates.map((candidate, position) => [shown(candidate.resolved.spec.ref), { ...candidate, position }]),
-  )
+  const positionOf = new Map(candidates.map((_, position) => [refOf(position), position]))
   const bring = (refs: readonly string[]) => {
     for (const ref of refs) {
       orphaned.delete(ref)
       charged.add(ref)
-      const candidate = candidateOf.get(ref)
-      if (candidate === undefined) continue
-      const { index, resolved, position } = candidate
-      if (sentContainer(position)) {
-        retracted.add(index)
-        continue
-      }
-      const size = deliveryCost.referenceContent(ref, resolved.content, locationOf(resolved.spec).location)
-      if (fits(size)) {
-        used += size
-        sentSize.set(position, size)
-        context.push({ t: "delivered", path: resolved.spec.path, anchor: resolved.spec.anchor, hash: resolved.hash })
-      } else {
-        delivery.references[index] = { ref, state: "read", reason: "budget", ...locationOf(resolved.spec) }
-      }
+      const position = positionOf.get(ref)
+      if (position !== undefined) send(position)
     }
   }
 
@@ -736,8 +774,11 @@ export function trim(
     }
     delivery.findings = delivery.findings.filter((finding) => kept.get(blockOf(finding))?.includes(finding) === true)
   }
-  if (orphaned.size > 0 || retracted.size > 0)
-    delivery.references = delivery.references.filter((one, index) => !orphaned.has(one.ref) && !retracted.has(index))
+  if (limit !== null) retryNamed()
+  if (orphaned.size > 0 || retracted.size > 0) {
+    const left = new Set([...retracted].map((position) => candidates[position]!.index))
+    delivery.references = delivery.references.filter((one, index) => !orphaned.has(one.ref) && !left.has(index))
+  }
 
   return { delivery, overflow: droppedBlocks > 0 ? assembled.delivery : null, context }
 }
