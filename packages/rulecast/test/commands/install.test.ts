@@ -256,9 +256,9 @@ describe("rulecast install", () => {
       const stale = withCommand(await settingsOf(main, PERSONAL), "rulecast hook claude-code")
       await writeFile(path.join(main, PERSONAL), JSON.stringify(stale))
       const doctor = await run(pkg, "doctor")
-      expect(doctor.stdout).toContain(
-        `../${PERSONAL} — but the hooks are out of date; run rulecast install --scope personal here`,
-      )
+      // Whether a rulecast binary is found (and so what the line leads with) depends on the machine.
+      expect(doctor.stdout).toContain(`Claude Code — ../${PERSONAL} — but`)
+      expect(doctor.stdout).toMatch(/the hooks are out of date; run rulecast install --scope personal here/i)
       expect((await run(pkg, "install", "--scope", "personal")).code).toBe(0)
       expect((await run(pkg, "doctor")).stdout).not.toContain("out of date")
     })
