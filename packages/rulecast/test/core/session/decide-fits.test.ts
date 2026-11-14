@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { renderAgentText } from "../../../src/core/delivery/render-agent"
 import { parseReference } from "../../../src/core/references"
-import { type ClassifiedFinding, decide } from "../../../src/core/session/decide"
+import { type ClassifiedFinding, decide, findingKey } from "../../../src/core/session/decide"
 import { emptyContext, emptyWork } from "../../../src/core/session/state"
 import { fakeResolver } from "../../helpers/resolver"
 import { rule } from "../../helpers/rules"
@@ -105,6 +105,55 @@ describe("a trimmed delivery fits its limit", () => {
         stopGate: false,
       })
       // The pipeline names the overflow file after decide returns; price it at its longest.
+      const rendered = renderAgentText(
+        { ...delivery, overflowPaths: overflow === null ? [] : [OVERFLOW_PATH] },
+        { maxMatchesPerRule: 10 },
+      )
+      expect(rendered.length, `seed ${seed} at limit ${limit}`).toBeLessThanOrEqual(limit)
+    }
+  })
+})
+
+/**
+ * The same sweep at an attended stop where some findings were sent at an earlier one: the line that
+ * names those repeats is rendered with the rest, so the budget must price it too.
+ */
+describe("a trimmed stop delivery with repeats fits its limit", () => {
+  const seeds = Array.from({ length: 40 }, (_, n) => n + 1)
+  const limits = [600, 750, 900, 1200, 1600, 2500, 4000, 6000, 9000]
+
+  test.each(seeds)("seed %i, across every limit", async (seed) => {
+    const { findings: base, warnings, resolver } = scenario(seed)
+    // Long paths, so the repeats line is long; every third new finding was sent before.
+    const findings = base.map((finding, n) => ({
+      ...finding,
+      match: { ...finding.match, file: `app/a/rather/deeply/nested/package/module_${n % 13}.py` },
+    }))
+    const work = emptyWork()
+    const sent = new Map(
+      findings
+        .filter((finding, n) => finding.status === "new" && n % 3 === 0)
+        .map((finding) => [findingKey(finding), { rule: finding.rule.id, file: finding.match.file, hash: "h" }]),
+    )
+    work.stopSent.set("main", sent)
+    const fileHashes = new Map(findings.map(({ match }) => [match.file, "h"]))
+    for (const limit of limits) {
+      const { delivery, overflow } = await decide({
+        agent: "main",
+        findings,
+        touches: [],
+        agentRead: null,
+        warnings,
+        work,
+        context: emptyContext(),
+        resolver,
+        maxBytes: 32768,
+        maxBlocks: 3,
+        maxContextChars: limit,
+        maxMatchesPerRule: 10,
+        stopGate: true,
+        fileHashes,
+      })
       const rendered = renderAgentText(
         { ...delivery, overflowPaths: overflow === null ? [] : [OVERFLOW_PATH] },
         { maxMatchesPerRule: 10 },

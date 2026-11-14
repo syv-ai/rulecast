@@ -141,6 +141,52 @@ describe("rulecast hook claude-code: configs anywhere", () => {
     expect(stop.reason).toContain("tools/y.py:1 prints.")
   })
 
+  test("a finding shown in another project's block counts as sent: the next block names it as a repeat", async () => {
+    const warnTop = localConfig([{ ...TOP_RULES[0], id: "top/warn-print", severity: "warning" }])
+    const repo = await createRepo({
+      ...BASE,
+      ".rulecast-config.yaml": warnTop,
+      "backend/.rulecast-config.yaml": BACKEND,
+    })
+    const session = agent(repo)
+    // Only the top config covers tools/: its stop has a warning alone, and lets the agent go.
+    await session.edit("tools/y.py", "print('y')\n")
+    await session.edit("backend/app/x.py", "x = 1  # TODO\n")
+    const first = await session.stop()
+    expect(first.reason).toContain("top/warn-print")
+
+    await session.hook("user-prompt-submit")
+    await session.edit("backend/app/z.py", "z = 1  # TODO\n")
+    const second = await session.stop()
+    expect(second.reason).toContain("backend/app/z.py:1 has a TODO.")
+    expect(second.reason).not.toContain("tools/y.py:1 prints.")
+    expect(second.reason).toContain("Still there from earlier stops, not repeated here:")
+    expect(second.reason).toContain("top/warn-print (tools/y.py)")
+  })
+
+  // What a project counts as sent must be what the agent is shown: each project caps its own rules,
+  // and the combined text must not cap them again at the nearest config's setting.
+  test("each config's own cap holds in the combined text: a nearer config's smaller cap hides none of another's", async () => {
+    // Both ways round: which config is the first part depends on where the agent and the files are.
+    const todo = { id: "backend/no-todo", name: "No TODO", files: "\\.py$", detect: { regex: { pattern: "TODO" } } }
+    for (const tightTop of [true, false]) {
+      const repo = await createRepo({
+        ...BASE,
+        ".rulecast-config.yaml": localConfig(TOP_RULES, tightTop ? { max_matches_per_rule: 1 } : {}),
+        "backend/.rulecast-config.yaml": localConfig(
+          [{ ...todo, message: "{{file}}:{{line}} has a TODO." }],
+          tightTop ? {} : { max_matches_per_rule: 1 },
+        ),
+      })
+      const session = agent(repo)
+      for (const name of ["a", "b", "c"]) await session.edit(`backend/app/${name}.py`, "print(1)  # TODO\n")
+      const stop = await session.stop()
+      // The tight config shows one of its rule's three; the other config shows all three of its own.
+      const roomy = tightTop ? "has a TODO." : "prints."
+      for (const name of ["a", "b", "c"]) expect(stop.reason).toContain(`backend/app/${name}.py:1 ${roomy}`)
+    }
+  })
+
   test("a session launched in frontend/ that edits ../backend/x.py is blocked on it at its stop", async () => {
     const repo = await createRepo({
       ...BASE,

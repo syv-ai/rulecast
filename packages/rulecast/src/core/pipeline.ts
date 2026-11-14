@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import type { CommittedBaseline } from "./baseline/committed"
@@ -18,7 +20,15 @@ import { type Detected, detectStage } from "./pipeline-detect"
 import { compileWarnings, type Warning } from "./pipeline-warnings"
 import { displayPath } from "./projects"
 import { appendActivity, duringCall, readActivity } from "./session/activity"
-import { type ClassifiedFinding, type DecideInput, type Decision, decide, delivers, findingKey } from "./session/decide"
+import {
+  type ClassifiedFinding,
+  type DecideInput,
+  type Decision,
+  decide,
+  delivers,
+  findingKey,
+  withoutRepeats,
+} from "./session/decide"
 import { LockTimeoutError } from "./session/lock"
 import { configHash } from "./session/oversight"
 import { appendContext, appendWork, commitSession, openSession, type SessionView, sessionDir } from "./session/session"
@@ -124,6 +134,11 @@ export interface PipelineResult {
    * detector was run. A rule not listed was not checked: its absence from `findings` proves nothing.
    */
   ran?: Map<string, string[]>
+  /**
+   * Records this stop's findings as sent to the agent: for a stop that let it go while another
+   * project's block shows them all the same (Decision.ifShown, commands/hook.ts).
+   */
+  recordShown?: () => Promise<void>
 }
 
 /** Said once: without a working tree to compare, shell edits are seen only after the session. */
@@ -438,6 +453,8 @@ interface Outcome {
   via: "shell" | undefined
   /** Files changed outside the agent's tool calls, verified at this stop (spec §9, Shell edits). */
   swept: string[]
+  /** At a session's stop: the files its agent edited that no longer exist (DecideInput.stopGone). */
+  stopGone: string[]
   detected: Detected | null
   /** Said to the agent at this shell call, once per session (Delivery.agentNotices). */
   agentNotices: string[]
@@ -448,6 +465,10 @@ async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boo
   const { options, project, config, root, session, stateDir, warnings } = run
   const { event, detected, swept, via } = outcome
   const findings = detected?.findings ?? []
+  const stopGate = options.stopGate === true && event.kind === "verify" && session !== null
+  // Only an attended stop tells repeats apart (session/decide.ts `repeats`).
+  const once = stopGate && project.mode.mode === "attended"
+  const fileHashes = once ? await contentHashes(root, findings) : undefined
   const refused = detected?.refused ?? []
   const disabledGroups = detected?.disabledGroups ?? []
   const told = detected?.told ?? []
@@ -469,7 +490,11 @@ async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boo
     mode: project.mode.mode,
     maxContextChars: outcome.budget.chars,
     maxMatchesPerRule: config.maxMatchesPerRule,
-    stopGate: options.stopGate === true && event.kind === "verify" && session !== null,
+    stopGate,
+    ...(once
+      ? { stopRan: detected?.ran ?? new Map(), stopCleared: [...outcome.stopGone, ...(detected?.unchanged ?? [])] }
+      : {}),
+    ...(fileHashes === undefined ? {} : { fileHashes }),
     ...(options.listPreexisting === true ? { listPreexisting: true } : {}),
     ...(via === undefined ? {} : { via }),
     ...(swept.length === 0 ? {} : { swept }),
@@ -513,7 +538,7 @@ async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boo
   })
 
   // Whether decide will put anything before the agent, by its own measure (session/decide.ts).
-  await outcome.budget.claim(delivers(inputFor(view)))
+  await outcome.budget.claim(delivers(withoutRepeats(inputFor(view))))
   if (!session) return result(await decide(inputFor(view)))
 
   await appendWork(session.dir, detected?.workRecords ?? [])
@@ -529,7 +554,10 @@ async function finish(run: Run, view: SessionView, outcome: Outcome, failed: boo
     decision = await decide({ ...inputFor({ work: emptyWork(), context: emptyContext() }), stopGate: false })
   }
   await logFindings(run, outcome, session.agent, decision)
-  return result(decision)
+  const shown = decision.ifShown
+  return shown === undefined
+    ? result(decision)
+    : { ...result(decision), recordShown: () => appendWork(session.dir, [shown]) }
 }
 
 /**
@@ -574,6 +602,32 @@ async function logFindings(run: Run, outcome: Outcome, agent: string, decision: 
     run.log,
     { weeklySummary: run.config.stats.weeklySummary },
   )
+}
+
+/**
+ * The content hash of each file with a new finding, as it is now: what tells a finding a stop already
+ * sent from one in a file changed since (session/decide.ts `repeats`). A file that cannot be read has
+ * none, and so none of its findings is a repeat.
+ */
+async function contentHashes(root: string, findings: readonly ClassifiedFinding[]): Promise<Map<string, string>> {
+  const files = [...new Set(findings.filter((finding) => finding.status === "new").map(({ match }) => match.file))]
+  const hashes = new Map<string, string>()
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        hashes.set(
+          file,
+          createHash("sha1")
+            .update(await readFile(path.join(root, file)))
+            .digest("hex")
+            .slice(0, 16),
+        )
+      } catch {
+        // Gone, a directory, unreadable: sent again rather than taken for a repeat.
+      }
+    }),
+  )
+  return hashes
 }
 
 /** Said to the user at a stop whose sweep waits for a running subagent. */
@@ -726,6 +780,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   let swept: string[] = []
+  let stopGone: string[] = []
   let deferredSweep = false
   let detected: Detected | null = null
   if (event.kind === "edit" || event.kind === "verify") {
@@ -751,7 +806,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       // edited is never swept: it was changed by a tool call, only not by this agent's.
       // A file edited and then deleted has nothing left to check: a tool given its path would only
       // report that it is missing (ruff's E902), at every stop, and nothing the agent does fixes that.
-      requested = run.relevant(editedBy(view.work, session.agent)).filter((file) => existsSync(path.join(root, file)))
+      const edited = run.relevant(editedBy(view.work, session.agent))
+      const exists = new Map(edited.map((file) => [file, existsSync(path.join(root, file))]))
+      requested = edited.filter((file) => exists.get(file))
+      stopGone = edited.filter((file) => !exists.get(file))
       // A subagent the agent started still runs here: its files are its own until it finishes, and
       // what it writes with its shell is not settled, so the sweep waits for a later stop. A running
       // shell job (a dev server, a watcher) never holds it: it may run all session (Event.running).
@@ -790,6 +848,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       agentRead,
       via,
       swept,
+      stopGone,
       detected,
       agentNotices: shell?.agentNotices ?? [],
     },

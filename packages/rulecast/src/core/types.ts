@@ -479,6 +479,14 @@ export interface Delivery {
    */
   refused?: { file: string; rule: string; dirtyAtStart: boolean; shared?: true }[]
   /**
+   * At an attended stop: findings an earlier stop already sent this agent, still there in a file
+   * unchanged since (session/decide.ts `repeats`). Named, never blocking, and without their rule text:
+   * as many as the line's share of the budget holds, by rule and file, and `repeatedMore` counts the
+   * findings of the rest.
+   */
+  repeated?: { rule: string; file: string }[]
+  repeatedMore?: number
+  /**
    * For the user, not the agent (spec §9, Oversight): the config changed this session, ignores were
    * added. Attached after the budget is spent and never part of agent context under a hook adapter.
    */

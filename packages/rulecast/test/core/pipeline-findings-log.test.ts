@@ -84,7 +84,7 @@ describe("the findings log", () => {
     await session.send({ kind: "edit", files: [USERS] })
     const stops = []
     for (let i = 0; i < 2; i++) stops.push((await session.send({ kind: "verify", files: [] })).stop)
-    expect(stops).toEqual(["block", "capReached"])
+    expect(stops).toEqual(["block", "allow"])
     const document = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
     expect(document.rules[0]).toMatchObject({ fired: 1, ignored: 1, fixed: 0, repeated: 1, medianTurnsToFix: null })
   })

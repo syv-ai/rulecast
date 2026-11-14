@@ -51,6 +51,8 @@ export interface Detected {
    */
   tried: IgnoredFinding[]
   ran: Map<string, string[]>
+  /** Requested files with nothing changed since their baseline: no rule ran on them, and none can hold a new finding. */
+  unchanged: string[]
   /** Notices for the user (session/oversight.ts). */
   told: Notice[]
   disabledGroups: DisabledGroup[]
@@ -358,5 +360,7 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       })
     }
   }
-  return { findings, ignored, tried, ran, told, disabledGroups, refused, workRecords, failed }
+  const checking = new Set(files)
+  const unchanged = requested.filter((file) => !checking.has(file))
+  return { findings, ignored, tried, ran, unchanged, told, disabledGroups, refused, workRecords, failed }
 }

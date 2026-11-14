@@ -345,6 +345,23 @@ export const deliveryCost = {
   },
 }
 
+/**
+ * Findings an earlier stop already sent, in one line: the ones `repeated` names, then how many more,
+ * with no rule text and nothing to do (session/decide.ts `repeats`). Null when there are none.
+ */
+export function repeatedLine(delivery: Pick<Delivery, "repeated" | "repeatedMore">): string | null {
+  const named = (delivery.repeated ?? []).map(({ rule, file }) => `${rule} (${file})`)
+  const more = delivery.repeatedMore ?? 0
+  if (named.length === 0 && more === 0) return null
+  const list =
+    named.length === 0
+      ? plural(more, "finding")
+      : more > 0
+        ? `${named.join(", ")} and ${plural(more, "more finding")}`
+        : named.join(", ")
+  return `Still there from earlier stops, not repeated here: ${list}.`
+}
+
 export function renderAgentText(delivery: Delivery, options: RenderOptions): string {
   const title = header(delivery)
   const notices = options.notices === false ? [] : (delivery.notices ?? [])
@@ -383,6 +400,9 @@ export function renderAgentText(delivery: Delivery, options: RenderOptions): str
     out.push(SWEPT_HEADING)
     blocks(outside, true)
   }
+  // Only beside something else: alone, the repeats are said to the user, not the agent (the adapter).
+  const repeats = repeatedLine(delivery)
+  if (repeats !== null) out.push(repeats, "")
 
   // "pre-existing (not blocking)" read as *ignore this*, and the backlog it names is the thing that
   // never moves on its own — one codebase held 57–61 violations of one rule while it tripled in

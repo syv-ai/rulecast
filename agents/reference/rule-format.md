@@ -257,7 +257,10 @@ watching should not. Its requirements are the same as for `true`.
 
 The stop gate assumes someone is in the loop. When the agent stops with new `error` findings, the
 gate holds the stop: the agent is given the findings and a turn to fix them. That happens once per user prompt
-(`stop_gate.max_blocks`). After that the findings go to the developer as a message. A goal loop
+(`stop_gate.max_blocks`). After that the findings go to the developer as a message. Each finding is
+given to the agent once: a later stop that finds it again, in a file unchanged since, names it in one
+line and does not hold the stop for it. A finding that is fixed and comes back, or that is still there
+after its file changed, counts as new. A goal loop
 (Claude Code's `/goal`), `claude -p`, a scheduled task or a CI job sends one prompt and has nobody
 reading messages, so it gets one block per run. After that enforcement quietly ends.
 

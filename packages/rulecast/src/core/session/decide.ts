@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { type CompiledRule, findingDocs, ruleContextFor } from "../compile/rule"
 import type { Mode } from "../config/schema"
-import { deliveryCost, measureRuleBlock, SWEPT_BLOCK } from "../delivery/render-agent"
+import { deliveryCost, measureRuleBlock, repeatedLine, SWEPT_BLOCK } from "../delivery/render-agent"
 import type { ReferenceResolver, ResolvedRef } from "../delivery/resolve"
 import type { DisabledGroup } from "../disabled"
 import type { ReferenceSpec } from "../references"
@@ -16,6 +16,8 @@ import {
   emptyContext,
   MAIN_AGENT,
   preexistingKey,
+  type Sent,
+  type SentFinding,
   type WorkRecord,
   type WorkState,
 } from "./state"
@@ -60,6 +62,16 @@ export interface DecideInput {
   disabled?: DisabledGroup[]
   /** AssembleInput.display. */
   display?: (file: string) => string
+  /**
+   * At a stop: the files each rule ran on to the end (by rule id), and the files that can hold no new
+   * finding: edited and since deleted, or back to their baseline. A finding sent earlier and not found
+   * now by its rule on its file, or in such a file, is forgotten (`repeats`). A rule that timed out
+   * or was over a file budget forgets nothing.
+   */
+  stopRan?: ReadonlyMap<string, readonly string[]>
+  stopCleared?: readonly string[]
+  /** At a stop: the content hash of each file with a finding, which tells a repeat from a finding in a changed file. */
+  fileHashes?: ReadonlyMap<string, string>
 }
 
 export interface Decision {
@@ -73,6 +85,11 @@ export interface Decision {
    * one that has blocked REPEAT_LIMIT stops and only rides along with a block (the findings log).
    */
   blocking?: ReadonlySet<string>
+  /**
+   * At an attended stop that put its findings before nobody (allow, capReached): what to record as
+   * sent if another project's block shows them to the agent after all (commands/hook.ts).
+   */
+  ifShown?: WorkRecord
 }
 
 /**
@@ -131,9 +148,12 @@ function renderFindings(
   display: (file: string) => string,
   /** Filled with each finding's `context_by_rule` sections, for the ones whose lint rule maps any. */
   sections?: Map<Finding, ReferenceSpec[]>,
+  /** Filled with the finding each one is rendered as: several merge into one when their messages agree. */
+  rendered?: Map<ClassifiedFinding, Finding>,
 ): Finding[] {
   const merged = new Map<string, Finding>()
-  for (const { id, rule, match } of findings) {
+  for (const classified of findings) {
+    const { id, rule, match } = classified
     const file = display(match.file)
     const message = renderTemplate(rule.message ?? "", {
       ...match.captures,
@@ -167,9 +187,11 @@ function renderFindings(
         ...docsFor(rule, match, display),
       }
       merged.set(key, finding)
+      rendered?.set(classified, finding)
       if (mapped !== undefined) sections?.set(finding, mapped)
       continue
     }
+    rendered?.set(classified, existing)
     existing.count++
     // The earliest match is the one shown, and its id the merged finding's: a tool's emit order
     // must not decide either.
@@ -251,6 +273,8 @@ export interface Assembled {
   candidates: { index: number; resolved: Extract<ResolvedRef, { found: true }>; contains: number[] }[]
   /** Findings with status "new", in input order. */
   fresh: ClassifiedFinding[]
+  /** The finding in `delivery.findings` each of `fresh` is rendered as. */
+  rendered: ReadonlyMap<ClassifiedFinding, Finding>
   /** Warnings not yet given in this context; `delivery.warnings` holds their texts. */
   unwarned: { key: string; text: string }[]
   touches: CompiledRule[]
@@ -324,7 +348,8 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
   // Findings and pre-existing summaries.
   const fresh = input.findings.filter((finding) => finding.status === "new")
   const findingSections = new Map<Finding, ReferenceSpec[]>()
-  delivery.findings = renderFindings(fresh, "new", display, findingSections)
+  const rendered = new Map<ClassifiedFinding, Finding>()
+  delivery.findings = renderFindings(fresh, "new", display, findingSections, rendered)
   if (input.listPreexisting === true) {
     delivery.preexisting = renderFindings(
       input.findings.filter((finding) => finding.status === "preexisting"),
@@ -439,7 +464,19 @@ export async function assemble(input: AssembleInput): Promise<Assembled> {
     }
   }
 
-  return { delivery, candidates, fresh, unwarned, touches, context, summaryFiles, refLabels, ruleRefs, findingSections }
+  return {
+    delivery,
+    candidates,
+    fresh,
+    rendered,
+    unwarned,
+    touches,
+    context,
+    summaryFiles,
+    refLabels,
+    ruleRefs,
+    findingSections,
+  }
 }
 
 export interface Trimmed {
@@ -824,7 +861,8 @@ export function findingKey({ rule, match }: ClassifiedFinding): string {
  * agent stop because its findings did not fit — which is the one thing the gate exists to prevent.
  * That used to be a comment; it is now the signature.
  *
- * Attended, a capped stop is let through and the user is told. Unattended there is no user, and a
+ * Attended, a capped stop is let through and the user is told, and a finding an earlier stop already
+ * sent never reaches the gate (`repeats`), a refused one included. Unattended there is no user, and a
  * stop the gate lets through ends the run, so what is left is said to the agent instead, by one more
  * block (`report`) asking it to record the findings as unresolved and finish. A finding that has
  * blocked REPEAT_LIMIT stops no longer counts towards blocking, only towards that report — except a
@@ -871,7 +909,8 @@ function gateFindings(
 ): Gated {
   const blocking = fresh.filter(({ match }) => !swept.has(match.file))
   // A protected file changed with the shell could not be refused before the write, so it blocks
-  // until it is reverted, whatever the rule's severity.
+  // whatever the rule's severity: unattended until it is reverted, attended once (`repeats`), since
+  // the user may have asked for the change.
   const refused = ({ rule, match }: ClassifiedFinding) => rule.refuseWrite && work.editedVia.get(match.file) === "shell"
   const failing = blocking.filter((finding) => finding.rule.severity === "error" || refused(finding))
   if (failing.length === 0) return { stop: "allow", work: [] }
@@ -893,8 +932,145 @@ function gateFindings(
   return { stop: "capReached", work: [] }
 }
 
+/**
+ * An attended stop says each finding once (decided with the lead sessions, 2026-11-14). A finding is
+ * a repeat when a stop already sent it to this agent (`WorkState.stopSent`) and the file's content is
+ * unchanged since. A repeat is named in one line (`Delivery.repeated`) and never blocks: a finding the
+ * agent cannot or may not fix would otherwise cost a turn at every prompt. A sent finding is
+ * forgotten once its rule runs on its file and does not find it, or its file is deleted or back to
+ * its baseline (`sentRecord`), so bringing it back blocks again; one still there after its file
+ * changed is sent again, as an edit meant to fix it did not.
+ * Unattended keeps its own per-finding limit (`gate`, REPEAT_LIMIT) and its report.
+ */
+function repeats(input: DecideInput): { findings: ClassifiedFinding[]; repeated: ClassifiedFinding[] } {
+  const sent = input.work.stopSent.get(input.agent)
+  const hashes = input.fileHashes ?? new Map<string, string>()
+  const findings: ClassifiedFinding[] = []
+  const repeated: ClassifiedFinding[] = []
+  for (const finding of input.findings) {
+    const earlier = finding.status === "new" ? sent?.get(findingKey(finding)) : undefined
+    const unchanged = earlier !== undefined && hashes.get(finding.match.file) === earlier.hash
+    if (unchanged) repeated.push(finding)
+    else findings.push(finding)
+  }
+  return { findings, repeated }
+}
+
+/**
+ * How this stop changes what stops have sent the agent and still stands: an earlier finding its rule
+ * ran on its file and did not find, or in a file that can hold none (`stopCleared`), is dropped; at a block or report what it
+ * put before the agent is added, with its file's hash now. Null when nothing changes.
+ */
+function sentRecord(
+  input: DecideInput,
+  findings: readonly ClassifiedFinding[],
+  sentNow: readonly ClassifiedFinding[],
+): WorkRecord | null {
+  const earlier = input.work.stopSent.get(input.agent) ?? new Map<string, Sent>()
+  const found = new Set(findings.map(findingKey))
+  const ran = input.stopRan ?? new Map<string, readonly string[]>()
+  const cleared = new Set(input.stopCleared ?? [])
+  const drop = [...earlier]
+    .filter(([key, { rule, file }]) => cleared.has(file) || (!found.has(key) && ran.get(rule)?.includes(file) === true))
+    .map(([key]) => key)
+  const add: SentFinding[] = []
+  for (const finding of sentNow) {
+    const key = findingKey(finding)
+    const hash = input.fileHashes?.get(finding.match.file)
+    if (hash === undefined || earlier.get(key)?.hash === hash) continue
+    add.push([key, finding.rule.id, finding.match.file, hash])
+  }
+  if (drop.length === 0 && add.length === 0) return null
+  return {
+    t: "stopSent",
+    agent: input.agent,
+    ...(add.length === 0 ? {} : { add }),
+    ...(drop.length === 0 ? {} : { drop }),
+  }
+}
+
+/** The most repeats the line names; past that it only counts them. */
+const REPEATED_NAMED = 10
+
+/**
+ * The most of the budget the repeats line may take. It is rendered with the findings, so the budget
+ * keeps this much back for it; a long list is cut to a count rather than crowd the findings out. The
+ * count alone ("N findings", about 70 characters) is the floor: under a budget so small it passes
+ * the share, it is still kept back, and the delivery still fits.
+ */
+const REPEATED_SHARE = 0.15
+
+/**
+ * The repeats as `Delivery.repeated` and `repeatedMore`: each rule and file once, named while the
+ * line stays inside its share of the budget, and the findings of the rest counted.
+ */
+function repeatedOf(
+  repeated: readonly ClassifiedFinding[],
+  display: (file: string) => string,
+  maxContextChars: number | null,
+): Pick<Delivery, "repeated" | "repeatedMore"> {
+  const seen = new Map<string, { rule: string; file: string; count: number }>()
+  for (const { rule, match } of repeated) {
+    const key = `${rule.id}\n${match.file}`
+    const pair = seen.get(key)
+    if (pair === undefined) seen.set(key, { rule: rule.id, file: display(match.file), count: 1 })
+    else pair.count++
+  }
+  const all = [...seen.values()].sort((a, b) => a.rule.localeCompare(b.rule) || a.file.localeCompare(b.file))
+  // The findings in the pairs past the first `named`.
+  const rest = (named: number) => all.slice(named).reduce((sum, pair) => sum + pair.count, 0)
+  const pairs = (named: number) => all.slice(0, named).map(({ rule, file }) => ({ rule, file }))
+  const room = maxContextChars === null ? Number.POSITIVE_INFINITY : Math.floor(maxContextChars * REPEATED_SHARE)
+  let named = 0
+  while (named < Math.min(all.length, REPEATED_NAMED)) {
+    const line = repeatedLine({ repeated: pairs(named + 1), repeatedMore: rest(named + 1) })
+    if (line === null || line.length > room) break
+    named++
+  }
+  return { repeated: pairs(named), ...(named < all.length ? { repeatedMore: rest(named) } : {}) }
+}
+
+/** Whether this decision tells repeats apart: an attended stop (`repeats`). */
+function saysOnce(input: DecideInput): boolean {
+  return input.stopGate && (input.mode ?? "attended") === "attended"
+}
+
+/** The input with the repeats taken out of its findings, as `decide` judges it: what `delivers` should be asked about. */
+export function withoutRepeats(input: DecideInput): DecideInput {
+  return saysOnce(input) ? { ...input, findings: repeats(input).findings } : input
+}
+
 /** Assemble, trim, and — on a stop — gate. */
 export async function decide(input: DecideInput): Promise<Decision> {
+  const split = saysOnce(input) ? repeats(input) : null
+  if (split === null) {
+    const { sent: _, ...decided } = await decideFindings(input)
+    return decided
+  }
+  const named =
+    split.repeated.length === 0
+      ? {}
+      : repeatedOf(split.repeated, input.display ?? ((file) => file), input.maxContextChars)
+  // The line, and the blank line before it, come out of the budget the rest is trimmed to.
+  const line = repeatedLine(named)
+  const reserve = line === null ? 0 : line.length + 2
+  const maxContextChars = input.maxContextChars === null ? null : Math.max(0, input.maxContextChars - reserve)
+  const { sent, ...decided } = await decideFindings({ ...input, findings: split.findings, maxContextChars })
+  if (named.repeated !== undefined && named.repeated.length > 0) decided.delivery.repeated = named.repeated
+  if (named.repeatedMore !== undefined) decided.delivery.repeatedMore = named.repeatedMore
+  // Only a block or a report puts the findings before the agent (see the returns of decideFindings).
+  const delivered = decided.delivery.stop === "block" || decided.delivery.stop === "report"
+  const record = sentRecord(input, input.findings, delivered ? sent : [])
+  // Only additions: whatever this stop forgets is in `record` already.
+  const ifShown = delivered ? null : sentRecord({ ...input, stopRan: new Map(), stopCleared: [] }, input.findings, sent)
+  return {
+    ...decided,
+    ...(record === null ? {} : { work: [...decided.work, record] }),
+    ...(ifShown === null ? {} : { ifShown }),
+  }
+}
+
+async function decideFindings(input: DecideInput): Promise<Decision & { sent: ClassifiedFinding[] }> {
   const assembled = await assemble(input)
   const trimmed = trim(assembled, {
     maxContextChars: input.maxContextChars,
@@ -904,7 +1080,14 @@ export async function decide(input: DecideInput): Promise<Decision> {
   // After the budget, like the notices: what did not run is never cut to make room for what did.
   const disabled = input.disabled ?? []
   if (disabled.length > 0) trimmed.delivery.disabled = disabled
-  if (!input.stopGate) return { delivery: trimmed.delivery, overflow: trimmed.overflow, work: [], context }
+  // What the agent is shown: the findings of each kept, after the budget cut whole rules and matches
+  // past a rule's cap. A cut one is not sent, so a later stop sends it.
+  const shown = new Set(trimmed.delivery.findings)
+  const sent = assembled.fresh.filter((finding) => {
+    const rendered = assembled.rendered.get(finding)
+    return rendered !== undefined && shown.has(rendered)
+  })
+  if (!input.stopGate) return { delivery: trimmed.delivery, overflow: trimmed.overflow, work: [], context, sent }
 
   const mode = input.mode ?? "attended"
   const gated = gate(
@@ -922,17 +1105,18 @@ export async function decide(input: DecideInput): Promise<Decision> {
     ...(mode === "unattended" ? { unattended: true as const } : {}),
   }
   // An incomplete stop carries no findings: none of the delivery is context the agent was given.
-  if (gated.stop === "incomplete") return { delivery, overflow: null, work: gated.work, context: [] }
+  if (gated.stop === "incomplete") return { delivery, overflow: null, work: gated.work, context: [], sent }
   // Only a block or a report reaches the agent as context; anything else must not count as
   // delivered. A capReached still prints its delivery as a system message, so it keeps the overflow
   // file — the message says rules did not fit, and the file is where they went.
-  if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: [] }
-  if (gated.stop === "capReached") return { delivery, overflow: trimmed.overflow, work: gated.work, context: [] }
+  if (gated.stop === "allow") return { delivery, overflow: null, work: gated.work, context: [], sent }
+  if (gated.stop === "capReached") return { delivery, overflow: trimmed.overflow, work: gated.work, context: [], sent }
   return {
     delivery,
     overflow: trimmed.overflow,
     work: gated.work,
     context,
+    sent,
     ...(gated.blocking === undefined ? {} : { blocking: new Set(gated.blocking) }),
   }
 }

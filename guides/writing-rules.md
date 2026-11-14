@@ -56,7 +56,7 @@ A rule with `context` and no `detect` is a touch rule: it delivers its doc secti
 Use it for generated code, vendored directories and files that must not change. Everything else is better reported after the write.
 
 - A refusal only rests on the text the agent is writing, and happens once per file per session, so it never traps the agent.
-- A write through Bash can't be refused before it runs. rulecast catches it right after: the agent is told how to revert it, its stop is held until it has (once per prompt by default), and you are told which file changed.
+- A write through Bash can't be refused before it runs. rulecast catches it right after: the agent is told how to revert it and its stop is held once, and you are told which file changed. In unattended mode it is held at every stop until the change is reverted, up to `unattended.max_blocks`.
 
 ## The linters you already run
 

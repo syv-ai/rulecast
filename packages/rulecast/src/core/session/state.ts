@@ -20,6 +20,12 @@ export type WorkRecord =
   | { t: "accessed"; agent: string; file: string }
   /** `findings`: the keys of the findings that blocked (session/decide.ts `findingKey`), for repeat detection. */
   | { t: "stopBlock"; agent: string; findings?: string[] }
+  /**
+   * Attended mode: what a stop changed in the findings sent to this agent that still stand
+   * (`WorkState.stopSent`): `add` sets an entry, `drop` removes one by key. Changes, not the whole
+   * set, so a file with many findings does not rewrite all of them at every stop.
+   */
+  | { t: "stopSent"; agent: string; add?: SentFinding[]; drop?: string[] }
   /** Unattended mode: the stop that told the agent to record what is left as unresolved, once per prompt. */
   | { t: "stopReport"; agent: string }
   /** Unattended mode: the stop that told the agent some rules did not run, once per prompt (#29). */
@@ -44,6 +50,16 @@ export type WorkRecord =
   /** The mode the hooks ran this session in, so `rulecast run --session` judges as they did. */
   | { t: "mode"; mode: ActiveMode["mode"]; source: ActiveMode["source"]; detail: string }
 
+/** A finding a stop sent: its key (session/decide.ts `findingKey`), rule, file, and that file's content hash then. */
+export type SentFinding = [key: string, rule: string, file: string, hash: string]
+
+/** What `WorkState.stopSent` holds for one finding. */
+export interface Sent {
+  rule: string
+  file: string
+  hash: string
+}
+
 export type TreePhase = "start" | "before" | "after" | "stop"
 
 type TreeHeader = Omit<TreeState, "entries">
@@ -67,6 +83,11 @@ export interface WorkState {
   stopBlocks: Map<string, number>
   /** How many stops each finding has blocked, by `blockedKey(agent, finding)`. Never reset: a prompt does not make a false positive true. */
   blockedFindings: Map<string, number>
+  /**
+   * Attended: what stops have sent each agent and still stands, by finding key (the latest
+   * `stopSent`). Never reset by a prompt: a stop says each finding once (session/decide.ts `repeats`).
+   */
+  stopSent: Map<string, Map<string, Sent>>
   /** Agents told to record their unresolved findings since their last prompt. */
   stopReports: Set<string>
   /** Agents told since their last prompt that configured rules did not run. */
@@ -135,6 +156,7 @@ export function emptyWork(): WorkState {
     editors: new Map(),
     stopBlocks: new Map(),
     blockedFindings: new Map(),
+    stopSent: new Map(),
     stopReports: new Set(),
     incompleteReports: new Set(),
     refusals: new Map(),
@@ -229,6 +251,13 @@ export function foldWork(records: readonly WorkRecord[]): WorkState {
           state.blockedFindings.set(key, (state.blockedFindings.get(key) ?? 0) + 1)
         }
         break
+      case "stopSent": {
+        const sent = state.stopSent.get(record.agent) ?? new Map<string, Sent>()
+        state.stopSent.set(record.agent, sent)
+        for (const key of record.drop ?? []) sent.delete(key)
+        for (const [key, rule, file, hash] of record.add ?? []) sent.set(key, { rule, file, hash })
+        break
+      }
       case "stopReport":
         state.stopReports.add(record.agent)
         break

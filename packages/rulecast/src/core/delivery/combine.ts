@@ -16,8 +16,8 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  * relative to `displayFrom` (the pipeline rebased it), so files from different projects do not collide.
  *
  * - One part is returned as it is.
- * - `findings`, `preexisting`, `preexistingSummary`, `touches`, `refused`, `swept`, `overflowPaths`
- *   and `disabled`: concatenated in part order.
+ * - `findings`, `preexisting`, `preexistingSummary`, `touches`, `refused`, `swept`, `repeated`,
+ *   `overflowPaths` and `disabled`: concatenated in part order. `repeatedMore`: summed.
  * - `references`: one per `(ref, location)`, the most complete state kept (REFERENCE_STATES), at the
  *   place it first appeared.
  * - A rule id two parts both deliver with different `templates`: the later part's findings, template
@@ -84,6 +84,9 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     combined.touches.push(...delivery.touches)
     if (delivery.refused !== undefined) combined.refused = [...(combined.refused ?? []), ...delivery.refused]
     if (delivery.swept !== undefined) combined.swept = [...(combined.swept ?? []), ...delivery.swept]
+    if (delivery.repeated !== undefined) combined.repeated = [...(combined.repeated ?? []), ...delivery.repeated]
+    if (delivery.repeatedMore !== undefined)
+      combined.repeatedMore = (combined.repeatedMore ?? 0) + delivery.repeatedMore
     if (delivery.disabled !== undefined) combined.disabled = [...(combined.disabled ?? []), ...delivery.disabled]
     combined.overflowPaths.push(...delivery.overflowPaths)
 

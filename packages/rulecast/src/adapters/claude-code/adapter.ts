@@ -1,4 +1,4 @@
-import { renderAgentText } from "../../core/delivery/render-agent"
+import { renderAgentText, repeatedLine } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
 import { HOOK_COMMAND, HOOK_SCRIPT, HOOK_SCRIPT_FILE, personalHookCommand, personalHookDir } from "./hook-script"
@@ -165,7 +165,10 @@ export const claudeCodeAdapter: Adapter = {
       return json({ decision: "block", reason, systemMessage: message })
     }
     const userOnly = event.kind === "guard" ? NONE : json({ systemMessage: notices })
-    if (text === "") return notices === "" ? NONE : userOnly
+    // A stop with only repeats has no agent text, and still tells the user (below).
+    if (text === "" && !(event.kind === "verify" && repeatedLine(delivery) !== null)) {
+      return notices === "" ? NONE : userOnly
+    }
     const withNotices = (value: Record<string, unknown>) =>
       notices === "" ? value : { ...value, systemMessage: notices }
     switch (event.kind) {
@@ -247,9 +250,14 @@ export const claudeCodeAdapter: Adapter = {
           const cap = withinLimit(`${CAP_PREAMBLE}\n\n${text}`, delivery, event)
           return json({ systemMessage: notices === "" ? cap : `${notices}\n\n${cap}` })
         }
+        // A stop let through: what is still there from earlier stops is the user's to know, not a turn
+        // of the agent's (session/decide.ts `repeats`).
+        const repeats = repeatedLine(delivery)
         const outside = sweptMessage(delivery, event, options)
-        if (outside !== null) return json({ systemMessage: notices === "" ? outside : `${notices}\n\n${outside}` })
-        return notices === "" ? NONE : json({ systemMessage: notices })
+        const told = [notices, outside, repeats === null ? null : `rulecast: ${repeats}`].filter(
+          (part) => part !== null && part !== "",
+        )
+        return told.length === 0 ? NONE : json({ systemMessage: told.join("\n\n") })
       }
       // Nothing to say before a prompt, a session or a command: these events only record state.
       case "prompt":

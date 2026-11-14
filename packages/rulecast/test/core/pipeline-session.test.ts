@@ -63,10 +63,16 @@ describe("pipeline with a session", () => {
     await write("def get():\n    raise HTTPException(404)\n    raise HTTPException(500)\n")
     await send({ kind: "edit", files: [USERS] })
 
+    expect((await send({ kind: "verify", files: [] })).stop).toBe("block")
+    // A new finding each time, so none is a repeat (pipeline-stop-repeats.test.ts): past the cap.
     const stops = []
-    for (let i = 0; i < 3; i++) stops.push((await send({ kind: "verify", files: [] })).stop)
-    expect(stops).toEqual(["block", "capReached", "capReached"])
+    for (const status of [501, 502]) {
+      await write(`def get():\n    raise HTTPException(404)\n    raise HTTPException(${status})\n`)
+      stops.push((await send({ kind: "verify", files: [] })).stop)
+    }
+    expect(stops).toEqual(["capReached", "capReached"])
 
+    // Never sent to the agent, so the next prompt's stop blocks on it.
     await send({ kind: "prompt", files: [] })
     expect((await send({ kind: "verify", files: [] })).stop).toBe("block")
 

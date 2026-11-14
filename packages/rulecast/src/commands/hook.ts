@@ -105,11 +105,18 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
     }
     if (parts.length === 0 && elsewhere === null) return 0
     const delivery = combineDeliveries(parts, parsed.cwd)
+    // A project that let the agent go has its findings shown anyway when another's block carries
+    // them: they count as sent there too, so its next block names them as repeats.
+    if (delivery.stop === "block" || delivery.stop === "report") {
+      const shown = parts.filter((part) => part.delivery.stop !== "block" && part.delivery.stop !== "report")
+      await Promise.all(shown.map((part) => part.recordShown?.()))
+    }
     if (elsewhere !== null) delivery.agentNotices = [...(delivery.agentNotices ?? []), elsewhere]
-    // The nearest project's setting: the first part is the config nearest the agent or the file. With
-    // no part, the delivery holds only the notice, and no matches to cap.
+    // One project: its own setting. Several: each part's budget already cut its rules to its own
+    // setting, and what it shows is what it records as sent, so the combined text cuts nothing more.
+    // With no part, the delivery holds only the notice, and no matches to cap.
     const output = adapter.format(delivery, event, {
-      maxMatchesPerRule: parts[0]?.maxMatchesPerRule ?? Number.POSITIVE_INFINITY,
+      maxMatchesPerRule: parts.length === 1 ? parts[0]!.maxMatchesPerRule : Number.POSITIVE_INFINITY,
     })
     if (output.stdout !== "") io.stdout(output.stdout)
   } catch (error) {
@@ -282,6 +289,8 @@ interface ProjectRun {
   subagents: boolean
   /** A shell call changed files this project's rules judge (the delivery is `via: "shell"`). */
   changedByShell: boolean
+  /** PipelineResult.recordShown. */
+  recordShown?: () => Promise<void>
 }
 
 /**
@@ -335,6 +344,7 @@ async function runProject(root: string, routing: Routing, routed: Routed): Promi
       maxMatchesPerRule: project.config.maxMatchesPerRule,
       subagents: routing.subagents,
       changedByShell: result.delivery.via === "shell",
+      ...(result.recordShown === undefined ? {} : { recordShown: result.recordShown }),
     }
   } catch (error) {
     log?.(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)

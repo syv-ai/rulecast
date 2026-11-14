@@ -35,6 +35,9 @@ describe("a subagent's hand-back is its stop, refused fewer times than Claude Co
     await edit(USERS, violation(USERS), "sub1")
     const handback = { kind: "verify" as const, files: [], agentId: "sub1", handback: true }
     expect((await send(handback)).stop).toBe("block")
+    // The same finding is a repeat; a new one is past the cap. Either way the hand-back goes through.
+    expect((await send(handback)).stop).toBe("allow")
+    await edit(USERS, `${violation(USERS)}    raise HTTPException(501)\n`, "sub1")
     expect((await send(handback)).stop).toBe("capReached")
   })
 
