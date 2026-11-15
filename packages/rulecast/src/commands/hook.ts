@@ -304,6 +304,9 @@ interface ProjectRun {
   stateDir: string
 }
 
+/** What the Claude Code adapter appends when it cuts an answer to the hook output limit. */
+const CUT_NOTICE = "cut to fit Claude Code's hook output limit"
+
 /** What of an answer reached the model: the context it was given, or the reason it was refused or held. */
 function modelText(stdout: string): string {
   if (stdout === "") return ""
@@ -337,14 +340,18 @@ async function recordInjected(
   event: Event,
   combined: Delivery,
 ): Promise<void> {
-  const total = modelText(stdout).length
+  const text = modelText(stdout)
+  const total = text.length
   const session = event.session
   if (total === 0 || session === undefined || parts.length === 0) return
   // A doc section the combined answer gave once is counted once, whole, for the first part that has
   // it (core/delivery/combine.ts keeps the first). The rest of what reached the model is shared by the
   // length of each part's own text without its sections, so the preamble goes with it.
+  // An unattended hold says only what did not run; its findings and docs were not sent.
+  const ownWordsOnly = event.kind === "verify" && combined.stop === "incomplete"
   const seen = new Set<string>()
   const docs = parts.map((part) => {
+    if (ownWordsOnly) return 0
     let chars = 0
     for (const reference of part.delivery.references) {
       const key = `${reference.ref}\n${reference.location ?? ""}`
@@ -367,13 +374,18 @@ async function recordInjected(
         .length - sections[index]!,
     ),
   )
-  const docTotal = Math.min(
-    total,
-    docs.reduce((a, b) => a + b, 0),
-  )
-  // The adapter can cut the tail to its limit: then the sections count for what is left.
-  const docScale = docTotal === 0 ? 0 : docTotal / docs.reduce((a, b) => a + b, 0)
-  const docShares = docs.map((chars) => Math.floor(chars * docScale))
+  // The adapter cuts the tail to its limit, where the sections are: what the parts' text has beyond
+  // what reached the model was cut from them, the last first.
+  const docShares = [...docs]
+  const ownSum = docShares.reduce((a, b) => a + b, 0) + other.reduce((a, b) => a + b, 0)
+  // Only when the adapter says it cut (adapters/claude-code `withinLimit`): several parts' texts each
+  // carry their own heading, which the combined answer has once, so their sum alone proves nothing.
+  let cut = text.includes(CUT_NOTICE) ? Math.max(0, ownSum - total) : 0
+  for (let index = docShares.length - 1; index >= 0 && cut > 0; index--) {
+    const taken = Math.min(docShares[index]!, cut)
+    docShares[index] = docShares[index]! - taken
+    cut -= taken
+  }
   const rest = total - docShares.reduce((a, b) => a + b, 0)
   const otherSum = other.reduce((a, b) => a + b, 0)
   // Rounded down, the rest to the last: the shares add up to what reached the model, none below 0.
@@ -383,8 +395,6 @@ async function recordInjected(
   )
   shares[shares.length - 1] = shares.at(-1)! + total - shares.reduce((a, b) => a + b, 0)
   const at = new Date().toISOString()
-  // An unattended hold says only what did not run; its findings and docs were not sent.
-  const ownWordsOnly = event.kind === "verify" && combined.stop === "incomplete"
   const counted = new Set<string>()
   const records = parts.map((part, index) =>
     injectedRecord({
