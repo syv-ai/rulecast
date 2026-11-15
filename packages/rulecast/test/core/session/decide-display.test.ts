@@ -71,7 +71,7 @@ describe("decide with a display path", () => {
       display,
     })
     expect(delivery.refused).toEqual([{ file: "backend/app/x.py", rule: "a/rule", dirtyAtStart: false }])
-    expect(renderAgentText(delivery, { maxMatchesPerRule: 10 })).toContain("git checkout -- backend/app/x.py")
+    expect(renderAgentText(delivery, { maxMatchesPerRule: 10 })).toContain("git checkout HEAD -- backend/app/x.py")
   })
 
   test("swept files are listed displayed, and their findings print under the swept heading", async () => {

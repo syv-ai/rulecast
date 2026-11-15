@@ -90,7 +90,7 @@ describe("paths shown relative to displayFrom", () => {
     const call = await session.shell(() => session.write(API, "export const api = 2\n"))
     expect(call.refused).toEqual([{ file: `backend/${API}`, rule: GENERATED, dirtyAtStart: false }])
     const text = renderAgentText(call, { maxMatchesPerRule: 10 })
-    expect(text).toContain(`git checkout -- backend/${API}`)
+    expect(text).toContain(`git checkout HEAD -- backend/${API}`)
     expect(call.notices).toEqual([
       `rulecast: the agent changed a protected file with Bash: backend/${API} (${GENERATED})`,
     ])

@@ -635,7 +635,7 @@ describe("refuse_write under Bash", () => {
   })
 
   test("a protected file changed while another session's command ran: undo only the agent's change", async () => {
-    // `git checkout -- <file>` would throw away whatever the other session wrote to it.
+    // `git checkout HEAD -- <file>` would throw away whatever the other session wrote to it.
     const root = await createProtected()
     const one = sessionAt(root, "one")
     const two = sessionAt(root, "two")
