@@ -318,6 +318,11 @@ function shebangTag(absolute: string): string | null {
   return null
 }
 
+/** Whether identify types the file by its name or extension alone, never reading its content. */
+export function typedByPath(file: string): boolean {
+  return pathTags(file).known
+}
+
 /**
  * A file's tags as identify gives them, for the file at `root`/`file`: none but `file` for a
  * symlink (identify gives it only `symlink`); from its path when identify knows its name or

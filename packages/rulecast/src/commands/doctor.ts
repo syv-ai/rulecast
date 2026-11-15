@@ -13,8 +13,7 @@ import {
   readCommittedBaseline,
 } from "../core/baseline/committed"
 import { INSTALL_COMMAND, installDir, pinnedInstallCommand } from "../core/binary-home"
-import type { CompiledProject } from "../core/compile/project"
-import { compile, diagnosticText } from "../core/compile/project"
+import { type CompiledProject, compile, diagnosticText, projectFilter } from "../core/compile/project"
 import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { type ActiveMode, ciVariable } from "../core/config/mode"
@@ -27,6 +26,7 @@ import { readSourceFile } from "../core/detection/per-rule"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { runDetection } from "../core/detection/run"
 import { errorMessage } from "../core/errors"
+import { typedByPath } from "../core/files"
 import { FINDING_ID_VERSION } from "../core/finding-id"
 import { allFiles, isShallow, mergeBase, repositoryTop } from "../core/git"
 import { cacheHome, ensureProjectState } from "../core/home"
@@ -860,7 +860,7 @@ async function dryRun(
     const matching = files.filter((candidate) => rule.matches(candidate))
     const file = matching[0]
     if (file === undefined) {
-      lines.push(noFileLine(rule, log, summary, project.root))
+      lines.push(noFileLine(rule, log, summary, project))
       continue
     }
 
@@ -911,9 +911,9 @@ function noFileLine(
   rule: CompiledProject["rules"][number],
   log: FindingsLog,
   summary: readonly WeekRow[],
-  root: string,
+  project: CompiledProject,
 ): DryRunLine {
-  const takes = takenBefore(rule, root)
+  const takes = takenBefore(rule, project)
   const NONE = "no file in the project matches this rule"
   const ranOn = new Set<string>()
   for (const record of log.records) {
@@ -961,11 +961,13 @@ function noFileLine(
 }
 
 /**
- * Whether a file a rule ran on is one its pattern takes now. A file gone from disk whose type the
- * rule's type tags would read from its content (a shebang) can't be told: it counts when the
- * path passes the rule's files and exclude, so a stale glob is never hidden for that reason.
+ * Whether a file a rule ran on is one its pattern takes now. A file gone from disk that identify
+ * would type from its content (a shebang, as its name and extension say nothing) can't be told:
+ * it counts when its path passes the config's and the rule's files and exclude, so a stale glob
+ * is never hidden for that reason. One whose path types it is told by its path, as `matches` does.
  */
-function takenBefore(rule: CompiledProject["rules"][number], root: string): (file: string) => boolean {
+function takenBefore(rule: CompiledProject["rules"][number], project: CompiledProject): (file: string) => boolean {
+  const global = projectFilter(project.config)
   const { files, exclude, types, typesOr, excludeTypes } = rule.patterns
   const typed = types.some((tag) => tag !== "file") || typesOr.length > 0 || excludeTypes.length > 0
   const regex = (source: string) => {
@@ -979,7 +981,8 @@ function takenBefore(rule: CompiledProject["rules"][number], root: string): (fil
   const leaveOut = regex(exclude)
   return (file) => {
     if (rule.matches(file)) return true
-    if (!typed || existsSync(path.join(root, file))) return false
+    if (!typed || typedByPath(file) || existsSync(path.join(project.root, file))) return false
+    if (typeof global === "string" || !global(file)) return false
     return include?.test(file) === true && leaveOut?.test(file) !== true
   }
 }

@@ -1665,6 +1665,28 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     )
   })
 
+  // Re-review of 36c2d46.
+  test("a deleted file its path alone types (old/x.py) is told by its path: not counted", async () => {
+    const shell = { ...RULE("guard"), files: "", types: ["shell"], expect: "quiet" }
+    const root = await withLog([shell], [record("2026-10-01T10:00:00.000Z", { guard: ["old/x.py", "README.md"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toContain("info     guard — matches no file; never matched since")
+  })
+
+  test("a deleted file the config's own exclude leaves out: not counted", async () => {
+    const shell = { ...RULE("guard"), files: "", types: ["shell"], expect: "quiet" }
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([shell], { exclude: "^vendor/" }),
+      "a.ts": "ok\n",
+    })
+    const stateDir = stateDirFor(root)
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(
+      path.join(stateDir, FINDINGS_LOG),
+      `${JSON.stringify(record("2026-10-01T10:00:00.000Z", { guard: ["vendor/bin/run"] }))}\n`,
+    )
+    expect(dryRunLine((await doctor(root)).stdout)).toContain("info     guard — matches no file; never matched since")
+  })
+
   test("without expect: quiet, the warning as before", async () => {
     const root = await withLog([{ ...guard, expect: undefined }], null)
     expect(dryRunLine((await doctor(root)).stdout)).toBe("  warning  guard — no file in the project matches this rule")

@@ -8,7 +8,7 @@ import { type Config, defaultConfig, overrideSchema, ruleSchema } from "../confi
 import { AGENT_DIR } from "../delivery/persist"
 import type { DetectorRegistry } from "../detection/registry"
 import { isNotFound, parseReported } from "../errors"
-import { compileFilter } from "../files"
+import { compileFilter, type FileFilter } from "../files"
 import type { Env } from "../home"
 import type { ReferenceRoot } from "../references"
 import type { RepoProvider } from "../repos/provider"
@@ -63,6 +63,24 @@ export interface CompiledProject {
   diagnostics: Diagnostic[]
   /** What the rules were compiled for: escalated severities and `refuse_write: unattended` follow it. */
   mode: ActiveMode
+}
+
+/**
+ * The config's own files and exclude, which every rule's filter is applied within: a matcher, or
+ * why it can't be made. rulecast's own directory is never checked: a committed baseline is a JSON
+ * file of hex ids, which a secrets scanner or a `\.json$` rule would otherwise read, and the rest
+ * is rulecast's output.
+ */
+export function projectFilter(config: Config): FileFilter | string {
+  const filter = compileFilter({
+    files: config.files,
+    exclude: config.exclude,
+    types: [],
+    typesOr: [],
+    excludeTypes: [],
+  })
+  if (typeof filter === "string") return filter
+  return (file: string) => !file.startsWith(`${AGENT_DIR}/`) && filter(file)
 }
 
 export interface CompileOptions {
@@ -152,17 +170,8 @@ export async function compile(options: CompileOptions): Promise<CompiledProject>
   if (config.minimumRulecastVersion !== null && isOlder(VERSION, config.minimumRulecastVersion)) {
     return configFailure(requiresNewerMessage(config.minimumRulecastVersion), config)
   }
-  const filter = compileFilter({
-    files: config.files,
-    exclude: config.exclude,
-    types: [],
-    typesOr: [],
-    excludeTypes: [],
-  })
-  if (typeof filter === "string") return configFailure(filter, config)
-  // rulecast's own directory is never checked: a committed baseline is a JSON file of hex ids, which
-  // a secrets scanner or a `\.json$` rule would otherwise read, and the rest is rulecast's output.
-  const global = (file: string) => !file.startsWith(`${AGENT_DIR}/`) && filter(file)
+  const global = projectFilter(config)
+  if (typeof global === "string") return configFailure(global, config)
 
   const mode = modeOf(config, options)
   const diagnostics: Diagnostic[] = []
