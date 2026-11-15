@@ -97,6 +97,11 @@ const ruleKeys = {
   refuse_write: z.union([z.boolean(), z.literal("unattended")]).optional(),
   /** false: compiled and listed, selected for nothing. The way to switch a catalog rule off without deleting it. */
   enabled: z.boolean().optional(),
+  /**
+   * `quiet`: a guard over code that holds today, meant never to fire, so doctor does not flag it
+   * for having run without firing (Conductor lead, 0.19.0).
+   */
+  expect: z.literal("quiet").optional(),
   detect: z
     .record(z.string(), z.unknown())
     .refine((value) => Object.keys(value).length === 1, "must name exactly one detector")

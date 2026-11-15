@@ -34,6 +34,8 @@ import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
 import { decide } from "../core/session/decide"
 import { emptyContext, emptyWork } from "../core/session/state"
+import { readFindingsLog } from "../core/stats/log"
+import { rulesRun } from "../core/stats/runs"
 import { isOlder, VERSION } from "../core/version"
 import {
   FILE_TEMPLATE,
@@ -433,6 +435,15 @@ export async function doctorCommand(
     return 128 + constants.signals[stop.signal]
   }
 
+  const history = await historyReport(project, stateDir)
+  if (history !== null) {
+    io.stdout(`\n${history.heading}\n`)
+    for (const result of history.lines) {
+      count(result.level)
+      io.stdout(line(result.level, result.rule, result.detail))
+    }
+  }
+
   const neighbours = await neighbourProjects(project, listed, registry, home, io.env)
   const payloads = await touchPayloads(project, listed, createReferenceResolver(root), neighbours)
   if (payloads.length > 0) {
@@ -450,6 +461,62 @@ export async function doctorCommand(
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * From the findings log (`rulecast stats`): the rules that ran and never fired, with how often, on
+ * how many files and since when, so a reader can tell many runs over many files from a few over one
+ * (Conductor lead, 0.19.0). A rule marked `expect: quiet` is a guard meant never to fire: that it
+ * did not is said as ok, and that it did, as info. Rules that never ran are `rulecast stats`'s to
+ * say. Null when the log holds nothing.
+ */
+async function historyReport(
+  project: CompiledProject,
+  stateDir: string,
+): Promise<{ heading: string; lines: { rule: string; level: Level; detail: string }[] } | null> {
+  const log = await readFindingsLog(stateDir)
+  if (log.records.length === 0) return null
+  const since = log.records.reduce((first, { at }) => (at < first ? at : first), log.records[0]!.at).slice(0, 10)
+  const runs = new Map<string, number>()
+  const files = new Map<string, Set<string>>()
+  const fired = new Map<string, number>()
+  for (const record of log.records) {
+    for (const rule of rulesRun(record)) {
+      runs.set(rule, (runs.get(rule) ?? 0) + 1)
+      const seen = files.get(rule) ?? new Set<string>()
+      files.set(rule, seen)
+      for (const index of record.ran[rule]!) {
+        const file = record.files[index]
+        if (file !== undefined) seen.add(file)
+      }
+    }
+    for (const found of record.found) fired.set(found.r, (fired.get(found.r) ?? 0) + 1)
+  }
+  const lines: { rule: string; level: Level; detail: string }[] = []
+  for (const rule of project.rules) {
+    if (!rule.enabled || rule.detector === null) continue
+    const times = fired.get(rule.id) ?? 0
+    const ran = runs.get(rule.id) ?? 0
+    if (times > 0) {
+      if (rule.expectQuiet)
+        lines.push({
+          rule: rule.id,
+          level: "info",
+          detail: `expect: quiet, and it fired ${plural(times, "time")} since ${since}`,
+        })
+      continue
+    }
+    if (ran === 0) continue
+    const evidence = `ran ${plural(ran, "time")} on ${plural(files.get(rule.id)?.size ?? 0, "file")} since ${since}, never fired`
+    lines.push(
+      rule.expectQuiet
+        ? { rule: rule.id, level: "ok", detail: `${evidence}, as expected (expect: quiet)` }
+        : { rule: rule.id, level: "info", detail: evidence },
+    )
+  }
+  if (lines.length === 0) return null
+  const rotated = log.rotated ? "; older records were rotated out" : ""
+  return { heading: `history (findings log since ${since}${rotated})`, lines }
+}
 
 /** A rule that picks no files of its own: every change reaches its detector. */
 const unfiltered = ({ patterns }: DetectorRule) =>

@@ -46,6 +46,8 @@ export interface CompiledRule {
   refuseWrite: boolean
   /** false: switched off with `enabled: false`; never selected for an event (spec §4). */
   enabled: boolean
+  /** `expect: quiet`: meant never to fire, so doctor does not flag it for running without firing. */
+  expectQuiet: boolean
   stages: Stage[]
   /**
    * The rule's own `files`, `exclude` and type tags, as written (none: "", "^$", []), for `rulecast
@@ -233,6 +235,7 @@ export async function compileRule(
     if (data.refuse_write) return "refuse_write needs detect: there is nothing to refuse a write for"
     if (data.scope) return "scope needs detect: there is nothing to classify"
     if (data.examples) return "examples need detect: there is nothing to run them against"
+    if (data.expect) return "expect: quiet needs detect: a rule without a detector never fires"
     if (stages.some((stage) => stage !== "touch")) return "rules without detect need stages: [touch]"
     if (data.message !== undefined) return "message needs detect"
     if (!data.context?.length) return "rules without detect need context"
@@ -316,6 +319,7 @@ export async function compileRule(
     scope: data.scope ?? "instance",
     refuseWrite: data.refuse_write === true || (unattended && data.refuse_write === "unattended"),
     enabled: data.enabled !== false,
+    expectQuiet: data.expect === "quiet",
     stages,
     patterns: {
       files: data.files ?? "",

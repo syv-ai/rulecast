@@ -7,6 +7,7 @@ import { stringify } from "yaml"
 
 import { HOOK_COMMAND } from "../../src/adapters/claude-code/hook-script"
 import { INSTALL_COMMAND, pinnedInstallCommand } from "../../src/core/binary-home"
+import { FINDINGS_LOG } from "../../src/core/stats/log"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo, git } from "../helpers/git"
@@ -1428,5 +1429,76 @@ describe("rulecast doctor", () => {
     expect(result.stderr).toContain("no .rulecast-config.yaml in")
     expect(result.stderr).toContain("run rulecast init")
     expect(result.code).toBe(2)
+  })
+})
+
+// Conductor lead, 0.19.0: "ran but never fired" with its evidence (runs, files, since when), in
+// doctor; and `expect: quiet` for a guard over code that holds today, so it stops being flagged.
+describe("rulecast doctor: rules that ran and never fired", () => {
+  const run = (at: string, ran: Record<string, string[]>, found: { r: string; f: string }[] = []) => {
+    const files = [...new Set(Object.values(ran).flat())]
+    return {
+      v: 1,
+      at,
+      s: "s1",
+      a: "main",
+      ev: "edit",
+      files,
+      ran: Object.fromEntries(Object.entries(ran).map(([rule, each]) => [rule, each.map((f) => files.indexOf(f))])),
+      found: found.map(({ r, f }) => ({ r, id: `${r}-${f}`, f, l: 1, o: "delivered" })),
+      ign: [],
+    }
+  }
+  const withLog = async (rules: Record<string, unknown>[], records: unknown[]) => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig(rules), "a.ts": "ok\n" })
+    const stateDir = stateDirFor(root)
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(path.join(stateDir, FINDINGS_LOG), records.map((each) => `${JSON.stringify(each)}\n`).join(""))
+    return root
+  }
+  const LOG = [
+    run("2026-10-01T10:00:00.000Z", { quiet: ["a.ts"], loud: ["a.ts"] }, [{ r: "loud", f: "a.ts" }]),
+    run("2026-10-02T10:00:00.000Z", { quiet: ["b.ts", "a.ts"] }),
+    run("2026-10-03T10:00:00.000Z", { quiet: ["c.ts"] }),
+  ]
+  const historyOf = (stdout: string) => stdout.split("\n\n").find((block) => block.startsWith("history")) ?? null
+
+  test("says how often, on how many files and since when, as info", async () => {
+    const root = await withLog([RULE("quiet"), RULE("loud")], LOG)
+    const { stdout } = await doctor(root)
+    expect(historyOf(stdout)).toBe(
+      "history (findings log since 2026-10-01)\n  info     quiet — ran 3 times on 3 files since 2026-10-01, never fired",
+    )
+  })
+
+  test("expect: quiet marks it as meant: an ok line, said so", async () => {
+    const root = await withLog([{ ...RULE("quiet"), expect: "quiet" }, RULE("loud")], LOG)
+    const { stdout } = await doctor(root)
+    expect(historyOf(stdout)).toContain(
+      "  ok       quiet — ran 3 times on 3 files since 2026-10-01, never fired, as expected (expect: quiet)",
+    )
+  })
+
+  test("expect: quiet on a rule that fired: said, as info; the guard did its job", async () => {
+    const root = await withLog([RULE("quiet"), { ...RULE("loud"), expect: "quiet" }], LOG)
+    const { stdout } = await doctor(root)
+    expect(historyOf(stdout)).toContain("  info     loud — expect: quiet, and it fired 1 time since 2026-10-01")
+  })
+
+  test("no log: no history section", async () => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([RULE("quiet")]), "a.ts": "ok\n" })
+    expect(historyOf((await doctor(root)).stdout)).toBeNull()
+  })
+
+  test("expect takes only quiet, and needs a detector", async () => {
+    const bad = await createRepo({ ".rulecast-config.yaml": localConfig([{ ...RULE("a"), expect: "loud" }]) })
+    expect((await doctor(bad)).stdout).toMatch(/expect/)
+    const touch = await createRepo({
+      ".rulecast-config.yaml": localConfig([
+        { id: "t", name: "t", files: "\\.ts$", stages: ["touch"], context: ["@d.md"], expect: "quiet" },
+      ]),
+      "d.md": "# D\n",
+    })
+    expect((await doctor(touch)).stdout).toContain("expect: quiet needs detect")
   })
 })

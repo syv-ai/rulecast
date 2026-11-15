@@ -23,6 +23,7 @@ export function rule(overrides: Overrides): CompiledRule {
     scope: "instance",
     refuseWrite: false,
     enabled: true,
+    expectQuiet: false,
     stages: ["edit", "verify"],
     patterns: { files, exclude: "^$", types: [], typesOr: [], excludeTypes: [] },
     detector: { kind: "regex", config: { pattern: "x", flags: "" }, captures: [] },
