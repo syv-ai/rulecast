@@ -128,7 +128,7 @@ No Node needed. Installs the latest release as `~/.local/bin/rulecast` and puts 
 curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
 ```
 
-It checks the download's checksum and lists any shell startup file it changed. Run it again to update. `sh -s -- --help` lists its options. For a fixed version, use the `install.sh` attached to that release. The binary unpacks its native files into `native/` in rulecast's cache home (`~/.cache/rulecast` by default), or into a private temp directory when that can't be written.
+It checks the download's checksum and lists any shell startup file it changed. It changes one only in a terminal, for the default directory: with no terminal (CI, an agent) or with `--install-dir`, it prints the line to add instead, and `--modify-path` adds it anyway. Run it again to update. `sh -s -- --help` lists its options. For a fixed version, use the `install.sh` attached to that release. The binary unpacks its native files into `native/` in rulecast's cache home (`~/.cache/rulecast` by default), or into a private temp directory when that can't be written.
 
 ### npm
 

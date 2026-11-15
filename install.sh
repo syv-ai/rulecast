@@ -8,8 +8,10 @@
 #   curl -LsSf https://github.com/syv-ai/rulecast/releases/download/vX.Y.Z/install.sh | sh
 #
 # It downloads the binary for this machine and its .sha256 from the release, checks one against
-# the other, and installs it as <dir>/rulecast. Then it makes sure <dir> is on your PATH: it writes
-# <dir>/env and sources it from your shell's startup files, and prints every file it changed.
+# the other, and installs it as <dir>/rulecast. It writes <dir>/env, which puts <dir> on the PATH.
+# In a terminal, installing to the default directory, it sources that from your shell's startup
+# files and prints every file it changed. Otherwise (no terminal, or a directory you named) it
+# changes no startup file and prints the line to add; --modify-path asks it to add the line anyway.
 #
 # In a terminal it first shows what it will do and asks: proceed, customize or cancel. With no
 # terminal to ask through (CI, an agent, a container build) it uses the defaults and says so. Pass
@@ -34,11 +36,13 @@ usage: install.sh [options]      (piped: curl -LsSf <url> | sh -s -- [options])
 
   -y, --yes               Ask nothing: install with the defaults and any options given
       --install-dir DIR   Install as DIR/rulecast (default: \$XDG_BIN_HOME, else ~/.local/bin)
+      --modify-path       Add DIR to the PATH in your shell startup files, also with no terminal
+                          or with --install-dir (by default only in a terminal, to the default DIR)
       --no-modify-path    Change no shell startup file
   -h, --help              Print this and exit
 
 Each has an environment variable, for setups that can't pass options: RULECAST_YES=1,
-RULECAST_INSTALL_DIR=DIR, RULECAST_NO_MODIFY_PATH=1. RULECAST_DOWNLOAD_URL points at a mirror
+RULECAST_INSTALL_DIR=DIR, RULECAST_MODIFY_PATH=1, RULECAST_NO_MODIFY_PATH=1. RULECAST_DOWNLOAD_URL points at a mirror
 of the release assets.
 EOF
 }
@@ -171,8 +175,10 @@ main() {
   yes=""
   [ "${RULECAST_YES:-}" = 1 ] && yes=1
   dir="${RULECAST_INSTALL_DIR:-}"
-  modify_path=1
-  [ "${RULECAST_NO_MODIFY_PATH:-}" = 1 ] && modify_path=0
+  # Asked for by an option, 1 or 0; empty, decided below.
+  path_choice=""
+  [ "${RULECAST_MODIFY_PATH:-}" = 1 ] && path_choice=1
+  [ "${RULECAST_NO_MODIFY_PATH:-}" = 1 ] && path_choice=0
   # Where the questions are read from: the terminal, also when the script itself arrives on stdin.
   # RULECAST_INSTALL_TTY replaces it, for tests.
   tty="${RULECAST_INSTALL_TTY:-/dev/tty}"
@@ -185,7 +191,8 @@ main() {
         shift
         ;;
       --install-dir=*) dir="${1#*=}" ;;
-      --no-modify-path) modify_path=0 ;;
+      --modify-path) path_choice=1 ;;
+      --no-modify-path) path_choice=0 ;;
       -h | --help)
         usage
         exit 0
@@ -213,6 +220,18 @@ main() {
     *) fail "no standalone binary for $(uname -sm); install it with npm: npm install -g @syv-ai/rulecast" ;;
   esac
 
+  # A startup file is the person's: changed only when they are there to see it, at a terminal, and
+  # only for the default directory, since one they name (a scratch directory, often) is rarely
+  # meant to stay on the PATH. An option says otherwise either way.
+  terminal=""
+  (: <"$tty") 2>/dev/null && terminal=1
+  if [ -n "$path_choice" ]; then
+    modify_path="$path_choice"
+  elif [ -z "$dir" ] && [ -n "$terminal" ]; then
+    modify_path=1
+  else
+    modify_path=0
+  fi
   [ -n "$dir" ] || dir="${XDG_BIN_HOME:-}"
   if [ -z "$dir" ]; then
     [ -n "${HOME:-}" ] || fail "HOME is not set; pass --install-dir to say where rulecast should go"
@@ -224,7 +243,7 @@ main() {
   dir="$trimmed"
   naming
 
-  if [ -z "$yes" ] && (: <"$tty") 2>/dev/null; then
+  if [ -z "$yes" ] && [ -n "$terminal" ]; then
     exec 3<"$tty"
     while :; do
       summary
@@ -310,6 +329,7 @@ EOF
   if on_path; then return 0; fi
   if [ "$modify_path" != 1 ] || [ -z "${HOME:-}" ]; then
     say "$dir is not on your PATH. Add this line to your shell's startup file: $env_line"
+    [ -n "$path_choice" ] || [ -z "${HOME:-}" ] || say "or run the installer again with --modify-path to add it"
     return 0
   fi
   files="$(planned_files)"

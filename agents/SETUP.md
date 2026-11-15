@@ -98,13 +98,13 @@ In the same turn, ask every question on the page with your question tool, and ad
 
 Only after the developer approves. First, install rulecast as approved, by running exactly the command the page showed. If the developer would rather run it themselves, give them the command and wait. Never install anything the page did not show.
 
-- **The standalone binary:** this downloads the binary for this machine and its checksum from the latest release, checks them, installs it as `~/.local/bin/rulecast`, and puts that directory on the PATH. Run by you, with no terminal to ask through, it installs those defaults and says so; it prints every shell startup file it changed:
+- **The standalone binary:** this downloads the binary for this machine and its checksum from the latest release, checks them, and installs it as `~/.local/bin/rulecast`. Run by you, with no terminal to ask through, it installs those defaults and says so. It changes no shell startup file, since those are the developer's, and prints the line that puts the directory on the PATH:
 
   ```sh
   curl -LsSf https://syv-ai.github.io/rulecast/install.sh | sh
   ```
 
-  Your shell has not read the startup files it changed, so for the rest of setup run rulecast by the path it printed (`~/.local/bin/rulecast`, or the directory it used). Everyone whose sessions run here installs it the same way. Tell the developer.
+  The hooks find it there without the PATH. For the rest of setup, run rulecast by the path it printed (`~/.local/bin/rulecast`). Give the developer the line it printed, to add to their shell's startup file themselves, or to run the installer in their own terminal, which offers to add it. Everyone whose sessions run here installs it the same way. Tell the developer.
 - **The devDependency:** add `@syv-ai/rulecast` with the project's package manager (`pnpm add -D`, `npm install -D`, `bun add -d`). The agent hooks and git hooks run that one first, so everyone gets the same version.
 - **A global install:** `npm install -g @syv-ai/rulecast`. The hooks run it only when there is no devDependency. Everyone whose sessions run here installs it the same way.
 

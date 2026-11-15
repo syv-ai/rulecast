@@ -198,7 +198,7 @@ describe("install.sh", () => {
   test("a HOME with $, quotes or spaces still installs, its startup line naming it through $HOME", async () => {
     const home = path.join(scratch("odd"), 'a $b "c`')
     mkdirSync(home)
-    const run = await install({ home, env: { SHELL: "/bin/zsh" } })
+    const run = await install({ home, args: ["--modify-path"], env: { SHELL: "/bin/zsh" } })
     expect(run.status, run.stderr).toBe(0)
     expect(count(read(path.join(home, ".zshrc")), SOURCE_LINE)).toBe(1)
     const env = path.join(bin(home), "env")
@@ -236,7 +236,7 @@ describe("install.sh", () => {
     const home = scratch("home")
     writeFileSync(path.join(home, ".bashrc"), "# mine\n")
     writeFileSync(path.join(home, ".zshrc"), "# mine\n")
-    const first = await install({ home })
+    const first = await install({ home, args: ["--modify-path"] })
     expect(first.status, first.stderr).toBe(0)
     for (const file of [".profile", ".bashrc", ".zshrc"]) {
       expect(count(read(path.join(home, file)), SOURCE_LINE), file).toBe(1)
@@ -246,7 +246,7 @@ describe("install.sh", () => {
     expect(existsSync(path.join(home, ".bash_profile"))).toBe(false)
 
     const before = [".profile", ".bashrc", ".zshrc"].map((file) => read(path.join(home, file)))
-    const second = await install({ home })
+    const second = await install({ home, args: ["--modify-path"] })
     expect(second.status).toBe(0)
     expect([".profile", ".bashrc", ".zshrc"].map((file) => read(path.join(home, file)))).toEqual(before)
     expect(second.stdout).not.toContain("to the PATH in")
@@ -255,7 +255,7 @@ describe("install.sh", () => {
   })
 
   test("a fresh account with zsh gets ~/.profile and ~/.zshrc", async () => {
-    const run = await install({ env: { SHELL: "/bin/zsh" } })
+    const run = await install({ args: ["--modify-path"], env: { SHELL: "/bin/zsh" } })
     expect(run.status).toBe(0)
     expect(count(read(path.join(run.home, ".profile")), SOURCE_LINE)).toBe(1)
     expect(count(read(path.join(run.home, ".zshrc")), SOURCE_LINE)).toBe(1)
@@ -279,12 +279,12 @@ describe("install.sh", () => {
 
   test("a directory with a space is printed so a pasted command keeps it whole", async () => {
     const dir = path.join(scratch("spaced"), "my bin")
-    const run = await install({ env: { RULECAST_INSTALL_DIR: dir, SHELL: "/usr/bin/fish" } })
+    const run = await install({ args: ["--modify-path"], env: { RULECAST_INSTALL_DIR: dir, SHELL: "/usr/bin/fish" } })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toContain(`for fish, run: fish_add_path "${dir}"\n`)
     expect(run.stdout).toContain(`to use rulecast in this shell now, run: . "${dir}/env"\n`)
     // Under HOME, through $HOME, as the startup files name it.
-    const home = await install({ env: { SHELL: "/usr/bin/fish" } })
+    const home = await install({ args: ["--modify-path"], env: { SHELL: "/usr/bin/fish" } })
     expect(home.stdout).toContain('for fish, run: fish_add_path "$HOME/.local/bin"\n')
   })
 
@@ -297,8 +297,9 @@ describe("install.sh", () => {
     ]) {
       const home = scratch("home")
       const dir = path.join(scratch("own"), "bin")
-      expect((await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${first}` } })).status).toBe(0)
-      const again = await install({ home, env: { RULECAST_INSTALL_DIR: `${dir}${second}` } })
+      const modify = ["--modify-path"]
+      expect((await install({ home, args: modify, env: { RULECAST_INSTALL_DIR: `${dir}${first}` } })).status).toBe(0)
+      const again = await install({ home, args: modify, env: { RULECAST_INSTALL_DIR: `${dir}${second}` } })
       expect(again.status, again.stderr).toBe(0)
       expect(again.stdout, `${first} then ${second}`).not.toContain("to the PATH in")
       expect(again.stdout).toContain(`installed rulecast 9.9.9 at ${dir}/rulecast\n`)
@@ -516,5 +517,61 @@ describe("install.sh options", () => {
     expect(await install({ args: ["--force"] })).toMatchObject({ status: 1 })
     expect((await install({ args: ["--force"] })).stderr).toContain("unknown option --force")
     expect((await install({ args: ["--install-dir"] })).stderr).toContain("--install-dir needs a directory")
+  })
+})
+
+// Both leads, 0.19.0: a shell startup file belongs to the person. An agent running the installer
+// had a scratch --install-dir put on the PATH in ~/.profile and ~/.zshrc, and nobody saw it happen.
+describe("install.sh changes a startup file only when someone is there to see it", () => {
+  test("no terminal: no startup file changes, and it says what to add and how to ask for it", async () => {
+    const run = await install({ env: { SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(readdirSync(run.home)).toEqual([".local"])
+    expect(run.stdout).toContain(`Add this line to your shell's startup file: ${SOURCE_LINE}`)
+    expect(run.stdout).toContain("--modify-path")
+  })
+
+  test("an explicit directory changes no startup file, even on a terminal", async () => {
+    for (const options of [
+      { args: ["--install-dir", scratch("own")] },
+      { env: { RULECAST_INSTALL_DIR: scratch("own") } },
+    ]) {
+      const run = await install({ answers: "\n", ...options, env: { SHELL: "/bin/zsh", ...options.env } })
+      expect(run.status, run.stderr).toBe(0)
+      expect(run.stdout).toContain("  PATH     no startup file changed; you add")
+      expect(readdirSync(run.home)).toEqual([])
+    }
+  })
+
+  test("the default directory on a terminal: added, as before", async () => {
+    const run = await install({ answers: "\n", env: { SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(count(read(path.join(run.home, ".zshrc")), SOURCE_LINE)).toBe(1)
+  })
+
+  test("--modify-path and RULECAST_MODIFY_PATH=1 ask for it: without a terminal, and for an explicit directory", async () => {
+    for (const options of [{ args: ["--modify-path"] }, { env: { RULECAST_MODIFY_PATH: "1" } }]) {
+      const run = await install({ ...options, env: { SHELL: "/bin/zsh", ...options.env } })
+      expect(run.status, run.stderr).toBe(0)
+      expect(count(read(path.join(run.home, ".zshrc")), SOURCE_LINE)).toBe(1)
+    }
+    const own = scratch("own")
+    const home = scratch("home")
+    const run = await install({ home, args: ["--modify-path", "--install-dir", own], env: { SHELL: "/bin/zsh" } })
+    expect(run.status, run.stderr).toBe(0)
+    expect(read(path.join(home, ".zshrc"))).toContain(`${own}/env`)
+  })
+
+  test("the last of --modify-path and --no-modify-path wins", async () => {
+    const off = await install({ args: ["--modify-path", "--no-modify-path"] })
+    expect(readdirSync(off.home)).toEqual([".local"])
+    const on = await install({ args: ["--no-modify-path", "--modify-path"], env: { SHELL: "/bin/zsh" } })
+    expect(count(read(path.join(on.home, ".zshrc")), SOURCE_LINE)).toBe(1)
+  })
+
+  test("--help lists --modify-path and its variable", async () => {
+    const run = await install({ args: ["--help"] })
+    expect(run.stdout).toContain("--modify-path")
+    expect(run.stdout).toContain("RULECAST_MODIFY_PATH=1")
   })
 })
