@@ -1545,3 +1545,60 @@ describe("rulecast doctor: the llm file budget", () => {
     expect(historyOf((await doctor(root)).stdout)).toBeNull()
   })
 })
+
+// Both leads, 0.19.0: `expect: quiet` makes "matches no file" info, but only while the findings
+// log shows the rule never ran on a file, and the line says what it relied on. A rule that ran on
+// files before and matches none now has a pattern a rename may have left stale: still a warning.
+describe("rulecast doctor: a guard rule that matches no file", () => {
+  const guard = { ...RULE("guard"), files: "\\.spec\\.tsx$", expect: "quiet" }
+  const dryRunLine = (stdout: string) => stdout.split("\n").find((text) => text.includes(" guard ")) ?? ""
+  const withLog = async (rules: Record<string, unknown>[], records: unknown[] | null) => {
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig(rules), "a.ts": "ok\n" })
+    if (records !== null) {
+      const stateDir = stateDirFor(root)
+      await mkdir(stateDir, { recursive: true })
+      await writeFile(path.join(stateDir, FINDINGS_LOG), records.map((each) => `${JSON.stringify(each)}\n`).join(""))
+    }
+    return root
+  }
+  const record = (at: string, ran: Record<string, string[]>) => {
+    const files = [...new Set(Object.values(ran).flat())]
+    return {
+      v: 1,
+      at,
+      s: "s1",
+      a: "main",
+      ev: "edit",
+      files,
+      ran: Object.fromEntries(Object.entries(ran).map(([rule, each]) => [rule, each.map((f) => files.indexOf(f))])),
+      found: [],
+      ign: [],
+    }
+  }
+
+  test("never ran on a file since the log began: info, saying since when", async () => {
+    const root = await withLog([guard, RULE("other")], [record("2026-10-01T10:00:00.000Z", { other: ["a.ts"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  info     guard — matches no file; never matched since 2026-10-01 (expect: quiet)",
+    )
+  })
+
+  test("no findings log yet: info, saying there is nothing to check against", async () => {
+    const root = await withLog([guard], null)
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  info     guard — matches no file; no findings log yet to check that it never did (expect: quiet)",
+    )
+  })
+
+  test("ran on files before: a warning, whatever expect says", async () => {
+    const root = await withLog([guard], [record("2026-10-01T10:00:00.000Z", { guard: ["old/a.spec.tsx"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  warning  guard — no file in the project matches this rule; it ran on 1 file since 2026-10-01, so its files pattern may be stale",
+    )
+  })
+
+  test("without expect: quiet, the warning as before", async () => {
+    const root = await withLog([{ ...guard, expect: undefined }], null)
+    expect(dryRunLine((await doctor(root)).stdout)).toBe("  warning  guard — no file in the project matches this rule")
+  })
+})

@@ -36,7 +36,7 @@ import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
 import { decide } from "../core/session/decide"
 import { emptyContext, emptyWork } from "../core/session/state"
-import { readFindingsLog } from "../core/stats/log"
+import { type FindingsLog, readFindingsLog } from "../core/stats/log"
 import { rulesRun } from "../core/stats/runs"
 import { isOlder, VERSION } from "../core/version"
 import {
@@ -199,6 +199,8 @@ export async function doctorCommand(
   }
 
   const stateDir = ensureProjectState(home, root)
+  // What agent hooks recorded here (`rulecast stats`): the dry run and the history read it.
+  const findingsLog = await readFindingsLog(stateDir)
   io.stdout(`project    ${root}\n`)
 
   // With doctor's own environment: the mode a hook would run in when started from this shell.
@@ -399,6 +401,7 @@ export async function doctorCommand(
     io.stdout("\ndry run\n")
     const dry = await dryRun(
       project,
+      findingsLog,
       detectionFor(project, registry, stateDir, createReferenceResolver(root)),
       listed,
       () => stop.signal !== null,
@@ -446,7 +449,7 @@ export async function doctorCommand(
     }
   }
 
-  const history = await historyReport(project, stateDir, registry)
+  const history = await historyReport(project, findingsLog, stateDir, registry)
   if (history !== null) {
     io.stdout(`\n${history.heading}\n`)
     for (const result of history.lines) {
@@ -516,10 +519,10 @@ async function budgetLines(
  */
 async function historyReport(
   project: CompiledProject,
+  log: FindingsLog,
   stateDir: string,
   registry: DetectorRegistry,
 ): Promise<{ heading: string; lines: { rule: string; level: Level; detail: string }[] } | null> {
-  const log = await readFindingsLog(stateDir)
   const budgets = await budgetLines(project, stateDir, registry)
   if (log.records.length === 0) {
     return budgets.lines.length === 0
@@ -806,6 +809,7 @@ const DRY_RUN_FOOTER = "the dry run tries one file per rule; rulecast run --all-
  */
 async function dryRun(
   project: CompiledProject,
+  log: FindingsLog,
   detection: DetectionContext,
   listed: { files: string[] } | { error: unknown },
   stopped: () => boolean,
@@ -850,7 +854,7 @@ async function dryRun(
     const matching = files.filter((candidate) => rule.matches(candidate))
     const file = matching[0]
     if (file === undefined) {
-      lines.push({ rule: rule.id, level: "warning", detail: "no file in the project matches this rule" })
+      lines.push(noFileLine(rule, log))
       continue
     }
 
@@ -888,6 +892,41 @@ async function dryRun(
     })
   }
   return lines
+}
+
+/**
+ * A rule whose `files` matches nothing in the project. A warning, since a pattern a rename left
+ * stale looks exactly like this; but a guard marked `expect: quiet` that the findings log shows
+ * never ran on a file is info, saying what it relied on, so a pattern stale before the log began
+ * still shows to whoever reads the line (both leads, 0.19.0). One that ran on files before is a
+ * warning whatever `expect` says.
+ */
+function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog): DryRunLine {
+  const NONE = "no file in the project matches this rule"
+  const ranOn = new Set<string>()
+  for (const record of log.records) {
+    for (const index of record.ran[rule.id] ?? []) {
+      const file = record.files[index]
+      if (file !== undefined) ranOn.add(file)
+    }
+  }
+  const since = log.records.reduce<string | null>((first, { at }) => (first === null || at < first ? at : first), null)
+  if (ranOn.size > 0) {
+    return {
+      rule: rule.id,
+      level: "warning",
+      detail: `${NONE}; it ran on ${plural(ranOn.size, "file")} since ${since!.slice(0, 10)}, so its files pattern may be stale`,
+    }
+  }
+  if (!rule.expectQuiet) return { rule: rule.id, level: "warning", detail: NONE }
+  return {
+    rule: rule.id,
+    level: "info",
+    detail:
+      since === null
+        ? "matches no file; no findings log yet to check that it never did (expect: quiet)"
+        : `matches no file; never matched since ${since.slice(0, 10)} (expect: quiet)`,
+  }
 }
 
 /** The smallest message budget of the agents rulecast installs into; null when none has one. */
