@@ -8,7 +8,7 @@ Relative links in this file resolve against this file's own URL.
 exclude: ^vendor/
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.20.0
+    rev: v0.20.1
     rules:
       - id: python/no-silent-except
         context: ["@AGENTS.md#errors"]
