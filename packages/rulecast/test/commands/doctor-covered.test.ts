@@ -134,4 +134,71 @@ describe.skipIf(RUFF === null)("rulecast doctor: a linter rule the git hooks alr
     })
     expect(coveredOf((await runCli(root, ["doctor"])).stdout)).toBe("")
   })
+
+  // Review of 432e578.
+  test("a file ruff's exclude skips under the hook's --force-exclude: not covered", async () => {
+    const root = await project({
+      "pyproject.toml": `[tool.ruff]\nextend-exclude = ["tests/gen"]\n\n${PYPROJECT}`,
+      "tests/gen/a.py": "x = 1\n",
+      ".rulecast-config.yaml": localConfig([rule("^tests/.*\\.py$", ["SLF001"])]),
+      ".pre-commit-config.yaml": preCommit(),
+    })
+    expect(coveredOf((await runCli(root, ["doctor"])).stdout)).toBe(
+      "  info     py/private-reads — covered for 1 of 2 files by ruff-check in .pre-commit-config.yaml",
+    )
+  })
+
+  test("a code the probe line itself breaks (D100): unsure, so nothing is said", async () => {
+    const root = await project({
+      "pyproject.toml": `[tool.ruff.lint]\nselect = ["D100"]\n`,
+      ".rulecast-config.yaml": localConfig([rule("^tests/.*\\.py$", ["D100"])]),
+      ".pre-commit-config.yaml": preCommit(),
+    })
+    expect(coveredOf((await runCli(root, ["doctor"])).stdout)).toBe("")
+  })
+
+  test("--output-format with its value apart is neutral", async () => {
+    const root = await project({
+      ".rulecast-config.yaml": localConfig([rule("^tests/.*\\.py$", ["SLF001"])]),
+      ".pre-commit-config.yaml": preCommit(["--output-format", "concise"]),
+    })
+    expect(coveredOf((await runCli(root, ["doctor"])).stdout)).toContain("already covered")
+  })
+
+  describe("a project below the repository's top", () => {
+    const nested = async (exclude?: string) => {
+      const root = await createRepo({
+        ".pre-commit-config.yaml": stringify({
+          ...(exclude === undefined ? {} : { exclude }),
+          repos: [
+            {
+              repo: "https://github.com/astral-sh/ruff-pre-commit",
+              rev: "v0.17.0",
+              hooks: [{ id: "ruff-check", types_or: ["python", "pyi"] }],
+            },
+          ],
+        }),
+        "pkg/.rulecast-config.yaml": localConfig([rule("^tests/.*\\.py$", ["SLF001"])]),
+        "pkg/pyproject.toml": PYPROJECT,
+        "pkg/tests/test_a.py": "x = 1\n",
+      })
+      const bin = path.join(root, "pkg", "node_modules", ".bin")
+      await mkdir(bin, { recursive: true })
+      await writeFile(path.join(bin, "ruff"), `#!/bin/sh\nexec ${JSON.stringify(RUFF)} "$@"\n`)
+      await chmod(path.join(bin, "ruff"), 0o755)
+      return path.join(root, "pkg")
+    }
+
+    test("judged against the hook's filter from the top: covered", async () => {
+      expect(coveredOf((await runCli(await nested(), ["doctor"])).stdout)).toContain("already covered")
+    })
+
+    test("the config's own exclude takes the files: not covered", async () => {
+      expect(coveredOf((await runCli(await nested("^pkg/tests/"), ["doctor"])).stdout)).toBe("")
+    })
+
+    test("an exclude JavaScript can't read as Python does: unsure, so nothing is said", async () => {
+      expect(coveredOf((await runCli(await nested("^pkg/legacy/.*\\Z"), ["doctor"])).stdout)).toBe("")
+    })
+  })
 })

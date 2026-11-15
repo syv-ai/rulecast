@@ -1532,7 +1532,10 @@ describe("rulecast doctor: the llm file budget", () => {
       "2026-10-02T10:00:00.000Z something else",
       cut("2026-10-03T10:00:00.000Z", 10, 2),
     ])
-    expect(historyOf((await doctor(root)).stdout)).toContain(
+    const history = historyOf((await doctor(root)).stdout)
+    // From the debug log, and said so: not the findings log's (review of 4841415).
+    expect(history).toMatch(/^history \(debug log since 2026-10-01\)\n/)
+    expect(history).toContain(
       "  info     llm.max_files_per_verify — llm rules checked 10 files and left 5 unchecked at 2 stops since 2026-10-01; raise llm.max_files_per_verify to check them all",
     )
   })

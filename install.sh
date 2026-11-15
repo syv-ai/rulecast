@@ -165,10 +165,12 @@ customize() {
   if on_path || [ -z "${HOME:-}" ]; then return 0; fi
   printf 'Add %s to your PATH in your shell startup files? [Y/n]: ' "$(tilde "$dir")"
   read -r answer <&3 || answer=""
+  # An answer is a choice, as an option is: the hint on how to ask for the edit is not for them.
   case "$answer" in
     n | N | no | No | NO) modify_path=0 ;;
     *) modify_path=1 ;;
   esac
+  path_choice="$modify_path"
 }
 
 main() {

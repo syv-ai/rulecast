@@ -456,6 +456,8 @@ describe("install.sh, asking", () => {
     expect(run.stdout).toContain("  PATH     no startup file changed; you add")
     expect(existsSync(path.join(dir, "rulecast"))).toBe(true)
     expect(readdirSync(run.home)).toEqual([])
+    // They said no: not asked again how to say yes.
+    expect(run.stdout).not.toContain("--modify-path")
   })
 
   test("Customize asks again for a directory it can't use, and takes ~", async () => {

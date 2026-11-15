@@ -564,10 +564,14 @@ async function historyReport(
         : { rule: rule.id, level: "info", detail: evidence },
     )
   }
-  lines.push(...budgets.lines)
-  if (lines.length === 0) return null
-  const rotated = log.rotated ? "; older records were rotated out" : ""
-  return { heading: `history (findings log since ${since}${rotated})`, lines }
+  if (lines.length + budgets.lines.length === 0) return null
+  const rotated = log.rotated ? ", older records rotated out" : ""
+  // Each source the lines below come from, so a budget line is not read as the findings log's.
+  const sources = [
+    ...(lines.length > 0 ? [`findings log since ${since}${rotated}`] : []),
+    ...(budgets.lines.length > 0 ? [`debug log since ${budgets.since}`] : []),
+  ]
+  return { heading: `history (${sources.join("; ")})`, lines: [...lines, ...budgets.lines] }
 }
 
 /** A rule that picks no files of its own: every change reaches its detector. */

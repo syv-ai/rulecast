@@ -166,6 +166,11 @@ function readRegex(regex: string): { same: boolean; alternatives: boolean } {
  * the project's directory, which is taken off, and have no top-level `|`, whose other alternatives
  * would keep the directory. `{ why }`: it can't be carried over; null: every file.
  */
+/** Whether JavaScript reads a pre-commit regex as Python does, so it can be searched as it is. */
+export function readsLikePython(regex: string): boolean {
+  return readRegex(regex).same
+}
+
 function rebaseRegex(regex: string, project: string): string | null | { why: string } {
   const read = readRegex(regex)
   if (!read.same) return { why: PYTHON_REGEX }
