@@ -293,6 +293,8 @@ async function shellBefore(run: Run, event: Extract<Event, { kind: "shell-before
 /** A shell call that changed files the rules match: checked from here as the edit of those files. */
 interface ShellEdit {
   files: string[]
+  /** Files the call deleted, which only a rule about the file itself can judge (Detector.deletions). */
+  deleted: string[]
   /** Another agent's shell call ran during this one, so what it changed may be partly theirs. */
   sharedCall: boolean
   /** Said to the agent at this call, once per session (Delivery.agentNotices). */
@@ -327,13 +329,13 @@ async function shellAfter(
     toolUseId: event.toolUseId,
   })
   await appendActivity(run.stateDir, { ...run.activityOf(session.agent), ev: "shell-after", tu: event.toolUseId })
-  const files =
-    call === null || call.gitOperation
-      ? []
-      : run.relevant(call.files.filter((file) => onDisk(run.root, file) && !others.edits.has(file)))
+  const changed = call === null || call.gitOperation ? [] : call.files.filter((file) => !others.edits.has(file))
+  const files = run.relevant(changed.filter((file) => onDisk(run.root, file)))
+  const deleted = run.relevant(changed.filter((file) => !onDisk(run.root, file)))
   // Another agent's shell call ran during this one, and this one is held to files: those may be the
   // other's writes (README, Agents). With no files there is nothing to misattribute. Told once per agent.
-  const sharedCall = files.length > 0 && (others.sharedShell || sharedShell(view.work, session.agent, event.toolUseId))
+  const sharedCall =
+    files.length + deleted.length > 0 && (others.sharedShell || sharedShell(view.work, session.agent, event.toolUseId))
   const sharedKey = `shared-tree:${session.agent}`
   const shared = sharedCall && !view.work.noticed.has(sharedKey)
   await appendWork(session.dir, [
@@ -341,9 +343,9 @@ async function shellAfter(
     treeRecord(view.work, { phase: "after", agent: session.agent, ...id }, now),
     ...(shared ? [{ t: "noticed" as const, key: sharedKey }] : []),
   ])
-  if (files.length === 0) return null
+  if (files.length + deleted.length === 0) return null
   const notice = run.options.subagentsProject === true ? SUBAGENTS_TREE : SHARED_TREE
-  return { files, sharedCall, agentNotices: shared ? [notice] : [] }
+  return { files, deleted, sharedCall, agentNotices: shared ? [notice] : [] }
 }
 
 /**
@@ -791,6 +793,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   let swept: string[] = []
   let stopGone: string[] = []
+  // Files a stop's agents edited that are gone since: a rule about the file itself still judges them.
+  let editedGone: string[] = []
   let deferredSweep = false
   let announceDeferral = false
   let detected: Detected | null = null
@@ -821,6 +825,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       const exists = new Map(edited.map((file) => [file, onDisk(root, file)]))
       requested = edited.filter((file) => exists.get(file))
       stopGone = edited.filter((file) => !exists.get(file))
+      editedGone = stopGone
       // A subagent the agent started still runs here: its files are its own until it finishes, and
       // what it writes with its shell is not settled, so the sweep waits for a later stop. A running
       // shell job (a dev server, a watcher) never holds it: it may run all session (Event.running).
@@ -828,6 +833,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       if (running.length > 0) {
         const theirs = new Set(running)
         requested = requested.filter((file) => !onlyBy(view.work, file, theirs))
+        editedGone = editedGone.filter((file) => !onlyBy(view.work, file, theirs))
         if (options.stopGate === true && hasOwnTree(view.work, session.agent)) deferredSweep = true
       }
       // Said once when the deferral starts, not at every stop while a subagent runs (#90): again
@@ -856,6 +862,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       requested,
       via,
       sharedCall: shell?.sharedCall === true,
+      // An Edit tool's file is there; a stop without a session judges every deletion git reports.
+      deleted: event.kind === "edit" ? (shell?.deleted ?? []) : session ? editedGone : undefined,
     })
   }
 

@@ -6,13 +6,13 @@ import { removedFindings } from "./baseline/removed"
 import { removedDefinitions } from "./baseline/removed-definitions"
 import { type BaselineInput, changesFor } from "./baseline/stage"
 import { appendBaseline, type BaselineState } from "./baseline/store"
-import type { CompiledRule } from "./compile/rule"
+import { type CompiledRule, type DetectorRule, isDetectorRule } from "./compile/rule"
 import { contentReader, WORKTREE } from "./content"
 import { applyFileBudget, applySizeCeiling } from "./detection/budget"
 import type { DetectionContext } from "./detection/context"
 import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
-import { selectDetectorRules } from "./detection/select"
+import { type Selection, selectDetectorRules } from "./detection/select"
 import { type DisabledGroup, disabledRules } from "./disabled"
 import { findingIds } from "./finding-id"
 import { deletedFilesSince } from "./git"
@@ -23,7 +23,7 @@ import { configHash, type Notice, notices } from "./session/oversight"
 import type { SessionView } from "./session/session"
 import { dirtyAtStart, editedBy, MAIN_AGENT, type WorkRecord } from "./session/state"
 import { type IgnoredFinding, sourceLines } from "./suppress"
-import type { Delivery, Event, Match, RemovedDefinition } from "./types"
+import type { ContentSource, Delivery, Event, Match, RemovedDefinition } from "./types"
 
 /** What an edit or a verify checks, and how: decided by the pipeline before detection runs. */
 export interface DetectInput {
@@ -39,6 +39,13 @@ export interface DetectInput {
   via: "shell" | undefined
   /** That shell call ran alongside another agent's, so what it changed may be partly theirs. */
   sharedCall: boolean
+  /**
+   * Gone files to judge with the rules about a file itself (Detector.deletions): a shell call's
+   * deletes, or at a stop the agents' edited files gone since. Undefined: every file git reports
+   * deleted since the base commit (a `rulecast run`). Only a file the base commit has counts: one
+   * the run created and deleted again changed nothing.
+   */
+  deleted?: readonly string[]
 }
 
 /** What detection found, for decide, the session store and the findings log. */
@@ -95,7 +102,7 @@ async function pulledInLines(
  */
 export async function detectStage(run: Run, input: DetectInput): Promise<Detected> {
   const { options, project, root, config, registry, log, session, warnings } = run
-  const { event, view, baseline, baselineInput, detection, disabled, requested, via, sharedCall } = input
+  const { event, view, baseline, baselineInput, detection, disabled, requested, via, sharedCall, deleted } = input
   let failed = false
   const workRecords: WorkRecord[] = []
   const refused: NonNullable<Delivery["refused"]> = []
@@ -201,12 +208,33 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
 
   // A `scope: removed` rule's matches are what it keeps: they become a count, not findings.
   const removed = await removedFindings(selections, detected, baselineChanges, containers, read)
+  // A deleted file a rule about the file itself covers: the delete is the change, always new.
+  const deletions = await deletionFindings(run, {
+    event,
+    deleted,
+    commit: event.kind === "verify" ? commit : baseline.startCommit,
+    source,
+    keep: (rule) => wanted(rule) && registry.get(rule.detector.kind)?.deletions === true,
+    disabled,
+  })
+  // The agent's shell edit of the file, so its stop judges the deletion again until it is undone.
+  if (via === "shell" && session !== null) {
+    for (const file of new Set(deletions.findings.map(({ match }) => match.file))) {
+      workRecords.push({
+        t: "edited",
+        file,
+        agent: session.agent,
+        via,
+        ...(sharedCall ? { shared: true as const } : {}),
+      })
+    }
+  }
   const output = removed.output
   // Over ignored matches too, so an ignore on one of two duplicates does not renumber the other.
   // From the lines suppression read through `read`, the content detection judged: staged in a
   // staged run, not the working tree. No file is read again.
   const ids = await findingIds(
-    [...output.findings, ...output.ignored, ...removed.findings],
+    [...output.findings, ...output.ignored, ...removed.findings, ...deletions.findings],
     (kind) => registry.get(kind),
     lines,
   )
@@ -232,8 +260,8 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       const id = ids[index]!
       return { id, rule, match, status: statusOf(rule, match, id) }
     }),
-    // The drop is the change's by construction: always new.
-    ...removed.findings.map(({ rule, match }, index) => ({
+    // The drop, and the delete, are the change's by construction: always new.
+    ...[...removed.findings, ...deletions.findings].map(({ rule, match }, index) => ({
       id: ids[removedFrom + index]!,
       rule,
       match,
@@ -275,10 +303,13 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       .filter((selection) => !incomplete.has(selection.rule.id))
       .map((selection) => [selection.rule.id, selection.files]),
   )
+  for (const { rule, files: gone } of deletions.ran) ran.set(rule.id, [...(ran.get(rule.id) ?? []), ...gone])
   // A refuse_write rule's new finding in a file the agent changed with its shell: told now, with
   // what to undo, because nothing could refuse the write before it happened.
   const shellEdited = (file: string) =>
-    via === "shell" ? requested.includes(file) : view.work.editedVia.get(file) === "shell"
+    via === "shell"
+      ? requested.includes(file) || (deleted ?? []).includes(file)
+      : view.work.editedVia.get(file) === "shell"
   const seen = new Set<string>()
   for (const { rule, match, status } of findings) {
     if (status !== "new" || !rule.refuseWrite || !shellEdited(match.file)) continue
@@ -377,4 +408,53 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
   const checking = new Set(files)
   const unchanged = requested.filter((file) => !checking.has(file))
   return { findings, ignored, tried, ran, unchanged, told, disabledGroups, refused, workRecords, failed }
+}
+
+/**
+ * Findings for deleted files, from the rules about a file itself (Detector.deletions): one per rule
+ * and file, on line 1, its text the path, as such a rule's match on the file was. Only files the
+ * base commit has: a file the run created and deleted again is no change. No base commit (outside
+ * git, a run of named files), nothing to compare with: none.
+ */
+async function deletionFindings(
+  run: Run,
+  input: {
+    event: DetectInput["event"]
+    deleted: readonly string[] | undefined
+    commit: string | null
+    source: ContentSource
+    keep: (rule: DetectorRule) => boolean
+    disabled: ReadonlySet<string>
+  },
+): Promise<{ findings: { rule: DetectorRule; match: Match }[]; ran: Selection[] }> {
+  const none = { findings: [], ran: [] }
+  if (input.commit === null || input.deleted?.length === 0) return none
+  // The git call only when a rule here could judge a deleted file at all.
+  const judging = (files: readonly string[]) =>
+    selectDetectorRules(run.project.rules, input.event.kind, files, input.disabled).filter(({ rule }) =>
+      input.keep(rule),
+    )
+  if (input.deleted !== undefined && judging(input.deleted).length === 0) return none
+  if (input.deleted === undefined && !run.project.rules.some((rule) => isDetectorRule(rule) && input.keep(rule))) {
+    return none
+  }
+  const sinceBase = new Set(await deletedFilesSince(run.root, input.commit, input.source))
+  const gone = run.relevant(
+    input.deleted === undefined ? [...sinceBase] : input.deleted.filter((file) => sinceBase.has(file)),
+  )
+  const ran = judging(gone)
+  const findings = ran.flatMap(({ rule, files }) =>
+    files.map((file) => ({
+      rule,
+      match: {
+        file,
+        line: 1,
+        endLine: 1,
+        column: 1,
+        text: file,
+        captures: Object.fromEntries(rule.detector.captures.map((name) => [name, ""])),
+      },
+    })),
+  )
+  return { findings, ran }
 }

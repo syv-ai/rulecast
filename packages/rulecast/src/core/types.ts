@@ -340,6 +340,12 @@ export interface Detector<Config> {
    */
   wholeFile?: boolean
   /**
+   * A file the run deleted is a match: the rule asks whether the file was changed, not what it
+   * holds, and a delete is a change (both leads, 0.19.0). Such a rule is given no deleted file to
+   * run on; the pipeline makes the finding itself (core/pipeline-detect.ts).
+   */
+  deletions?: boolean
+  /**
    * This rule's tool can be handed a file's content under its real path (ruff `--stdin-filename`,
    * a model prompt). When the content is not the working tree, such a rule is run with
    * `fromDisk: false`; one that cannot is given a scratch copy instead, which configuration keyed

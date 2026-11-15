@@ -151,6 +151,7 @@ detect:
 ```
 
 - Every file the rule selects is a match at line 1, so the rule's `files` is the whole check. Use it for files that must not be edited at all, such as generated code.
+- A deleted file counts too: deleting a file changes it as much as writing it, and so does renaming it away (`git mv`, `mv`), which deletes the old path. A shell call that deletes one is a finding at that call, and again at every stop until the file is back, with `git checkout -- <file>` as the undo when the rule refuses writes. A git hook (`rulecast run`, staged) and CI (`--from-ref`) report a deletion the same way. Only a file the base commit has counts: one the run created and deleted again changed nothing. `--all-files` and `--files` judge the files that are there, so they report none.
 - Captures: none. `{{text}}` is the file path.
 - Default stages: `edit`, `verify`.
 

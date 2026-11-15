@@ -822,3 +822,34 @@ describe("rulecast run: an llm rule told what the change removed elsewhere (#72)
     expect(forA).toContain("- app/b.py: class Order:")
   })
 })
+
+// Both leads, 0.19.0: a path rule covers a deleted file in a git hook and in CI too.
+describe("rulecast run: a deleted file a path rule covers", () => {
+  const API = "src/client/api.ts"
+  const rules = (stdout: string) =>
+    JSON.parse(stdout).findings.map((finding: { rule: string; file: string }) => `${finding.rule} ${finding.file}`)
+
+  test("staged (pre-commit): git rm alone is a finding", async () => {
+    const root = await createFixture()
+    await git(root, "rm", "-q", API)
+    const result = await run(root, "--format", "json")
+    expect(rules(result.stdout)).toEqual([`frontend/no-generated-edits ${API}`])
+  })
+
+  test("--from-ref (CI): a branch that deletes the file", async () => {
+    const root = await createFixture()
+    await git(root, "checkout", "-q", "-b", "feature")
+    await git(root, "rm", "-q", API)
+    await git(root, "commit", "-q", "-m", "drop the client")
+    const result = await run(root, "--from-ref", "main", "--to-ref", "feature", "--format", "json")
+    expect(rules(result.stdout)).toEqual([`frontend/no-generated-edits ${API}`])
+  })
+
+  test("--all-files and --files judge what is there: no deletions", async () => {
+    const root = await createFixture()
+    await rm(path.join(root, API))
+    expect(rules((await run(root, "--all-files", "--format", "json")).stdout)).toEqual([
+      "backend/no-httpexception app/services/users.py",
+    ])
+  })
+})

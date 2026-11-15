@@ -663,3 +663,87 @@ describe("refuse_write under Bash", () => {
     expect(guard.refused).toBeUndefined()
   })
 })
+
+// Both leads, 0.19.0: a path rule asks whether the run changed the file, and a delete is a change.
+// Deleted by a shell call (rm, git rm, a rename away), it is a finding after the fact; content
+// rules still skip a file that is gone.
+describe("a shell call that deletes a file a path rule covers", () => {
+  const GENERATED = "frontend/no-generated-edits"
+  const createProtected = (refuse: boolean) =>
+    createRepo({
+      ...fixtureFiles,
+      ".rulecast-config.yaml": localConfig(
+        fixtureRules.map((rule) => (rule.id === GENERATED && refuse ? { ...rule, refuse_write: true } : rule)),
+      ),
+    })
+  const rules = (delivery: { findings: { file: string; rule: string }[] }) =>
+    delivery.findings.map((finding) => `${finding.rule} ${finding.file}`)
+
+  test("rm: a finding at the call, on the deleted file", async () => {
+    const root = await createProtected(false)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(() => rm(path.join(root, API)))
+    expect(rules(call)).toEqual([`${GENERATED} ${API}`])
+  })
+
+  test("git rm and git mv away: the old path is the finding", async () => {
+    for (const command of [
+      ["rm", "-q", API],
+      ["mv", API, "src/api.ts"],
+    ]) {
+      const root = await createProtected(false)
+      const session = sessionAt(root)
+      await session.send({ kind: "start", files: [] })
+      const call = await session.shell(() => git(root, ...command))
+      expect(rules(call)).toEqual([`${GENERATED} ${API}`])
+    }
+  })
+
+  test("refuse_write: told what to undo, the stop blocks, and restoring the file lets it go", async () => {
+    const root = await createProtected(true)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(() => rm(path.join(root, API)))
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false }])
+    expect(renderAgentText(call, { maxMatchesPerRule: 10 })).toContain(`git checkout -- ${API}`)
+    expect(call.notices).toEqual([`rulecast: the agent changed a protected file with Bash: ${API} (${GENERATED})`])
+
+    const stop = await session.send({ kind: "verify", files: [] })
+    expect(stop.stop).toBe("block")
+    expect(stop.refused).toEqual(call.refused)
+
+    await session.shell(() => git(root, "checkout", "--", API))
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("allow")
+  })
+
+  test("a protected file the run created and then deleted: nothing changed, no finding", async () => {
+    const root = await createProtected(true)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const temp = "src/client/tmp.ts"
+    await session.shell(() => session.write(temp, "x\n"))
+    const removed = await session.shell(() => rm(path.join(root, temp)))
+    expect(rules(removed)).toEqual([])
+    expect(removed.refused).toBeUndefined()
+  })
+
+  test("a subagent still running deleted it: its own until it finishes, then the main stop blocks", async () => {
+    const root = await createProtected(true)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    await session.shell(async () => {}, { agentId: "sub1" })
+    await session.shell(() => rm(path.join(root, API)), { agentId: "sub1" })
+    const waiting = await session.send({ kind: "verify", files: [], running: { agents: ["sub1"], shells: 0 } })
+    expect(waiting.stop).toBe("allow")
+    expect(waiting.refused).toBeUndefined()
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("block")
+  })
+
+  test("a file only a content rule covers: still no finding when it is deleted", async () => {
+    const root = await createProtected(false)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    expect(rules(await session.shell(() => rm(path.join(root, USERS))))).toEqual([])
+  })
+})

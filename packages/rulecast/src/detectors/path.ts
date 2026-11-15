@@ -13,6 +13,8 @@ export const pathDetector: Detector<z.infer<typeof schema>> = {
   guards: true,
   // The match is the file itself, and writing it is what the rule forbids.
   wholeFile: true,
+  // Deleting the file changes it as much as writing it does.
+  deletions: true,
   run: perRule(async (rule, input) => {
     const matches: Match[] = []
     for (const file of rule.files) {
