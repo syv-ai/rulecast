@@ -297,7 +297,9 @@ const count = (value: number) => value.toLocaleString("en-US")
 function injectedLines(injected: InjectedStats): string[] {
   const out = ["injected into the agents (≈ tokens, chars ÷ 4):"]
   const again = injected.again > 0 ? `; ${count(injected.again)} of it re-delivered after a compact` : ""
-  out.push(`  ${count(injected.tokens)} over ${count(injected.events)} answers${again}`)
+  out.push(
+    `  ${count(injected.tokens)} over ${count(injected.events)} ${injected.events === 1 ? "answer" : "answers"}${again}`,
+  )
   const events = Object.entries(injected.byEvent)
     .sort((a, b) => b[1] - a[1])
     .map(([ev, tokens]) => `${ev} ${count(tokens)}`)
@@ -460,7 +462,10 @@ export async function statsCommand(
       one.rolledUpTo !== null && (latest === null || one.rolledUpTo > latest) ? one.rolledUpTo : latest,
     null,
   )
-  const anyInjected = loaded.some((one) => one.injected.length > 0)
+  const windowFrom = since?.toISOString()
+  const anyInjected = loaded.some((one) =>
+    one.injected.some((record) => windowFrom === undefined || record.at >= windowFrom),
+  )
   if (records.length === 0 && rows.length === 0 && !anyInjected && values.format === "terminal") {
     io.stdout(
       checkouts === null
@@ -526,7 +531,8 @@ export async function statsCommand(
       lastRecord,
       truncated: rotated && (from === undefined || (firstRecord !== null && firstRecord > from)),
     },
-    sessions: new Set(windowed.map(sessionOf)).size,
+    // A session that has read docs but not stopped yet is one too.
+    sessions: new Set([...windowed.map(sessionOf), ...injectedRecords.map((record) => untagged(record.s))]).size,
     rules,
     ...(notCompiled.length > 0
       ? { notCompiled }

@@ -340,16 +340,49 @@ async function recordInjected(
   const total = modelText(stdout).length
   const session = event.session
   if (total === 0 || session === undefined || parts.length === 0) return
-  const own = parts.map(
-    (part) =>
-      renderAgentText(part.delivery, { maxMatchesPerRule: part.maxMatchesPerRule, notices: false, warnings: false })
-        .length,
+  // A doc section the combined answer gave once is counted once, whole, for the first part that has
+  // it (core/delivery/combine.ts keeps the first). The rest of what reached the model is shared by the
+  // length of each part's own text without its sections, so the preamble goes with it.
+  const seen = new Set<string>()
+  const docs = parts.map((part) => {
+    let chars = 0
+    for (const reference of part.delivery.references) {
+      const key = `${reference.ref}\n${reference.location ?? ""}`
+      if (reference.state !== "full" || seen.has(key)) continue
+      seen.add(key)
+      chars += (reference.content ?? "").length
+    }
+    return chars
+  })
+  const sections = parts.map((part) =>
+    part.delivery.references.reduce(
+      (sum, reference) => sum + (reference.state === "full" ? (reference.content ?? "").length : 0),
+      0,
+    ),
   )
-  const sum = own.reduce((a, b) => a + b, 0)
-  const at = new Date().toISOString()
+  const other = parts.map((part, index) =>
+    Math.max(
+      0,
+      renderAgentText(part.delivery, { maxMatchesPerRule: part.maxMatchesPerRule, notices: false, warnings: false })
+        .length - sections[index]!,
+    ),
+  )
+  const docTotal = Math.min(
+    total,
+    docs.reduce((a, b) => a + b, 0),
+  )
+  // The adapter can cut the tail to its limit: then the sections count for what is left.
+  const docScale = docTotal === 0 ? 0 : docTotal / docs.reduce((a, b) => a + b, 0)
+  const docShares = docs.map((chars) => Math.floor(chars * docScale))
+  const rest = total - docShares.reduce((a, b) => a + b, 0)
+  const otherSum = other.reduce((a, b) => a + b, 0)
   // Rounded down, the rest to the last: the shares add up to what reached the model, none below 0.
-  const shares = own.map((chars, index) => (sum === 0 ? (index === 0 ? total : 0) : Math.floor((total * chars) / sum)))
+  const shares = docShares.map(
+    (chars, index) =>
+      chars + (otherSum === 0 ? (index === 0 ? rest : 0) : Math.floor((rest * other[index]!) / otherSum)),
+  )
   shares[shares.length - 1] = shares.at(-1)! + total - shares.reduce((a, b) => a + b, 0)
+  const at = new Date().toISOString()
   // An unattended hold says only what did not run; its findings and docs were not sent.
   const ownWordsOnly = event.kind === "verify" && combined.stop === "incomplete"
   const counted = new Set<string>()

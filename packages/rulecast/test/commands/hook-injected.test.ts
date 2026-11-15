@@ -72,21 +72,29 @@ describe("review of cec2ae0: the hook side", () => {
     await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), testEnv)
     const terminal = (await runCli(root, ["stats"], "", testEnv)).stdout
     expect(terminal).toContain("injected into the agents")
+    expect(terminal).toContain("1 session")
+    expect(terminal).toMatch(/over 1 answer\b/)
   })
 
-  test("a doc section two projects both deliver is counted once, by the project whose copy was shown", async () => {
+  test("a doc section two projects both deliver is counted once, and whole", async () => {
     const { createRepo } = await import("../helpers/git")
     const { localConfig } = await import("../helpers/config")
-    const touch = (id: string) => ({ id, name: id, files: "\\.py$", stages: ["touch"], context: ["@docs/d.md#s"] })
+    const touch = (id: string, ref: string) => ({ id, name: id, files: "\\.py$", stages: ["touch"], context: [ref] })
+    const section = `## S\n${"Lots of words here.\n".repeat(50)}`
     const root = await createRepo({
-      ".rulecast-config.yaml": localConfig([touch("top/t")]),
-      "backend/.rulecast-config.yaml": localConfig([{ ...touch("b/t"), context: ["@../docs/d.md#s"] }]),
-      "docs/d.md": `# D\n\n## S\n\n${"Section text. ".repeat(40)}\n`,
-      "backend/x.py": "x = 1\n",
+      ".rulecast-config.yaml": localConfig([touch("top/s", "@backend/docs/d.md#s")]),
+      "backend/.rulecast-config.yaml": localConfig([touch("be/s", "@docs/d.md#s")]),
+      "backend/docs/d.md": `# D\n${section}`,
+      "backend/app/x.py": "x = 1\n",
     })
-    const payload = claudeCodePayload("post-tool-use.read.complete", { root, file: "backend/x.py", sessionId: "s1" })
-    const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), testEnv)
-    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("Section text.")
+    const env = { ...testEnv, CLAUDE_PROJECT_DIR: root }
+    const payload = claudeCodePayload("post-tool-use.read.complete", {
+      root,
+      file: "backend/app/x.py",
+      sessionId: "s1",
+    })
+    const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), env)
+    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("Lots of words here.")
     const docsOf = async (dir: string) => {
       const text = await readFile(path.join(stateDirFor(dir), INJECTED_LOG), "utf8").catch(() => "")
       return text
@@ -97,5 +105,7 @@ describe("review of cec2ae0: the hook side", () => {
     }
     const all = [...(await docsOf(root)), ...(await docsOf(path.join(root, "backend")))]
     expect(all).toHaveLength(1)
+    // Counted whole: the section reached the model once, all of it (re-review of 6ab7444).
+    expect(all[0]![1]).toBeGreaterThanOrEqual(section.trimEnd().length - 2)
   })
 })
