@@ -190,6 +190,41 @@ async function checkoutProjects(
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }
 
+/**
+ * With `--worktrees`: each recurring file's checkouts, those whose log has the rule firing there
+ * since the trend's start (AKA lead, 0.19.0). From the logs, not the weekly summary, which keeps
+ * counts and no checkouts: a file whose findings are only in the summary names none.
+ */
+function withCheckouts(
+  trend: WeeklyTrend,
+  loaded: readonly { records: readonly FindingsRecord[]; checkout: { name: string } | null }[] | null,
+): WeeklyTrend {
+  if (loaded === null) return trend
+  const where = new Map<string, Set<string>>()
+  for (const { records, checkout } of loaded) {
+    if (checkout === null) continue
+    for (const record of records) {
+      if (trend.from !== null && record.at < trend.from) continue
+      for (const found of record.found) {
+        const key = `${found.r}\u0000${found.f}`
+        const names = where.get(key) ?? new Set<string>()
+        where.set(key, names)
+        names.add(checkout.name)
+      }
+    }
+  }
+  return {
+    ...trend,
+    rules: trend.rules.map((rule) => ({
+      ...rule,
+      recurringFiles: rule.recurringFiles.map((entry) => ({
+        ...entry,
+        checkouts: [...(where.get(`${rule.rule}\u0000${entry.file}`) ?? [])].sort(),
+      })),
+    })),
+  }
+}
+
 const UNITS: Record<string, number> = { d: 24 * 60 * 60 * 1000, h: 60 * 60 * 1000 }
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/
@@ -239,7 +274,8 @@ const SHOWN_WEEKS = 8
 const SHOWN_FILES = 3
 
 /** The weekly section: only once the trend spans two weeks, since one week is no trend. */
-function weeklyLines(weekly: StatsDocument["weekly"]): string[] {
+/** `several`: the run read more than one checkout's log (`--worktrees`). */
+function weeklyLines(weekly: StatsDocument["weekly"], several: boolean): string[] {
   const spans = weekly.rules[0]?.weeks.length ?? 0
   if (spans < 2) return []
   const out: string[] = []
@@ -268,9 +304,12 @@ function weeklyLines(weekly: StatsDocument["weekly"]): string[] {
   if (recurring.length > 0) {
     out.push(`fired in the same file in ${RECUR_MIN_SESSIONS} or more sessions:`)
     for (const rule of recurring) {
-      const files = rule.recurringFiles
-        .slice(0, SHOWN_FILES)
-        .map(({ file, sessions }) => `${file} (${sessions} sessions)`)
+      const files = rule.recurringFiles.slice(0, SHOWN_FILES).map(({ file, sessions, checkouts }) =>
+        // Which checkouts, only when there are several to tell apart (`--worktrees`).
+        several && checkouts !== undefined && checkouts.length > 0
+          ? `${file} (${sessions} sessions; in ${checkouts.join(", ")})`
+          : `${file} (${sessions} sessions)`,
+      )
       const more = rule.recurringFileCount - files.length
       out.push(`  ${rule.rule}: ${files.join(", ")}${more > 0 ? `, and ${more} more` : ""}`)
     }
@@ -376,7 +415,7 @@ function terminal(document: StatsDocument): string {
     }
     out.push("")
   }
-  out.push(...weeklyLines(document.weekly))
+  out.push(...weeklyLines(document.weekly, (document.checkouts?.length ?? 0) > 1))
   if (document.neverFired !== undefined && document.runs !== undefined) {
     const runs = document.runs
     const ran = document.neverFired.filter((rule) => (runs[rule] ?? 0) > 0)
@@ -496,7 +535,10 @@ export async function statsCommand(
   const neverFired = detectorRules.filter((rule) => !fired.has(rule)).sort()
   const runs = ruleRuns(windowed)
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
-  const trend = weeklyTrend(rows, { since: from ?? null, last: lastRecord ?? rolledUpTo, rolledUpTo })
+  const trend = withCheckouts(
+    weeklyTrend(rows, { since: from ?? null, last: lastRecord ?? rolledUpTo, rolledUpTo }),
+    checkouts === null ? null : loaded,
+  )
   const skippedLines = skipped
   const injectedRecords = loaded
     .flatMap((one) => one.injected)

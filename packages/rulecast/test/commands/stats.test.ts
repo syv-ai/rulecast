@@ -475,6 +475,30 @@ describe("rulecast stats --worktrees (#71)", () => {
     expect(text).toContain("2 checkouts: w1, w2 (removed)")
   })
 
+  // AKA lead, 0.19.0: recurringFiles is where stats names a file, so that is where to say which
+  // checkout a finding came from.
+  test("a recurring file names the checkouts it fired in; the terminal says so when there are several", async () => {
+    const fired = (at: string, s: string) => record(at, "stop", [[`id-${s}`, RULE, "delivered"]], s)
+    const root = await realpath(
+      await projectWithLog([fired("2026-10-01T10:00:00.000Z", "s1"), fired("2026-10-01T11:00:00.000Z", "s2")]),
+    )
+    const w1 = path.join(root, ".claude", "worktrees", "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", w1], { cwd: root })
+    await writeLog(stateDirFor(w1), [fired("2026-10-06T10:00:00.000Z", "s3")], w1, path.join(root, ".git"))
+    const main = path.basename(root)
+
+    const document = JSON.parse((await runCli(root, ["stats", "--worktrees", "*", "--format", "json"])).stdout)
+    const trend = document.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)
+    expect(trend.recurringFiles).toEqual([{ file: USERS, sessions: 3, checkouts: [main, "w1"].sort() }])
+
+    const text = (await runCli(root, ["stats", "--worktrees", "*"])).stdout
+    expect(text).toContain(`${USERS} (3 sessions; in ${[main, "w1"].sort().join(", ")})`)
+
+    // Without --worktrees there is one checkout, and nothing to tell apart.
+    const plain = JSON.parse((await runCli(root, ["stats", "--format", "json"])).stdout)
+    expect(plain.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)?.recurringFiles ?? []).toEqual([])
+  })
+
   test("a removed checkout is found wherever it was, and only when it was this repository's", async () => {
     const root = await realpath(await projectWithLog(RECORDS.slice(0, 4)))
     // Another repository beside this one, with a log of its own: not a checkout of this one.

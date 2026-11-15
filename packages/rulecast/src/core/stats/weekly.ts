@@ -129,7 +129,8 @@ export interface RuleTrend {
   enoughFindings: boolean
   weeks: TrendWeek[]
   /** Files the rule fired on in >= RECUR_MIN_SESSIONS sessions, most first, then by path; at most RECUR_LIST. */
-  recurringFiles: { file: string; sessions: number }[]
+  /** `checkouts`: with `--worktrees`, the checkouts whose logs have the rule firing on the file. */
+  recurringFiles: { file: string; sessions: number; checkouts?: string[] }[]
   recurringFileCount: number
 }
 
