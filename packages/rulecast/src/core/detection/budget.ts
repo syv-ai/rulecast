@@ -78,3 +78,30 @@ export async function applySizeCeiling(
     skipped: files.filter((file) => over.has(file)),
   }
 }
+
+/**
+ * The debug-log line for a file budget cut at an agent's stop, where it is said to nobody; doctor
+ * reads it back with `budgetCuts`, so the two are written side by side.
+ */
+export function budgetLogLine(kind: string, max: number, skipped: number, setting: string): string {
+  return `${kind} rules checked ${max} files; ${skipped} were not checked (${setting})`
+}
+
+/** The cuts of `kind` at `max` files in a debug log (core/home.ts `debugLogger`: an ISO time, a space, the line). */
+export function budgetCuts(
+  debugLog: string,
+  kind: string,
+  max: number,
+  setting: string,
+): { at: string; skipped: number }[] {
+  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const pattern = new RegExp(
+    `^(\\S+) ${literal(kind)} rules checked ${max} files; (\\d+) were not checked \\(${literal(setting)}\\)$`,
+  )
+  const cuts: { at: string; skipped: number }[] = []
+  for (const text of debugLog.split("\n")) {
+    const match = pattern.exec(text)
+    if (match !== null) cuts.push({ at: match[1]!, skipped: Number(match[2]) })
+  }
+  return cuts
+}

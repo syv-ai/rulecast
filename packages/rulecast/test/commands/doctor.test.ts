@@ -1502,3 +1502,43 @@ describe("rulecast doctor: rules that ran and never fired", () => {
     expect((await doctor(touch)).stdout).toContain("expect: quiet needs detect")
   })
 })
+
+// Both leads, 0.19.0: a budget cut at an agent's stop goes only to the debug log, and looks like a
+// clean pass. doctor says how often it cut, and which setting raises it.
+describe("rulecast doctor: the llm file budget", () => {
+  const withDebugLog = async (lines: string[], settings: Record<string, unknown> = {}) => {
+    const tone = {
+      id: "tone",
+      name: "Tone",
+      files: "\\.ts$",
+      stages: ["verify"],
+      detect: { llm: { model: "haiku", question: "is it rude?" } },
+      message: "{{file}}:{{line}} {{reason}}",
+    }
+    const root = await createRepo({ ".rulecast-config.yaml": localConfig([tone], settings), "a.ts": "ok\n" })
+    await stubAgentCli(root, "claude")
+    const stateDir = stateDirFor(root)
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(path.join(stateDir, "debug.log"), lines.map((each) => `${each}\n`).join(""))
+    return root
+  }
+  const cut = (at: string, max: number, skipped: number) =>
+    `${at} llm rules checked ${max} files; ${skipped} were not checked (llm.max_files_per_verify)`
+  const historyOf = (stdout: string) => stdout.split("\n\n").find((block) => block.startsWith("history")) ?? null
+
+  test("cut at stops: how often, how many files left out, and the setting to raise", async () => {
+    const root = await withDebugLog([
+      cut("2026-10-01T10:00:00.000Z", 10, 3),
+      "2026-10-02T10:00:00.000Z something else",
+      cut("2026-10-03T10:00:00.000Z", 10, 2),
+    ])
+    expect(historyOf((await doctor(root)).stdout)).toContain(
+      "  info     llm.max_files_per_verify — llm rules checked 10 files and left 5 unchecked at 2 stops since 2026-10-01; raise llm.max_files_per_verify to check them all",
+    )
+  })
+
+  test("raised since: the cuts at the old setting are not said", async () => {
+    const root = await withDebugLog([cut("2026-10-01T10:00:00.000Z", 10, 3)], { llm: { max_files_per_verify: 20 } })
+    expect(historyOf((await doctor(root)).stdout)).toBeNull()
+  })
+})

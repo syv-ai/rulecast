@@ -176,7 +176,7 @@ detect:
 - One call per file **and model**, covering every llm rule that selected that file. Three llm rules on one file all using `haiku` cost one call; a fourth using `sonnet` costs a second.
 - Files with no changed lines are not sent at all. When there is a change set the changed lines are marked and the model is told to report only those; with no change set it judges the whole file.
 - Answers are cached on the file's content, the change set, the provider, the model and the rules' questions and grounding. Re-running a verify with nothing changed makes no calls.
-- At most `llm.max_files_per_verify` files per verify (default 10), most recently edited first. The rest are named in a warning.
+- At most `llm.max_files_per_verify` files per verify (default 10), most recently edited first. The rest are named in a warning. At an agent's stop that goes only to rulecast's debug log, so `rulecast doctor` says how often stops hit the limit and how many files they left unchecked.
 - Captures: `{{reason}}`, the model's explanation. `{{text}}` is the line from the file, not the model's quote of it.
 - Default stages: **`verify` only.** A model call takes seconds; it has no business in an edit hook. Write `stages: [edit, verify]` if you want it anyway.
 - Providers are configured once for the project, in `llm.provider`:

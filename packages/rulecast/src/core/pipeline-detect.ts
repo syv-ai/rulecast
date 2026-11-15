@@ -8,7 +8,7 @@ import { type BaselineInput, changesFor } from "./baseline/stage"
 import { appendBaseline, type BaselineState } from "./baseline/store"
 import { type CompiledRule, type DetectorRule, isDetectorRule } from "./compile/rule"
 import { contentReader, WORKTREE } from "./content"
-import { applyFileBudget, applySizeCeiling } from "./detection/budget"
+import { applyFileBudget, applySizeCeiling, budgetLogLine } from "./detection/budget"
 import type { DetectionContext } from "./detection/context"
 import { runDetectionFrom } from "./detection/materialise"
 import { fileBytes } from "./detection/per-rule"
@@ -376,7 +376,7 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
     // A setting, not a problem anyone can fix at an agent's stop (the developer, 2026-11-15): the
     // debug log keeps it there; the CLI, where a person asked for the check, still says it.
     if (options.agentHook === true) {
-      log(`${kind} rules checked ${max} files; ${skipped.length} were not checked (${setting})`)
+      log(budgetLogLine(kind, max, skipped.length, setting))
       continue
     }
     warnings.push({

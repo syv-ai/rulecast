@@ -55,7 +55,7 @@ repos:
 | `llm.provider` | `claude-code` | What runs `llm` rules: one of the [providers](detectors.md#llm) |
 | `llm.base_url` | none | The provider's URL, for `anthropic` and `openai-compatible` ([providers](detectors.md#llm)) |
 | `llm.api_key_env` | `ANTHROPIC_API_KEY` | The environment variable that holds the API key, for `anthropic` and `openai-compatible` |
-| `llm.max_files_per_verify` | `10` | Files an `llm` rule judges per verify, most recently edited first; the rest are named in a warning |
+| `llm.max_files_per_verify` | `10` | Files an `llm` rule judges per verify, most recently edited first; the rest are named in a warning, which at an agent's stop goes to the debug log, and `rulecast doctor` says how often that happened |
 | `stats.weekly_summary` | `false` | Keep 26 weeks of per-week counts for `rulecast stats` beside this config's findings log. Applies to this config's log only |
 
 ## Several configs

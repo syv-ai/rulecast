@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { constants } from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -17,6 +18,7 @@ import { type DetectorRule, isDetectorRule } from "../core/compile/rule"
 import { CONFIG_FILE } from "../core/config/load"
 import { type ActiveMode, ciVariable } from "../core/config/mode"
 import { createReferenceResolver, type ReferenceResolver } from "../core/delivery/resolve"
+import { budgetCuts } from "../core/detection/budget"
 import { memoryCache } from "../core/detection/cache"
 import { checkDetectors } from "../core/detection/check"
 import { type DetectionContext, detectionFor } from "../core/detection/context"
@@ -435,7 +437,7 @@ export async function doctorCommand(
     return 128 + constants.signals[stop.signal]
   }
 
-  const history = await historyReport(project, stateDir)
+  const history = await historyReport(project, stateDir, registry)
   if (history !== null) {
     io.stdout(`\n${history.heading}\n`)
     for (const result of history.lines) {
@@ -463,6 +465,40 @@ export async function doctorCommand(
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
+ * A file budget an agent's stop hit at the current setting, which the hook says only to its debug
+ * log, and which looks like a clean pass (both leads, 0.19.0): how often, how many files it left
+ * out, and the setting that raises it. Cuts at another setting are an older setting's.
+ */
+async function budgetLines(
+  project: CompiledProject,
+  stateDir: string,
+  registry: DetectorRegistry,
+): Promise<{ since: string; lines: { rule: string; level: Level; detail: string }[] }> {
+  const text = await readFile(path.join(stateDir, "debug.log"), "utf8").catch(() => "")
+  const settings = { llm: project.config.llm }
+  const lines: { rule: string; level: Level; detail: string }[] = []
+  let since = ""
+  const kinds = new Set(
+    project.rules.flatMap((rule) => (rule.enabled && rule.detector !== null ? [rule.detector.kind] : [])),
+  )
+  for (const kind of kinds) {
+    const budget = registry.get(kind)?.fileBudget?.(settings)
+    if (budget === undefined) continue
+    const cuts = budgetCuts(text, kind, budget.max, budget.setting)
+    if (cuts.length === 0) continue
+    const first = cuts[0]!.at.slice(0, 10)
+    if (since === "" || first < since) since = first
+    const left = cuts.reduce((sum, cut) => sum + cut.skipped, 0)
+    lines.push({
+      rule: budget.setting,
+      level: "info",
+      detail: `${kind} rules checked ${budget.max} files and left ${left} unchecked at ${plural(cuts.length, "stop")} since ${first}; raise ${budget.setting} to check them all`,
+    })
+  }
+  return { since, lines }
+}
+
+/**
  * From the findings log (`rulecast stats`): the rules that ran and never fired, with how often, on
  * how many files and since when, so a reader can tell many runs over many files from a few over one
  * (Conductor lead, 0.19.0). A rule marked `expect: quiet` is a guard meant never to fire: that it
@@ -472,9 +508,15 @@ const DAY_MS = 24 * 60 * 60 * 1000
 async function historyReport(
   project: CompiledProject,
   stateDir: string,
+  registry: DetectorRegistry,
 ): Promise<{ heading: string; lines: { rule: string; level: Level; detail: string }[] } | null> {
   const log = await readFindingsLog(stateDir)
-  if (log.records.length === 0) return null
+  const budgets = await budgetLines(project, stateDir, registry)
+  if (log.records.length === 0) {
+    return budgets.lines.length === 0
+      ? null
+      : { heading: `history (debug log since ${budgets.since})`, lines: budgets.lines }
+  }
   const since = log.records.reduce((first, { at }) => (at < first ? at : first), log.records[0]!.at).slice(0, 10)
   const runs = new Map<string, number>()
   const files = new Map<string, Set<string>>()
@@ -513,6 +555,7 @@ async function historyReport(
         : { rule: rule.id, level: "info", detail: evidence },
     )
   }
+  lines.push(...budgets.lines)
   if (lines.length === 0) return null
   const rotated = log.rotated ? "; older records were rotated out" : ""
   return { heading: `history (findings log since ${since}${rotated})`, lines }
