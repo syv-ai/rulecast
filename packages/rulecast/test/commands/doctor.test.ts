@@ -1614,7 +1614,9 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     const row = { v: 1, log: "older", to: "2026-09-30T00:00:00.000Z", week: "2026-09-21", rule: "guard" }
     await writeFile(
       path.join(stateDirFor(root), FINDINGS_WEEKLY),
-      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 0, files: {}, first: "2026-09-22T00:00:00.000Z" })}\n`,
+      // The summary keeps the files a rule fired on, not those it ran on: a fired file the pattern
+      // takes now is what shows it matched before.
+      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 1, files: { "old/a.spec.tsx": 1 }, first: "2026-09-22T00:00:00.000Z" })}\n`,
     )
     expect(dryRunLine((await doctor(root)).stdout)).toBe(
       "  warning  guard — no file in the project matches this rule; it ran 4 times in the weeks the weekly summary keeps, from 2026-09-21, so its files pattern may be stale",
@@ -1626,6 +1628,15 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     const root = await withLog([aliased], [record("2026-10-01T10:00:00.000Z", { guard: ["old/a.spec.tsx"] })])
     expect(dryRunLine((await doctor(root)).stdout)).toContain(
       "warning  guard — no file in the project matches this rule; it ran on 1 file",
+    )
+  })
+
+  // AKA lead, 0.20.0: a hook rule that had no `files` ran on every changed file until `files` was
+  // added (0.17's doctor hint). Files its pattern never matched are not "matched before".
+  test("ran before only on files its current pattern doesn't match: never matched, so info", async () => {
+    const root = await withLog([guard], [record("2026-10-01T10:00:00.000Z", { guard: ["pyproject.toml", "a.ts"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  info     guard — matches no file; never matched since 2026-10-01 (expect: quiet)",
     )
   })
 

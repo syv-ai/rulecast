@@ -912,7 +912,9 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, su
   for (const record of log.records) {
     for (const index of record.ran[rule.id] ?? []) {
       const file = record.files[index]
-      if (file !== undefined) ranOn.add(file)
+      // Only a file the pattern takes now: a hook rule without `files` ran on every changed file
+      // until `files` was added, and those runs say nothing about the pattern (AKA lead, 0.20.0).
+      if (file !== undefined && rule.matches(file)) ranOn.add(file)
     }
   }
   const since = log.records.reduce<string | null>((first, { at }) => (first === null || at < first ? at : first), null)
@@ -923,8 +925,11 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, su
       detail: `${NONE}; it ran on ${plural(ranOn.size, "file")} since ${since!.slice(0, 10)}, so its files pattern may be stale`,
     }
   }
-  // Older runs a rotation dropped from the log: counts by week, without their files.
-  const summed = summary.filter((row) => row.rule === rule.id && row.runs > 0)
+  // Older weeks a rotation dropped from the log: counts by week, and only the files the rule fired
+  // on, so a week counts when one of those the pattern takes now is among them.
+  const summed = summary.filter(
+    (row) => row.rule === rule.id && row.runs > 0 && Object.keys(row.files).some((file) => rule.matches(file)),
+  )
   if (summed.length > 0) {
     const runs = summed.reduce((sum, row) => sum + row.runs, 0)
     const first = summed.reduce((earliest, row) => (row.week < earliest ? row.week : earliest), summed[0]!.week)
