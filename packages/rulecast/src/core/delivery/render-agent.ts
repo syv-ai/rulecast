@@ -374,13 +374,20 @@ export function repeatedLine(delivery: Repeats, forUser = false): string | null 
   const list = repeatedListLine(delivery)
   const count = delivery.repeatedCount
   if (list !== null) parts.push(list)
-  else if (!forUser && count !== undefined) {
+  // Several projects: one may list while another counts.
+  if (!forUser && count !== undefined) {
     const are = count.count === 1 ? "is" : "are"
     parts.push(`${plural(count.count, "finding")} from earlier stops ${are} still there (${count.rules.join(", ")}).`)
   }
   const fixed = delivery.repeatedFixed
   if (fixed !== undefined) {
-    parts.push(`${fixed.fixed} of the ${fixed.of} earlier findings ${fixed.fixed === 1 ? "is" : "are"} fixed.`)
+    parts.push(
+      fixed.fixed < fixed.of
+        ? `${fixed.fixed} of the ${fixed.of} earlier findings ${fixed.fixed === 1 ? "is" : "are"} fixed.`
+        : fixed.of === 1
+          ? "The earlier finding is fixed."
+          : `All ${fixed.of} earlier findings are fixed.`,
+    )
   }
   return parts.length === 0 ? null : parts.join(" ")
 }

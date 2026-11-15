@@ -1066,8 +1066,9 @@ export function withoutRepeats(input: DecideInput): DecideInput {
 /**
  * What this stop says of its repeats (#90), and what to record as said. The whole set is listed when
  * it has a finding the last stop did not say; otherwise it is a count, which only a block says.
- * Findings the last stop said that are neither repeats nor found again in a changed file are fixed,
- * which is said once. Nothing new and nothing fixed: nothing beyond the count.
+ * A finding said before is fixed when this stop forgets it as sent (`sentRecord`): its rule ran on
+ * its file and did not find it, or the file can hold none. That is said once. One whose rule did not
+ * run here (a timeout, a file budget) is neither fixed nor forgotten: it stays said.
  */
 function saidOf(
   input: DecideInput,
@@ -1075,7 +1076,17 @@ function saidOf(
 ): { delivery: Partial<Delivery>; record: WorkRecord | null } {
   const before = input.work.repeatsSaid.get(input.agent) ?? new Set<string>()
   const now = new Set(split.repeated.map(findingKey))
-  const again = new Set(split.findings.map(findingKey))
+  const found = new Set([...now, ...split.findings.map(findingKey)])
+  const sent = input.work.stopSent.get(input.agent)
+  const ran = input.stopRan ?? new Map<string, readonly string[]>()
+  const cleared = new Set(input.stopCleared ?? [])
+  const fixedKey = (key: string) => {
+    if (found.has(key)) return false
+    const entry = sent?.get(key)
+    // Forgotten as sent at an earlier stop: not there since.
+    if (entry === undefined) return true
+    return cleared.has(entry.file) || ran.get(entry.rule)?.includes(entry.file) === true
+  }
   const delivery: Partial<Delivery> = {}
   if ([...now].some((key) => !before.has(key))) {
     const named = repeatedOf(split.repeated, input.display ?? ((file) => file), input.maxContextChars)
@@ -1083,12 +1094,14 @@ function saidOf(
     if (named.repeatedMore !== undefined) delivery.repeatedMore = named.repeatedMore
   } else if (now.size > 0) {
     const rules = [...new Set(split.repeated.map(({ rule }) => rule.id))].sort()
-    delivery.repeatedCount = { count: split.repeated.length, rules }
+    delivery.repeatedCount = { count: now.size, rules }
   }
-  const fixed = [...before].filter((key) => !now.has(key) && !again.has(key)).length
-  if (fixed > 0) delivery.repeatedFixed = { fixed, of: before.size }
-  const same = now.size === before.size && [...now].every((key) => before.has(key))
-  return { delivery, record: same ? null : { t: "repeatsSaid", agent: input.agent, keys: [...now] } }
+  const fixed = [...before].filter(fixedKey)
+  if (fixed.length > 0) delivery.repeatedFixed = { fixed: fixed.length, of: before.size }
+  const gone = new Set(fixed)
+  const after = new Set([...[...before].filter((key) => !gone.has(key)), ...now])
+  const same = after.size === before.size && [...after].every((key) => before.has(key))
+  return { delivery, record: same ? null : { t: "repeatsSaid", agent: input.agent, keys: [...after] } }
 }
 
 /** Assemble, trim, and — on a stop — gate. */
@@ -1105,6 +1118,8 @@ export async function decide(input: DecideInput): Promise<Decision> {
   const maxContextChars = input.maxContextChars === null ? null : Math.max(0, input.maxContextChars - reserve)
   const { sent, ...decided } = await decideFindings({ ...input, findings: split.findings, maxContextChars })
   Object.assign(decided.delivery, said.delivery)
+  // The count is for the agent at a block; a stop that lets it go, or is capped, says it to nobody.
+  if (decided.delivery.stop !== "block" && decided.delivery.stop !== "report") delete decided.delivery.repeatedCount
   if (said.record !== null) decided.work = [...decided.work, said.record]
   // Only a block or a report puts the findings before the agent (see the returns of decideFindings).
   const delivered = decided.delivery.stop === "block" || decided.delivery.stop === "report"

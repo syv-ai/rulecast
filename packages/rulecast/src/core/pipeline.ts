@@ -792,6 +792,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   let swept: string[] = []
   let stopGone: string[] = []
   let deferredSweep = false
+  let announceDeferral = false
   let detected: Detected | null = null
   if (event.kind === "edit" || event.kind === "verify") {
     let requested = run.relevant(event.files)
@@ -828,6 +829,15 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         const theirs = new Set(running)
         requested = requested.filter((file) => !onlyBy(view.work, file, theirs))
         if (options.stopGate === true && hasOwnTree(view.work, session.agent)) deferredSweep = true
+      }
+      // Said once when the deferral starts, not at every stop while a subagent runs (#90): again
+      // only after a stop that was not deferred. Recorded now, so a stop that fails later still
+      // ends or starts it.
+      if (options.stopGate === true) {
+        const was = view.work.deferred.has(session.agent)
+        announceDeferral = deferredSweep && !was
+        if (deferredSweep !== was)
+          await appendWork(session.dir, [{ t: "deferral", agent: session.agent, on: deferredSweep }])
       }
       if (options.stopGate === true && running.length === 0) {
         const sweeping = await sweep(run, view, session)
@@ -866,14 +876,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     },
     failedAtStart || detected?.failed === true,
   )
-  // Said once when the deferral starts, not at every stop while a subagent runs (#90): again only
-  // after a stop that was not deferred.
-  if (event.kind === "verify" && options.stopGate === true && session) {
-    const was = view.work.deferred.has(session.agent)
-    if (deferredSweep && !was) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
-    if (deferredSweep !== was) {
-      await appendWork(session.dir, [{ t: "deferral", agent: session.agent, on: deferredSweep }])
-    }
-  }
+  if (announceDeferral) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
   return finished
 }

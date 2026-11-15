@@ -53,11 +53,12 @@ describe("a Stop sends each finding once", () => {
     expect(second.findings).toEqual([])
     expect(second.repeated).toEqual([{ rule: "backend/no-httpexception", file: USERS }])
 
-    // Within one prompt too: past the cap the stop is allowed, not capReached. Listed once, then
-    // counted (#90).
+    // Within one prompt too: past the cap the stop is allowed, not capReached. Listed once; an
+    // allowed stop says nothing more of it (#90).
     const sameprompt = await send({ kind: "verify", files: [] })
     expect(sameprompt.stop).toBe("allow")
-    expect(sameprompt.repeatedCount).toEqual({ count: 1, rules: ["backend/no-httpexception"] })
+    expect(sameprompt.repeated).toBeUndefined()
+    expect(sameprompt.repeatedCount).toBeUndefined()
   })
 
   test("a block sends only what is new; earlier findings, warnings too, ride as one line", async () => {
