@@ -36,8 +36,9 @@ import { repoLabel } from "../core/repos/layout"
 import { cachedRepos, fetchingRepos } from "../core/repos/provider"
 import { decide } from "../core/session/decide"
 import { emptyContext, emptyWork } from "../core/session/state"
-import { type FindingsLog, readFindingsLog } from "../core/stats/log"
+import { type FindingsLog, readFindingsLog, readWeeklyRollup } from "../core/stats/log"
 import { rulesRun } from "../core/stats/runs"
+import type { WeekRow } from "../core/stats/weekly"
 import { isOlder, VERSION } from "../core/version"
 import {
   FILE_TEMPLATE,
@@ -201,6 +202,8 @@ export async function doctorCommand(
   const stateDir = ensureProjectState(home, root)
   // What agent hooks recorded here (`rulecast stats`): the dry run and the history read it.
   const findingsLog = await readFindingsLog(stateDir)
+  // The weeks a rotation dropped from the log, as counts, when stats.weekly_summary kept them.
+  const summary = (await readWeeklyRollup(stateDir)).rows
   io.stdout(`project    ${root}\n`)
 
   // With doctor's own environment: the mode a hook would run in when started from this shell.
@@ -402,6 +405,7 @@ export async function doctorCommand(
     const dry = await dryRun(
       project,
       findingsLog,
+      summary,
       detectionFor(project, registry, stateDir, createReferenceResolver(root)),
       listed,
       () => stop.signal !== null,
@@ -810,6 +814,7 @@ const DRY_RUN_FOOTER = "the dry run tries one file per rule; rulecast run --all-
 async function dryRun(
   project: CompiledProject,
   log: FindingsLog,
+  summary: readonly WeekRow[],
   detection: DetectionContext,
   listed: { files: string[] } | { error: unknown },
   stopped: () => boolean,
@@ -854,7 +859,7 @@ async function dryRun(
     const matching = files.filter((candidate) => rule.matches(candidate))
     const file = matching[0]
     if (file === undefined) {
-      lines.push(noFileLine(rule, log))
+      lines.push(noFileLine(rule, log, summary))
       continue
     }
 
@@ -901,7 +906,7 @@ async function dryRun(
  * still shows to whoever reads the line (both leads, 0.19.0). One that ran on files before is a
  * warning whatever `expect` says.
  */
-function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog): DryRunLine {
+function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, summary: readonly WeekRow[]): DryRunLine {
   const NONE = "no file in the project matches this rule"
   const ranOn = new Set<string>()
   for (const record of log.records) {
@@ -916,6 +921,17 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog): D
       rule: rule.id,
       level: "warning",
       detail: `${NONE}; it ran on ${plural(ranOn.size, "file")} since ${since!.slice(0, 10)}, so its files pattern may be stale`,
+    }
+  }
+  // Older runs a rotation dropped from the log: counts by week, without their files.
+  const summed = summary.filter((row) => row.rule === rule.id && row.runs > 0)
+  if (summed.length > 0) {
+    const runs = summed.reduce((sum, row) => sum + row.runs, 0)
+    const first = summed.reduce((earliest, row) => (row.week < earliest ? row.week : earliest), summed[0]!.week)
+    return {
+      rule: rule.id,
+      level: "warning",
+      detail: `${NONE}; it ran ${plural(runs, "time")} in the weeks the weekly summary keeps, from ${first}, so its files pattern may be stale`,
     }
   }
   if (!rule.expectQuiet) return { rule: rule.id, level: "warning", detail: NONE }

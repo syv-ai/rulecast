@@ -7,7 +7,7 @@ import { stringify } from "yaml"
 
 import { HOOK_COMMAND } from "../../src/adapters/claude-code/hook-script"
 import { INSTALL_COMMAND, pinnedInstallCommand } from "../../src/core/binary-home"
-import { FINDINGS_LOG } from "../../src/core/stats/log"
+import { FINDINGS_LOG, FINDINGS_LOG_ROTATED, FINDINGS_WEEKLY } from "../../src/core/stats/log"
 import { runCli } from "../helpers/cli"
 import { localConfig } from "../helpers/config"
 import { createRepo, git } from "../helpers/git"
@@ -1594,6 +1594,38 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     const root = await withLog([guard], [record("2026-10-01T10:00:00.000Z", { guard: ["old/a.spec.tsx"] })])
     expect(dryRunLine((await doctor(root)).stdout)).toBe(
       "  warning  guard — no file in the project matches this rule; it ran on 1 file since 2026-10-01, so its files pattern may be stale",
+    )
+  })
+
+  // Review of 7925459.
+  test("ran before only in the rotated log: a warning, since when from the rotated file", async () => {
+    const root = await withLog([guard], [record("2026-10-05T10:00:00.000Z", {})])
+    await writeFile(
+      path.join(stateDirFor(root), FINDINGS_LOG_ROTATED),
+      `${JSON.stringify(record("2026-09-01T10:00:00.000Z", { guard: ["old/a.spec.tsx"] }))}\n`,
+    )
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  warning  guard — no file in the project matches this rule; it ran on 1 file since 2026-09-01, so its files pattern may be stale",
+    )
+  })
+
+  test("ran before only in the weekly summary: a warning, naming the summary", async () => {
+    const root = await withLog([guard], [record("2026-10-05T10:00:00.000Z", {})])
+    const row = { v: 1, log: "older", to: "2026-09-30T00:00:00.000Z", week: "2026-09-21", rule: "guard" }
+    await writeFile(
+      path.join(stateDirFor(root), FINDINGS_WEEKLY),
+      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 0, files: {}, first: "2026-09-22T00:00:00.000Z" })}\n`,
+    )
+    expect(dryRunLine((await doctor(root)).stdout)).toBe(
+      "  warning  guard — no file in the project matches this rule; it ran 4 times in the weeks the weekly summary keeps, from 2026-09-21, so its files pattern may be stale",
+    )
+  })
+
+  test("an aliased rule is looked up by the name it was logged under", async () => {
+    const aliased = { ...guard, id: "guard-original", alias: "guard" }
+    const root = await withLog([aliased], [record("2026-10-01T10:00:00.000Z", { guard: ["old/a.spec.tsx"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toContain(
+      "warning  guard — no file in the project matches this rule; it ran on 1 file",
     )
   })
 

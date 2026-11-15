@@ -487,9 +487,11 @@ export async function statsCommand(
   // The summaries' rows hold counts, not session ids, so they are added as they are: in the weeks a
   // summary covers, a session that ran in two checkouts counts twice.
   const uncounted = loaded.flatMap((one) => one.uncounted)
+  // With their checkout tags, which `withCheckouts` reads, and without, which the rows count.
+  const uncountedLives = derive(uncounted)
   const live = weekRows(
     uncounted.map((record) => ({ ...record, s: sessionOf(record) })),
-    derive(uncounted).map((life) => ({ ...life, session: untagged(life.session) })),
+    uncountedLives.map((life) => ({ ...life, session: untagged(life.session) })),
   )
   const rows = [...loaded.flatMap((one) => one.rolledUp), ...live]
   const skipped = loaded.reduce((sum, one) => sum + one.skipped, 0)
@@ -535,7 +537,7 @@ export async function statsCommand(
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
   const trend = withCheckouts(
     weeklyTrend(rows, { since: from ?? null, last: lastRecord ?? rolledUpTo, rolledUpTo }),
-    checkouts === null ? null : derive(uncounted),
+    checkouts === null ? null : uncountedLives,
   )
   const skippedLines = skipped
   const injectedRecords = loaded
