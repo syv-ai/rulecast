@@ -127,7 +127,7 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       maxMatchesPerRule: parts.length === 1 ? parts[0]!.maxMatchesPerRule : Number.POSITIVE_INFINITY,
     })
     if (output.stdout !== "") io.stdout(output.stdout)
-    await recordInjected(output.stdout, said, event)
+    await recordInjected(output.stdout, said, event, delivery)
   } catch (error) {
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
   }
@@ -331,7 +331,12 @@ function modelText(stdout: string): string {
  * shared by the length of each part's own text for the agent, so the combined preamble is spread
  * with it. Never fails the hook.
  */
-async function recordInjected(stdout: string, parts: readonly ProjectRun[], event: Event): Promise<void> {
+async function recordInjected(
+  stdout: string,
+  parts: readonly ProjectRun[],
+  event: Event,
+  combined: Delivery,
+): Promise<void> {
   const total = modelText(stdout).length
   const session = event.session
   if (total === 0 || session === undefined || parts.length === 0) return
@@ -342,29 +347,25 @@ async function recordInjected(stdout: string, parts: readonly ProjectRun[], even
   )
   const sum = own.reduce((a, b) => a + b, 0)
   const at = new Date().toISOString()
-  let left = total
-  await Promise.all(
-    parts.map((part, index) => {
-      const share =
-        index === parts.length - 1
-          ? left
-          : sum === 0
-            ? index === 0
-              ? total
-              : 0
-            : Math.round((total * own[index]!) / sum)
-      left -= share
-      const record = injectedRecord({
-        at,
-        session: session.id,
-        agent: session.agentId ?? MAIN_AGENT,
-        kind: event.kind,
-        delivery: part.delivery,
-        chars: share,
-      })
-      return appendInjected(part.stateDir, record, () => {})
+  // Rounded down, the rest to the last: the shares add up to what reached the model, none below 0.
+  const shares = own.map((chars, index) => (sum === 0 ? (index === 0 ? total : 0) : Math.floor((total * chars) / sum)))
+  shares[shares.length - 1] = shares.at(-1)! + total - shares.reduce((a, b) => a + b, 0)
+  // An unattended hold says only what did not run; its findings and docs were not sent.
+  const ownWordsOnly = event.kind === "verify" && combined.stop === "incomplete"
+  const counted = new Set<string>()
+  const records = parts.map((part, index) =>
+    injectedRecord({
+      at,
+      session: session.id,
+      agent: session.agentId ?? MAIN_AGENT,
+      kind: event.kind,
+      delivery: part.delivery,
+      chars: shares[index]!,
+      counted,
+      ownWordsOnly,
     }),
   )
+  await Promise.all(parts.map((part, index) => appendInjected(part.stateDir, records[index]!, () => {})))
 }
 
 /**

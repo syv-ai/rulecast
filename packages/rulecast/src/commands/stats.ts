@@ -115,7 +115,7 @@ async function loadLog(stateDir: string, tag: string | null): Promise<Loaded> {
     records,
     uncounted,
     rolledUp: rollup.rows,
-    skipped: log.skipped + rollup.skipped,
+    skipped: log.skipped + rollup.skipped + injected.skipped,
     rotated: log.rotated,
     rolledUpTo: rollup.rolledUpTo,
     injected:
@@ -304,9 +304,8 @@ function injectedLines(injected: InjectedStats): string[] {
   out.push(`  by event: ${events.join(" · ")}`)
   for (const one of injected.sessions.slice(0, INJECTED_SHOWN)) {
     const heavy = injected.heavySessions.includes(one.session) ? `  (over ${count(PER_TURN_FLAG_TOKENS)} a turn)` : ""
-    out.push(
-      `  session ${one.session}: ${count(one.tokens)} over ${count(one.turns)} turns, ${count(one.perTurn)} a turn${heavy}`,
-    )
+    const rate = one.perTurn === null ? "no stop recorded" : `${count(one.perTurn)} a turn`
+    out.push(`  session ${one.session}: ${count(one.tokens)} over ${count(one.turns)} turns, ${rate}${heavy}`)
   }
   if (injected.large.length > 0) {
     const largest = injected.large[0]!
@@ -461,7 +460,8 @@ export async function statsCommand(
       one.rolledUpTo !== null && (latest === null || one.rolledUpTo > latest) ? one.rolledUpTo : latest,
     null,
   )
-  if (records.length === 0 && rows.length === 0 && values.format === "terminal") {
+  const anyInjected = loaded.some((one) => one.injected.length > 0)
+  if (records.length === 0 && rows.length === 0 && !anyInjected && values.format === "terminal") {
     io.stdout(
       checkouts === null
         ? "no findings recorded yet (the log fills as agent hooks run)\n"
@@ -509,9 +509,14 @@ export async function statsCommand(
   }
   const injected = injectedRecords.length === 0 ? null : injectedStats(injectedRecords, turns, citedBy)
   if (injected !== null) {
-    injected.sessions = injected.sessions.map((one) => ({ ...one, session: untagged(one.session) }))
-    injected.heavySessions = injected.heavySessions.map(untagged)
-    injected.large = injected.large.map((one) => ({ ...one, session: untagged(one.session) }))
+    // `--worktrees`: one session in two checkouts is two rows, each named with its checkout.
+    const shownSession = (session: string) => {
+      const [id, checkout] = session.split("\u0000")
+      return checkout === undefined ? id! : `${id} (${checkout})`
+    }
+    injected.sessions = injected.sessions.map((one) => ({ ...one, session: shownSession(one.session) }))
+    injected.heavySessions = injected.heavySessions.map(shownSession)
+    injected.large = injected.large.map((one) => ({ ...one, session: shownSession(one.session) }))
   }
   const document: StatsDocument = {
     schemaVersion: STATS_SCHEMA_VERSION,

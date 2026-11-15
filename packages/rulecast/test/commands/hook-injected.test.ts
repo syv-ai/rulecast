@@ -60,3 +60,42 @@ describe("rulecast stats shows what reached the model", () => {
     expect(terminal).toContain("conventions/backend.md#services")
   })
 })
+
+describe("review of cec2ae0: the hook side", () => {
+  test("stats shows what reached the model before any stop is in the findings log", async () => {
+    const root = await createFixture()
+    const payload = claudeCodePayload("post-tool-use.read.complete", {
+      root,
+      file: "app/services/users.py",
+      sessionId: "s1",
+    })
+    await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), testEnv)
+    const terminal = (await runCli(root, ["stats"], "", testEnv)).stdout
+    expect(terminal).toContain("injected into the agents")
+  })
+
+  test("a doc section two projects both deliver is counted once, by the project whose copy was shown", async () => {
+    const { createRepo } = await import("../helpers/git")
+    const { localConfig } = await import("../helpers/config")
+    const touch = (id: string) => ({ id, name: id, files: "\\.py$", stages: ["touch"], context: ["@docs/d.md#s"] })
+    const root = await createRepo({
+      ".rulecast-config.yaml": localConfig([touch("top/t")]),
+      "backend/.rulecast-config.yaml": localConfig([{ ...touch("b/t"), context: ["@../docs/d.md#s"] }]),
+      "docs/d.md": `# D\n\n## S\n\n${"Section text. ".repeat(40)}\n`,
+      "backend/x.py": "x = 1\n",
+    })
+    const payload = claudeCodePayload("post-tool-use.read.complete", { root, file: "backend/x.py", sessionId: "s1" })
+    const { stdout } = await runCli(root, ["hook", "claude-code"], JSON.stringify(payload), testEnv)
+    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("Section text.")
+    const docsOf = async (dir: string) => {
+      const text = await readFile(path.join(stateDirFor(dir), INJECTED_LOG), "utf8").catch(() => "")
+      return text
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .flatMap((line) => JSON.parse(line).docs as [string, number][])
+    }
+    const all = [...(await docsOf(root)), ...(await docsOf(path.join(root, "backend")))]
+    expect(all).toHaveLength(1)
+  })
+})

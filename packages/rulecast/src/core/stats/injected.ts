@@ -68,13 +68,31 @@ export function injectedRecord(input: {
   delivery: Delivery
   /** This project's share of what reached the model. */
   chars: number
+  /**
+   * Doc sections already counted for another project of the same answer, by ref and location: the
+   * combined answer gave each once (core/delivery/combine.ts). Filled with this record's.
+   */
+  counted?: Set<string>
+  /** Only rulecast's own words reached the model (an unattended `incomplete` hold): no docs, no findings. */
+  ownWordsOnly?: boolean
 }): InjectedRecord | null {
   const ev = EVENT_OF[input.kind]
   if (ev === undefined || input.chars <= 0) return null
-  const docs: [string, number][] = input.delivery.references.flatMap((reference) =>
-    reference.state === "full" ? [[reference.ref, (reference.content ?? "").length] as [string, number]] : [],
-  )
-  const findings = input.delivery.findings.reduce((sum, finding) => sum + finding.message.length, 0)
+  const counted = input.counted ?? new Set<string>()
+  const docs: [string, number][] = []
+  // What reached the model can be less than the sections (the adapter cuts the tail to its limit):
+  // the sections count for no more than this project's share.
+  let room = input.chars
+  for (const reference of input.ownWordsOnly === true ? [] : input.delivery.references) {
+    const key = `${reference.ref}\n${reference.location ?? ""}`
+    if (reference.state !== "full" || counted.has(key) || room <= 0) continue
+    counted.add(key)
+    const chars = Math.min((reference.content ?? "").length, room)
+    room -= chars
+    docs.push([reference.ref, chars])
+  }
+  const findings =
+    input.ownWordsOnly === true ? 0 : input.delivery.findings.reduce((sum, finding) => sum + finding.message.length, 0)
   return {
     v: INJECTED_LOG_VERSION,
     at: input.at,
@@ -83,7 +101,7 @@ export function injectedRecord(input: {
     ev,
     chars: input.chars,
     docs,
-    findings: Math.min(findings, input.chars),
+    findings: Math.min(findings, room),
     ...(ev === "compact" ? { again: true as const } : {}),
   }
 }
@@ -135,8 +153,8 @@ export interface InjectedStats {
   byEvent: Partial<Record<InjectedEvent, number>>
   /** Of `tokens`, re-delivered after a compact. */
   again: number
-  /** Most first, each beside its turns (stops) and the rate. */
-  sessions: { session: string; tokens: number; turns: number; perTurn: number }[]
+  /** Most first, each beside its turns (stops) and the rate; null with no stop in the findings log. */
+  sessions: { session: string; tokens: number; turns: number; perTurn: number | null }[]
   /** Sessions past PER_TURN_FLAG_TOKENS a turn. */
   heavySessions: string[]
   /** Single injections past SINGLE_FLAG_TOKENS, largest first, with their largest doc section. */
@@ -189,7 +207,13 @@ export function injectedStats(
     .map(([session, sessionChars]) => {
       const tokens = tokensOf(sessionChars)
       const sessionTurns = turns.get(session) ?? 0
-      return { session, tokens, turns: sessionTurns, perTurn: Math.round(tokens / Math.max(1, sessionTurns)) }
+      // No stop recorded (one not made yet, or rotated out of the findings log): no rate to judge.
+      return {
+        session,
+        tokens,
+        turns: sessionTurns,
+        perTurn: sessionTurns === 0 ? null : Math.round(tokens / sessionTurns),
+      }
     })
     .sort((a, b) => b.tokens - a.tokens)
   return {
@@ -198,7 +222,9 @@ export function injectedStats(
     byEvent: Object.fromEntries(Object.entries(byEvent).map(([ev, evChars]) => [ev, tokensOf(evChars)])),
     again: tokensOf(again),
     sessions,
-    heavySessions: sessions.filter((one) => one.perTurn > PER_TURN_FLAG_TOKENS).map((one) => one.session),
+    heavySessions: sessions
+      .filter((one) => one.perTurn !== null && one.perTurn > PER_TURN_FLAG_TOKENS)
+      .map((one) => one.session),
     large: large.sort((a, b) => b.tokens - a.tokens),
     docs: [...byDoc]
       .map(([ref, doc]) => ({

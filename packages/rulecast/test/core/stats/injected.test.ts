@@ -106,3 +106,24 @@ describe("injectedStats", () => {
     expect(stats.heavySessions).toEqual(["s2"])
   })
 })
+
+describe("review of cec2ae0", () => {
+  test("docs never count for more than what reached the model", () => {
+    const delivery = {
+      ...emptyDelivery(),
+      references: [{ ref: "d#x", state: "full" as const, content: "z".repeat(1000) }],
+    }
+    const record = injectedRecord({ at, session: "s1", agent: "main", kind: "touch", delivery, chars: 500 })
+    expect(record!.docs).toEqual([["d#x", 500]])
+  })
+
+  test("a session with no stop recorded has no rate, and is not flagged", () => {
+    const stats = injectedStats(
+      [{ v: 1, at, s: "s9", a: "main", ev: "read", chars: 40_000, docs: [], findings: 0 }],
+      new Map(),
+      new Map(),
+    )
+    expect(stats.sessions).toEqual([{ session: "s9", tokens: 10_000, turns: 0, perTurn: null }])
+    expect(stats.heavySessions).toEqual([])
+  })
+})
