@@ -108,7 +108,7 @@ describe("repeats are listed when they change, counted at a block, and fixes are
 // session's notices about it (recording them as told, then saying nothing): the subagent's own stop
 // says them.
 describe("a checkout only subagents worked in", () => {
-  test("the parent's stop there leaves the config notice to the subagent's own stop", async () => {
+  test("while a subagent runs, the parent's stop there leaves the config notice to the subagent's own stop", async () => {
     const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(fixtureRules) })
     const send = async (event: DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }, lead = false) => {
       const { agentId, ...rest } = event
@@ -118,9 +118,28 @@ describe("a checkout only subagents worked in", () => {
     await send({ kind: "edit", files: [USERS], agentId: "sub1" })
     const config = path.join(root, ".rulecast-config.yaml")
     await writeFile(config, `${localConfig(fixtureRules)}\n# narrowed\n`)
-    const parent = await send({ kind: "verify", files: [] }, true)
+    const parent = await send({ kind: "verify", files: [], running: { agents: ["sub1"], shells: 0 } }, true)
     expect(parent.notices ?? []).toEqual([])
     const own = await send({ kind: "verify", files: [], agentId: "sub1" })
     expect((own.notices ?? []).join("\n")).toContain("config changed this session")
+  })
+
+  // Re-review of 6396d21: a subagent whose stop is never checked (an --agent session's own type)
+  // must not take the notice with it. Once no subagent runs, the parent's stop gives it, once.
+  test("once no subagent runs, the parent's stop gives the notice, once", async () => {
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(fixtureRules) })
+    const stop = async () =>
+      (
+        await pipelineAt(
+          root,
+          { kind: "verify", files: [], cwd: root, session: { id: "s1" } },
+          { stopGate: true, subagentsProject: true },
+        )
+      ).delivery
+    // The session's first event, before the change: the hash it starts from.
+    await pipelineAt(root, { kind: "start", files: [], cwd: root, session: { id: "s1" } }, { stopGate: true })
+    await writeFile(path.join(root, ".rulecast-config.yaml"), `${localConfig(fixtureRules)}\n# narrowed\n`)
+    expect(((await stop()).notices ?? []).join("\n")).toContain("config changed this session")
+    expect((await stop()).notices ?? []).toEqual([])
   })
 })

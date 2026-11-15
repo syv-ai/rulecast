@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { CONFIG_FILE } from "../config/load"
-import { displayPath } from "../projects"
+import { displayPath, inOtherCheckout } from "../projects"
 import type { DeliveredReference, Delivery, Omitted } from "../types"
 
 /** Most complete first: content in full, then a file to read, then just the name, then not found. */
@@ -54,14 +54,20 @@ export function checkoutTags(roots: readonly string[], displayFrom: string): (st
   const own = (root: string, dir: string) => {
     if (dir !== "." && !/^\.\.(\/\.\.)*$/.test(dir)) return false
     const down = path.relative(path.resolve(root), path.resolve(displayFrom)).split(path.sep).join("/")
-    return !/(^|\/)\.claude\/worktrees\//.test(`${down}/`)
+    // Claude Code's own worktree layout says so by its path; any other worktree, git does.
+    return !/(^|\/)\.claude\/worktrees\//.test(`${down}/`) && !inOtherCheckout(root, displayFrom)
   }
   const names = roots.map((root) => path.basename(path.resolve(root)))
   return roots.map((root, index) => {
     if (own(root, dirs[index]!)) return null
     const name = names[index]!
     const shared = names.filter((other, at) => other === name && at !== index && !own(roots[at]!, dirs[at]!))
-    return shared.length > 0 ? dirs[index]!.replace(/^(\.\.\/)+/, "") || name : name
+    if (shared.length === 0) return name
+    // A path above the agent has no directory to name but its own: its parent's name goes with it.
+    const dir = dirs[index]!
+    const below = /^\.\.(\/\.\.)*$/.test(dir) ? "" : dir.replace(/^(\.\.\/)+/, "")
+    const resolved = path.resolve(root)
+    return below !== "" && below !== name ? below : `${path.basename(path.dirname(resolved))}/${name}`
   })
 }
 

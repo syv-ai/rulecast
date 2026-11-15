@@ -149,8 +149,8 @@ function chrome(level: "note" | "warning" | "error", text: string): string {
   const body = (tagged?.[2] ?? text)
     .replace(/^rulecast: /, "")
     // A compile problem names its config and rule: `.rulecast-config.yaml (r/x): …` is `rule r/x: …`.
-    .replace(/^\S*\.rulecast-config\.yaml \(([^)]+)\): /, "rule $1: ")
-    .replace(/^\S*\.rulecast-config\.yaml: /, "config: ")
+    .replace(/(^|\s)\S*\.rulecast-config\.yaml \(([^)]+)\): /g, "$1rule $2: ")
+    .replace(/(^|\s)\S*\.rulecast-config\.yaml: /g, "$1config: ")
     .replace(/\s*\n\s*/g, " ")
   return `RC ${level}${tagged ? ` [${tagged[1]}]` : ""}: ${body}`
 }

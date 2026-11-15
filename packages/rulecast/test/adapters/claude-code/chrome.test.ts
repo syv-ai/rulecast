@@ -96,6 +96,22 @@ describe("what a line is tagged with, and what it leaves out (review of 7a64b2a)
     )
   })
 
+  test("a summary's first compile problem names its rule too", () => {
+    expect(
+      said(
+        delivery({
+          warnings: ["3 rules failed to compile — run rulecast validate.\nFirst: .rulecast-config.yaml (r/x): bad"],
+        }),
+      ),
+    ).toBe("RC warning: 3 rules failed to compile — run rulecast validate. First: rule r/x: bad")
+  })
+
+  test("the main checkout and another checkout of one name: told apart, the one above by its parent", () => {
+    expect(tagged(["/work/repo", "/other/repo"], "/work/repo/.claude/worktrees/wt1")).toBe(
+      "RC warning [work/repo]: w0\nRC warning [other/repo]: w1",
+    )
+  })
+
   test("a compile problem names its rule, not its config's path", () => {
     expect(
       said(delivery({ warnings: ["../wt/.rulecast-config.yaml (r/x): name: required (run rulecast validate)"] })),

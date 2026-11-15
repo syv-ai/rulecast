@@ -292,11 +292,13 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       ...(shared ? { shared: true as const } : {}),
     })
   }
-  // Not in a checkout only the main agent's subagents worked in: the session's notices about it
-  // (config changed, ignores added) are the subagents' to give at their own stops, and once given
-  // here they would be recorded as told and never shown (commands/hook.ts says only findings there).
+  // In a checkout only the main agent's subagents worked in, the session's notices about it (config
+  // changed, ignores added) wait while a subagent still runs: its own stop gives them. Once none
+  // runs, this stop does, for a subagent whose stop is not checked (an `--agent` session's own type)
+  // or the main agent's own shell there. Told once either way: what is told is recorded.
   const atStop = options.stopGate === true && event.kind === "verify" && session !== null
-  const noticesAtStop = atStop && options.subagentsProject !== true
+  const subagentsRunning = event.kind === "verify" && (event.running?.agents ?? []).length > 0
+  const noticesAtStop = atStop && !(options.subagentsProject === true && subagentsRunning)
   if (session !== null && (noticesAtStop || refused.length > 0)) {
     told = notices({
       startConfigHash: noticesAtStop ? (baseline.startConfigHash ?? null) : null,
