@@ -49,6 +49,7 @@ import {
 import { type HookConfig, hookName } from "../detectors/hook/schema"
 import { filesSaid, filterText, type RuleFilter, verdictOf } from "../detectors/hook/scope"
 import { rebaseJob } from "../init/hooks"
+import { coveredByHooks } from "./doctor-covered"
 import { agentHookChecks, hooksWithoutProject, installRemedy, judgedGuard, unfetchedRepos } from "./doctor-hooks"
 import {
   configLabel,
@@ -435,6 +436,14 @@ export async function doctorCommand(
   if (stop.signal !== null) {
     io.stderr("rulecast: doctor interrupted; the tools it ran have stopped, and files they changed are put back\n")
     return 128 + constants.signals[stop.signal]
+  }
+
+  if ("files" in listed) {
+    const covered = await coveredByHooks(project, listed.files, AbortSignal.timeout(CHECK_TIMEOUT_MS)).catch(() => [])
+    if (covered.length > 0) {
+      io.stdout("\nalready in the git hooks\n")
+      for (const result of covered) io.stdout(line(result.level, result.rule, result.detail))
+    }
   }
 
   const history = await historyReport(project, stateDir, registry)
