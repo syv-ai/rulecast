@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { constants } from "node:os"
 import path from "node:path"
@@ -859,7 +860,7 @@ async function dryRun(
     const matching = files.filter((candidate) => rule.matches(candidate))
     const file = matching[0]
     if (file === undefined) {
-      lines.push(noFileLine(rule, log, summary))
+      lines.push(noFileLine(rule, log, summary, project.root))
       continue
     }
 
@@ -906,7 +907,13 @@ async function dryRun(
  * still shows to whoever reads the line (both leads, 0.19.0). One that ran on files before is a
  * warning whatever `expect` says.
  */
-function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, summary: readonly WeekRow[]): DryRunLine {
+function noFileLine(
+  rule: CompiledProject["rules"][number],
+  log: FindingsLog,
+  summary: readonly WeekRow[],
+  root: string,
+): DryRunLine {
+  const takes = takenBefore(rule, root)
   const NONE = "no file in the project matches this rule"
   const ranOn = new Set<string>()
   for (const record of log.records) {
@@ -914,7 +921,7 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, su
       const file = record.files[index]
       // Only a file the pattern takes now: a hook rule without `files` ran on every changed file
       // until `files` was added, and those runs say nothing about the pattern (AKA lead, 0.20.0).
-      if (file !== undefined && rule.matches(file)) ranOn.add(file)
+      if (file !== undefined && takes(file)) ranOn.add(file)
     }
   }
   const since = log.records.reduce<string | null>((first, { at }) => (first === null || at < first ? at : first), null)
@@ -926,10 +933,13 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, su
     }
   }
   // Older weeks a rotation dropped from the log: counts by week, and only the files the rule fired
-  // on, so a week counts when one of those the pattern takes now is among them.
-  const summed = summary.filter(
-    (row) => row.rule === rule.id && row.runs > 0 && Object.keys(row.files).some((file) => rule.matches(file)),
-  )
+  // on, which a guard meant never to fire has none of. So a week counts unless every file it names
+  // is one the pattern does not take now; with none named, its files are not known, and it counts.
+  const summed = summary.filter((row) => {
+    if (row.rule !== rule.id || row.runs === 0) return false
+    const named = Object.keys(row.files)
+    return named.length === 0 || named.some(takes)
+  })
   if (summed.length > 0) {
     const runs = summed.reduce((sum, row) => sum + row.runs, 0)
     const first = summed.reduce((earliest, row) => (row.week < earliest ? row.week : earliest), summed[0]!.week)
@@ -947,6 +957,30 @@ function noFileLine(rule: CompiledProject["rules"][number], log: FindingsLog, su
       since === null
         ? "matches no file; no findings log yet to check that it never did (expect: quiet)"
         : `matches no file; never matched since ${since.slice(0, 10)} (expect: quiet)`,
+  }
+}
+
+/**
+ * Whether a file a rule ran on is one its pattern takes now. A file gone from disk whose type the
+ * rule's type tags would read from its content (a shebang) can't be told: it counts when the
+ * path passes the rule's files and exclude, so a stale glob is never hidden for that reason.
+ */
+function takenBefore(rule: CompiledProject["rules"][number], root: string): (file: string) => boolean {
+  const { files, exclude, types, typesOr, excludeTypes } = rule.patterns
+  const typed = types.some((tag) => tag !== "file") || typesOr.length > 0 || excludeTypes.length > 0
+  const regex = (source: string) => {
+    try {
+      return new RegExp(source)
+    } catch {
+      return null
+    }
+  }
+  const include = regex(files)
+  const leaveOut = regex(exclude)
+  return (file) => {
+    if (rule.matches(file)) return true
+    if (!typed || existsSync(path.join(root, file))) return false
+    return include?.test(file) === true && leaveOut?.test(file) !== true
   }
 }
 

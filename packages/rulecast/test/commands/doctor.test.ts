@@ -1614,9 +1614,7 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     const row = { v: 1, log: "older", to: "2026-09-30T00:00:00.000Z", week: "2026-09-21", rule: "guard" }
     await writeFile(
       path.join(stateDirFor(root), FINDINGS_WEEKLY),
-      // The summary keeps the files a rule fired on, not those it ran on: a fired file the pattern
-      // takes now is what shows it matched before.
-      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 1, files: { "old/a.spec.tsx": 1 }, first: "2026-09-22T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 0, files: {}, first: "2026-09-22T00:00:00.000Z" })}\n`,
     )
     expect(dryRunLine((await doctor(root)).stdout)).toBe(
       "  warning  guard — no file in the project matches this rule; it ran 4 times in the weeks the weekly summary keeps, from 2026-09-21, so its files pattern may be stale",
@@ -1637,6 +1635,33 @@ describe("rulecast doctor: a guard rule that matches no file", () => {
     const root = await withLog([guard], [record("2026-10-01T10:00:00.000Z", { guard: ["pyproject.toml", "a.ts"] })])
     expect(dryRunLine((await doctor(root)).stdout)).toBe(
       "  info     guard — matches no file; never matched since 2026-10-01 (expect: quiet)",
+    )
+  })
+
+  // Review of 9db1bcb.
+  test("a summary week whose recorded files the pattern doesn't take now: those runs don't count", async () => {
+    const root = await withLog([guard], [record("2026-10-05T10:00:00.000Z", {})])
+    const row = { v: 1, log: "older", to: "2026-09-30T00:00:00.000Z", week: "2026-09-21", rule: "guard" }
+    await writeFile(
+      path.join(stateDirFor(root), FINDINGS_WEEKLY),
+      `${JSON.stringify({ ...row, runs: 4, sessions: 1, fired: 1, files: { "pyproject.toml": 1 }, first: "2026-09-22T00:00:00.000Z" })}\n`,
+    )
+    expect(dryRunLine((await doctor(root)).stdout)).toContain("info     guard — matches no file; never matched since")
+  })
+
+  test("a record with files on both sides of the pattern counts only those it takes", async () => {
+    const root = await withLog(
+      [guard],
+      [record("2026-10-01T10:00:00.000Z", { guard: ["old/a.spec.tsx", "pyproject.toml", "b.ts"] })],
+    )
+    expect(dryRunLine((await doctor(root)).stdout)).toContain("it ran on 1 file since 2026-10-01")
+  })
+
+  test("a deleted file only its content could type: it can't be checked, so it counts", async () => {
+    const shell = { ...RULE("guard"), files: "^bin/", types: ["shell"], expect: "quiet" }
+    const root = await withLog([shell], [record("2026-10-01T10:00:00.000Z", { guard: ["bin/deploy"] })])
+    expect(dryRunLine((await doctor(root)).stdout)).toContain(
+      "warning  guard — no file in the project matches this rule; it ran on 1 file",
     )
   })
 
