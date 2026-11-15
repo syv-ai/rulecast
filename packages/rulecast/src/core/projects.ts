@@ -64,7 +64,7 @@ export function configRootsAbove(dir: string, home: string = homedir()): string[
  * repository plus worktrees" layout (`proj/.git` is `gitdir: ./.bare`, worktrees at `proj/w1`). Such a
  * directory is not a work tree, so it is no checkout boundary. Read from files, without git.
  */
-function bareContainer(top: string): boolean {
+export function bareContainer(top: string): boolean {
   try {
     const dotGit = path.join(top, ".git")
     if (!statSync(dotGit).isFile()) return false

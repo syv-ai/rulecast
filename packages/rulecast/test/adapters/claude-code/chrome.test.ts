@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest"
 import { claudeCodeAdapter } from "../../../src/adapters/claude-code/adapter"
 import { combineDeliveries } from "../../../src/core/delivery/combine"
 import { type Delivery, type Event, type EventKind, emptyDelivery } from "../../../src/core/types"
+import { createRepo } from "../../helpers/git"
 
 // What rulecast itself says to the user, as against the findings and docs the developer chose
 // (the developer, 2026-11-15): one short line each, `RC <level>: <message>`, no heading and no
@@ -116,5 +117,23 @@ describe("what a line is tagged with, and what it leaves out (review of 7a64b2a)
     expect(
       said(delivery({ warnings: ["../wt/.rulecast-config.yaml (r/x): name: required (run rulecast validate)"] })),
     ).toBe("RC warning: rule r/x: name: required (run rulecast validate)")
+  })
+})
+
+describe("a bare repository's worktrees (re-review of 7dee360)", () => {
+  test("the config in the bare repository's directory is each worktree's own: not tagged", async () => {
+    const { mkdtemp, writeFile } = await import("node:fs/promises")
+    const { tmpdir } = await import("node:os")
+    const nodePath = await import("node:path")
+    const { execFileSync } = await import("node:child_process")
+    const source = await createRepo({ "a.txt": "a\n" })
+    const proj = await mkdtemp(nodePath.join(tmpdir(), "rulecast-bare-"))
+    const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" })
+    run(proj, "clone", "-q", "--bare", source, ".bare")
+    await writeFile(nodePath.join(proj, ".git"), "gitdir: ./.bare\n")
+    run(proj, "worktree", "add", "-q", "w1")
+    const w1 = nodePath.join(proj, "w1")
+    const combined = combineDeliveries([{ root: proj, delivery: delivery({ warnings: ["shared"] }) }], w1, "checkout")
+    expect(said(combined)).toBe("RC warning: shared")
   })
 })

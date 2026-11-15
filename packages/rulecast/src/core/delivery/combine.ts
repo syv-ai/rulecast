@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { CONFIG_FILE } from "../config/load"
-import { displayPath, inOtherCheckout } from "../projects"
+import { bareContainer, displayPath, inOtherCheckout } from "../projects"
 import type { DeliveredReference, Delivery, Omitted } from "../types"
 
 /** Most complete first: content in full, then a file to read, then just the name, then not found. */
@@ -55,6 +55,8 @@ export function checkoutTags(roots: readonly string[], displayFrom: string): (st
     if (dir !== "." && !/^\.\.(\/\.\.)*$/.test(dir)) return false
     const down = path.relative(path.resolve(root), path.resolve(displayFrom)).split(path.sep).join("/")
     // Claude Code's own worktree layout says so by its path; any other worktree, git does.
+    // A bare repository's directory is no checkout: its config is each worktree's below it.
+    if (bareContainer(path.resolve(root))) return true
     return !/(^|\/)\.claude\/worktrees\//.test(`${down}/`) && !inOtherCheckout(root, displayFrom)
   }
   const names = roots.map((root) => path.basename(path.resolve(root)))
