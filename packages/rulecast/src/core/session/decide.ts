@@ -103,29 +103,10 @@ export interface Decision {
 const WARNING_SHARE = 0.15
 
 /**
- * What replaces the warnings the share could not hold: how many, then as many of them as `room`
- * holds, each by its first words (#90), and the command that lists compile problems only when one
- * of them is one; validate has nothing to say about the rest.
+ * What replaces the warnings the share could not hold: how many, and where all of them are, never a
+ * sentence cut short (the developer, 2026-11-15).
  */
-function moreWarnings(cut: readonly { key: string; text: string }[], room = 0): string {
-  const validate = cut.some(({ key }) => key.startsWith("diagnostic")) ? " (run rulecast validate)" : ""
-  const counted = `…and ${cut.length} more${validate}`
-  const named: string[] = []
-  for (const { text } of cut) {
-    const words = text.split("\n")[0]!
-    const brief = words.length > BRIEF_WARNING ? `${words.slice(0, BRIEF_WARNING - 1)}…` : words
-    const left = cut.length - named.length - 1
-    const line = `…and ${cut.length} more: ${[...named, brief].join("; ")}${left > 0 ? `; and ${left} other${left === 1 ? "" : "s"}` : ""}${validate}`
-    if (deliveryCost.warning(line) > room) break
-    named.push(brief)
-  }
-  if (named.length === 0) return counted
-  const left = cut.length - named.length
-  return `…and ${cut.length} more: ${named.join("; ")}${left > 0 ? `; and ${left} other${left === 1 ? "" : "s"}` : ""}${validate}`
-}
-
-/** How much of each cut warning `moreWarnings` names. */
-const BRIEF_WARNING = 60
+const moreWarnings = (cut: readonly unknown[]) => `${cut.length} more — run rulecast doctor`
 
 /**
  * What a reference is called in a delivery. A project reference names a file in the project, so it
@@ -683,12 +664,12 @@ export function trim(
       }
     }
     delivery.warnings = unwarned.slice(0, held).map((warning) => warning.text)
-    for (const warning of unwarned.slice(0, held)) context.push({ t: "warned", key: warning.key })
+    // The cut ones too: the line standing for them is said once, not again at every stop.
+    for (const warning of unwarned) context.push({ t: "warned", key: warning.key })
     const cut = unwarned.slice(held)
     if (cut.length > 0 && spent + warningCost(moreWarnings(cut)) <= ceiling) {
-      const more = moreWarnings(cut, ceiling - spent)
-      spent += warningCost(more)
-      delivery.warnings.push(more)
+      spent += warningCost(moreWarnings(cut))
+      delivery.warnings.push(moreWarnings(cut))
     }
     // Nothing printed, so the heading never prints either.
     used += delivery.warnings.length > 0 ? spent : 0

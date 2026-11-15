@@ -65,10 +65,9 @@ const INCOMPLETE_PREAMBLE = ({ files }: Configs) =>
 /** Under a block's findings: what the agent's report must say was never checked. */
 const NOT_CHECKED = "Not checked (rulecast could not run these rules; say so in your report):"
 
-const CAP_PREAMBLE = "rulecast: the agent stopped with these findings unresolved (stop gate limit reached)."
+const CAP_PREAMBLE = "RC warning: the agent stopped with these findings unresolved (stop limit reached)."
 
-const SWEPT_PREAMBLE =
-  "rulecast: files changed outside the agent's tool calls this session have findings (not blocking the agent)."
+const SWEPT_PREAMBLE = "RC note: findings in files changed outside the agent's tool calls (not blocking)."
 
 const DENY_PREAMBLE = ({ source }: Configs) =>
   `${source} refuse this write. Change what you are writing, or the file you are writing it to, and try again.`
@@ -139,6 +138,16 @@ function conventionDocs(docs: readonly string[]): { stdout: string; exitCode: nu
   return json({ hookSpecificOutput: { hookEventName: "SubagentStart", additionalContext: lines.join("\n") } })
 }
 
+/**
+ * One of rulecast's own lines to the user: `RC <level>: <message>`, or `RC <level> [dir]: <message>`
+ * for another project's (core/delivery/combine.ts tags it), without the text's own "rulecast: ".
+ */
+function chrome(level: "note" | "warning" | "error", text: string): string {
+  const tagged = /^\[([^\]]+)\] ([\s\S]*)$/.exec(text)
+  const body = (tagged?.[2] ?? text).replace(/^rulecast: /, "")
+  return `RC ${level}${tagged ? ` [${tagged[1]}]` : ""}: ${body}`
+}
+
 export const claudeCodeAdapter: Adapter = {
   name: "claude-code",
   label: "Claude Code",
@@ -150,14 +159,16 @@ export const claudeCodeAdapter: Adapter = {
     if (event.kind === "agent-start") return conventionDocs(delivery.conventionDocs ?? [])
     const text = renderAgentText(delivery, { ...options, notices: false, warnings: false })
     // For the user, never the model: config changes and ignores added this session (spec §9,
-    // Oversight), and rule or detector problems, which only the human can fix (§11).
-    const problems =
-      delivery.warnings.length === 0 ? [] : ["rulecast problems:", ...delivery.warnings.map((w) => `  - ${w}`)]
+    // Oversight), and rule or detector problems, which only the human can fix (§11). One short line
+    // each (the developer, 2026-11-15): what rulecast says itself stays out of the way of what the
+    // developer chose to have said.
+    const problems = delivery.warnings.map((warning) => chrome("warning", warning))
     // Set only at an unattended stop, and said at every one of them, not once (#29).
     const disabled = (delivery.disabled ?? []).map(disabledText)
-    const notRun =
-      disabled.length === 0 ? [] : ["rulecast: rules that did not run:", ...disabled.map((d) => `  - ${d}`)]
-    const notices = [...(delivery.notices ?? []), ...problems, ...notRun].join("\n")
+    const notRun = disabled.length === 0 ? [] : [`RC error: rules that did not run: ${disabled.join("; ")}`]
+    const notices = [...(delivery.notices ?? []).map((notice) => chrome("note", notice)), ...problems, ...notRun].join(
+      "\n",
+    )
     if (event.kind === "verify" && delivery.stop === "incomplete") {
       const reason = `${INCOMPLETE_PREAMBLE(configsOf(delivery))}\n\n${disabled.map((d) => `- ${d}`).join("\n")}`
       const outside = sweptMessage(delivery, event, options)
@@ -254,7 +265,7 @@ export const claudeCodeAdapter: Adapter = {
         // of the agent's (session/decide.ts `repeats`).
         const repeats = repeatedLine(delivery, true)
         const outside = sweptMessage(delivery, event, options)
-        const told = [notices, outside, repeats === null ? null : `rulecast: ${repeats}`].filter(
+        const told = [notices, outside, repeats === null ? null : chrome("note", repeats)].filter(
           (part) => part !== null && part !== "",
         )
         return told.length === 0 ? NONE : json({ systemMessage: told.join("\n\n") })

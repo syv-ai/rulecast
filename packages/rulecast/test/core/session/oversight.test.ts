@@ -13,7 +13,7 @@ describe("notices", () => {
   test("a config that changed since the session started is told, once per change", () => {
     const told = notices({ startConfigHash: "a", currentConfigHash: "b", ignored: [], told: new Set() })
     expect(told.map((notice) => notice.text)).toEqual([
-      "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced. Review: git diff .rulecast-config.yaml",
+      "rulecast: config changed this session; review with git diff .rulecast-config.yaml",
     ])
     expect(
       notices({ startConfigHash: "a", currentConfigHash: "b", ignored: [], told: new Set([told[0]!.key]) }),
@@ -93,7 +93,7 @@ describe("oversight in a session", () => {
     const passed = await send({ kind: "verify", files: [], session }, true)
     expect(passed.delivery.stop).toBe("allow")
     expect(passed.delivery.notices).toEqual([
-      "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced. Review: git diff .rulecast-config.yaml",
+      "rulecast: config changed this session; review with git diff .rulecast-config.yaml",
     ])
     // Told once, not at every Stop after it.
     const again = await send({ kind: "verify", files: [], session }, true)

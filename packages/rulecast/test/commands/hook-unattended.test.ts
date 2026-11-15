@@ -85,7 +85,7 @@ describe("hook claude-code: unattended stops", () => {
     // A new finding past the cap.
     await edit(USERS, violation(501))
     const second = await stop()
-    expect(second).toEqual({ systemMessage: expect.stringContaining("stop gate limit reached") })
+    expect(second).toEqual({ systemMessage: expect.stringContaining("stop limit reached") })
   })
 
   test("attended: a finding an earlier stop sent is named to the user, and the agent is let go", async () => {
@@ -93,7 +93,7 @@ describe("hook claude-code: unattended stops", () => {
     await edit(USERS, violation(500))
     expect(kindOf(await stop())).toBe("block")
     expect(await stop()).toEqual({
-      systemMessage: `rulecast: Still there from earlier stops, not repeated here: backend/no-httpexception (${USERS}).`,
+      systemMessage: `RC note: Still there from earlier stops, not repeated here: backend/no-httpexception (${USERS}).`,
     })
   })
 

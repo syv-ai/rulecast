@@ -150,7 +150,7 @@ describe("work still running at a stop (R10)", () => {
   test("a subagent running in the same checkout defers the sweep, and says so", async () => {
     const output = await sweepScenario(async (root) => root)
     expect(output.systemMessage).toContain("a subagent is still running")
-    expect(output.systemMessage).not.toContain("changed outside the agent's tool calls this session have findings")
+    expect(output.systemMessage).not.toContain("findings in files changed outside the agent's tool calls")
   })
 
   test("a subagent running in its own worktree does not defer this checkout's sweep", async () => {
@@ -159,9 +159,10 @@ describe("work still running at a stop (R10)", () => {
       await git(root, "worktree", "add", "-q", worktree)
       return worktree
     })
-    expect(output.systemMessage).toContain("changed outside the agent's tool calls this session have findings")
+    expect(output.systemMessage).toContain("findings in files changed outside the agent's tool calls")
     // Deferred only in the worktree's own project, where the subagent writes.
-    expect(output.systemMessage).not.toMatch(/^\.rulecast-config\.yaml: rulecast: a subagent is still running/m)
-    expect(output.systemMessage).toMatch(/^\.claude\/worktrees\/iso\/\.rulecast-config\.yaml: rulecast: a subagent/m)
+    // Neither checkout says it: this one did not defer, and the subagent's own worktree, which only
+    // the subagent worked in, has its own stops for that (the developer, 2026-11-15).
+    expect(output.systemMessage).not.toContain("a subagent is still running")
   })
 })

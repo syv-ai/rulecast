@@ -104,7 +104,12 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       if (fresh.length > 0) elsewhere = elsewhereNotice(fresh, parsed.cwd)
     }
     if (parts.length === 0 && elsewhere === null) return 0
-    const delivery = combineDeliveries(parts, parsed.cwd)
+    // A checkout only the main agent's subagents worked in has their own stops for what is wrong with
+    // its setup; here the lead hears only its findings (the developer, 2026-11-15).
+    const said = parts.map((part) =>
+      part.subagents ? { ...part, delivery: { ...part.delivery, warnings: [], notices: [] } } : part,
+    )
+    const delivery = combineDeliveries(said, parsed.cwd)
     // A project that let the agent go has its findings shown anyway when another's block carries
     // them: they count as sent there too, so its next block names them as repeats.
     if (delivery.stop === "block" || delivery.stop === "report") {

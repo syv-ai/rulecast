@@ -50,13 +50,15 @@ describe("combineDeliveries", () => {
     expect(alone.notices).toEqual(["n"])
 
     const both = combineDeliveries([top({ warnings: ["a"] }), backend({ warnings: ["b"], notices: ["n"] })], FROM)
-    expect(both.warnings).toEqual([".rulecast-config.yaml: a", "backend/.rulecast-config.yaml: b"])
-    expect(both.notices).toEqual(["backend/.rulecast-config.yaml: n"])
+    // The agent's own config bare; one below it tagged with its directory, never a config path.
+    expect(both.warnings).toEqual(["a", "[backend] b"])
+    expect(both.notices).toEqual(["[backend] n"])
   })
 
   test("labels are relative to where the agent is", () => {
     const both = combineDeliveries([top({ warnings: ["a"] }), backend({ warnings: ["b"] })], "/repo/backend")
-    expect(both.warnings).toEqual(["../.rulecast-config.yaml: a", ".rulecast-config.yaml: b"])
+    // A config above the agent is its own checkout's too: neither is tagged.
+    expect(both.warnings).toEqual(["a", "b"])
   })
 
   test("findings, touches and overflow paths are concatenated in part order", () => {

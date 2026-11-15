@@ -169,7 +169,7 @@ describe("Claude Code adapter: format", () => {
     expect(output.decision).toBe("block")
     expect(output.reason).toContain("Record each one as unresolved in your final report")
     expect(output.reason).toContain("raises HTTPException(500)")
-    expect(output.systemMessage).toBe(notice)
+    expect(output.systemMessage).toBe(notice.replace("rulecast: ", "RC note: "))
   })
 
   describe("rules that did not run, unattended (#29)", () => {
@@ -211,7 +211,7 @@ describe("Claude Code adapter: format", () => {
 
     test("an allowed stop says it to the user every time", () => {
       const output = JSON.parse(format(delivery({ stop: "allow", unattended: true, disabled }), "verify").stdout)
-      expect(output).toEqual({ systemMessage: `rulecast: rules that did not run:\n  - ${LINE}` })
+      expect(output).toEqual({ systemMessage: `RC error: rules that did not run: ${LINE}` })
     })
   })
 
@@ -342,26 +342,28 @@ describe("Claude Code adapter: format", () => {
 })
 
 describe("Claude Code adapter: notices are for the user", () => {
-  const NOTICE = "rulecast: .rulecast-config.yaml changed during this session; findings may have been silenced."
+  const NOTICE = "rulecast: config changed this session; review with git diff .rulecast-config.yaml"
+  /** What the user sees of it (adapter `chrome`). */
+  const SAID = "RC note: config changed this session; review with git diff .rulecast-config.yaml"
 
   test("a block carries the notice as a system message, never in what the agent is given", () => {
     const output = JSON.parse(
       format(delivery({ findings: [finding()], stop: "block", notices: [NOTICE] }), "verify").stdout,
     )
     expect(output.hookSpecificOutput.additionalContext).toContain("raises HTTPException(500)")
-    expect(output.systemMessage).toBe(NOTICE)
+    expect(output.systemMessage).toBe(SAID)
     expect(output.hookSpecificOutput.additionalContext).not.toContain("changed during this session")
     const unattended = JSON.parse(
       format(delivery({ findings: [finding()], stop: "block", unattended: true, notices: [NOTICE] }), "verify").stdout,
     )
     expect(unattended.decision).toBe("block")
-    expect(unattended.systemMessage).toBe(NOTICE)
+    expect(unattended.systemMessage).toBe(SAID)
     expect(unattended.reason).not.toContain("changed during this session")
   })
 
   test("an allowed stop with nothing else to say still tells the user", () => {
     expect(JSON.parse(format(delivery({ stop: "allow", notices: [NOTICE] }), "verify").stdout)).toEqual({
-      systemMessage: NOTICE,
+      systemMessage: SAID,
     })
   })
 
@@ -369,8 +371,8 @@ describe("Claude Code adapter: notices are for the user", () => {
     const output = JSON.parse(
       format(delivery({ findings: [finding()], stop: "capReached", notices: [NOTICE] }), "verify").stdout,
     )
-    expect(output.systemMessage.startsWith(`${NOTICE}\n\n`)).toBe(true)
-    expect(output.systemMessage).toContain("stop gate limit reached")
+    expect(output.systemMessage.startsWith(`${SAID}\n\n`)).toBe(true)
+    expect(output.systemMessage).toContain("stop limit reached")
   })
 
   test("notices never reach the model as additional context", () => {
@@ -382,10 +384,10 @@ describe("Claude Code adapter: notices are for the user", () => {
     const warning = "regex detector failed for r/x: bad pattern. Disabled for this session."
     const withFinding = JSON.parse(format(delivery({ findings: [finding()], warnings: [warning] }), "edit").stdout)
     expect(withFinding.hookSpecificOutput.additionalContext).not.toContain("bad pattern")
-    expect(withFinding.systemMessage).toBe(`rulecast problems:\n  - ${warning}`)
+    expect(withFinding.systemMessage).toBe(`RC warning: ${warning}`)
     // A warning alone still reaches the user.
     expect(JSON.parse(format(delivery({ warnings: [warning] }), "edit").stdout)).toEqual({
-      systemMessage: `rulecast problems:\n  - ${warning}`,
+      systemMessage: `RC warning: ${warning}`,
     })
     // --format agent keeps them in the text: there is nobody else to show them to.
     expect(renderAgentText(delivery({ warnings: [warning] }), options)).toContain("bad pattern")

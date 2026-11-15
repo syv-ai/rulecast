@@ -71,6 +71,27 @@ async function worktrees(settings: Record<string, unknown> = {}) {
 }
 
 describe("rulecast hook claude-code: subagents in their own worktrees", () => {
+  // The developer, 2026-11-15: a checkout only subagents worked in has its own stops for what is
+  // wrong with its setup; the lead, who can't act on it, hears only its findings.
+  test("the main agent's stop says nothing of a subagent-only worktree's warnings, only its findings", async () => {
+    const broken = { id: "py/broken", files: "\\.py$", detect: { regex: { pattern: "x" } }, message: "m" }
+    const lead = await createRepo({ ".rulecast-config.yaml": localConfig(RULES), "a.py": "a = 1\n" })
+    const sub = await createRepo({ ".rulecast-config.yaml": localConfig([...RULES, broken]), "b.py": "b = 1\n" })
+    const sessionId = randomUUID()
+    const env = { ...testEnv, CLAUDE_PROJECT_DIR: lead }
+    const hook = (name: string, cwd: string, agentId?: string, file?: string) => {
+      const payload = claudeCodePayload(name, { root: cwd, file, sessionId })
+      if (agentId === undefined) delete payload.agent_id
+      else payload.agent_id = agentId
+      return runCli(cwd, ["hook", "claude-code"], JSON.stringify(payload), env)
+    }
+    await writeFile(path.join(sub, "b.py"), "print(1)\n")
+    await hook("post-tool-use.edit.subagent", sub, "sub1", "b.py")
+    const { stdout } = await hook("stop", lead)
+    expect(stdout).toContain("b.py")
+    expect(stdout).not.toContain("py/broken")
+  })
+
   test("by default the main agent's stop also verifies its subagent's worktree", async () => {
     const { lead, sub, stopOf, subEdits } = await worktrees()
     expect(await subEdits("print(1)\n")).toContain("prints.")

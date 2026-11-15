@@ -165,24 +165,19 @@ describe("decide: warnings are charged after the floor", () => {
       input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
     )
     expect(delivery.warnings.length).toBeLessThan(80)
-    // Detector failures, not compile problems: validate has nothing to say about them (#90).
-    expect(delivery.warnings.at(-1)).toMatch(/^…and \d+ more(: |$)/)
-    expect(delivery.warnings.at(-1)).not.toContain("validate")
+    expect(delivery.warnings.at(-1)).toMatch(/^\d+ more — run rulecast doctor$/)
     const chars = delivery.warnings.reduce((sum, text) => sum + text.length, 0)
     expect(chars).toBeLessThanOrEqual(9000 * 0.15)
   })
 
-  test("a warning the budget cut is not recorded as warned, so it is announced again", async () => {
-    const { delivery, context } = await decide(
+  // The developer, 2026-11-15: a cut warning came back at every stop, which is the noise #90 was
+  // about. The line that stands in for it says where to see them all, once.
+  test("warnings the budget cut are recorded as said too: the line naming doctor is said once", async () => {
+    const { context } = await decide(
       input({ maxContextChars: 9000, warnings: noisy(80), findings: manyIn("works/compute", "a.py", 1) }),
     )
     const warned = context.flatMap((record) => (record.t === "warned" ? [record.key] : []))
-    // The trailing "…and N more" is not a warning anyone can key on; every other line is.
-    expect(warned).toEqual(
-      noisy(80)
-        .slice(0, delivery.warnings.length - 1)
-        .map((warning) => warning.key),
-    )
+    expect(warned).toEqual(noisy(80).map((warning) => warning.key))
   })
 
   test("without a limit every warning is delivered", async () => {

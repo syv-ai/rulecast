@@ -43,7 +43,7 @@ export function notices(input: {
   ) {
     out.push({
       key: configKey,
-      text: `rulecast: ${display(CONFIG_FILE)} changed during this session; findings may have been silenced. Review: git diff ${display(CONFIG_FILE)}`,
+      text: `rulecast: config changed this session; review with git diff ${display(CONFIG_FILE)}`,
     })
   }
   const keyOf = ({ rule, match }: { rule: string; match: Match }) => `ignore:${rule}:${match.file}:${match.line}`

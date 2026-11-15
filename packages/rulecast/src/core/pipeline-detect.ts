@@ -336,6 +336,12 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
   // Not `failed`: staying inside a budget the project set is normal operation, not a rulecast
   // failure, so it must not change the exit code.
   for (const { kind, max, setting, skipped } of overBudget) {
+    // A setting, not a problem anyone can fix at an agent's stop (the developer, 2026-11-15): the
+    // debug log keeps it there; the CLI, where a person asked for the check, still says it.
+    if (options.agentHook === true) {
+      log(`${kind} rules checked ${max} files; ${skipped.length} were not checked (${setting})`)
+      continue
+    }
     warnings.push({
       // Said once a session, whichever files a later stop leaves out (#90): it is about the setting.
       key: `${kind}-budget`,

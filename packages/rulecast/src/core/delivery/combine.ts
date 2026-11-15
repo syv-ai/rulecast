@@ -25,8 +25,8 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  *   With the same template they group as one rule. Display only; `preexistingSummary` and `refused`
  *   keep the plain id, since they never group by template.
  * - `stop`: the strongest (STOPS). `unattended` and `via: "shell"`: set if any part sets them.
- * - `warnings` and `notices`: concatenated, each prefixed with its config's path relative to
- *   `displayFrom`. `agentNotices` are about the session, not a config: unprefixed, said once.
+ * - `warnings` and `notices`: concatenated, each from a project other than the one at `displayFrom`
+ *   prefixed with `[<its directory's name>] ` (adapters show it as a tag). `agentNotices` are about the session, not a config: unprefixed, said once.
  * - `conventionDocs`: concatenated in part order, each path once.
  * - `configs`: the config of each part with something for the agent (`forAgent`), relative to
  *   `displayFrom`, in part order: a preamble names the configs whose rules it is about, not every
@@ -108,7 +108,12 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     if (delivery.unattended === true) combined.unattended = true
     if (delivery.via === "shell") combined.via = "shell"
 
-    const prefix = `${configLabel(root)}: `
+    // The session's own project (the one at `displayFrom`) is said bare; another, by its directory's
+    // name: never a config path, which only the developer's tools need.
+    // A config at or above the agent's directory is its own checkout's: only one beside or below it is tagged.
+    const dir = shown(root, ".")
+    const above = dir === "." || /^\.\.(\/\.\.)*$/.test(dir)
+    const prefix = above ? "" : `[${path.basename(dir)}] `
     combined.warnings.push(...delivery.warnings.map((warning) => prefix + warning))
     if (delivery.notices !== undefined) {
       combined.notices = [...(combined.notices ?? []), ...delivery.notices.map((notice) => prefix + notice)]
