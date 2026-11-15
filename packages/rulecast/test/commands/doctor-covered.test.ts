@@ -148,6 +148,24 @@ describe.skipIf(RUFF === null)("rulecast doctor: a linter rule the git hooks alr
     )
   })
 
+  test("a remote hook whose entry the config sets without --force-exclude lints the excluded file too", async () => {
+    const root = await project({
+      "pyproject.toml": `[tool.ruff]\nextend-exclude = ["tests/gen"]\n\n${PYPROJECT}`,
+      "tests/gen/a.py": "x = 1\n",
+      ".rulecast-config.yaml": localConfig([rule("^tests/.*\\.py$", ["SLF001"])]),
+      ".pre-commit-config.yaml": stringify({
+        repos: [
+          {
+            repo: "https://github.com/astral-sh/ruff-pre-commit",
+            rev: "v0.17.0",
+            hooks: [{ id: "ruff-check", entry: "ruff check", types_or: ["python", "pyi"] }],
+          },
+        ],
+      }),
+    })
+    expect(coveredOf((await runCli(root, ["doctor"])).stdout)).toContain("already covered")
+  })
+
   test("a code the probe line itself breaks (D100): unsure, so nothing is said", async () => {
     const root = await project({
       "pyproject.toml": `[tool.ruff.lint]\nselect = ["D100"]\n`,

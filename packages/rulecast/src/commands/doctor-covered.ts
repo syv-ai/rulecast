@@ -92,10 +92,12 @@ const MAX_FILES = 500
 /** At most this many ruff processes at once. */
 const PARALLEL = 8
 
-async function inBatches<T, R>(items: readonly T[], each: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = []
+/** `each` over `items`, PARALLEL at a time, stopping after a batch with a null: the hook is then unsure. */
+async function inBatches<T, R>(items: readonly T[], each: (item: T) => Promise<R | null>): Promise<(R | null)[]> {
+  const results: (R | null)[] = []
   for (let start = 0; start < items.length; start += PARALLEL) {
     results.push(...(await Promise.all(items.slice(start, start + PARALLEL).map(each))))
+    if (results.includes(null)) break
   }
   return results
 }
@@ -196,14 +198,10 @@ async function ruffHooks(top: string): Promise<PreCommitHook[]> {
       const stages = strings(entry.stages) ?? defaults
       if (stages !== null && !stages.includes("pre-commit") && !stages.includes("commit")) continue
       const all = [...own, ...args]
-      found.push({
-        id: entry.id,
-        args: all,
-        forceExclude: !local || all.includes("--force-exclude"),
-        repo,
-        entry,
-        global,
-      })
+      // ruff-pre-commit's own entry has --force-exclude; an entry the config sets says for itself.
+      const set = typeof entry.entry === "string" ? entry.entry.split(/\s+/) : null
+      const forceExclude = all.includes("--force-exclude") || (set === null ? !local : set.includes("--force-exclude"))
+      found.push({ id: entry.id, args: all, forceExclude, repo, entry, global })
     }
   }
   return found

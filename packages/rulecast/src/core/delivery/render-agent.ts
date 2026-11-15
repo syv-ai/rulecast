@@ -46,9 +46,9 @@ const PROTECTED = "This file is protected; revert your change."
 const DIRTY_ADVICE = "It had uncommitted changes before this session: undo only your change, not the whole file."
 const SHARED_ADVICE =
   "Another agent was changing files in this working tree at the same time: undo only your change, not the whole file."
-// A deleted file is gone from the index too after `git rm` or `git mv`, so it comes back from HEAD.
-const undo = (refused: { file: string; deleted?: true }) =>
-  refused.deleted === true ? `git checkout HEAD -- ${refused.file}` : `git checkout -- ${refused.file}`
+// From HEAD, not the index: after `git rm` or `git mv` the index no longer has the file, even when
+// the agent wrote it again, and a file clean at the start has its HEAD content as its own.
+const undo = (refused: { file: string }) => `git checkout HEAD -- ${refused.file}`
 const refusedLines = (refused: NonNullable<Delivery["refused"]>[number]) => [
   `${refused.file} (${refused.rule}): ${PROTECTED}`,
   `  ${refused.dirtyAtStart ? DIRTY_ADVICE : refused.shared === true ? SHARED_ADVICE : undo(refused)}`,

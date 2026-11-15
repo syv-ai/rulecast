@@ -598,7 +598,7 @@ describe("refuse_write under Bash", () => {
     expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false }])
     const text = renderAgentText(call, { maxMatchesPerRule: 10 })
     expect(text).toContain(`${API} (${GENERATED}): This file is protected; revert your change.`)
-    expect(text).toContain(`git checkout -- ${API}`)
+    expect(text).toContain(`git checkout HEAD -- ${API}`)
     expect(call.notices).toEqual([`rulecast: the agent changed a protected file with Bash: ${API} (${GENERATED})`])
 
     const stop = await session.send({ kind: "verify", files: [] })
@@ -705,7 +705,7 @@ describe("a shell call that deletes a file a path rule covers", () => {
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
     const call = await session.shell(() => rm(path.join(root, API)))
-    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false, deleted: true }])
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false }])
     expect(renderAgentText(call, { maxMatchesPerRule: 10 })).toContain(`git checkout HEAD -- ${API}`)
     expect(call.notices).toEqual([`rulecast: the agent changed a protected file with Bash: ${API} (${GENERATED})`])
 
@@ -722,9 +722,23 @@ describe("a shell call that deletes a file a path rule covers", () => {
     const session = sessionAt(root)
     await session.send({ kind: "start", files: [] })
     const call = await session.shell(() => git(root, "rm", "-q", API))
-    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false, deleted: true }])
+    expect(call.refused).toEqual([{ file: API, rule: GENERATED, dirtyAtStart: false }])
     const text = renderAgentText(call, { maxMatchesPerRule: 10 })
     expect(text).toContain(`git checkout HEAD -- ${API}`)
+    await session.shell(() => git(root, "checkout", "HEAD", "--", API))
+    expect((await session.send({ kind: "verify", files: [] })).stop).toBe("allow")
+  })
+
+  test("git rm, then the file written again unstaged: the advised undo still restores it", async () => {
+    const root = await createProtected(true)
+    const session = sessionAt(root)
+    await session.send({ kind: "start", files: [] })
+    const call = await session.shell(async () => {
+      await git(root, "rm", "-q", API)
+      await mkdir(path.dirname(path.join(root, API)), { recursive: true })
+      await session.write(API, "export const api = 2\n")
+    })
+    expect(renderAgentText(call, { maxMatchesPerRule: 10 })).toContain(`git checkout HEAD -- ${API}`)
     await session.shell(() => git(root, "checkout", "HEAD", "--", API))
     expect((await session.send({ kind: "verify", files: [] })).stop).toBe("allow")
   })

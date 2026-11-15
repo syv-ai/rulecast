@@ -240,7 +240,7 @@ writing it. Three things it does not do, all deliberate:
 **A write made with the shell is caught right after it, not refused.** Nothing can know what a
 command such as `sed -i` will write before it runs. So rulecast compares the working tree before and
 after the command: a `refuse_write` finding in a file the command changed is told to the agent at
-once, with how to revert it (`git checkout -- <file>`, or "undo only your change" when the file had
+once, with how to revert it (`git checkout HEAD -- <file>`, or "undo only your change" when the file had
 uncommitted work before the session). Stop is blocked while the finding is new, whatever the rule's
 severity, and the developer is told which file the agent changed.
 

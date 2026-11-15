@@ -310,7 +310,6 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
     via === "shell"
       ? requested.includes(file) || (deleted ?? []).includes(file)
       : view.work.editedVia.get(file) === "shell"
-  const deletedFiles = new Set(deletions.findings.map(({ match }) => match.file))
   const seen = new Set<string>()
   for (const { rule, match, status } of findings) {
     if (status !== "new" || !rule.refuseWrite || !shellEdited(match.file)) continue
@@ -322,7 +321,6 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       rule: rule.id,
       dirtyAtStart: dirtyAtStart(view.work, match.file),
       ...(shared ? { shared: true as const } : {}),
-      ...(deletedFiles.has(match.file) ? { deleted: true as const } : {}),
     })
   }
   // In a checkout only the main agent's subagents worked in, the session's notices about it (config
