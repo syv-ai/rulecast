@@ -11,6 +11,14 @@ import { checkoutOf, git, repositoryTop } from "../core/git"
 import { CHECKOUT_FILE, cacheHome, projectStateDir } from "../core/home"
 import { cachedRepos } from "../core/repos/provider"
 import { derive, type RuleStats, ruleStats } from "../core/stats/derive"
+import {
+  type InjectedRecord,
+  type InjectedStats,
+  injectedStats,
+  PER_TURN_FLAG_TOKENS,
+  readInjected,
+  SINGLE_FLAG_TOKENS,
+} from "../core/stats/injected"
 import { type FindingsRecord, readFindingsLog, readWeeklyRollup } from "../core/stats/log"
 import { ruleRuns, type StopBlocks, stopBlocks } from "../core/stats/runs"
 import {
@@ -66,6 +74,11 @@ export interface StatsDocument {
    * with the path of this project in each and whether the checkout still exists.
    */
   checkouts?: { name: string; root: string; exists: boolean; records: number }[]
+  /**
+   * What reached the agents in the window (core/stats/injected.ts), as ≈ tokens (chars ÷ 4); present
+   * only when anything did.
+   */
+  injected?: InjectedStats
 }
 
 /** One checkout's log and weekly summary, ready to merge with others'. */
@@ -78,6 +91,8 @@ interface Loaded {
   skipped: number
   rotated: boolean
   rolledUpTo: string | null
+  /** What reached the model, sessions tagged as `records` are. */
+  injected: InjectedRecord[]
 }
 
 /**
@@ -87,6 +102,7 @@ interface Loaded {
 async function loadLog(stateDir: string, tag: string | null): Promise<Loaded> {
   const log = await readFindingsLog(stateDir)
   const rollup = await readWeeklyRollup(stateDir)
+  const injected = await readInjected(stateDir)
   const records =
     tag === null ? log.records : log.records.map((record) => ({ ...record, s: `${record.s}\u0000${tag}` }))
   // A log file is counted from the summary or from the log, whole, never both: `findings.1.jsonl` is
@@ -102,6 +118,8 @@ async function loadLog(stateDir: string, tag: string | null): Promise<Loaded> {
     skipped: log.skipped + rollup.skipped,
     rotated: log.rotated,
     rolledUpTo: rollup.rolledUpTo,
+    injected:
+      tag === null ? injected.records : injected.records.map((record) => ({ ...record, s: `${record.s}\u0000${tag}` })),
   }
 }
 
@@ -270,6 +288,43 @@ function weeklyLines(weekly: StatsDocument["weekly"]): string[] {
   return out
 }
 
+/** How many of the most costly doc sections and sessions the terminal names. */
+const INJECTED_SHOWN = 5
+
+const count = (value: number) => value.toLocaleString("en-US")
+
+/** The injected section: what reached the agents, and what to look at. */
+function injectedLines(injected: InjectedStats): string[] {
+  const out = ["injected into the agents (≈ tokens, chars ÷ 4):"]
+  const again = injected.again > 0 ? `; ${count(injected.again)} of it re-delivered after a compact` : ""
+  out.push(`  ${count(injected.tokens)} over ${count(injected.events)} answers${again}`)
+  const events = Object.entries(injected.byEvent)
+    .sort((a, b) => b[1] - a[1])
+    .map(([ev, tokens]) => `${ev} ${count(tokens)}`)
+  out.push(`  by event: ${events.join(" · ")}`)
+  for (const one of injected.sessions.slice(0, INJECTED_SHOWN)) {
+    const heavy = injected.heavySessions.includes(one.session) ? `  (over ${count(PER_TURN_FLAG_TOKENS)} a turn)` : ""
+    out.push(
+      `  session ${one.session}: ${count(one.tokens)} over ${count(one.turns)} turns, ${count(one.perTurn)} a turn${heavy}`,
+    )
+  }
+  if (injected.large.length > 0) {
+    const largest = injected.large[0]!
+    const where = largest.doc === undefined ? largest.ev : `${largest.ev}, ${largest.doc}`
+    out.push(
+      `  ${injected.large.length} single ${injected.large.length === 1 ? "answer" : "answers"} over ${count(SINGLE_FLAG_TOKENS)} (largest ${count(largest.tokens)}: ${where})`,
+    )
+  }
+  if (injected.docs.length > 0) {
+    out.push("  doc sections by cost:")
+    for (const doc of injected.docs.slice(0, INJECTED_SHOWN)) {
+      const rules = doc.rules.length === 0 ? "" : ` (${doc.rules.join(", ")})`
+      out.push(`    ${doc.ref}: ${count(doc.tokens)} over ${count(doc.deliveries)} deliveries${rules}`)
+    }
+  }
+  return out
+}
+
 function terminal(document: StatsDocument): string {
   const out: string[] = []
   const since = document.window.since ?? document.window.firstRecord
@@ -335,6 +390,7 @@ function terminal(document: StatsDocument): string {
     out.push(`no longer configured: ${document.unknownRules.join(", ")}`, "")
   if (document.notCompiled !== undefined)
     out.push("some rules did not compile (see above), so unused and removed rules are not listed", "")
+  if (document.injected !== undefined) out.push(...injectedLines(document.injected), "")
   if (document.window.truncated) out.push("the log was rotated: findings older than its first record are gone", "")
   if (document.skippedLines !== undefined)
     out.push(`${document.skippedLines} unreadable lines in the log were skipped`, "")
@@ -379,7 +435,7 @@ export async function statsCommand(
     for (const checkout of checkouts) {
       const log =
         checkout.stateDir === null
-          ? { records: [], uncounted: [], rolledUp: [], skipped: 0, rotated: false, rolledUpTo: null }
+          ? { records: [], uncounted: [], rolledUp: [], skipped: 0, rotated: false, rolledUpTo: null, injected: [] }
           : await loadLog(checkout.stateDir, checkout.name)
       loaded.push({ ...log, checkout })
     }
@@ -437,6 +493,26 @@ export async function statsCommand(
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
   const trend = weeklyTrend(rows, { since: from ?? null, last: lastRecord ?? rolledUpTo, rolledUpTo })
   const skippedLines = skipped
+  const injectedRecords = loaded
+    .flatMap((one) => one.injected)
+    .filter((record) => from === undefined || record.at >= from)
+  // An agent's turn ends at its stop, which the findings log records whatever it found.
+  const turns = new Map<string, number>()
+  for (const record of windowed) if (record.ev === "stop") turns.set(record.s, (turns.get(record.s) ?? 0) + 1)
+  const citedBy = new Map<string, string[]>()
+  for (const rule of project.rules) {
+    for (const spec of [...rule.context, ...[...rule.contextByRule.values()].flat()]) {
+      const rules = citedBy.get(spec.ref) ?? []
+      if (!rules.includes(rule.id)) rules.push(rule.id)
+      citedBy.set(spec.ref, rules)
+    }
+  }
+  const injected = injectedRecords.length === 0 ? null : injectedStats(injectedRecords, turns, citedBy)
+  if (injected !== null) {
+    injected.sessions = injected.sessions.map((one) => ({ ...one, session: untagged(one.session) }))
+    injected.heavySessions = injected.heavySessions.map(untagged)
+    injected.large = injected.large.map((one) => ({ ...one, session: untagged(one.session) }))
+  }
   const document: StatsDocument = {
     schemaVersion: STATS_SCHEMA_VERSION,
     window: {
@@ -458,6 +534,7 @@ export async function statsCommand(
         }),
     weekly: { ...trend, summary: project.config.stats.weeklySummary ? "on" : "off" },
     ...(skippedLines > 0 ? { skippedLines } : {}),
+    ...(injected === null ? {} : { injected }),
     ...(checkouts === null
       ? {}
       : {

@@ -4,6 +4,7 @@ import path from "node:path"
 import { ADAPTERS, adapterByName } from "../adapters"
 import { compile } from "../core/compile/project"
 import { combineDeliveries } from "../core/delivery/combine"
+import { renderAgentText } from "../core/delivery/render-agent"
 import type { DetectorRegistry } from "../core/detection/registry"
 import { warmableKinds } from "../core/detection/warm"
 import { errorMessage } from "../core/errors"
@@ -24,6 +25,7 @@ import {
 import { cachedRepos } from "../core/repos/provider"
 import { elsewhereNotice, uncheckedCheckouts, untold, wasTold } from "../core/session/elsewhere"
 import { MAIN_AGENT } from "../core/session/state"
+import { appendInjected, injectedRecord } from "../core/stats/injected"
 import type { Adapter, AdapterInput, Delivery, Event } from "../core/types"
 import type { CliIo } from "./main"
 
@@ -125,6 +127,7 @@ export async function hookCommand(args: string[], registry: DetectorRegistry, io
       maxMatchesPerRule: parts.length === 1 ? parts[0]!.maxMatchesPerRule : Number.POSITIVE_INFINITY,
     })
     if (output.stdout !== "") io.stdout(output.stdout)
+    await recordInjected(output.stdout, said, event)
   } catch (error) {
     io.stderr(`rulecast: ${errorMessage(error)}\n`)
   }
@@ -297,6 +300,71 @@ interface ProjectRun {
   changedByShell: boolean
   /** PipelineResult.recordShown. */
   recordShown?: () => Promise<void>
+  /** The project's state directory, where what reached the model is recorded. */
+  stateDir: string
+}
+
+/** What of an answer reached the model: the context it was given, or the reason it was refused or held. */
+function modelText(stdout: string): string {
+  if (stdout === "") return ""
+  try {
+    const output = JSON.parse(stdout) as {
+      decision?: string
+      reason?: string
+      hookSpecificOutput?: { additionalContext?: string; permissionDecisionReason?: string }
+    }
+    const specific = output.hookSpecificOutput
+    return [
+      specific?.additionalContext,
+      specific?.permissionDecisionReason,
+      output.decision === "block" ? output.reason : undefined,
+    ]
+      .filter((text): text is string => typeof text === "string")
+      .join("")
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * Records, in each project's state, its share of what reached the model (core/stats/injected.ts):
+ * shared by the length of each part's own text for the agent, so the combined preamble is spread
+ * with it. Never fails the hook.
+ */
+async function recordInjected(stdout: string, parts: readonly ProjectRun[], event: Event): Promise<void> {
+  const total = modelText(stdout).length
+  const session = event.session
+  if (total === 0 || session === undefined || parts.length === 0) return
+  const own = parts.map(
+    (part) =>
+      renderAgentText(part.delivery, { maxMatchesPerRule: part.maxMatchesPerRule, notices: false, warnings: false })
+        .length,
+  )
+  const sum = own.reduce((a, b) => a + b, 0)
+  const at = new Date().toISOString()
+  let left = total
+  await Promise.all(
+    parts.map((part, index) => {
+      const share =
+        index === parts.length - 1
+          ? left
+          : sum === 0
+            ? index === 0
+              ? total
+              : 0
+            : Math.round((total * own[index]!) / sum)
+      left -= share
+      const record = injectedRecord({
+        at,
+        session: session.id,
+        agent: session.agentId ?? MAIN_AGENT,
+        kind: event.kind,
+        delivery: part.delivery,
+        chars: share,
+      })
+      return appendInjected(part.stateDir, record, () => {})
+    }),
+  )
 }
 
 /**
@@ -352,6 +420,7 @@ async function runProject(root: string, routing: Routing, routed: Routed): Promi
       subagents: routing.subagents,
       changedByShell: result.delivery.via === "shell",
       ...(result.recordShown === undefined ? {} : { recordShown: result.recordShown }),
+      stateDir,
     }
   } catch (error) {
     log?.(`hook ${adapter.name}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)

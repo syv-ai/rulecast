@@ -203,7 +203,7 @@ interface ReadLines<T> {
 }
 
 /** Lines that do not parse, or are not of a shape this version understands, are skipped and counted. */
-async function readLines<T>(file: string, schema: z.ZodType<T>): Promise<ReadLines<T> | null> {
+export async function readLines<T>(file: string, schema: z.ZodType<T>): Promise<ReadLines<T> | null> {
   let text: string
   try {
     text = await readFile(file, "utf8")
