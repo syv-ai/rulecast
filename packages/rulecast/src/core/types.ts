@@ -489,7 +489,7 @@ export interface Delivery {
    * `shared`: another agent's shell call ran at the same time, so part of the change may be theirs
    * and reverting the whole file is wrong too.
    */
-  refused?: { file: string; rule: string; dirtyAtStart: boolean; shared?: true }[]
+  refused?: { file: string; rule: string; dirtyAtStart: boolean; shared?: true; deleted?: true }[]
   /**
    * At an attended stop: findings an earlier stop already sent this agent, still there in a file
    * unchanged since (session/decide.ts `repeats`). Named, never blocking, and without their rule text:

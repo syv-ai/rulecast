@@ -31,6 +31,7 @@ import {
   allFiles,
   changedFilesBetween,
   changedFilesSince,
+  deletedFilesSince,
   headCommit,
   insideWorkTree,
   mergeBase,
@@ -241,10 +242,17 @@ export async function routeRun(root: string, cwd: string, run: RunArgs, cache: s
       ? { selection: "files", files: run.files, baseCommit: null, content: WORKTREE }
       : await selectFiles(cwd, cwd, run)
   const routed = projectsForFiles(cwd, gathered.files)
+  // A deleted file is in no list of changed files, but a path rule judges it (Detector.deletions):
+  // the projects above it run too, so a commit that only deletes one is not missed there.
+  const deleted =
+    gathered.baseCommit === null
+      ? new Map<string, string[]>()
+      : projectsForFiles(cwd, await deletedFilesSince(cwd, gathered.baseCommit, gathered.content))
+  const reached = new Set([...routed.keys(), ...deleted.keys()])
   const above = configRootsAbove(cwd)
   const roots = [
-    ...above.filter((dir) => dir === nearest || routed.has(dir)),
-    ...[...routed.keys()].filter((dir) => !above.includes(dir)).sort(),
+    ...above.filter((dir) => dir === nearest || reached.has(dir)),
+    ...[...reached].filter((dir) => !above.includes(dir)).sort(),
   ]
   if (roots.length === 0) {
     // Configs only below cwd, and none of them reached: the first one says what was checked.

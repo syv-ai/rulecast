@@ -117,3 +117,39 @@ describe("rulecast run: every config above a file", () => {
     expect(result.code).toBe(0)
   })
 })
+
+// Review of edc57fc: a commit that only deletes a file a nested project's path rule covers must
+// reach that project, though no file it judges is there any more.
+describe("a deletion in a nested project", () => {
+  const protect = {
+    id: "pkg/generated",
+    name: "Generated",
+    files: "^generated/",
+    detect: { path: {} },
+    message: "{{file}} is generated.",
+  }
+  const createRepoWithPkg = () =>
+    createRepo({
+      ".rulecast-config.yaml": localConfig([TOP_RULE]),
+      "pkg/.rulecast-config.yaml": localConfig([protect]),
+      "pkg/generated/x.ts": "x\n",
+    })
+  const rules = (stdout: string) =>
+    JSON.parse(stdout).findings.map((finding: { rule: string; file: string }) => `${finding.rule} ${finding.file}`)
+
+  test("staged: git rm alone reaches the nested config", async () => {
+    const root = await createRepoWithPkg()
+    await git(root, "rm", "-q", "pkg/generated/x.ts")
+    const result = await runCli(root, ["run", "--format", "json"])
+    expect(rules(result.stdout)).toEqual(["pkg/generated pkg/generated/x.ts"])
+  })
+
+  test("--from-ref: a branch that only deletes it", async () => {
+    const root = await createRepoWithPkg()
+    await git(root, "checkout", "-q", "-b", "feature")
+    await git(root, "rm", "-q", "pkg/generated/x.ts")
+    await git(root, "commit", "-q", "-m", "drop")
+    const result = await runCli(root, ["run", "--from-ref", "main", "--to-ref", "feature", "--format", "json"])
+    expect(rules(result.stdout)).toEqual(["pkg/generated pkg/generated/x.ts"])
+  })
+})
