@@ -289,8 +289,9 @@ async function filesForHook(
  */
 async function untracked(cwd: string, files: readonly string[]): Promise<Set<string>> {
   if (files.length === 0) return new Set()
-  const listed = await git(cwd, ["ls-files", "-z", "--", ...files])
-  if (!listed.ok) return new Set(files)
+  // git that fails or can't run at all says nothing: every file is reported, none is skipped.
+  const listed = await git(cwd, ["ls-files", "-z", "--", ...files]).catch(() => null)
+  if (listed === null || !listed.ok) return new Set(files)
   const tracked = new Set(listed.stdout.split("\0").filter(Boolean))
   return new Set(files.filter((file) => !tracked.has(file)))
 }
