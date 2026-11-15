@@ -1,5 +1,24 @@
 # @syv-ai/rulecast
 
+## 0.20.0
+
+### Minor Changes
+
+- 432e578: `rulecast doctor` says when a ruff rule's codes already run in the project's pre-commit: `already covered by ruff-check in .pre-commit-config.yaml`, or `covered for 1 of 2 files` when the code is on for only some of the rule's files. It is info and never says to drop the rule: the overlap is harmless, and a rule can be kept to teach the fix at the edit. Whether a code is on for a file is ruff's own answer for that file under the hook's args, `per-file-ignores` and their negated patterns included. doctor says nothing when it can't be sure. eslint, gitleaks and lefthook jobs are not judged yet.
+- 6d03de0: `rulecast doctor` has a history section, read from the findings log. It lists each rule that ran and never fired, with how many times, on how many files and since when: `ran 40 times on 12 files since 2026-10-01, never fired`. Many runs over many files count for more than a few over one. A new rule key, `expect: quiet`, marks a guard over code that holds today: doctor then says its quiet record is as expected (`ok`), and a finding of it is said as `info`. A rule whose `files` matches no file is a warning, since a pattern left stale by a rename looks exactly like that. Marked `expect: quiet`, it is info while the findings log shows it never ran on a file, saying so: `matches no file; never matched since 2026-10-01 (expect: quiet)`. One that ran on files before stays a warning, whatever `expect` says.
+- 2e07a54: The installer changes a shell startup file only in a terminal, for the default directory (`~/.local/bin` or `$XDG_BIN_HOME`). With no terminal (CI, an agent, a container build), or with a directory you name (`--install-dir`, `RULECAST_INSTALL_DIR`), it changes none and prints the line to add. Before, an agent installing into a scratch directory put that directory on the PATH in `~/.profile` and `~/.zshrc`. The new `--modify-path` (`RULECAST_MODIFY_PATH=1`) asks for the edit anyway; `--no-modify-path` still turns it off, and the last of the two wins. Breaking for scripted installs that relied on the edit: add `--modify-path`.
+- edc57fc: A `path` rule now covers a deleted file. Deleting a file changes it as much as writing it, and so does renaming it away (`git mv`, `mv`). Before, `rm .github/workflows/ci.yml` passed `loop-safety/protected-loop-config` silently. Now:
+  - a shell call that deletes or moves away a file a `path` rule covers is a finding at that call, and again at every stop until the file is back. With `refuse_write`, the agent is told to run `git checkout HEAD -- <file>`, and the stop blocks;
+  - `rulecast run` in a git hook (staged) and in CI (`--from-ref`) reports a deleted file the same way;
+  - only a file the base commit has counts: one the run created and deleted again changed nothing. Rules that read a file's content still skip deleted files.
+  
+  A protected file the agent changed with its shell is now undone with `git checkout HEAD -- <file>`, for any change, not only a delete. `git checkout -- <file>` failed after `git rm` or `git mv`, because the index no longer had the file.
+- d213872: `rulecast stats --worktrees` says which checkouts a recurring file's findings came from: each `recurringFiles` entry has `checkouts`, and the terminal lists them beside the file when more than one checkout was read, as in `app/x.py (3 sessions; in main, w1)`.
+
+### Patch Changes
+
+- 4841415: `rulecast doctor` says when agents' stops hit `llm.max_files_per_verify`: how many times, how many files were left unchecked, and that raising the setting checks them all. At a stop the cut goes only to the debug log, so on its own it looks like a clean pass. Cuts at an earlier, lower setting are not counted.
+
 ## 0.19.0
 
 ### Minor Changes
