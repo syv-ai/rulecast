@@ -59,6 +59,41 @@ export interface InjectedRecord {
   again?: true
 }
 
+/**
+ * Each project's share of one combined answer that reached the model, `total` characters. A part's
+ * doc sections (`docs`, each counted once across parts) count whole; the rest is shared by the length
+ * of each part's own words (`other`), so the combined preamble goes with them. Rounded down, the odd
+ * characters to the last part: the shares add up to `total`.
+ *
+ * `kept` is how much of the parts' text reached the model when the adapter cut the answer to its
+ * limit, before its notice; null when it did not cut. The cut is the tail, where the sections are, so
+ * it comes off them, the last part's first. Only the adapter's word counts: each part's text carries
+ * its own heading, which the combined answer has once, so the parts' sum alone proves nothing.
+ */
+export function shareInjected(input: {
+  total: number
+  docs: readonly number[]
+  other: readonly number[]
+  kept: number | null
+}): number[] {
+  const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0)
+  const docShares = [...input.docs]
+  let cut = input.kept === null ? 0 : Math.max(0, sum(input.docs) + sum(input.other) - input.kept)
+  for (let index = docShares.length - 1; index >= 0 && cut > 0; index--) {
+    const taken = Math.min(docShares[index]!, cut)
+    docShares[index] = docShares[index]! - taken
+    cut -= taken
+  }
+  const rest = input.total - sum(docShares)
+  const otherSum = sum(input.other)
+  const shares = docShares.map(
+    (chars, index) =>
+      chars + (otherSum === 0 ? (index === 0 ? rest : 0) : Math.floor((rest * input.other[index]!) / otherSum)),
+  )
+  shares[shares.length - 1] = shares.at(-1)! + input.total - sum(shares)
+  return shares
+}
+
 /** The record of one answer, or null when nothing of this project reached the model. */
 export function injectedRecord(input: {
   at: string

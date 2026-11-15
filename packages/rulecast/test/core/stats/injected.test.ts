@@ -5,6 +5,7 @@ import {
   injectedStats,
   PER_TURN_FLAG_TOKENS,
   SINGLE_FLAG_TOKENS,
+  shareInjected,
 } from "../../../src/core/stats/injected"
 import { emptyDelivery } from "../../../src/core/types"
 
@@ -125,5 +126,48 @@ describe("review of cec2ae0", () => {
     )
     expect(stats.sessions).toEqual([{ session: "s9", tokens: 10_000, turns: 0, perTurn: null }])
     expect(stats.heavySessions).toEqual([])
+  })
+})
+
+describe("review of fc58d9b", () => {
+  test("an answer not cut: each part's sections whole, the rest shared by its own words", () => {
+    expect(shareInjected({ total: 1000, docs: [400, 100], other: [300, 100], kept: null })).toEqual([
+      400 + 375,
+      100 + 125,
+    ])
+  })
+
+  test("an answer cut to the limit: what was cut comes off the sections, the last part's first", () => {
+    // The parts' text is 400 + 300 + 100 + 200 = 1000; 700 of it was kept, then a 50-char notice.
+    // The last part's 300 of sections were cut; the 350 left over is shared 1 : 2, the odd char to the last.
+    expect(shareInjected({ total: 750, docs: [400, 300], other: [100, 200], kept: 700 })).toEqual([400 + 116, 0 + 234])
+  })
+
+  test("the cut notice is not counted as doc sections", () => {
+    // 100 of the parts' 1100 was cut, then a 60-char notice: the last part keeps 400 of its 500 of
+    // sections, and the notice goes with the rest, 80 : 80.
+    expect(shareInjected({ total: 1060, docs: [500, 500], other: [50, 50], kept: 1000 })).toEqual([580, 480])
+  })
+
+  test("several parts each carry a heading the combined answer has once: no cut without the adapter saying so", () => {
+    expect(shareInjected({ total: 500, docs: [200, 200], other: [100, 100], kept: null })).toEqual([250, 250])
+  })
+
+  test("an unattended hold: only rulecast's own words, no docs and no findings", () => {
+    const delivery = {
+      ...emptyDelivery(),
+      references: [{ ref: "d#x", state: "full" as const, content: "z".repeat(100) }],
+      findings: [{ rule: "r", file: "a.py", message: "m".repeat(30) }],
+    } as unknown as Parameters<typeof injectedRecord>[0]["delivery"]
+    const record = injectedRecord({
+      at,
+      session: "s1",
+      agent: "main",
+      kind: "verify",
+      delivery,
+      chars: 300,
+      ownWordsOnly: true,
+    })
+    expect(record).toMatchObject({ ev: "stop", chars: 300, docs: [], findings: 0 })
   })
 })

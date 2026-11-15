@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs"
 import path from "node:path"
 
 import { ADAPTERS, adapterByName } from "../adapters"
+import { CUT_NOTICE_START } from "../adapters/claude-code/adapter"
 import { compile } from "../core/compile/project"
 import { combineDeliveries } from "../core/delivery/combine"
 import { renderAgentText } from "../core/delivery/render-agent"
@@ -25,7 +26,7 @@ import {
 import { cachedRepos } from "../core/repos/provider"
 import { elsewhereNotice, uncheckedCheckouts, untold, wasTold } from "../core/session/elsewhere"
 import { MAIN_AGENT } from "../core/session/state"
-import { appendInjected, injectedRecord } from "../core/stats/injected"
+import { appendInjected, injectedRecord, shareInjected } from "../core/stats/injected"
 import type { Adapter, AdapterInput, Delivery, Event } from "../core/types"
 import type { CliIo } from "./main"
 
@@ -304,9 +305,6 @@ interface ProjectRun {
   stateDir: string
 }
 
-/** What the Claude Code adapter appends when it cuts an answer to the hook output limit. */
-const CUT_NOTICE = "cut to fit Claude Code's hook output limit"
-
 /** What of an answer reached the model: the context it was given, or the reason it was refused or held. */
 function modelText(stdout: string): string {
   if (stdout === "") return ""
@@ -374,26 +372,9 @@ async function recordInjected(
         .length - sections[index]!,
     ),
   )
-  // The adapter cuts the tail to its limit, where the sections are: what the parts' text has beyond
-  // what reached the model was cut from them, the last first.
-  const docShares = [...docs]
-  const ownSum = docShares.reduce((a, b) => a + b, 0) + other.reduce((a, b) => a + b, 0)
-  // Only when the adapter says it cut (adapters/claude-code `withinLimit`): several parts' texts each
-  // carry their own heading, which the combined answer has once, so their sum alone proves nothing.
-  let cut = text.includes(CUT_NOTICE) ? Math.max(0, ownSum - total) : 0
-  for (let index = docShares.length - 1; index >= 0 && cut > 0; index--) {
-    const taken = Math.min(docShares[index]!, cut)
-    docShares[index] = docShares[index]! - taken
-    cut -= taken
-  }
-  const rest = total - docShares.reduce((a, b) => a + b, 0)
-  const otherSum = other.reduce((a, b) => a + b, 0)
-  // Rounded down, the rest to the last: the shares add up to what reached the model, none below 0.
-  const shares = docShares.map(
-    (chars, index) =>
-      chars + (otherSum === 0 ? (index === 0 ? rest : 0) : Math.floor((rest * other[index]!) / otherSum)),
-  )
-  shares[shares.length - 1] = shares.at(-1)! + total - shares.reduce((a, b) => a + b, 0)
+  // The adapter cuts the tail to its limit (adapters/claude-code `withinLimit`) and says so after it.
+  const notice = text.lastIndexOf(CUT_NOTICE_START)
+  const shares = shareInjected({ total, docs, other, kept: notice === -1 ? null : notice })
   const at = new Date().toISOString()
   const counted = new Set<string>()
   const records = parts.map((part, index) =>

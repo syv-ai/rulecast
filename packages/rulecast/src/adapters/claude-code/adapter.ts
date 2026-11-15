@@ -98,18 +98,21 @@ function sweptMessage(delivery: Delivery, event: Event, options: { maxMatchesPer
   return withinLimit(`${SWEPT_PREAMBLE}\n\n${sweptText}`, delivery, event)
 }
 
+/** How the notice on a cut answer starts; `rulecast stats` finds the cut by it (commands/hook.ts). */
+export const CUT_NOTICE_START = "\n\n…cut to fit Claude Code's hook output limit"
+
 /** Where the rest of a cut delivery can be read: the file commit wrote, else the CLI. */
 function cutNotice(delivery: Delivery, event: Event): string {
   const overflow = delivery.overflowPaths
   // Combined from several projects, each one that overflowed wrote its own file; one that fit wrote none.
   if (overflow.length > 0 && (delivery.configs ?? []).length > 1) {
-    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery of each config that did not fit is in ${overflow.join(" and ")}.`
+    return `${CUT_NOTICE_START}. The whole delivery of each config that did not fit is in ${overflow.join(" and ")}.`
   }
   if (overflow.length > 0) {
-    return `\n\n…cut to fit Claude Code's hook output limit. The whole delivery is in ${overflow.join(" and ")}.`
+    return `${CUT_NOTICE_START}. The whole delivery is in ${overflow.join(" and ")}.`
   }
   const session = event.session ? `--session ${event.session.id} ` : ""
-  return `\n\n…cut to fit Claude Code's hook output limit. Run \`rulecast run ${session}--format agent\` for the full list.`
+  return `${CUT_NOTICE_START}. Run \`rulecast run ${session}--format agent\` for the full list.`
 }
 
 /**
