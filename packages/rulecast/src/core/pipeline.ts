@@ -876,6 +876,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     },
     failedAtStart || detected?.failed === true,
   )
-  if (announceDeferral) finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
+  if (announceDeferral && options.subagentsProject !== true)
+    finished.delivery.notices = [...(finished.delivery.notices ?? []), DEFERRED_SWEEP]
   return finished
 }

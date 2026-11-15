@@ -1,3 +1,4 @@
+import { TAG } from "../../core/delivery/combine"
 import { renderAgentText, repeatedLine } from "../../core/delivery/render-agent"
 import { disabledText } from "../../core/disabled"
 import { type Adapter, type Delivery, type Event, emptyDelivery } from "../../core/types"
@@ -139,12 +140,18 @@ function conventionDocs(docs: readonly string[]): { stdout: string; exitCode: nu
 }
 
 /**
- * One of rulecast's own lines to the user: `RC <level>: <message>`, or `RC <level> [dir]: <message>`
- * for another project's (core/delivery/combine.ts tags it), without the text's own "rulecast: ".
+ * One of rulecast's own lines to the user: `RC <level>: <message>`, or `RC <level> [checkout]:
+ * <message>` for another checkout's (core/delivery/combine.ts marks it), on one line, without the
+ * text's own "rulecast: " or a config's path, which only the developer's tools need.
  */
 function chrome(level: "note" | "warning" | "error", text: string): string {
-  const tagged = /^\[([^\]]+)\] ([\s\S]*)$/.exec(text)
-  const body = (tagged?.[2] ?? text).replace(/^rulecast: /, "")
+  const tagged = new RegExp(`^${TAG}([^${TAG}]*)${TAG}([\\s\\S]*)$`).exec(text)
+  const body = (tagged?.[2] ?? text)
+    .replace(/^rulecast: /, "")
+    // A compile problem names its config and rule: `.rulecast-config.yaml (r/x): …` is `rule r/x: …`.
+    .replace(/^\S*\.rulecast-config\.yaml \(([^)]+)\): /, "rule $1: ")
+    .replace(/^\S*\.rulecast-config\.yaml: /, "config: ")
+    .replace(/\s*\n\s*/g, " ")
   return `RC ${level}${tagged ? ` [${tagged[1]}]` : ""}: ${body}`
 }
 

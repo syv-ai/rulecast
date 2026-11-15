@@ -52,9 +52,53 @@ describe("rulecast's own lines to the user", () => {
         { root: "/repo-worktrees/validation-rename", delivery: other },
       ],
       "/repo",
+      "checkout",
     )
     const message = said(combined)!
     expect(message).toBe("RC note [validation-rename]: other notice\nRC warning: own warning")
     expect(message).not.toContain(".rulecast-config.yaml")
+  })
+})
+
+describe("what a line is tagged with, and what it leaves out (review of 7a64b2a)", () => {
+  const tagged = (roots: string[], from: string) =>
+    said(
+      combineDeliveries(
+        roots.map((root, index) => ({ root, delivery: delivery({ warnings: [`w${index}`] }) })),
+        from,
+        "checkout",
+      ),
+    )
+
+  test("one part beside the agent is tagged too", () => {
+    expect(tagged(["/repo/backend"], "/repo/frontend")).toBe("RC warning [backend]: w0")
+  })
+
+  test("from a worktree under the main checkout, the main checkout is another checkout", () => {
+    expect(tagged(["/repo", "/repo/.claude/worktrees/wt1"], "/repo/.claude/worktrees/wt1")).toBe(
+      "RC warning [repo]: w0\nRC warning: w1",
+    )
+  })
+
+  test("two checkouts with one name are told apart by their path", () => {
+    expect(tagged(["/a/pkg", "/b/pkg"], "/c")).toBe("RC warning [a/pkg]: w0\nRC warning [b/pkg]: w1")
+  })
+
+  test("a warning whose own text starts with brackets is not read as a tag", () => {
+    expect(said(delivery({ warnings: ["[x] y.py: rulecast-ignore needs a reason"] }))).toBe(
+      "RC warning: [x] y.py: rulecast-ignore needs a reason",
+    )
+  })
+
+  test("a warning of several lines is said on one", () => {
+    expect(said(delivery({ warnings: ["3 rules failed to compile.\nFirst: r/x: bad"] }))).toBe(
+      "RC warning: 3 rules failed to compile. First: r/x: bad",
+    )
+  })
+
+  test("a compile problem names its rule, not its config's path", () => {
+    expect(
+      said(delivery({ warnings: ["../wt/.rulecast-config.yaml (r/x): name: required (run rulecast validate)"] })),
+    ).toBe("RC warning: rule r/x: name: required (run rulecast validate)")
   })
 })

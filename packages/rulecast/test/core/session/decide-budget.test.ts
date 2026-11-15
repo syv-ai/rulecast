@@ -180,6 +180,18 @@ describe("decide: warnings are charged after the floor", () => {
     expect(warned).toEqual(noisy(80).map((warning) => warning.key))
   })
 
+  // Review of 7a64b2a: with the budget full nothing of a warning is said, so it must not be
+  // recorded as said: it waits for a stop with room.
+  test("a warning nothing was said of, not even the line standing for it, is not recorded as said", async () => {
+    const warnings = [{ key: "detector:x:r1:m", text: "regex detector failed for r1: bad. Disabled for this session." }]
+    const { delivery, context } = await decide(
+      // So little room that even "1 more — run rulecast doctor" does not fit.
+      input({ maxContextChars: 60, warnings, findings: manyIn("works/compute", "a.py", 1) }),
+    )
+    expect(delivery.warnings).toEqual([])
+    expect(context.filter((record) => record.t === "warned")).toEqual([])
+  })
+
   test("without a limit every warning is delivered", async () => {
     const { delivery, context } = await decide(input({ warnings: noisy(80) }))
     expect(delivery.warnings).toHaveLength(80)

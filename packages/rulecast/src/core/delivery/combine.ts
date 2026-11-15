@@ -25,8 +25,7 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  *   With the same template they group as one rule. Display only; `preexistingSummary` and `refused`
  *   keep the plain id, since they never group by template.
  * - `stop`: the strongest (STOPS). `unattended` and `via: "shell"`: set if any part sets them.
- * - `warnings` and `notices`: concatenated, each from a project other than the one at `displayFrom`
- *   prefixed with `[<its directory's name>] ` (adapters show it as a tag). `agentNotices` are about the session, not a config: unprefixed, said once.
+ * - `warnings` and `notices`: concatenated, each labelled as `labels` says. `agentNotices` are about the session, not a config: unprefixed, said once.
  * - `conventionDocs`: concatenated in part order, each path once.
  * - `configs`: the config of each part with something for the agent (`forAgent`), relative to
  *   `displayFrom`, in part order: a preamble names the configs whose rules it is about, not every
@@ -34,7 +33,60 @@ const STOPS: Delivery["stop"][] = ["block", "report", "incomplete", "capReached"
  * - `omitted`: `findings` merged per rule and per swept/not swept (the renderer finds an entry by
  *   both), counts and files summed, `inFiles` joined; `rules` and `preexisting` summed.
  */
-export function combineDeliveries(parts: { root: string; delivery: Delivery }[], displayFrom: string): Delivery {
+/**
+ * How a project's warnings and notices are labelled: `config`, by its config's path (the CLI);
+ * `checkout`, an agent's hooks: by `checkoutTag`, and only a project of another checkout or below the
+ * agent (the developer, 2026-11-15).
+ */
+export type Labels = "config" | "checkout"
+
+/** The marker around a `checkout` label, which no warning's own text holds (adapters/claude-code). */
+export const TAG = "\u0001"
+
+/**
+ * The short name of a project's checkout for a line said to the user, or null for the agent's own:
+ * one at or above the agent's directory, unless the agent is in a worktree under it
+ * (`.claude/worktrees/<name>`), which is a checkout of its own. By the directory's name, or its path
+ * when two projects share a name.
+ */
+export function checkoutTags(roots: readonly string[], displayFrom: string): (string | null)[] {
+  const dirs = roots.map((root) => displayPath(root, displayFrom)("."))
+  const own = (root: string, dir: string) => {
+    if (dir !== "." && !/^\.\.(\/\.\.)*$/.test(dir)) return false
+    const down = path.relative(path.resolve(root), path.resolve(displayFrom)).split(path.sep).join("/")
+    return !/(^|\/)\.claude\/worktrees\//.test(`${down}/`)
+  }
+  const names = roots.map((root) => path.basename(path.resolve(root)))
+  return roots.map((root, index) => {
+    if (own(root, dirs[index]!)) return null
+    const name = names[index]!
+    const shared = names.filter((other, at) => other === name && at !== index && !own(roots[at]!, dirs[at]!))
+    return shared.length > 0 ? dirs[index]!.replace(/^(\.\.\/)+/, "") || name : name
+  })
+}
+
+export function combineDeliveries(
+  parts: { root: string; delivery: Delivery }[],
+  displayFrom: string,
+  labels: Labels = "config",
+): Delivery {
+  if (labels === "checkout") {
+    // Even one part: a project beside or below the agent, or in another checkout, is named.
+    const tags = checkoutTags(
+      parts.map(({ root }) => root),
+      displayFrom,
+    )
+    parts = parts.map((part, index) => {
+      const tag = tags[index]
+      if (tag === null || tag === undefined) return part
+      const mark = (text: string) => `${TAG}${tag}${TAG}${text}`
+      const notices = part.delivery.notices?.map(mark)
+      return {
+        ...part,
+        delivery: { ...part.delivery, warnings: part.delivery.warnings.map(mark), ...(notices ? { notices } : {}) },
+      }
+    })
+  }
   if (parts.length === 1) return parts[0]!.delivery
 
   const shown = (root: string, file: string) => displayPath(root, displayFrom)(file)
@@ -108,12 +160,8 @@ export function combineDeliveries(parts: { root: string; delivery: Delivery }[],
     if (delivery.unattended === true) combined.unattended = true
     if (delivery.via === "shell") combined.via = "shell"
 
-    // The session's own project (the one at `displayFrom`) is said bare; another, by its directory's
-    // name: never a config path, which only the developer's tools need.
-    // A config at or above the agent's directory is its own checkout's: only one beside or below it is tagged.
-    const dir = shown(root, ".")
-    const above = dir === "." || /^\.\.(\/\.\.)*$/.test(dir)
-    const prefix = above ? "" : `[${path.basename(dir)}] `
+    // `checkout` labels were put on above.
+    const prefix = labels === "checkout" ? "" : `${configLabel(root)}: `
     combined.warnings.push(...delivery.warnings.map((warning) => prefix + warning))
     if (delivery.notices !== undefined) {
       combined.notices = [...(combined.notices ?? []), ...delivery.notices.map((notice) => prefix + notice)]

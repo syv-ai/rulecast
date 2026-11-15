@@ -664,12 +664,14 @@ export function trim(
       }
     }
     delivery.warnings = unwarned.slice(0, held).map((warning) => warning.text)
-    // The cut ones too: the line standing for them is said once, not again at every stop.
-    for (const warning of unwarned) context.push({ t: "warned", key: warning.key })
+    for (const warning of unwarned.slice(0, held)) context.push({ t: "warned", key: warning.key })
     const cut = unwarned.slice(held)
     if (cut.length > 0 && spent + warningCost(moreWarnings(cut)) <= ceiling) {
       spent += warningCost(moreWarnings(cut))
       delivery.warnings.push(moreWarnings(cut))
+      // The line standing for the cut ones said where to see them: said once, not at every stop.
+      // When even it did not fit, nothing was said of them, and they wait for a later stop.
+      for (const warning of cut) context.push({ t: "warned", key: warning.key })
     }
     // Nothing printed, so the heading never prints either.
     used += delivery.warnings.length > 0 ? spent : 0

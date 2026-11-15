@@ -292,12 +292,16 @@ export async function detectStage(run: Run, input: DetectInput): Promise<Detecte
       ...(shared ? { shared: true as const } : {}),
     })
   }
+  // Not in a checkout only the main agent's subagents worked in: the session's notices about it
+  // (config changed, ignores added) are the subagents' to give at their own stops, and once given
+  // here they would be recorded as told and never shown (commands/hook.ts says only findings there).
   const atStop = options.stopGate === true && event.kind === "verify" && session !== null
-  if (session !== null && (atStop || refused.length > 0)) {
+  const noticesAtStop = atStop && options.subagentsProject !== true
+  if (session !== null && (noticesAtStop || refused.length > 0)) {
     told = notices({
-      startConfigHash: atStop ? (baseline.startConfigHash ?? null) : null,
-      currentConfigHash: atStop ? await configHash(root) : null,
-      ignored: atStop
+      startConfigHash: noticesAtStop ? (baseline.startConfigHash ?? null) : null,
+      currentConfigHash: noticesAtStop ? await configHash(root) : null,
+      ignored: noticesAtStop
         ? classifiedIgnores.map(({ rule, match, reason, status }) => ({ rule: rule.id, match, reason, status }))
         : [],
       told: view.work.noticed,

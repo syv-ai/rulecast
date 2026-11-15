@@ -103,3 +103,24 @@ describe("repeats are listed when they change, counted at a block, and fixes are
     expect((await stop()).repeatedFixed).toBeUndefined()
   })
 })
+
+// Review of 7a64b2a: the parent's stop in a checkout only its subagents worked in must not take the
+// session's notices about it (recording them as told, then saying nothing): the subagent's own stop
+// says them.
+describe("a checkout only subagents worked in", () => {
+  test("the parent's stop there leaves the config notice to the subagent's own stop", async () => {
+    const root = await createRepo({ ...fixtureFiles, ".rulecast-config.yaml": localConfig(fixtureRules) })
+    const send = async (event: DistributiveOmit<Event, "cwd" | "session"> & { agentId?: string }, lead = false) => {
+      const { agentId, ...rest } = event
+      const options = { stopGate: true, ...(lead ? { subagentsProject: true } : {}) }
+      return (await pipelineAt(root, { ...rest, cwd: root, session: { id: "s1", agentId } } as Event, options)).delivery
+    }
+    await send({ kind: "edit", files: [USERS], agentId: "sub1" })
+    const config = path.join(root, ".rulecast-config.yaml")
+    await writeFile(config, `${localConfig(fixtureRules)}\n# narrowed\n`)
+    const parent = await send({ kind: "verify", files: [] }, true)
+    expect(parent.notices ?? []).toEqual([])
+    const own = await send({ kind: "verify", files: [], agentId: "sub1" })
+    expect((own.notices ?? []).join("\n")).toContain("config changed this session")
+  })
+})
