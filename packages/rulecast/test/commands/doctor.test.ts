@@ -698,6 +698,14 @@ describe("rulecast doctor", () => {
       expect(filtered.stdout).not.toContain("selects every file")
     })
 
+    test("a pass_filenames: false hook: the rule is told the hook runs when those files change", async () => {
+      const { stdout } = await doctor(await repo("        pass_filenames: false\n        types: [python]\n"))
+      expect(stdout).toContain(
+        "  info     mypy — selects every file, but its hook mypy-check only runs when a Python file changed; " +
+          "add `types: [python]` to the rule so it selects the same\n",
+      )
+    })
+
     test("types: [python] (AIP): the rule is told to take the hook's types", async () => {
       const { stdout } = await doctor(await repo(`${ALWAYS}        types: [python]\n`))
       expect(stdout).toContain(

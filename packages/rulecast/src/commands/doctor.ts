@@ -512,7 +512,8 @@ async function everyChangeHooks(
           if (verdict.kind === "filter") {
             found.push({
               rule: rule.id,
-              detail: `selects every file, but its hook ${hook} is only given ${filesSaid(verdict.rule, true)}; add ${filterText(verdict.rule)} to the rule so it selects the same`,
+              // A pass_filenames: false hook is given no files: its filter only decides when it runs.
+              detail: `selects every file, but its hook ${hook} ${scope.passFilenames === false ? `only runs when ${filesSaid(verdict.rule)} changed` : `is only given ${filesSaid(verdict.rule, true)}`}; add ${filterText(verdict.rule)} to the rule so it selects the same`,
               level: "info",
             })
           }

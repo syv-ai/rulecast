@@ -184,9 +184,7 @@ describe("hook detector: pre-commit hooks", () => {
       leaveChanges: true,
     })
     expect(await readFile(path.join(root, "t.txt"), "utf8")).toBe("hello\nworld\n")
-    expect(result.findings.map((finding) => finding.match.captures.message)).toEqual([
-      "trailing-whitespace would change this file",
-    ])
+    expect(result.findings.map((finding) => finding.match.file)).toEqual(["t.txt"])
   })
 
   // A file another agent changed while the hook ran is not the hook's change: pre-commit says when
@@ -194,7 +192,8 @@ describe("hook detector: pre-commit hooks", () => {
   test.each([false, true])(
     "a file that changed while a hook that modified nothing ran: not its finding, not put back (leaveChanges %s)",
     async (leaveChanges) => {
-      const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello\n" })
+      // Tracked: pre-commit's `git diff` would have seen the hook change it.
+      const root = await createRepo({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello\n" })
       await stubRunner(root, "prek", "printf 'edited by another agent\\n' > t.txt\necho 'trim.........Passed'")
       const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["t.txt"])], {
         leaveChanges,
@@ -248,6 +247,43 @@ repos:
     const result = await run(root, [ruleFor("fmt", { "pre-commit": "fmt" }, ["docs/PLAN.md"])])
     expect(result).toEqual({ findings: [], errors: [] })
     expect(existsSync(path.join(root, "prek.calls"))).toBe(false)
+  })
+
+  // An empty --files list makes pre-commit run on staged files and stash the rest: never pass one.
+  test("an always_run hook whose filter takes none of the files: run on them all, nothing compared", async () => {
+    const config =
+      "repos:\n  - repo: local\n    hooks:\n      - id: fmt\n        name: fmt\n        entry: fmt\n        language: system\n        always_run: true\n        types: [python]\n"
+    const root = await createProject({ ".pre-commit-config.yaml": config, "docs/PLAN.md": "# plan\n" })
+    await stubRunner(
+      root,
+      "prek",
+      `for f in "$@"; do [ -f "$f" ] && printf 'x\\n' > "$f"; done\n${replay("prek.modified.txt", 1)}`,
+    )
+    const result = await run(root, [ruleFor("fmt", { "pre-commit": "fmt" }, ["docs/PLAN.md"])], { leaveChanges: true })
+    expect(await calls(root, "prek")).toEqual(["run fmt --files docs/PLAN.md"])
+    expect(result.findings).toEqual([])
+  })
+
+  // pre-commit tells "files were modified" from `git diff`, which leaves untracked files out: a new
+  // file a formatter rewrote is the hook's change though the runner does not say so.
+  test("an untracked file the hook changed is its change, though the runner says nothing was modified", async () => {
+    const root = await createRepo({ ".pre-commit-config.yaml": CONFIG, "tracked.txt": "a\n" })
+    await writeFile(path.join(root, "new.txt"), "hello   \n")
+    await stubRunner(root, "prek", "printf 'hello\\n' > new.txt\necho 'trim.........Passed'")
+    const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["new.txt"])])
+    expect(await readFile(path.join(root, "new.txt"), "utf8")).toBe("hello   \n")
+    expect(result.findings.map((finding) => finding.match.file)).toEqual(["new.txt"])
+  })
+
+  test("in an agent's hook the finding says the hook changed the file", async () => {
+    const root = await createProject({ ".pre-commit-config.yaml": CONFIG, "t.txt": "hello   \nworld\n" })
+    await stubRunner(root, "prek", `printf 'hello\\nworld\\n' > t.txt\n${replay("prek.modified.txt", 1)}`)
+    const result = await run(root, [ruleFor("trim", { "pre-commit": "trailing-whitespace" }, ["t.txt"])], {
+      leaveChanges: true,
+    })
+    expect(result.findings.map((finding) => finding.match.captures.message)).toEqual([
+      "trailing-whitespace changed this file; check the change and keep or undo it",
+    ])
   })
 
   /** A prek stub whose hook failed with `exit` and printed `lines`, indented as prek does. */

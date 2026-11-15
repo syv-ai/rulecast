@@ -35,13 +35,13 @@ async function formatterRepo(): Promise<string> {
 
 describe("a formatter hook's change", () => {
   test.each([
-    [true, "a = 1\n"],
-    [false, "a=1\n"],
-  ])("agentHook %s: the file is %j afterwards, and the change is the finding", async (agentHook, after) => {
+    [true, "a = 1\n", "pre-commit/fmt changed this file; check the change and keep or undo it"],
+    [false, "a=1\n", "pre-commit/fmt would change this file"],
+  ])("agentHook %s: the file is %j afterwards, and the change is the finding", async (agentHook, after, message) => {
     const root = await formatterRepo()
     const event = { kind: "verify" as const, files: ["a.py"], cwd: root }
     const { delivery } = await pipelineAt(root, event, { agentHook })
     expect(await readFile(path.join(root, "a.py"), "utf8")).toBe(after)
-    expect(delivery.findings.map((finding) => finding.message)).toEqual(["pre-commit/fmt would change this file"])
+    expect(delivery.findings.map((finding) => finding.message)).toEqual([message])
   })
 })
