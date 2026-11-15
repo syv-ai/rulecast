@@ -19,7 +19,7 @@ minimum_pre_commit_version: "3.2.0"
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 repos:
   - repo: https://github.com/syv-ai/rulecast
-    rev: v0.17.1
+    rev: v0.18.0
     hooks:
       - id: rulecast
       - id: rulecast-push
