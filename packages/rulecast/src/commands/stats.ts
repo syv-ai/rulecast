@@ -10,7 +10,7 @@ import type { DetectorRegistry } from "../core/detection/registry"
 import { checkoutOf, git, repositoryTop } from "../core/git"
 import { CHECKOUT_FILE, cacheHome, projectStateDir } from "../core/home"
 import { cachedRepos } from "../core/repos/provider"
-import { derive, type RuleStats, ruleStats } from "../core/stats/derive"
+import { derive, type FindingLife, type RuleStats, ruleStats } from "../core/stats/derive"
 import {
   type InjectedRecord,
   type InjectedStats,
@@ -29,6 +29,7 @@ import {
   type WeeklyTrend,
   type WeekRow,
   weeklyTrend,
+  weekOf,
   weekRows,
 } from "../core/stats/weekly"
 import type { CliIo } from "./main"
@@ -191,27 +192,23 @@ async function checkoutProjects(
 }
 
 /**
- * With `--worktrees`: each recurring file's checkouts, those whose log has the rule firing there
- * since the trend's start (AKA lead, 0.19.0). From the logs, not the weekly summary, which keeps
- * counts and no checkouts: a file whose findings are only in the summary names none.
+ * With `--worktrees`: each recurring file's checkouts (AKA lead, 0.19.0). Counted as the file's
+ * sessions are (weekly.ts `weekRows`): the lives of the rule on the file first reported in the
+ * trend's weeks, each named by the checkout its session was tagged with. From the logs, not the
+ * weekly summary, which keeps counts and no checkouts, so the list can leave out one whose findings
+ * were rotated into the summary.
  */
-function withCheckouts(
-  trend: WeeklyTrend,
-  loaded: readonly { records: readonly FindingsRecord[]; checkout: { name: string } | null }[] | null,
-): WeeklyTrend {
-  if (loaded === null) return trend
+function withCheckouts(trend: WeeklyTrend, lives: readonly FindingLife[] | null): WeeklyTrend {
+  if (lives === null || trend.from === null) return trend
+  const fromWeek = weekOf(trend.from)
   const where = new Map<string, Set<string>>()
-  for (const { records, checkout } of loaded) {
-    if (checkout === null) continue
-    for (const record of records) {
-      if (trend.from !== null && record.at < trend.from) continue
-      for (const found of record.found) {
-        const key = `${found.r}\u0000${found.f}`
-        const names = where.get(key) ?? new Set<string>()
-        where.set(key, names)
-        names.add(checkout.name)
-      }
-    }
+  for (const life of lives) {
+    const checkout = life.session.split("\u0000")[1]
+    if (checkout === undefined || weekOf(life.firstAt) < fromWeek) continue
+    const key = `${life.rule}\u0000${life.file}`
+    const names = where.get(key) ?? new Set<string>()
+    where.set(key, names)
+    names.add(checkout)
   }
   return {
     ...trend,
@@ -415,7 +412,8 @@ function terminal(document: StatsDocument): string {
     }
     out.push("")
   }
-  out.push(...weeklyLines(document.weekly, (document.checkouts?.length ?? 0) > 1))
+  // Several only when more than one checkout's log had anything in it.
+  out.push(...weeklyLines(document.weekly, (document.checkouts ?? []).filter((one) => one.records > 0).length > 1))
   if (document.neverFired !== undefined && document.runs !== undefined) {
     const runs = document.runs
     const ran = document.neverFired.filter((rule) => (runs[rule] ?? 0) > 0)
@@ -537,7 +535,7 @@ export async function statsCommand(
   const lastRecord = records.reduce<string | null>((last, { at }) => (last === null || at > last ? at : last), null)
   const trend = withCheckouts(
     weeklyTrend(rows, { since: from ?? null, last: lastRecord ?? rolledUpTo, rolledUpTo }),
-    checkouts === null ? null : loaded,
+    checkouts === null ? null : derive(uncounted),
   )
   const skippedLines = skipped
   const injectedRecords = loaded

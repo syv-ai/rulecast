@@ -499,6 +499,47 @@ describe("rulecast stats --worktrees (#71)", () => {
     expect(plain.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)?.recurringFiles ?? []).toEqual([])
   })
 
+  test("under --since, a checkout is named only for findings the window counts (review of d213872)", async () => {
+    const fired = (at: string, s: string, id = `id-${s}`) => record(at, "stop", [[id, RULE, "delivered"]], s)
+    // Three sessions in the main checkout, all in the window.
+    const root = await realpath(
+      await projectWithLog([
+        fired("2026-10-06T10:00:00.000Z", "s1"),
+        fired("2026-10-06T11:00:00.000Z", "s2"),
+        fired("2026-10-13T10:00:00.000Z", "s3"),
+      ]),
+    )
+    // In w1, a finding first reported before the window, and reported again inside it.
+    const w1 = path.join(root, ".claude", "worktrees", "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", w1], { cwd: root })
+    await writeLog(
+      stateDirFor(w1),
+      [fired("2026-09-01T10:00:00.000Z", "s9", "old"), fired("2026-10-07T10:00:00.000Z", "s9", "old")],
+      w1,
+      path.join(root, ".git"),
+    )
+    const document = JSON.parse(
+      (await runCli(root, ["stats", "--worktrees", "*", "--since", "2026-10-05", "--format", "json"])).stdout,
+    )
+    const trend = document.weekly.rules.find((entry: { rule: string }) => entry.rule === RULE)
+    expect(trend.recurringFiles).toEqual([{ file: USERS, sessions: 3, checkouts: [path.basename(root)] }])
+  })
+
+  test("one checkout's log read, others empty: the terminal does not name checkouts", async () => {
+    const fired = (at: string, s: string) => record(at, "stop", [[`id-${s}`, RULE, "delivered"]], s)
+    const root = await realpath(
+      await projectWithLog([
+        fired("2026-10-01T10:00:00.000Z", "s1"),
+        fired("2026-10-01T11:00:00.000Z", "s2"),
+        fired("2026-10-06T10:00:00.000Z", "s3"),
+      ]),
+    )
+    const w1 = path.join(root, ".claude", "worktrees", "w1")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "w1", w1], { cwd: root })
+    const text = (await runCli(root, ["stats", "--worktrees", "*"])).stdout
+    expect(text).toContain(`${USERS} (3 sessions)`)
+  })
+
   test("a removed checkout is found wherever it was, and only when it was this repository's", async () => {
     const root = await realpath(await projectWithLog(RECORDS.slice(0, 4)))
     // Another repository beside this one, with a log of its own: not a checkout of this one.
