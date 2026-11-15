@@ -1,5 +1,27 @@
 # @syv-ai/rulecast
 
+## 0.17.0
+
+### Minor Changes
+
+- 56a308d: **Breaking:** at an agent's Stop (and in any other agent hook), a formatter hook rule no longer puts the file back after its hook changes it. The change stays in the file, as a commit would leave it, and is still reported as "<hook> would change this file". Putting files back raced with other agents: a subagent's edit made while the hook ran was taken for the hook's change and reverted. `rulecast run`, `rulecast doctor` and git hooks still put files back.
+  
+  With pre-commit or prek, a changed file counts as the hook's only when the runner says the hook modified files. A file someone else changed while a hook that modified nothing ran is no longer reported as that hook's change, and is never put back.
+  
+  In an agent's hook the finding says "<hook> changed this file; check the change and keep or undo it". An untracked file a formatter changed still counts as the hook's change, since pre-commit only reports changes to tracked files. An always_run hook whose filter takes none of the selected files is still run on them, never with an empty file list (which would make pre-commit stash the tree).
+- 56a308d: A pre-commit hook rule runs its hook only on the files the hook's own filter takes: its `types`, `types_or`, `exclude_types`, `files` and `exclude`, and the config's top-level `files` and `exclude`, as pre-commit applies them. Before, a rule with no filter of its own handed every changed file to the hook. A Python-only hook was then compared over Markdown files, and blamed for changes to them. `rulecast init` now writes the hook's filter into every hook rule, not only an always_run hook's, and `rulecast doctor` says (as information) when an existing rule could take it.
+- a10c44d: A stop says only what is new since the agent's last stop, and nothing when nothing is new (#90):
+  
+  - Warnings shown to the user at a stop that lets the agent go are recorded as said, like those at a block, so they are not repeated at every stop.
+  - "a subagent is still running, so … are checked at a later stop" is said once, when the deferral starts, and again only after a stop that was not deferred.
+  - The llm file-budget warning is said once per session, whichever files a later stop leaves out.
+  - "…and N more" names the warnings it cut, and points at `rulecast validate` only when one of them is a compile problem.
+  - Findings from earlier stops are listed when that list changes. After that, a block gives only a count that names their rules ("3 findings from earlier stops are still there (rule-a, rule-b)"), and a stop that lets the agent go says nothing about them. When some of them are fixed, that is said once ("2 of the 6 earlier findings are fixed").
+
+### Patch Changes
+
+- 4fe4ebd: Stop no longer checks a file changed outside the agent's tool calls that has since been deleted, and a shell call that deletes a file no longer has the deleted file checked as its edit. Both missed a file that git never tracked: once deleted, `git status` doesn't list it, and rulecast read that as "unchanged and still there". So ruff was handed the missing path and reported E902 at every stop. Whether a changed file still exists is now checked on disk, also outside a git repository. A dangling symlink or a loop of links counts as deleted; a file rulecast isn't allowed to look at still counts as there.
+
 ## 0.16.0
 
 ### Minor Changes
